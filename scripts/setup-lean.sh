@@ -19,6 +19,11 @@ else
     if [ -f "$HOME/.elan/env" ]; then
         source "$HOME/.elan/env"
     fi
+
+    # Add to GITHUB_PATH for CI persistence across steps
+    if [ -n "${GITHUB_PATH:-}" ]; then
+        echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+    fi
 fi
 
 # Verify elan is available
