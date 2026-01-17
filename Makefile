@@ -122,6 +122,11 @@ test-web: ## Run web tests
 	@echo "Testing web..."
 	@cd web && npm test 2>/dev/null || true
 
+.PHONY: test-visual
+test-visual: ## Run visual regression tests
+	@echo "Running visual regression tests..."
+	@cd web && npm run test:visual
+
 # =============================================================================
 # Check outdated dependencies
 # =============================================================================
