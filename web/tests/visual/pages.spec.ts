@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
 
 /**
  * Visual regression tests for critical pages
@@ -8,11 +8,11 @@ import { test, expect } from '@playwright/test';
  */
 
 // Helper function to wait for page to be fully loaded
-async function waitForPageLoad(page) {
+async function waitForPageLoad(page: Page) {
   await page.waitForLoadState('networkidle');
-  await page.waitForLoadState('domcontentloaded');
-  // Give animations and fonts time to settle
-  await page.waitForTimeout(500);
+  await page.waitForLoadState('load');
+  // Give fonts time to load by waiting for a specific element
+  await page.locator('body').waitFor({ state: 'visible' });
 }
 
 test.describe('Homepage Visual Tests', () => {
