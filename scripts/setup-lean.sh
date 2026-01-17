@@ -37,7 +37,8 @@ cd "$PROJECT_ROOT/lean"
 
 # Install toolchain specified in lean-toolchain
 echo "Installing Lean toolchain..."
-elan install
+TOOLCHAIN=$(cat lean-toolchain)
+elan toolchain install "$TOOLCHAIN"
 
 echo "Lean version: $(lean --version)"
 
