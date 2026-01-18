@@ -16,7 +16,7 @@ import Mathlib.Data.Real.Basic
 /-! ## Cryptographic Schemes as Structures -/
 
 /-- A commitment scheme bundles commit/reveal with correctness -/
-structure CommitmentScheme (M R C : Type*) where
+structure CommitScheme (M R C : Type*) where
   /-- Commit algorithm -/
   commit : M → R → C
   /-- Reveal algorithm -/
@@ -30,12 +30,12 @@ structure CommitmentScheme (M R C : Type*) where
 def Indistinguishable (_x _y : α) : Prop := True  -- Simplified
 
 /-- Hiding: commitment reveals nothing about the message -/
-def isHiding (scheme : CommitmentScheme M R C) : Prop :=
+def isHiding (scheme : CommitScheme M R C) : Prop :=
   ∀ m₁ m₂ : M, ∀ r₁ r₂ : R,
     Indistinguishable (scheme.commit m₁ r₁) (scheme.commit m₂ r₂)
 
 /-- Binding: can't reveal to two different messages -/
-def isBinding (scheme : CommitmentScheme M R C) : Prop :=
+def isBinding (scheme : CommitScheme M R C) : Prop :=
   ∀ c : C, ∀ m₁ m₂ : M, ∀ r₁ r₂ : R,
     scheme.commit m₁ r₁ = c →
     scheme.commit m₂ r₂ = c →
