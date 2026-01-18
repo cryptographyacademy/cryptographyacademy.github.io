@@ -90,8 +90,7 @@ theorem reduction_example
     (_hA : advantage_A > 0)
     (hreduction : advantage_B (constructReduction A) ≥ f advantage_A)
     : ∃ B : DLogAdversary, advantage_B B ≥ f advantage_A := by
-  use constructReduction A
-  exact hreduction
+  exact ⟨constructReduction A, hreduction⟩
 
 /-! ## Concrete vs Asymptotic Security -/
 

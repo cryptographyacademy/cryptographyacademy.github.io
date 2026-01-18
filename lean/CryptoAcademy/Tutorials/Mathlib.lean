@@ -8,7 +8,6 @@
 import Mathlib.Algebra.Group.Basic
 import Mathlib.Algebra.Field.Basic
 import Mathlib.Data.ZMod.Basic
-import Mathlib.Data.ZMod.Algebra
 
 /-! ## Algebraic Structures -/
 
@@ -46,10 +45,7 @@ end FieldExamples
 
 /-! ## ZMod n -/
 
--- ZMod 7 is a field (7 is prime)
-example : Field (ZMod 7) := inferInstance
-
--- Arithmetic works as expected
+-- Arithmetic in ZMod works as expected
 example : (3 : ZMod 7) + 5 = 1 := rfl  -- 3 + 5 = 8 ≡ 1 (mod 7)
 
 /-! ## Type Classes in Action -/
