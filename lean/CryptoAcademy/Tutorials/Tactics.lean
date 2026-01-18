@@ -5,6 +5,8 @@
   Source: web/src/pages/learn/proofs-and-tactics.astro
 -/
 
+import Mathlib.Tactic
+
 /-! ## Proofs Are Programs -/
 
 -- The proposition "2 + 2 = 4" is a type
@@ -37,8 +39,7 @@ example (h : 2 + 2 = 4) : 2 + 2 = 4 := by
 
 -- rw (rewrite): substitutes equals for equals
 example (a b : Nat) (h : a = b) : a + 1 = b + 1 := by
-  rw [h]      -- goal becomes: b + 1 = b + 1
-  rfl
+  rw [h]      -- substitutes a with b, closes by rfl automatically
 
 -- simp: simplifies using a database of lemmas
 example : (1 + 2) * 3 = 9 := by

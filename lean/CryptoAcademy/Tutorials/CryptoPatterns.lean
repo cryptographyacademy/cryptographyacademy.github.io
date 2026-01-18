@@ -10,29 +10,31 @@
 -/
 
 import Mathlib.Algebra.Group.Basic
+import Mathlib.Algebra.Order.Ring.Defs
+import Mathlib.Data.Real.Basic
 
 /-! ## Cryptographic Schemes as Structures -/
 
-/-- A commitment scheme bundles commit/open with correctness -/
+/-- A commitment scheme bundles commit/reveal with correctness -/
 structure CommitmentScheme (M R C : Type*) where
   /-- Commit algorithm -/
   commit : M → R → C
-  /-- Open algorithm -/
-  open : C → R → M
+  /-- Reveal algorithm -/
+  reveal : C → R → M
   /-- Correctness property -/
-  correct : ∀ m r, open (commit m r) r = m
+  correct : ∀ m r, reveal (commit m r) r = m
 
 /-! ## Security Properties -/
 
 /-- Placeholder for indistinguishability (would be defined with probability) -/
-def Indistinguishable (x y : α) : Prop := True  -- Simplified
+def Indistinguishable (_x _y : α) : Prop := True  -- Simplified
 
 /-- Hiding: commitment reveals nothing about the message -/
 def isHiding (scheme : CommitmentScheme M R C) : Prop :=
   ∀ m₁ m₂ : M, ∀ r₁ r₂ : R,
     Indistinguishable (scheme.commit m₁ r₁) (scheme.commit m₂ r₂)
 
-/-- Binding: can't open to two different messages -/
+/-- Binding: can't reveal to two different messages -/
 def isBinding (scheme : CommitmentScheme M R C) : Prop :=
   ∀ c : C, ∀ m₁ m₂ : M, ∀ r₁ r₂ : R,
     scheme.commit m₁ r₁ = c →
@@ -85,7 +87,7 @@ theorem reduction_example
     (advantage_A : ℝ)
     (advantage_B : DLogAdversary → ℝ)
     (f : ℝ → ℝ)
-    (hA : advantage_A > 0)
+    (_hA : advantage_A > 0)
     (hreduction : advantage_B (constructReduction A) ≥ f advantage_A)
     : ∃ B : DLogAdversary, advantage_B B ≥ f advantage_A := by
   use constructReduction A

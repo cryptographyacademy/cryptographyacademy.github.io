@@ -8,6 +8,7 @@
 import Mathlib.Algebra.Group.Basic
 import Mathlib.Algebra.Field.Basic
 import Mathlib.Data.ZMod.Basic
+import Mathlib.Data.ZMod.Algebra
 
 /-! ## Algebraic Structures -/
 
@@ -58,7 +59,7 @@ theorem my_inv_inv {G : Type*} [Group G] (a : G) : a⁻¹⁻¹ = a := by
   exact inv_inv a
 
 -- Apply to any specific group
-example : (3 : ZMod 7)⁻¹⁻¹ = 3 := my_inv_inv 3
+example : (3 : ZMod 7)⁻¹⁻¹ = 3 := my_inv_inv (3 : ZMod 7)
 
 /-! ## Finding Theorems -/
 

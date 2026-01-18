@@ -5,6 +5,8 @@
   Source: web/src/pages/learn/reading-lean.astro
 -/
 
+import Mathlib.Tactic
+
 /-! ## The Basics -/
 
 /-- A natural number is even if it equals 2 times some other natural number. -/
@@ -32,14 +34,14 @@ theorem even_plus_even (m n : Nat)
 
 /-! ## Reading a Real Example -/
 
-/-- A simple commitment scheme with commit and open operations. -/
+/-- A simple commitment scheme with commit and reveal operations. -/
 structure CommitmentScheme (M R C : Type) where
   /-- Commit takes a message and randomness, returns a commitment -/
   commit : M → R → C
-  /-- Opening reveals the message -/
-  open : C → R → M
-  /-- Correctness: opening a commitment reveals the original message -/
-  correctness : ∀ (m : M) (r : R), open (commit m r) r = m
+  /-- Reveal extracts the message -/
+  reveal : C → R → M
+  /-- Correctness: revealing a commitment returns the original message -/
+  correctness : ∀ (m : M) (r : R), reveal (commit m r) r = m
 
 /-! ## Interactive Example -/
 
