@@ -54,8 +54,7 @@ example : (3 : ZMod 7) + 5 = 1 := rfl  -- 3 + 5 = 8 ≡ 1 (mod 7)
 theorem my_inv_inv {G : Type*} [Group G] (a : G) : a⁻¹⁻¹ = a := by
   exact inv_inv a
 
--- Apply to any specific group
-example : (3 : ZMod 7)⁻¹⁻¹ = 3 := my_inv_inv (3 : ZMod 7)
+-- The power of polymorphism: prove once, use for any group
 
 /-! ## Finding Theorems -/
 
