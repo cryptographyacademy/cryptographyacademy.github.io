@@ -11,3 +11,6 @@
 -- Infrastructure
 import CryptoAcademy.Meta.Paper
 import CryptoAcademy.Meta.Notation
+
+-- Tutorials (code examples from the Learn section)
+import CryptoAcademy.Tutorials
