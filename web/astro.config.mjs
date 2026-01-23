@@ -6,7 +6,7 @@ import tailwindcss from '@tailwindcss/vite';
 
 // https://astro.build/config
 export default defineConfig({
-  site: 'https://cryptographyacademy.github.io',
+  site: 'https://cryptography.academy',
   integrations: [react(), mdx()],
   vite: {
     plugins: [tailwindcss()],
