@@ -14,3 +14,17 @@ import CryptoAcademy.Meta.Notation
 
 -- Tutorials (code examples from the Learn section)
 import CryptoAcademy.Tutorials
+
+-- Primitives
+import CryptoAcademy.Primitives.Security
+import CryptoAcademy.Primitives.Hash.Sponge
+import CryptoAcademy.Primitives.Hash.Poseidon.SBox
+import CryptoAcademy.Primitives.Hash.Poseidon.MDS
+import CryptoAcademy.Primitives.Hash.Poseidon.HADES
+import CryptoAcademy.Primitives.Hash.Poseidon.Basic
+import CryptoAcademy.Primitives.Hash.Poseidon.Security
+import CryptoAcademy.Primitives.Hash.Poseidon.Instances
+import CryptoAcademy.Primitives.Hash.Poseidon.Grain
+
+-- Paper analyses
+import CryptoAcademy.Papers.Poseidon2019

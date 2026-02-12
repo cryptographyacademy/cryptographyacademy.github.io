@@ -113,6 +113,20 @@ def Nova2022 : Paper := {
   eprint := some "2021/370"
 }
 
+/-! ## Hash Functions -/
+
+/-- Poseidon hash function paper -/
+def Poseidon2019 : Paper := {
+  key := "GKRRS19"
+  title := "POSEIDON: A New Hash Function for Zero-Knowledge Proof Systems (Updated Version)"
+  authors := ["Lorenzo Grassi", "Dmitry Khovratovich",
+              "Christian Rechberger", "Arnab Roy",
+              "Markus Schofnegger"]
+  year := 2019
+  eprint := some "2019/458"
+  url := some "https://eprint.iacr.org/2019/458"
+}
+
 /-! ## Signatures -/
 
 /-- Schnorr signature paper -/
