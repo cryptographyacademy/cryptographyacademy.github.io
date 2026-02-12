@@ -1,3 +1,9 @@
+import CryptoAcademy.Tutorials.ReadingLean
+import CryptoAcademy.Tutorials.Types
+import CryptoAcademy.Tutorials.Tactics
+import CryptoAcademy.Tutorials.Mathlib
+import CryptoAcademy.Tutorials.CryptoPatterns
+
 /-
   CryptoAcademy Tutorials
 
@@ -6,9 +12,3 @@
 
   These files are compiled as part of CI to ensure all tutorial code is correct.
 -/
-
-import CryptoAcademy.Tutorials.ReadingLean
-import CryptoAcademy.Tutorials.Types
-import CryptoAcademy.Tutorials.Tactics
-import CryptoAcademy.Tutorials.Mathlib
-import CryptoAcademy.Tutorials.CryptoPatterns

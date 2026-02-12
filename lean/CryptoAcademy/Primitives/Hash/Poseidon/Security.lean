@@ -1,3 +1,6 @@
+import CryptoAcademy.Primitives.Hash.Poseidon.Basic
+import CryptoAcademy.Primitives.Security
+
 /-!
 # Poseidon Security Analysis
 
@@ -19,9 +22,6 @@ attack-specific bounds.
 
 - Sections 5, C in [GKRRS19] https://eprint.iacr.org/2019/458
 -/
-
-import CryptoAcademy.Primitives.Hash.Poseidon.Basic
-import CryptoAcademy.Primitives.Security
 
 namespace CryptoAcademy.Primitives.Hash.Poseidon.Security
 

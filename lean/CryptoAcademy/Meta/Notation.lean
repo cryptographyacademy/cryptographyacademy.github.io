@@ -1,10 +1,10 @@
+import Mathlib.Tactic
+
 /-
   CryptoAcademy/Meta/Notation.lean
 
   Custom notation for cryptographic constructions.
 -/
-
-import Mathlib.Tactic
 
 namespace CryptoAcademy.Meta
 

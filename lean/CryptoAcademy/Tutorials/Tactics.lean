@@ -1,11 +1,11 @@
+import Mathlib.Tactic
+
 /-
   CryptoAcademy Tutorial: Proofs and Tactics
 
   This file contains all code examples from the "Proofs and Tactics" tutorial.
   Source: web/src/pages/learn/proofs-and-tactics.astro
 -/
-
-import Mathlib.Tactic
 
 /-! ## Proofs Are Programs -/
 

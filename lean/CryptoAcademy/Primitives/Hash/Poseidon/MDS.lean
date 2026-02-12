@@ -1,3 +1,7 @@
+import Mathlib.Data.ZMod.Basic
+import Mathlib.Data.Matrix.Basic
+import Mathlib.LinearAlgebra.Matrix.Determinant.Basic
+
 /-!
 # Poseidon MDS Matrix (Linear Layer)
 
@@ -21,10 +25,6 @@ output element depends on every input element.
 - Section 2.3 in [GKRRS19] https://eprint.iacr.org/2019/458
 - [GRS21] for matrix security verification algorithms
 -/
-
-import Mathlib.Data.ZMod.Basic
-import Mathlib.Data.Matrix.Basic
-import Mathlib.LinearAlgebra.Matrix.Determinant.Basic
 
 namespace CryptoAcademy.Primitives.Hash.Poseidon.MDS
 

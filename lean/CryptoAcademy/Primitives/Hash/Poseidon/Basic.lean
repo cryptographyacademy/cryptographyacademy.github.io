@@ -1,3 +1,6 @@
+import CryptoAcademy.Primitives.Hash.Sponge
+import CryptoAcademy.Primitives.Hash.Poseidon.HADES
+
 /-!
 # Poseidon Hash Function
 
@@ -24,9 +27,6 @@ permutation.
   (Updated Version)", eprint 2019/458, 2019.
   URL: https://eprint.iacr.org/2019/458
 -/
-
-import CryptoAcademy.Primitives.Hash.Sponge
-import CryptoAcademy.Primitives.Hash.Poseidon.HADES
 
 namespace CryptoAcademy.Primitives.Hash.Poseidon
 

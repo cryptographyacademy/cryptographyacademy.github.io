@@ -1,3 +1,5 @@
+import Mathlib.Data.ZMod.Basic
+
 /-!
 # Cryptographic Security Definitions
 
@@ -23,8 +25,6 @@ Anemoi, Griffin, etc.).
 - Definitions 5.1–5.5 in [GKRRS19]
   https://eprint.iacr.org/2019/458
 -/
-
-import Mathlib.Data.ZMod.Basic
 
 namespace CryptoAcademy.Primitives.Security
 

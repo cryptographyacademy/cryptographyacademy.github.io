@@ -1,3 +1,15 @@
+-- Re-export all Poseidon modules
+import CryptoAcademy.Primitives.Security
+import CryptoAcademy.Primitives.Hash.Sponge
+import CryptoAcademy.Primitives.Hash.Poseidon.SBox
+import CryptoAcademy.Primitives.Hash.Poseidon.MDS
+import CryptoAcademy.Primitives.Hash.Poseidon.HADES
+import CryptoAcademy.Primitives.Hash.Poseidon.Basic
+import CryptoAcademy.Primitives.Hash.Poseidon.Security
+import CryptoAcademy.Primitives.Hash.Poseidon.Instances
+import CryptoAcademy.Primitives.Hash.Poseidon.Grain
+import CryptoAcademy.Meta.Paper
+
 /-!
 # Paper: POSEIDON (eprint 2019/458)
 
@@ -57,18 +69,6 @@ import CryptoAcademy.Papers.Poseidon2019
 | sec_7     | `Poseidon.MDS.maxInactiveRounds`            | theorem    |
 | table_2   | `Poseidon.Instances.poseidon128_t3` etc.    | def        |
 -/
-
--- Re-export all Poseidon modules
-import CryptoAcademy.Primitives.Security
-import CryptoAcademy.Primitives.Hash.Sponge
-import CryptoAcademy.Primitives.Hash.Poseidon.SBox
-import CryptoAcademy.Primitives.Hash.Poseidon.MDS
-import CryptoAcademy.Primitives.Hash.Poseidon.HADES
-import CryptoAcademy.Primitives.Hash.Poseidon.Basic
-import CryptoAcademy.Primitives.Hash.Poseidon.Security
-import CryptoAcademy.Primitives.Hash.Poseidon.Instances
-import CryptoAcademy.Primitives.Hash.Poseidon.Grain
-import CryptoAcademy.Meta.Paper
 
 namespace CryptoAcademy.Papers
 

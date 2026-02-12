@@ -1,11 +1,11 @@
+import Mathlib.Tactic
+
 /-
   CryptoAcademy Tutorial: Reading Lean Code
 
   This file contains all code examples from the "Reading Lean Code" tutorial.
   Source: web/src/pages/learn/reading-lean.astro
 -/
-
-import Mathlib.Tactic
 
 /-! ## The Basics -/
 

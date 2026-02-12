@@ -1,3 +1,7 @@
+import Mathlib.Algebra.Field.Defs
+import Mathlib.Data.ZMod.Basic
+import Mathlib.Data.List.Basic
+
 /-!
 # Sponge Construction
 
@@ -24,9 +28,6 @@ Anemoi, Griffin, etc.
 - Bertoni, Daemen, Peeters, Van Assche.
   "Sponge functions", ECRYPT Hash Workshop 2007.
 -/
-
-import Mathlib.Data.ZMod.Basic
-import Mathlib.Data.List.Basic
 
 namespace CryptoAcademy.Primitives.Hash.Sponge
 

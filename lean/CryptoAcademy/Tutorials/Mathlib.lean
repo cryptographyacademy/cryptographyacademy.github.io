@@ -1,13 +1,13 @@
+import Mathlib.Algebra.Group.Basic
+import Mathlib.Algebra.Field.Basic
+import Mathlib.Data.ZMod.Basic
+
 /-
   CryptoAcademy Tutorial: Using Mathlib
 
   This file contains all code examples from the "Using Mathlib" tutorial.
   Source: web/src/pages/learn/mathlib-basics.astro
 -/
-
-import Mathlib.Algebra.Group.Basic
-import Mathlib.Algebra.Field.Basic
-import Mathlib.Data.ZMod.Basic
 
 /-! ## Algebraic Structures -/
 

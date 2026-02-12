@@ -1,3 +1,7 @@
+import Mathlib.Algebra.Group.Basic
+import Mathlib.Algebra.Order.Ring.Defs
+import Mathlib.Data.Real.Basic
+
 /-
   CryptoAcademy Tutorial: Cryptographic Patterns
 
@@ -8,10 +12,6 @@
   Real implementations would include more complex probability and
   computational assumptions.
 -/
-
-import Mathlib.Algebra.Group.Basic
-import Mathlib.Algebra.Order.Ring.Defs
-import Mathlib.Data.Real.Basic
 
 /-! ## Cryptographic Schemes as Structures -/
 

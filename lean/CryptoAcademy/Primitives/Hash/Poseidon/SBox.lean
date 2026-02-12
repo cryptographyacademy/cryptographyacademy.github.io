@@ -1,3 +1,6 @@
+import Mathlib.Data.ZMod.Basic
+import Mathlib.Data.Nat.GCD.Basic
+
 /-!
 # Poseidon S-Box (Power Map)
 
@@ -26,9 +29,6 @@ The S-box for the Poseidon hash function is defined as the power map
 - Section 2.3 in [GKRRS19] https://eprint.iacr.org/2019/458
 - Section C.1.1 in [GKRRS19] for differential bounds
 -/
-
-import Mathlib.Data.ZMod.Basic
-import Mathlib.Data.Nat.GCD.Basic
 
 namespace CryptoAcademy.Primitives.Hash.Poseidon.SBox
 

@@ -1,3 +1,6 @@
+import CryptoAcademy.Primitives.Hash.Poseidon.SBox
+import CryptoAcademy.Primitives.Hash.Poseidon.MDS
+
 /-!
 # HADES Design Strategy
 
@@ -27,9 +30,6 @@ full rounds at a fraction of the cost in arithmetic circuits.
 - [GLRS19] "HADES: Design Strategy for Crypto Primitives"
   https://eprint.iacr.org/2019/1107
 -/
-
-import CryptoAcademy.Primitives.Hash.Poseidon.SBox
-import CryptoAcademy.Primitives.Hash.Poseidon.MDS
 
 namespace CryptoAcademy.Primitives.Hash.Poseidon.HADES
 

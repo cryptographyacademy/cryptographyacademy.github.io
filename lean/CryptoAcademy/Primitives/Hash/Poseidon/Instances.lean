@@ -1,3 +1,5 @@
+import CryptoAcademy.Primitives.Hash.Poseidon.HADES
+
 /-!
 # Poseidon Concrete Instances
 
@@ -18,8 +20,6 @@ These correspond to Table 2 in [GKRRS19] (with security margin).
 - Table 2 (Section 4.1) in [GKRRS19]
   https://eprint.iacr.org/2019/458
 -/
-
-import CryptoAcademy.Primitives.Hash.Poseidon.HADES
 
 namespace CryptoAcademy.Primitives.Hash.Poseidon.Instances
 

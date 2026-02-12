@@ -1,3 +1,5 @@
+import Mathlib.Data.ZMod.Basic
+
 /-!
 # Grain LFSR Parameter Generation
 
@@ -21,8 +23,6 @@ NUMS (Nothing-Up-My-Sleeve) property.
 - Section E (Appendix) in [GKRRS19]
   https://eprint.iacr.org/2019/458
 -/
-
-import Mathlib.Data.ZMod.Basic
 
 namespace CryptoAcademy.Primitives.Hash.Poseidon.Grain
 
