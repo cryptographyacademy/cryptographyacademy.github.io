@@ -1,0 +1,1372 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+
+const EPRINT_URL = 'https://eprint.iacr.org/2023/522';
+---
+
+<BaseLayout title="SAFE: Sponge API for Field Elements (2023/522)">
+  <article class="max-w-4xl mx-auto article-prose">
+    <nav class="mb-8">
+      <a href="/papers" class="text-blue-400 hover:text-blue-300">
+        &larr; Back to Papers
+      </a>
+    </nav>
+
+    <!-- ============================================================ -->
+    <!-- HEADER                                                       -->
+    <!-- ============================================================ -->
+
+    <header class="mb-12">
+      <h1 class="text-3xl font-bold mb-4">
+        SAFE: Sponge API for Field Elements
+      </h1>
+      <p class="text-gray-400 mb-2">
+        JP Aumasson, Dmitry Khovratovich, Bart Mennink,
+        Porcu Quine
+      </p>
+      <p class="text-gray-500 text-sm mb-4">
+        2023 &middot; Full Version &middot; eprint 2023/522
+      </p>
+      <div class="flex gap-4 text-sm">
+        <a
+          href={EPRINT_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          class="text-blue-400 hover:text-blue-300"
+        >
+          Paper (eprint) &rarr;
+        </a>
+      </div>
+      <p class="mt-4 text-xs text-gray-500">
+        All content below belongs to the original authors. This page
+        reproduces the paper for educational purposes. Always
+        <a
+          href={EPRINT_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          class="text-blue-400 hover:text-blue-300"
+        >cite the original</a>.
+      </p>
+    </header>
+
+    <!-- ============================================================ -->
+    <!-- TABLE OF CONTENTS                                            -->
+    <!-- ============================================================ -->
+
+    <nav id="toc" class="mb-10 p-6 rounded-lg"
+      style="background: rgba(255,255,255,0.03);
+             border: 1px solid rgba(255,255,255,0.06);">
+      <h2 class="text-lg font-bold mb-4">Table of Contents</h2>
+      <ol class="space-y-1 text-sm text-gray-300
+        list-decimal list-inside">
+        <li>
+          <a href="#abstract"
+            class="hover:text-white">Abstract</a>
+        </li>
+        <li>
+          <a href="#sec-1"
+            class="hover:text-white">Introduction</a>
+        </li>
+        <li>
+          <a href="#sec-2"
+            class="hover:text-white">Sponges</a>
+        </li>
+        <li>
+          <a href="#sec-3"
+            class="hover:text-white">The SAFE API</a>
+          <ol class="ml-6 mt-1 space-y-1 list-decimal
+            list-inside text-gray-400">
+            <li>
+              <a href="#sec-3.1"
+                class="hover:text-white">
+                API Overview</a>
+            </li>
+            <li>
+              <a href="#sec-3.2"
+                class="hover:text-white">
+                Security</a>
+            </li>
+            <li>
+              <a href="#sec-3.3"
+                class="hover:text-white">
+                From IO Patterns to Tags to Instances</a>
+            </li>
+            <li>
+              <a href="#sec-3.4"
+                class="hover:text-white">
+                Detailed API</a>
+            </li>
+          </ol>
+        </li>
+        <li>
+          <a href="#sec-4"
+            class="hover:text-white">SAFE Applications</a>
+        </li>
+      </ol>
+      <p class="text-xs text-gray-500 mt-4 mb-1 font-semibold">
+        Additional
+      </p>
+      <ul class="space-y-1 text-sm text-gray-400 list-disc
+        list-inside">
+        <li>
+          <a href="#references"
+            class="hover:text-white">References</a>
+        </li>
+      </ul>
+    </nav>
+
+    <!-- ============================================================ -->
+    <!-- ABSTRACT                                                     -->
+    <!-- ============================================================ -->
+
+    <section id="abstract" class="mb-10">
+      <h2 class="text-2xl font-bold">Abstract</h2>
+      <p class="text-gray-300">
+        From hashing and commitment schemes to Fiat&ndash;Shamir and
+        encryption, hash functions are everywhere in zero-knowledge
+        proof systems (ZKPs), and minor performance changes in
+        &ldquo;vanilla&rdquo; implementations can translate in major
+        discrepancies when the hash is processed as a circuit within
+        the proof system. Protocol designers have resorted to a number
+        of techniques and custom modes to optimize hash functions for
+        ZKP settings, but so far without a single established,
+        well-studied construction. To address this need, we define the
+        Sponge API for Field Elements (SAFE), a unified framework for
+        permutation-based schemes (including AEAD, Sigma, PRNGs, and
+        so on). SAFE eliminates the performance overhead, is pluggable
+        in any field-oriented protocol, and is suitable for any
+        permutation algorithm. SAFE is implemented in Filecoin&rsquo;s
+        Neptune hash framework, which is our reference implementation
+        (in Rust). SAFE is also being integrated in other prominent
+        ZKP projects. This report specifies SAFE and describes use
+        cases.
+      </p>
+      <p class="text-gray-300">
+        Among other improvements, our construction is among the first
+        to store the protocol metadata in the sponge inner part in a
+        provably secure way, which may be of independent interest to
+        the sponge use cases outside of ZKP.
+      </p>
+    </section>
+
+    <!-- ============================================================ -->
+    <!-- 1. INTRODUCTION                                              -->
+    <!-- ============================================================ -->
+
+    <section id="sec-1" class="mb-10">
+      <h2 class="text-2xl font-bold">1. Introduction</h2>
+      <p class="text-gray-300">
+        Sponge functions [BDPV07] are the basis of permutation-based
+        symmetric primitives&rsquo; design, as studied by Daemen et
+        al.: hash functions, MACs, authenticated encryption schemes,
+        PRNGs, and others. When operating in Duplex mode [BDPV11], a
+        sponge can be seen as a stateful object that can ingest input
+        (&ldquo;absorb&rdquo;) and produce output
+        (&ldquo;squeeze&rdquo;) at any time and in arbitrary order.
+      </p>
+      <p class="text-gray-300">
+        The duplex specification sees the input and output as raw bits,
+        and leaves application-specific encoding to the users. However,
+        in zero-knowledge proof systems (ZKPs) specifications, hash
+        functions often process field elements (with respect to some
+        canonical encoding), rather than raw bits. Performance being
+        critical to reduce the proof generation and verification cost,
+        dedicated &ldquo;field-friendly&rdquo;, algebraic hash
+        functions were designed, most of which are sponges. These
+        include for example Poseidon [GKR<span class="math">^+</span>21],
+        Rescue [AAB<span class="math">^+</span>20],
+        MiMC [AGR<span class="math">^+</span>16], and Reinforced
+        Concrete [LRG<span class="math">^+</span>22].
+      </p>
+      <p class="text-gray-300">
+        A typical sponge function makes one call to the inner
+        permutation
+        <span class="math">P</span> per
+        <span class="math">r</span> input bits (or other base units)
+        to be hashed (absorbed) or outputted (squeezed), with
+        <span class="math">r</span> called rate. Despite its relative
+        simplicity, sponge-like constructions can and have been
+        &ldquo;misused&rdquo;, or misimplemented, particularly when
+        working with prime field arithmetic, for which constructions
+        are less established and specifications not as rigorous as the
+        generic one. Here we outline the most common misuse patterns
+        we have observed, based on our experience contributing to and
+        auditing ZKP projects (excluding trivial failures such as
+        overwriting the full state):
+      </p>
+      <ul class="list-disc list-inside text-gray-300 space-y-3
+        ml-4 my-4">
+        <li>
+          <strong>Domain separation:</strong> When the input data fills
+          the full rate, no padding or any other length-dependent
+          separator is applied. A classical example is hashing two
+          field elements inside a Merkle tree with
+          <span class="math">r = 2</span> field elements, where only
+          1 call to <span class="math">P</span> is made to reduce
+          costs.
+        </li>
+        <li>
+          <strong>Cross-protocol collisions:</strong> Two protocols
+          with one being an extension of the other start with the same
+          state. As a result, they output the same prefix on the same
+          inputs.
+        </li>
+        <li>
+          <strong>Superfluous permutations:</strong> Making an extra
+          call between squeezing out data and absorbing it.
+        </li>
+        <li>
+          <strong>Custom constructions:</strong> Using nested sponge
+          calls (instead of chaining squeeze-absorb calls) in
+          multi-round non-interactive protocols obtained via
+          Fiat&ndash;Shamir heuristic. This unnecessarily increases
+          the complexity, and may jeopardize the provable security
+          guarantees.
+        </li>
+      </ul>
+      <p class="text-gray-300">
+        Whereas the last two issues are just extra work for a caller,
+        the former two may breach not only security proofs but also the
+        concrete security of real protocols. The API presented below
+        solves all those and offers secure and efficient usage patterns
+        for many use cases. It also reduces the workload of developers
+        and makes a step towards a unified cross-platform interface.
+      </p>
+      <p class="text-gray-300">
+        <strong>Contribution.</strong> We propose SAFE, a generic API
+        for sponge functions, as well as a production-ready reference
+        implementation. SAFE comes with a security proof, which is
+        available as a separate report. As its main features, SAFE:
+      </p>
+      <ul class="list-disc list-inside text-gray-300 space-y-3
+        ml-4 my-4">
+        <li>
+          Does not use any padding, thus not wasting an extra call to
+          the sponge permutation in any circumstances.
+        </li>
+        <li>
+          Is independent of an underlying permutation and thus can be
+          used with almost every design on the market (including
+          Poseidon&rsquo;s).
+        </li>
+        <li>
+          Eliminates a number of misuse patterns by limiting the set
+          of operations callable at sponge and by binding a protocol
+          designer to a specific order of these operations.
+        </li>
+        <li>
+          Is provably secure in the random permutation model in a
+          number of settings, including the overlooked but frequently
+          required cross-protocol security.
+        </li>
+        <li>
+          Is among the first constructions to store the
+          protocol&rsquo;s metadata in the sponge inner part, provably
+          losing no security.
+        </li>
+      </ul>
+      <p class="text-gray-300">
+        SAFE is suitable for a variety of use cases encountered in
+        real-world ZK proof systems, including:
+      </p>
+      <ul class="list-disc list-inside text-gray-300 space-y-3
+        ml-4 my-4">
+        <li>
+          Hashing with fixed-length input, as found in commitment
+          schemes, Merkle trees, and signatures.
+        </li>
+        <li>
+          Fiat&ndash;Shamir transforms and other stateful oracle
+          simulations, where the sequence and size of input values is
+          fixed and known in advance.
+        </li>
+        <li>
+          Authenticated encryption (in the ZK setting, also verifiable
+          encryption) of predetermined-length messages. A classical
+          example is an encryption of a coin secret on
+          recipient&rsquo;s public key in privacy-preserving
+          cryptocurrencies [HBHW22].
+        </li>
+        <li>
+          Pseudo-random generation of field elements from a seed, with
+          a reseeding mechanism.
+        </li>
+      </ul>
+      <p class="text-gray-300">
+        SAFE however does not support variable-length hashing when the
+        length of data hashed is unknown in advance. This sacrifice is
+        inevitable for a drastic performance and simplicity
+        improvement, and did not prove problematic when we surveyed ZK
+        projects&rsquo; engineers.
+      </p>
+    </section>
+
+    <!-- ============================================================ -->
+    <!-- 2. SPONGES                                                   -->
+    <!-- ============================================================ -->
+
+    <section id="sec-2" class="mb-10">
+      <h2 class="text-2xl font-bold">2. Sponges</h2>
+      <p class="text-gray-300">
+        A (duplexed) sponge is a stateful object parameterized by a
+        capacity <span class="math">c</span> and a rate
+        <span class="math">r</span> where
+        <span class="math">c + r = n</span> is the inner
+        state&rsquo;s width. State changes are driven by three
+        operations:
+      </p>
+      <ul class="list-disc list-inside text-gray-300 space-y-3
+        ml-4 my-4">
+        <li>
+          Permutation of the width-<span class="math">n</span> state
+          by <span class="math">P</span>.
+        </li>
+        <li>
+          Injection of input data
+          <span class="math">M^i</span> (&ldquo;absorption&rdquo;),
+          by chunks of up to <span class="math">r</span> elements.
+        </li>
+        <li>
+          Extraction of output data
+          <span class="math">Z^i</span> (&ldquo;squeezing&rdquo;),
+          by chunks of up to <span class="math">r</span> elements.
+        </li>
+      </ul>
+      <p class="text-gray-300">
+        The original sponge was defined for bitstring states, but all
+        the security results carry over to field-element states, as
+        long these use a sound, fixed-size encoding. When defined over
+        field elements, sponge parameters
+        (<span class="math">c, r, n</span>) are usually expressed in
+        terms of field elements, which lead to the notion of
+        <em>arithmetic capacity</em>.
+      </p>
+      <p class="text-gray-300">
+        A sponge is traditionally initialized to the full-zero state.
+        Input data then overwrites up to <span class="math">r</span>
+        given state elements at a time, whereas the
+        <span class="math">c</span>-wide inner part is never touched
+        nor outputted. This construction provides security up to
+        <span class="math">c/2</span> bits in the random permutation
+        model in the indifferentiability framework [MRH04, CDMP05].
+        This result means that it behaves like a random oracle and,
+        among others, achieves this level of preimage and collision
+        resistance provided the output size is large enough. It is
+        widely believed that concrete instances such as SHA-3 keep the
+        same security level.
+      </p>
+
+      <!-- Figure 1 skipped (raster image) -->
+    </section>
+
+    <!-- ============================================================ -->
+    <!-- 3. THE SAFE API                                              -->
+    <!-- ============================================================ -->
+
+    <section id="sec-3" class="mb-10">
+      <h2 class="text-2xl font-bold">3. The SAFE API</h2>
+
+      <!-- ── 3.1 API Overview ── -->
+
+      <section id="sec-3.1" class="mb-10">
+        <h3 class="text-xl font-bold">3.1 API Overview</h3>
+        <p class="text-gray-300">
+          We assume a sponge width of
+          <span class="math">n = r + c</span> field elements, where
+          <span class="math">r</span> is the rate and
+          <span class="math">c</span> the capacity. Here
+          <span class="math">\mathbb&#123;F&#125;</span> is the finite
+          field type, thus elements of
+          <span class="math">\mathbb&#123;F&#125;^L</span> are vectors
+          of <span class="math">L</span> field elements.
+          <em>Length</em> is the length type, an unsigned integer
+          properly bounded counting the number of field elements.
+          <em>State</em> is the type of the internal state, consisting
+          of field elements and other variables.
+        </p>
+        <p class="text-gray-300">
+          A SAFE sponge object should expose the following operations
+          to protocol designers:
+        </p>
+        <ul class="list-disc list-inside text-gray-300 space-y-3
+          ml-4 my-4">
+          <li>
+            <strong>START(IOPattern, DomainSeparator):</strong>
+            This initializes the inner state of the sponge, modifying
+            up to <span class="math">c/2</span> field elements of the
+            state. It is done once in the lifetime of a sponge.
+          </li>
+          <li>
+            <strong>ABSORB(Length : L,
+            <span class="math">\mathbb&#123;F&#125;^L</span> :
+            X[L]):</strong>
+            This injects <span class="math">L</span> field elements
+            to the state from the array
+            <span class="math">X</span>, interleaving calls to the
+            permutation. It also checks if the current call matches
+            the IO pattern.
+          </li>
+          <li>
+            <strong>SQUEEZE(Length : L)
+            <span class="math">\to \mathbb&#123;F&#125;^L</span>:</strong>
+            This extracts <span class="math">L</span> field elements
+            from the state, interleaving calls to the permutation.
+            It also checks if the current call matches the IO pattern.
+          </li>
+          <li>
+            <strong>FINISH(Length)
+            <span class="math">\to</span> Result:</strong>
+            This marks the end of the sponge life, preventing any
+            further operation. In particular, the state is erased from
+            memory. The result is &lsquo;OK&rsquo;, or an error.
+          </li>
+        </ul>
+        <p class="text-gray-300">
+          The general workflow of a sponge prescribed by SAFE is then
+          as follows:
+        </p>
+        <ol class="list-decimal list-inside text-gray-300 space-y-3
+          ml-4 my-4">
+          <li>
+            The consumer protocol initializes the sponge:
+            <span class="math">\mathsf&#123;START&#125;(\mathit&#123;IO&#125;[\,], D)</span>
+            where <span class="math">\mathit&#123;IO&#125;</span> is a
+            sequence of future calls and their respective lengths
+            (what we call &ldquo;IO pattern&rdquo;) and
+            <span class="math">D</span> is a domain separator. One
+            can also start from a precomputed state, but said state
+            must come from a properly initialized sponge.
+          </li>
+          <li>
+            The protocol makes a chain of calls
+            <span class="math">C_1, C_2, \ldots, C_\ell</span>,
+            whose input lengths and types correspond to
+            <span class="math">S</span>. Each
+            <span class="math">C^i</span> is either an ABSORB or a
+            SQUEEZE call.
+          </li>
+          <li>
+            The protocol closes the sponge with a FINISH() call.
+          </li>
+        </ol>
+        <p class="text-gray-300">
+          The most important element of the design is
+          <strong>IOPattern</strong>, which is a compact encoding of
+          the pattern of ABSORB and SQUEEZE calls during the sponge
+          lifetime. An implementation must forbid to finish the sponge
+          usage if this pattern is violated. In particular, the output
+          from SQUEEZE calls must not be used if the IO pattern is not
+          followed.
+        </p>
+        <div class="formal-block formal-block-definition">
+          <div class="flex items-start justify-between mb-2">
+            <span class="text-sm font-bold text-blue-400">
+              Remark 1
+            </span>
+          </div>
+          <p class="text-sm text-gray-300">
+            Several IO patterns can belong to the same equivalence
+            class, and thus leading to identical instances. This is
+            because consecutive calls of a same type (ABSORB or
+            SQUEEZE) are aggregated to define the initial state. An
+            application that needs to absorb
+            <span class="math">L &gt; 1</span> elements in a row can
+            thus do it one by one (with
+            <span class="math">L</span> calls to ABSORB), or with a
+            single call including the
+            <span class="math">L</span> elements.
+          </p>
+        </div>
+        <p class="text-gray-300">
+          <strong>Important notes:</strong>
+        </p>
+        <ul class="list-disc list-inside text-gray-300 space-y-3
+          ml-4 my-4">
+          <li>
+            <strong>Dealing with non-field elements:</strong> The API
+            assumes that the input is (represented as) field elements,
+            however applications may need to process other data types.
+            It is the responsibility of users to properly encode such
+            inputs as field elements. If objects of different types are
+            processed by multiple runs of a same instance, at the same
+            position, then some signalling of the input type is
+            required to avoid collisions between different elements of
+            distinct types encoded identically (incurring a performance
+            overhead).
+          </li>
+          <li>
+            <strong>Precomputed state:</strong> Multiple
+            &ldquo;forks&rdquo; of a sponge can be created, by storing
+            the state after a given number of operations, and
+            restarting from it with distinct ABSORB calls in distinct
+            branches. Note that all forks must do the same calls
+            sequence, as specified to the START call.
+          </li>
+        </ul>
+      </section>
+
+      <!-- ── 3.2 Security ── -->
+
+      <section id="sec-3.2" class="mb-10">
+        <h3 class="text-xl font-bold">3.2 Security</h3>
+        <p class="text-gray-300">
+          The security of SAFE API is captured by the following
+          theorem, which essentially says that the SAFE outputs are
+          indistinguishable from that of a random oracle.
+        </p>
+        <div class="formal-block formal-block-theorem">
+          <div class="flex items-start justify-between mb-2">
+            <span class="text-sm font-bold text-green-400">
+              Theorem 1
+            </span>
+          </div>
+          <p class="text-sm text-gray-300">
+            Let <span class="math">P</span> be a cryptographic
+            protocol that employs random oracles
+            <span class="math">R_1, R_2, \ldots, R^k</span> and is
+            secure in the random oracle model against adversaries that
+            make up to
+            <span class="math">2^\lambda</span> queries to the
+            oracles. Then, the implementation of this protocol with
+            oracle <span class="math">R^i</span> instantiated with the
+            SAFE API using a field of size at least
+            <span class="math">2^&#123;2\lambda&#125;</span> and a
+            domain separator
+            <span class="math">D^i</span> (pairwise distinct) is
+            secure against adversaries that make up to
+            <span class="math">2^\lambda</span> queries to the
+            underlying hash
+            <span class="math">H</span> and permutation
+            <span class="math">P</span>.
+          </p>
+        </div>
+        <p class="text-gray-300">
+          It implies that whenever SAFE is used in one or multiple
+          (with different IO patterns or domain separators) protocols,
+          at least
+          <span class="math">c \log_2 |\mathbb&#123;F&#125;|</span>
+          bits of security is guaranteed against collision, preimage,
+          or distinguishing attacks. Details are provided in a separate
+          report.
+        </p>
+      </section>
+
+      <!-- ── 3.3 From IO Patterns to Tags to Instances ── -->
+
+      <section id="sec-3.3" class="mb-10">
+        <h3 class="text-xl font-bold">
+          3.3 From IO Patterns to Tags to Instances
+        </h3>
+        <p class="text-gray-300">
+          Let <span class="math">c &lt; n</span> be the number of
+          capacity elements. The SAFE sponge state consists of the
+          following elements:
+        </p>
+        <ul class="list-disc list-inside text-gray-300 space-y-3
+          ml-4 my-4">
+          <li>
+            Permutation state
+            <span class="math">V \in \mathbb&#123;F&#125;^n</span>.
+          </li>
+          <li>
+            Absorb position
+            <span class="math">\text&#123;absorb\_pos&#125; \leq n - c</span>.
+          </li>
+          <li>
+            Squeeze position
+            <span class="math">\text&#123;squeeze\_pos&#125; \leq n - c</span>.
+          </li>
+          <li>
+            IO pattern expected (as defined by START).
+          </li>
+        </ul>
+        <p class="text-gray-300">
+          The sponge updates itself by calling inner permutation
+          <span class="math">P</span>. It is also able to compute
+          parameter tag <span class="math">T</span> using
+          <span class="math">H</span>, a cryptographic hash function
+          producing 256-bit digests, by default SHA3-256.
+        </p>
+        <p class="text-gray-300">
+          An instance is characterized by a <em>tag</em> derived from
+          an IO pattern, which is a sequence of absorb phases and
+          squeeze phases and their respective number of field elements.
+          The tag is used as an initial value, to ensure that distinct
+          instances behave differently. Using distinct tags for
+          different, non-equivalent usage patterns avoids trivial
+          collisions between input sequences of different length,
+          where a &ldquo;non-input&rdquo; element is replaced by a
+          zero element in the colliding message (this would lead to a
+          collision because of the lack of padding). Furthermore, for
+          applications that need to distinguish equivalent IO patterns,
+          a domain separator can be set.
+        </p>
+        <p class="text-gray-300">
+          A tag is calculated from an IO pattern and a domain separator
+          as follows:
+        </p>
+        <ol class="list-decimal list-inside text-gray-300 space-y-3
+          ml-4 my-4">
+          <li>
+            Encode the IO pattern as a list of 32-bit words, whose MSB
+            set to 1 for ABSORB calls and to 0 for SQUEEZE calls. For
+            example, an instance that does 2 ABSORB calls with 3
+            elements each and then does one SQUEEZE call with 3
+            elements is described by the three words
+            <code>[0x80000003, 0x80000003, 0x00000003]</code>.
+          </li>
+          <li>
+            Aggregate any contiguous ABSORB or SQUEEZE calls within a
+            single call: in our example, we would replace
+            <code>[0x80000003, 0x80000003]</code> with a single
+            <code>0x80000006</code>.
+          </li>
+          <li>
+            Serialize the list of words into a byte string and append
+            to it the domain separator
+            <span class="math">D</span>: for example, if
+            <span class="math">D</span> is the two-byte sequence
+            <code>0x4142</code>, then the example above would yield
+            the string (if big-endian convention is used):
+            <code>0x80000006000000034142</code>.
+          </li>
+          <li>
+            Hash the string obtained with the hasher
+            <span class="math">H</span> to a 256-bit tag
+            <span class="math">T</span> (truncating the hash if
+            needed).
+          </li>
+        </ol>
+        <p class="text-gray-300">
+          Given its tag string, an instance admits an arbitrary number
+          of executions, which are in addition characterized by an
+          input
+          <span class="math">Y \in (\mathbb&#123;F&#125;^r)^\star</span>.
+          In other words, a tag is not like an execution-specific
+          nonce; it is a characterization of the expected usage in
+          terms of IO pattern, and of a domain separator (which can be
+          used to create different instances/tags for a same IO
+          pattern).
+        </p>
+        <div class="formal-block formal-block-definition">
+          <div class="flex items-start justify-between mb-2">
+            <span class="text-sm font-bold text-blue-400">
+              Remark 2
+            </span>
+          </div>
+          <p class="text-sm text-gray-300">
+            The 32-bit encoding restricts the number of elements
+            absorbed or squeezed to
+            <span class="math">2^&#123;31&#125; - 1</span> per call.
+            For applications that need to absorb or squeeze such a
+            large number of elements, the operation must therefore be
+            done via multiple calls, rather than a single one.
+          </p>
+        </div>
+        <div class="formal-block formal-block-definition">
+          <div class="flex items-start justify-between mb-2">
+            <span class="text-sm font-bold text-blue-400">
+              Remark 3
+            </span>
+          </div>
+          <p class="text-sm text-gray-300">
+            If the hash function used to create the tag received field
+            elements rather than byte strings, and can directly process
+            32-bit integers as field elements, then the serialization
+            mechanism (including endianness aspects) is not needed.
+          </p>
+        </div>
+      </section>
+
+      <!-- ── 3.4 Detailed API ── -->
+
+      <section id="sec-3.4" class="mb-10">
+        <h3 class="text-xl font-bold">3.4 Detailed API</h3>
+        <p class="text-gray-300">
+          Everything begins with START, which computes a tag from the
+          IO pattern and domain separator. This operation is unique as
+          it writes the tag into the inner part of the state, which
+          makes us to use a new security proof (Section 3.2). Each
+          call to ABSORB or SQUEEZE both:
+        </p>
+        <ul class="list-disc list-inside text-gray-300 space-y-3
+          ml-4 my-4">
+          <li>
+            Writes to or reads the outer part of the permutation state
+            and calls the permutation
+            <span class="math">P</span>.
+          </li>
+          <li>
+            Verifies its own parameters against the initially supplied
+            IO pattern (&ldquo;early abort&rdquo; misuse detection).
+          </li>
+        </ul>
+        <p class="text-gray-300">
+          When all calls are done, the FINISH operation verifies that
+          no call is left undone.
+        </p>
+
+        <!-- Algorithm 1: START and FINISH -->
+
+        <div class="formal-block formal-block-definition">
+          <div class="flex items-start justify-between mb-2">
+            <span class="text-sm font-bold text-blue-400">
+              Algorithm 1 &mdash; START and FINISH Operations
+            </span>
+          </div>
+          <p class="text-sm text-gray-300 mb-2">
+            If field elements are 248 bits or more,
+            <span class="math">T</span> is converted to a field
+            element. Otherwise <span class="math">T</span> is parsed
+            as two or more field elements (but at most
+            <span class="math">c/2</span> elements, if
+            <span class="math">c</span> is the arithmetic capacity).
+          </p>
+          <p class="text-sm text-gray-400 font-bold mb-1">START:</p>
+          <ol class="list-decimal list-inside text-sm text-gray-300
+            space-y-2 ml-4 my-2">
+            <li>
+              Given an IO pattern
+              <span class="math">\mathit&#123;IO&#125;</span> (as a
+              list of calls with the respective number of elements)
+              and a byte string <span class="math">D</span> used as
+              domain separator, compute the tag
+              <span class="math">T</span> as described in
+              Section 3.3.
+            </li>
+            <li>
+              Set the permutation state to all zeros and add
+              <span class="math">T</span> to the first
+              <span class="math">\min(256, \log_2 |\mathbb&#123;F&#125;|)</span>
+              bits of the inner part of the state (with respect to the
+              field&rsquo;s addition).
+            </li>
+            <li>
+              Set both absorb and squeeze positions to zero:
+              <span class="math">\text&#123;absorb\_pos&#125; = \text&#123;squeeze\_pos&#125; = 0</span>.
+            </li>
+            <li>
+              Set the IO count to zero:
+              <span class="math">\text&#123;io\_count&#125; = 0</span>.
+            </li>
+            <li>
+              Set the IO pattern expected to
+              <span class="math">\mathit&#123;IO&#125;[L]</span>.
+            </li>
+          </ol>
+          <p class="text-sm text-gray-400 font-bold mb-1 mt-3">
+            FINISH:
+          </p>
+          <ol class="list-decimal list-inside text-sm text-gray-300
+            space-y-2 ml-4 my-2">
+            <li>
+              Check that
+              <span class="math">\text&#123;io\_count&#125;</span>
+              equals the length of the IO pattern expected. Return an
+              error otherwise.
+            </li>
+            <li>
+              Erase the state and its variables.
+            </li>
+          </ol>
+        </div>
+
+        <!-- Algorithm 2: ABSORB and SQUEEZE -->
+
+        <div class="formal-block formal-block-definition">
+          <div class="flex items-start justify-between mb-2">
+            <span class="text-sm font-bold text-blue-400">
+              Algorithm 2 &mdash; ABSORB and SQUEEZE Operations
+            </span>
+          </div>
+          <p class="text-sm text-gray-400 font-bold mb-1">ABSORB:</p>
+          <ol class="list-decimal list-inside text-sm text-gray-300
+            space-y-2 ml-4 my-2">
+            <li>
+              If <span class="math">L = 0</span>, return.
+            </li>
+            <li>
+              For
+              <span class="math">i = 0, 1, \ldots, L - 1</span>:
+              <ul class="list-disc list-inside ml-6 mt-1 space-y-1">
+                <li>
+                  If
+                  <span class="math">\text&#123;absorb\_pos&#125; = (n - c)</span>,
+                  then set
+                  <span class="math">V = P(V)</span> to permute the
+                  state, and set
+                  <span class="math">\text&#123;absorb\_pos&#125; = 0</span>
+                  to restart writing at the zero offset.
+                </li>
+                <li>
+                  Add <span class="math">X[i]</span> to the state
+                  element at
+                  <span class="math">\text&#123;absorb\_pos&#125;</span>.
+                </li>
+                <li>
+                  Do
+                  <span class="math">\text&#123;absorb\_pos&#125;\mathord&#123;++&#125;</span>.
+                </li>
+              </ul>
+            </li>
+            <li>
+              Compute the 32-bit encoding of
+              <span class="math">L</span> to the IO pattern.
+            </li>
+            <li>
+              Verify that the word obtained is equal to the
+              <span class="math">\text&#123;io\_count&#125;</span>-th
+              word of the IO pattern expected; abort upon mismatch (and
+              erase the state).
+            </li>
+            <li>
+              Do
+              <span class="math">\text&#123;io\_count&#125;\mathord&#123;++&#125;</span>.
+            </li>
+            <li>
+              Set
+              <span class="math">\text&#123;squeeze\_pos&#125; = (n - c)</span>,
+              to force a permute at the start of the next SQUEEZE.
+            </li>
+          </ol>
+          <p class="text-sm text-gray-400 font-bold mb-1 mt-3">
+            SQUEEZE:
+          </p>
+          <ol class="list-decimal list-inside text-sm text-gray-300
+            space-y-2 ml-4 my-2">
+            <li>
+              If <span class="math">L = 0</span>, return.
+            </li>
+            <li>
+              For
+              <span class="math">i = 0, 1, \ldots, L - 1</span>:
+              <ul class="list-disc list-inside ml-6 mt-1 space-y-1">
+                <li>
+                  If
+                  <span class="math">\text&#123;squeeze\_pos&#125; = (n - c)</span>,
+                  then set
+                  <span class="math">V = P(V)</span> to permute the
+                  state, set
+                  <span class="math">\text&#123;squeeze\_pos&#125; = 0</span>
+                  to restart reading output at the zero offset, and
+                  set
+                  <span class="math">\text&#123;absorb\_pos&#125; = 0</span>
+                  to start writing at the zero offset in the next
+                  ABSORB.
+                </li>
+                <li>
+                  Set
+                  <span class="math">Y[i] = V[\text&#123;squeeze\_pos&#125;]</span>.
+                </li>
+                <li>
+                  Do
+                  <span class="math">\text&#123;squeeze\_pos&#125;\mathord&#123;++&#125;</span>.
+                </li>
+              </ul>
+            </li>
+            <li>
+              Compute the 32-bit encoding of
+              <span class="math">L + 2^&#123;31&#125;</span> with the
+              IO pattern.
+            </li>
+            <li>
+              Verify that the word obtained is equal to the
+              <span class="math">\text&#123;io\_count&#125;</span>-th
+              word of the IO pattern expected; abort upon mismatch (and
+              erase the state).
+            </li>
+            <li>
+              Do
+              <span class="math">\text&#123;io\_count&#125;\mathord&#123;++&#125;</span>.
+            </li>
+          </ol>
+        </div>
+
+        <div class="formal-block formal-block-definition">
+          <div class="flex items-start justify-between mb-2">
+            <span class="text-sm font-bold text-blue-400">
+              Remark 4
+            </span>
+          </div>
+          <p class="text-sm text-gray-300">
+            We do not set
+            <span class="math">\text&#123;absorb\_pos&#125;</span> to
+            <span class="math">(n - c)</span> as in ABSORB, as we may
+            want the state to absorb at the same positions that have
+            been squeezed, for example in authenticated encryption.
+          </p>
+        </div>
+      </section>
+    </section>
+
+    <!-- ============================================================ -->
+    <!-- 4. SAFE APPLICATIONS                                         -->
+    <!-- ============================================================ -->
+
+    <section id="sec-4" class="mb-10">
+      <h2 class="text-2xl font-bold">4. SAFE Applications</h2>
+      <p class="text-gray-300">
+        SAFE among others supports the following use cases.
+      </p>
+
+      <!-- Algorithm 3: Fixed-length hashing -->
+
+      <div class="formal-block formal-block-definition">
+        <div class="flex items-start justify-between mb-2">
+          <span class="text-sm font-bold text-blue-400">
+            Algorithm 3 &mdash; SAFE for Fixed-Length Hashing
+          </span>
+        </div>
+        <table class="w-full text-sm">
+          <thead>
+            <tr class="border-b border-gray-700">
+              <th class="text-left py-2 pr-4">Protocol</th>
+              <th class="text-left py-2">Sponge calls via SAFE</th>
+            </tr>
+          </thead>
+          <tbody class="text-gray-300">
+            <tr class="border-b border-gray-800">
+              <td class="py-2 pr-4 align-top">
+                1: Select
+                <span class="math">X_1, X_2, \ldots, X_L</span>
+                for hashing;<br/>
+                2: Get hash
+                <span class="math">T</span>.
+              </td>
+              <td class="py-2 align-top">
+                1: START(IO[2], D) with IO the encoding of the
+                following calls, and
+                <span class="math">D</span> an arbitrary domain
+                separator;<br/>
+                2: ABSORB(<span class="math">L</span>, X[]);<br/>
+                3: <span class="math">T \leftarrow</span>
+                SQUEEZE(1);<br/>
+                4: FINISH().
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <p class="text-sm text-gray-300 mt-2">
+          If the <span class="math">L</span> elements are absorbed
+          using more than one call &ndash; for example, via
+          ABSORB(1, <span class="math">X_1</span>) followed by
+          ABSORB(<span class="math">L - 1</span>,
+          (<span class="math">X_2, \ldots, X_L</span>)) &ndash; then
+          the resulting hash will not change. No padding is required.
+        </p>
+      </div>
+
+      <!-- Algorithm 4: Merkle tree -->
+
+      <div class="formal-block formal-block-definition">
+        <div class="flex items-start justify-between mb-2">
+          <span class="text-sm font-bold text-blue-400">
+            Algorithm 4 &mdash; SAFE for Merkle Tree of Arity 2
+          </span>
+        </div>
+        <table class="w-full text-sm">
+          <thead>
+            <tr class="border-b border-gray-700">
+              <th class="text-left py-2 pr-4">Protocol</th>
+              <th class="text-left py-2">Sponge calls via SAFE</th>
+            </tr>
+          </thead>
+          <tbody class="text-gray-300">
+            <tr class="border-b border-gray-800">
+              <td class="py-2 pr-4 align-top">
+                1: Select child node hashes
+                <span class="math">X_1, X_2</span>;<br/>
+                2: Get parent hash
+                <span class="math">T</span>.
+              </td>
+              <td class="py-2 align-top">
+                1: START(IO[2], D);<br/>
+                2: ABSORB(2, X[]);<br/>
+                3: <span class="math">T \leftarrow</span>
+                SQUEEZE(1);<br/>
+                4: FINISH().
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Algorithm 5: Commitment schemes -->
+
+      <div class="formal-block formal-block-definition">
+        <div class="flex items-start justify-between mb-2">
+          <span class="text-sm font-bold text-blue-400">
+            Algorithm 5 &mdash; SAFE for Commitment Schemes
+          </span>
+        </div>
+        <table class="w-full text-sm">
+          <thead>
+            <tr class="border-b border-gray-700">
+              <th class="text-left py-2 pr-4">Protocol</th>
+              <th class="text-left py-2">Sponge calls via SAFE</th>
+            </tr>
+          </thead>
+          <tbody class="text-gray-300">
+            <tr class="border-b border-gray-800">
+              <td class="py-2 pr-4 align-top">
+                1: Select values for commitment
+                <span class="math">X_1, X_2, X_3 \in \mathbb&#123;F&#125;^2</span>;<br/>
+                2: Get commitment
+                <span class="math">C</span>.
+              </td>
+              <td class="py-2 align-top">
+                1: START(IO[4], D);<br/>
+                2: ABSORB(2,
+                <span class="math">X_1</span>[]);<br/>
+                3: ABSORB(2,
+                <span class="math">X_2</span>[]);<br/>
+                4: ABSORB(2,
+                <span class="math">X_3</span>[]);<br/>
+                5: <span class="math">C \leftarrow</span>
+                SQUEEZE(1);<br/>
+                6: FINISH().
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <p class="text-sm text-gray-300 mt-2">
+          Note that the tag will be the same for committing six
+          1-field elements. If this difference matters for an
+          application, a domain separator should be used.
+        </p>
+      </div>
+
+      <!-- Algorithm 6: Sigma protocols -->
+
+      <div class="formal-block formal-block-definition">
+        <div class="flex items-start justify-between mb-2">
+          <span class="text-sm font-bold text-blue-400">
+            Algorithm 6 &mdash; SAFE for Sigma Protocols
+          </span>
+        </div>
+        <p class="text-sm text-gray-400 font-bold mb-1">
+          Interactive form:
+        </p>
+        <ol class="list-decimal list-inside text-sm text-gray-300
+          space-y-1 ml-4 my-2">
+          <li>
+            Parties agree on the common input
+            <span class="math">Z \in \mathbb&#123;F&#125;^z</span>.
+          </li>
+          <li>
+            Prover prepares and sends proof elements
+            <span class="math">\pi_1 \in \mathbb&#123;F&#125;^&#123;L_1&#125;</span>
+            and
+            <span class="math">\pi_2 \in \mathbb&#123;F&#125;^&#123;L_2&#125;</span>.
+          </li>
+          <li>
+            Verifier responds with challenge
+            <span class="math">c_1 \in \mathbb&#123;F&#125;</span>.
+          </li>
+          <li>
+            Prover prepares and sends proof element
+            <span class="math">\pi_3 \in \mathbb&#123;F&#125;^&#123;L_3&#125;</span>.
+          </li>
+          <li>
+            Verifier responds with challenges
+            <span class="math">c_2, c_3 \in \mathbb&#123;F&#125;</span>.
+          </li>
+          <li>
+            Prover sends final proof
+            <span class="math">\pi_4</span>.
+          </li>
+        </ol>
+        <p class="text-sm text-gray-400 font-bold mb-1 mt-3">
+          Sponge calls via SAFE:
+        </p>
+        <ol class="list-decimal list-inside text-sm text-gray-300
+          space-y-1 ml-4 my-2">
+          <li>
+            START(IO[6], D) with IO the encoding of the following
+            calls, and <span class="math">D</span> an arbitrary
+            domain separator.
+          </li>
+          <li>
+            ABSORB(<span class="math">z</span>,
+            <span class="math">Z</span>).
+          </li>
+          <li>
+            ABSORB(<span class="math">L_1</span>,
+            <span class="math">\pi_1</span>).
+          </li>
+          <li>
+            ABSORB(<span class="math">L_2</span>,
+            <span class="math">\pi_2</span>).
+          </li>
+          <li>
+            <span class="math">c_1 \leftarrow</span> SQUEEZE(1).
+          </li>
+          <li>
+            ABSORB(<span class="math">L_3</span>,
+            <span class="math">\pi_3</span>).
+          </li>
+          <li>
+            <span class="math">c_2 \leftarrow</span> SQUEEZE(1).
+          </li>
+          <li>
+            <span class="math">c_3 \leftarrow</span> SQUEEZE(1).
+          </li>
+          <li>FINISH().</li>
+        </ol>
+        <p class="text-sm text-gray-300 mt-2">
+          Note that the sponge absorbs exactly those elements that the
+          Prover sends to the Verifier. Thus a protocol designer can
+          use a simple rule of thumb: just absorb everything that is
+          sent out.
+        </p>
+      </div>
+
+      <!-- Algorithm 7: Authenticated encryption -->
+
+      <div class="formal-block formal-block-definition">
+        <div class="flex items-start justify-between mb-2">
+          <span class="text-sm font-bold text-blue-400">
+            Algorithm 7 &mdash; SAFE for Authenticated Encryption
+          </span>
+        </div>
+        <p class="text-sm text-gray-400 font-bold mb-1">
+          Protocol:
+        </p>
+        <ol class="list-decimal list-inside text-sm text-gray-300
+          space-y-1 ml-4 my-2">
+          <li>
+            Get key
+            <span class="math">K \in \mathbb&#123;F&#125;^k</span>.
+          </li>
+          <li>
+            Get nonce
+            <span class="math">N \in \mathbb&#123;F&#125;^m</span>.
+          </li>
+          <li>
+            Encrypt data blocks
+            <span class="math">D_1, D_2, \ldots, D_b</span>, where
+            <span class="math">D_i \in \mathbb&#123;F&#125;^&#123;L_i&#125;</span>.
+          </li>
+          <li>
+            Get ciphertext
+            <span class="math">C</span>.
+          </li>
+        </ol>
+        <p class="text-sm text-gray-400 font-bold mb-1 mt-3">
+          Sponge calls via SAFE:
+        </p>
+        <ol class="list-decimal list-inside text-sm text-gray-300
+          space-y-1 ml-4 my-2">
+          <li>
+            START(IO[<span class="math">2b + 2</span>], D).
+          </li>
+          <li>
+            ABSORB(<span class="math">k</span>,
+            <span class="math">K</span>).
+          </li>
+          <li>
+            ABSORB(<span class="math">m</span>,
+            <span class="math">N</span>).
+          </li>
+          <li>
+            <span class="math">C_1 \leftarrow</span>
+            SQUEEZE(<span class="math">L_1</span>).
+          </li>
+          <li>
+            ABSORB(<span class="math">L_1</span>,
+            <span class="math">D_1</span>).
+          </li>
+          <li>
+            <span class="math">C_2 \leftarrow</span>
+            SQUEEZE(<span class="math">L_2</span>).
+          </li>
+          <li>
+            ABSORB(<span class="math">L_2</span>,
+            <span class="math">D_2</span>).
+          </li>
+          <li>
+            &hellip;
+          </li>
+          <li>
+            <span class="math">C_b \leftarrow</span>
+            SQUEEZE(<span class="math">L_b</span>).
+          </li>
+          <li>
+            ABSORB(<span class="math">L_b</span>,
+            <span class="math">D_b</span>).
+          </li>
+          <li>
+            <span class="math">S \leftarrow</span> SQUEEZE(1).
+          </li>
+          <li>
+            FINISH(). Upon success of FINISH() and of previous calls,
+            the string
+            <span class="math">(C_1 + D_1) \| (C_2 + D_2) \| \cdots \| (C_b + D_b) \| S</span>
+            will be the ciphertext, where
+            &ldquo;<span class="math">+</span>&rdquo; denotes
+            addition in
+            <span class="math">\mathbb&#123;F&#125;</span>.
+          </li>
+        </ol>
+        <p class="text-sm text-gray-300 mt-2">
+          This construction is a simplification of the SpongeWrap mode
+          [BDPV11]. It is most efficient when
+          <span class="math">L_i \equiv 0 \pmod&#123;r&#125;</span>,
+          that is, all blocks fit the rate parameter of the sponge.
+          This mode can be adapted to support associated data
+          (authenticated but not encrypted), in the same vein as the
+          SpongeWrap mode. Note that there is no padding overhead, nor
+          are unneeded calls to
+          <span class="math">P</span> spent.
+        </p>
+      </div>
+
+      <!-- Algorithm 8: Stream cipher and PRNG -->
+
+      <div class="formal-block formal-block-definition">
+        <div class="flex items-start justify-between mb-2">
+          <span class="text-sm font-bold text-blue-400">
+            Algorithm 8 &mdash; SAFE for Stream Cipher and PRNG
+          </span>
+        </div>
+        <p class="text-sm text-gray-400 font-bold mb-1">
+          Protocol:
+        </p>
+        <ol class="list-decimal list-inside text-sm text-gray-300
+          space-y-1 ml-4 my-2">
+          <li>
+            <strong>If</strong> PRNG <strong>then</strong>:
+            Get seed
+            <span class="math">S \in \mathbb&#123;F&#125;^s</span>.
+          </li>
+          <li>
+            <strong>Else</strong> (stream cipher):
+            Get key
+            <span class="math">K \in \mathbb&#123;F&#125;^k</span>
+            and nonce
+            <span class="math">N \in \mathbb&#123;F&#125;^m</span>.
+          </li>
+          <li>
+            Generate <span class="math">L</span> stream elements
+            <span class="math">C[\,]</span>.
+          </li>
+          <li>
+            <strong>If</strong> stream cipher <strong>then</strong>:
+            Encrypt data
+            <span class="math">D[\,]</span> with
+            <span class="math">C[\,]</span>.
+          </li>
+        </ol>
+        <p class="text-sm text-gray-400 font-bold mb-1 mt-3">
+          Sponge calls via SAFE:
+        </p>
+        <ol class="list-decimal list-inside text-sm text-gray-300
+          space-y-1 ml-4 my-2">
+          <li>
+            <strong>If</strong> PRNG <strong>then</strong>:
+            ABSORB(<span class="math">s</span>,
+            <span class="math">S</span>).
+          </li>
+          <li>
+            <strong>Else</strong> (stream cipher):
+            ABSORB(<span class="math">k</span>,
+            <span class="math">K</span>); then
+            ABSORB(<span class="math">m</span>,
+            <span class="math">N</span>).
+          </li>
+          <li>
+            <span class="math">C_1 \leftarrow</span>
+            SQUEEZE(<span class="math">L_1</span>).
+          </li>
+          <li>
+            <span class="math">C_2 \leftarrow</span>
+            SQUEEZE(<span class="math">L_2</span>).
+          </li>
+          <li>
+            &hellip;
+          </li>
+          <li>
+            <span class="math">C_b \leftarrow</span>
+            SQUEEZE(<span class="math">L_b</span>).
+          </li>
+          <li>
+            FINISH(). For the stream cipher case, the plaintext
+            <span class="math">D_1, \ldots, D_b</span> with
+            <span class="math">D_i</span> consisting of
+            <span class="math">L_i</span> field elements is encrypted
+            to
+            <span class="math">(C_1 + D_1) \| (C_2 + D_2) \| \cdots \| (C_b + D_b)</span>.
+          </li>
+        </ol>
+      </div>
+    </section>
+
+    <!-- ============================================================ -->
+    <!-- REFERENCES                                                   -->
+    <!-- ============================================================ -->
+
+    <section id="references" class="mb-10">
+      <h2 class="text-2xl font-bold">References</h2>
+      <ol class="list-none space-y-3 text-gray-300 text-sm">
+        <li id="ref-AAB+20">
+          <strong>[AAB<span class="math">^+</span>20]</strong>
+          Abdelrahaman Aly, Tomer Ashur, Eli Ben-Sasson, Siemen
+          Dhooghe, and Alan Szepieniec. Design of Symmetric-Key
+          Primitives for Advanced Cryptographic Protocols.
+          <em>IACR ToSC</em>, (3):1&ndash;45, 2020.
+        </li>
+        <li id="ref-AGR+16">
+          <strong>[AGR<span class="math">^+</span>16]</strong>
+          Martin R. Albrecht, Lorenzo Grassi, Christian Rechberger,
+          Arnab Roy, and Tyge Tiessen. MiMC: Efficient Encryption and
+          Cryptographic Hashing with Minimal Multiplicative Complexity.
+          In <em>ASIACRYPT</em>, 2016.
+        </li>
+        <li id="ref-BDPV07">
+          <strong>[BDPV07]</strong>
+          Guido Bertoni, Joan Daemen, Michael Peeters, and Gilles Van
+          Assche. Sponge functions. <em>Ecrypt Hash Workshop</em>,
+          May 2007.
+        </li>
+        <li id="ref-BDPV11">
+          <strong>[BDPV11]</strong>
+          Guido Bertoni, Joan Daemen, Michael Peeters, and Gilles Van
+          Assche. Duplexing the sponge: Single-pass authenticated
+          encryption and other applications. In <em>SAC</em>, 2011.
+        </li>
+        <li id="ref-CDMP05">
+          <strong>[CDMP05]</strong>
+          Jean-Sebastien Coron, Yevgeniy Dodis, Cecile Malinaud, and
+          Prashant Puniya. Merkle&ndash;Damgard revisited: How to
+          construct a hash function. In <em>CRYPTO</em>, 2005.
+        </li>
+        <li id="ref-GKR+21">
+          <strong>[GKR<span class="math">^+</span>21]</strong>
+          Lorenzo Grassi, Dmitry Khovratovich, Arnab Roy, Christian
+          Rechberger, and Markus Schofnegger. Poseidon: A new hash
+          function for zero-knowledge proof systems. <em>USENIX
+          Security</em>, 2021.
+        </li>
+        <li id="ref-HBHW22">
+          <strong>[HBHW22]</strong>
+          Daira Hopwood, Sean Bowe, Taylor Hornby, and Nathan Wilcox.
+          ZCash protocol specification, 2022.
+        </li>
+        <li id="ref-LRG+22">
+          <strong>[LRG<span class="math">^+</span>22]</strong>
+          Reinhard Luftenegger, Christian Rechberger, Lorenzo Grassi,
+          Markus Schofnegger, Roman Walch, and Dmitry Khovratovich.
+          Reinforced Concrete: A fast hash function for verifiable
+          computation. In <em>ACM CCS</em>, 2022.
+        </li>
+        <li id="ref-MRH04">
+          <strong>[MRH04]</strong>
+          Ueli M. Maurer, Renato Renner, and Clemens Holenstein.
+          Indifferentiability, impossibility results on reductions, and
+          applications to the random oracle methodology. In
+          <em>TCC</em>, 2004.
+        </li>
+      </ol>
+    </section>
+  </article>
+</BaseLayout>

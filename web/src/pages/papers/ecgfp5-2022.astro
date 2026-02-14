@@ -1,0 +1,1159 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+
+const EPRINT_URL = 'https://eprint.iacr.org/2022/274';
+---
+
+<BaseLayout title="EcGFp5: a Specialized Elliptic Curve (2022/274)">
+  <article class="max-w-4xl mx-auto article-prose">
+    <nav class="mb-8">
+      <a href="/papers" class="text-blue-400 hover:text-blue-300">
+        &larr; Back to Papers
+      </a>
+    </nav>
+
+    <!-- ============================================================ -->
+    <!-- HEADER                                                       -->
+    <!-- ============================================================ -->
+
+    <header class="mb-12">
+      <h1 class="text-3xl font-bold mb-4">
+        EcGFp5: a Specialized Elliptic Curve
+      </h1>
+      <p class="text-gray-400 mb-2">
+        Thomas Pornin
+      </p>
+      <p class="text-gray-500 text-sm mb-4">
+        2022 &middot; NCC Group &middot; eprint 2022/274
+      </p>
+      <div class="flex gap-4 text-sm">
+        <a
+          href={EPRINT_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          class="text-blue-400 hover:text-blue-300"
+        >
+          Paper (eprint) &rarr;
+        </a>
+      </div>
+      <p class="mt-4 text-xs text-gray-500">
+        All content below belongs to the original authors. This page
+        reproduces the paper for educational purposes. Always
+        <a
+          href={EPRINT_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          class="text-blue-400 hover:text-blue-300"
+        >cite the original</a>.
+      </p>
+    </header>
+
+    <!-- ============================================================ -->
+    <!-- TABLE OF CONTENTS                                            -->
+    <!-- ============================================================ -->
+
+    <nav id="toc" class="mb-10 p-6 rounded-lg"
+      style="background: rgba(255,255,255,0.03);
+             border: 1px solid rgba(255,255,255,0.06);">
+      <h2 class="text-lg font-bold mb-4">Table of Contents</h2>
+      <ol class="space-y-1 text-sm text-gray-300
+        list-decimal list-inside">
+        <li>
+          <a href="#abstract"
+            class="hover:text-white">Abstract</a>
+        </li>
+        <li>
+          <a href="#sec-1"
+            class="hover:text-white">EcGFp5 Definition</a>
+        </li>
+        <li>
+          <a href="#sec-2"
+            class="hover:text-white">Choice of Field</a>
+        </li>
+        <li>
+          <a href="#sec-3"
+            class="hover:text-white">In-VM Implementation</a>
+          <ol class="ml-6 mt-1 space-y-1 list-decimal
+            list-inside text-gray-400">
+            <li>
+              <a href="#sec-3.1"
+                class="hover:text-white">VM Opcodes</a>
+            </li>
+            <li>
+              <a href="#sec-3.2"
+                class="hover:text-white">Field Operations</a>
+            </li>
+            <li>
+              <a href="#sec-3.3"
+                class="hover:text-white">Curve Formulas</a>
+            </li>
+          </ol>
+        </li>
+        <li>
+          <a href="#sec-4"
+            class="hover:text-white">Curve Parameters Selection</a>
+        </li>
+        <li>
+          <a href="#sec-5"
+            class="hover:text-white">Out-of-VM Implementation</a>
+          <ol class="ml-6 mt-1 space-y-1 list-decimal
+            list-inside text-gray-400">
+            <li>
+              <a href="#sec-5.1"
+                class="hover:text-white">Field Operations</a>
+            </li>
+            <li>
+              <a href="#sec-5.2"
+                class="hover:text-white">Curve Operations</a>
+            </li>
+          </ol>
+        </li>
+        <li>
+          <a href="#sec-6"
+            class="hover:text-white">Conclusion</a>
+        </li>
+      </ol>
+      <p class="text-xs text-gray-500 mt-4 mb-1 font-semibold">
+        Additional
+      </p>
+      <ul class="space-y-1 text-sm text-gray-400 list-disc
+        list-inside">
+        <li>
+          <a href="#acknowledgements"
+            class="hover:text-white">Acknowledgements</a>
+        </li>
+        <li>
+          <a href="#references"
+            class="hover:text-white">References</a>
+        </li>
+      </ul>
+    </nav>
+
+    <!-- ============================================================ -->
+    <!-- ABSTRACT                                                     -->
+    <!-- ============================================================ -->
+
+    <section id="abstract" class="mb-10">
+      <h2 class="text-2xl font-bold">Abstract</h2>
+      <p class="text-gray-300">
+        We present here the design and implementation of ecGFp5, an
+        elliptic curve meant for a specific compute model in which
+        operations modulo a given 64-bit prime are especially efficient.
+        This model is primarily intended for running operations in a
+        virtual machine that produces and verifies zero-knowledge STARK
+        proofs. We describe here the choice of a secure curve, amenable
+        to safe cryptographic operations such as digital signatures, that
+        maps to such models, while still providing reasonable performance
+        on general purpose computers.
+      </p>
+    </section>
+
+    <!-- ============================================================ -->
+    <!-- 1. ECGFP5 DEFINITION                                        -->
+    <!-- ============================================================ -->
+
+    <section id="sec-1" class="mb-10">
+      <h2 class="text-2xl font-bold">
+        1. EcGFp5 Definition
+      </h2>
+
+      <p class="text-gray-300">
+        Let <span class="math">p = 2^&#123;64&#125; - 2^&#123;32&#125; + 1</span>.
+        This is a 64-bit prime integer; computations modulo
+        <span class="math">p</span> can be relatively efficiently
+        implemented on a variety of platforms. It has high 2-adicity
+        (<span class="math">p - 1</span> is a multiple of a large power
+        of 2, here <span class="math">2^&#123;32&#125;</span>) which
+        makes it convenient for STARK proofs [4]. 32-bit integer
+        operations can also be expressed over
+        <span class="math">\text&#123;GF&#125;(p)</span> since, for
+        instance, the product of two unsigned 32-bit integers is at most
+        <span class="math">(2^&#123;32&#125; - 1)^2</span>, which is
+        lower than <span class="math">p</span>. The Miden VM [13] is an
+        open-source implementation of a virtual machine whose internal
+        opcodes work over elements of
+        <span class="math">\text&#123;GF&#125;(p)</span> and can be used
+        to generate and verify STARK proofs over arbitrary program
+        executions.
+      </p>
+
+      <p class="text-gray-300">
+        The chosen curve has the following parameters. We first define
+        the finite field extension
+        <span class="math">\text&#123;GF&#125;(p^5) = \text&#123;GF&#125;(p)[z]/(z^5 - 3)</span>,
+        i.e. the ring of polynomials (in the symbolic variable
+        <span class="math">z</span>) with coefficients in
+        <span class="math">\text&#123;GF&#125;(p)</span>, and all
+        operations performed modulo the irreducible polynomial
+        <span class="math">z^5 - 3</span>. Every element of
+        <span class="math">\text&#123;GF&#125;(p^5)</span> can be
+        represented as five elements of
+        <span class="math">\text&#123;GF&#125;(p)</span>, corresponding
+        to the five coefficients of a polynomial of degree at most 4.
+      </p>
+
+      <p class="text-gray-300">
+        We define, over
+        <span class="math">\text&#123;GF&#125;(p^5)</span>, an elliptic
+        curve of equation:
+      </p>
+      <div class="math-block">
+        y^2 = x(x^2 + 2x + 263z)
+      </div>
+
+      <p class="text-gray-300">
+        This is a <em>double-odd curve</em> [16], with equation constants
+        <span class="math">a = 2</span> and
+        <span class="math">b = 263z</span>; its order is
+        <span class="math">2n</span> for the 319-bit prime integer:
+      </p>
+      <p class="text-gray-300" style="word-break: break-all;">
+        <span class="math">n = 1067993516717146951041484916571792702745057740581727230159139685185762082554198619328292418486241</span>
+      </p>
+
+      <p class="text-gray-300">
+        EcGFp5 is then formally defined as the group
+        <span class="math">\mathbb&#123;G&#125;</span> of points of that
+        curve which are <em>not</em> points of
+        <span class="math">n</span>-torsion. The neutral element of the
+        group is the point
+        <span class="math">N = (0, 0)</span> (the only point of order 2
+        on the curve). The sum in the group of two elements
+        <span class="math">P</span> and
+        <span class="math">Q</span> is defined as the curve point
+        <span class="math">P + Q + N</span>. As explained in [16], this
+        yields a group with the proper characteristics for defining
+        cryptographic operations such as digital signatures or key
+        exchange:
+      </p>
+      <ul class="list-disc list-inside space-y-1 text-gray-300 ml-4">
+        <li>
+          The group <span class="math">\mathbb&#123;G&#125;</span> has
+          prime order <span class="math">n</span>.
+        </li>
+        <li>
+          Elements of <span class="math">\mathbb&#123;G&#125;</span> can
+          be uniquely encoded into a field element; the decoding process
+          is unambiguous and inherently verifies that the provided
+          encoding was valid and canonical.
+        </li>
+        <li>
+          Group operations can be computed with efficient complete
+          formulas.
+        </li>
+      </ul>
+
+      <p class="text-gray-300">
+        Several systems of coordinates can be used. In general, it is
+        recommended to use <span class="math">(x, u)</span> coordinates,
+        in which <span class="math">u = x/y</span> for element
+        <span class="math">(x, y)</span> (for the neutral
+        <span class="math">N</span>, we use
+        <span class="math">u = 0</span>). If both
+        <span class="math">x</span> and
+        <span class="math">u</span> are expressed as fractions (denoted
+        <span class="math">X/Z</span> and
+        <span class="math">U/T</span>, respectively), then general point
+        addition formulas have a cost of 10 multiplications in the field
+        (denoted <span class="math">10M</span>), and specialized formulas
+        for sequences of doublings have a per-doubling cost of
+        <span class="math">2M + 5S</span>. However, within the target
+        compute model, it is more efficient to switch to affine
+        Weierstrass coordinates and formulas.
+      </p>
+
+      <p class="text-gray-300">
+        In the next sections, the paper justifies the choice of a
+        degree-5 field extension; describes the implementation of field
+        and curve operations in the target compute model (called
+        &ldquo;in-VM&rdquo;); formalizes the choice criteria for the
+        curve parameters; and provides details on the out-of-VM
+        implementation. A test implementation in Python and a reference
+        implementation in Rust are provided at
+        <a
+          href="https://github.com/pornin/ecgfp5/"
+          target="_blank"
+          rel="noopener noreferrer"
+          class="text-blue-400 hover:text-blue-300"
+        >github.com/pornin/ecgfp5</a>.
+      </p>
+    </section>
+
+    <!-- ============================================================ -->
+    <!-- 2. CHOICE OF FIELD                                           -->
+    <!-- ============================================================ -->
+
+    <section id="sec-2" class="mb-10">
+      <h2 class="text-2xl font-bold">
+        2. Choice of Field
+      </h2>
+
+      <p class="text-gray-300">
+        Since <span class="math">p</span> is a 64-bit integer, we need
+        to work in a field extension
+        <span class="math">\text&#123;GF&#125;(p^k)</span> in order to
+        have a field large enough to obtain a curve with adequate
+        security. We aim at the usual &ldquo;128-bit security&rdquo;
+        level. For such a level, we need a field with at least a 256-bit
+        order, hence <span class="math">k \ge 4</span>. Robustness of
+        elliptic curve discrete logarithm in extension fields has been
+        studied in various articles. A rough summary is the following:
+      </p>
+      <ul class="list-disc list-inside space-y-1 text-gray-300 ml-4">
+        <li>
+          If the extension degree <span class="math">k</span> is
+          composite, then Weil descent attacks may apply, using a tower
+          of field extensions to turn the problem into a discrete
+          logarithm in a higher genus curve on a smaller field [9, 3].
+          To avoid such issues, a prime degree is highly recommended.
+          Diem showed that if <span class="math">k</span> is prime and
+          not lower than 11, then such attacks cannot work [6].
+        </li>
+        <li>
+          A related attack using Groebner bases was described by
+          Gaudry [8]; its complexity was further analyzed by Joux and
+          Vitse, along with some possible variants [12].
+        </li>
+      </ul>
+
+      <p class="text-gray-300">
+        For performance reasons, we would like to have
+        <span class="math">k</span> as small as possible;
+        <span class="math">k = 11</span> would lead to a 704-bit field
+        where computations would be too expensive. Using
+        <span class="math">k = 4</span> would allow the known attacks on
+        quartic extension fields [3], with complexity about
+        <span class="math">O(p^&#123;3/2&#125;) \approx 2^&#123;96&#125;</span>.
+        Though this value is quite larger than what can practically be
+        implemented, it still falls short of the expected
+        &ldquo;128-bit&rdquo; level. Thus, we need at least
+        <span class="math">k = 5</span>.
+      </p>
+
+      <p class="text-gray-300">
+        With <span class="math">k = 5</span>, Gaudry&rsquo;s attack
+        entails computing about
+        <span class="math">p^&#123;2 - 2/5&#125; \approx 2^&#123;102.4&#125;</span>
+        systems of polynomial equations, and obtaining a Groebner basis
+        for each of them. Each system would contain 5 equations with 5
+        unknowns, and a total degree
+        <span class="math">2^&#123;k-1&#125; = 16</span>; obtaining the
+        basis requires the FGLM algorithm [7] with complexity
+        <span class="math">O(kD^3)</span>, where
+        <span class="math">D</span> is the degree of the underlying
+        ideal, close to
+        <span class="math">2^&#123;k(k-1)&#125; = 2^&#123;20&#125;</span>.
+        This leads to a total theoretical complexity of at least
+        <span class="math">2^&#123;142&#125;</span>, well beyond the
+        target 128-bit level. Joux and Vitse&rsquo;s variant has cost
+        <span class="math">O(Cp^2)</span> for some constant
+        <span class="math">C</span> that depends on
+        <span class="math">k</span>, again above the 128-bit level.
+      </p>
+
+      <p class="text-gray-300">
+        We can thus claim that a degree-5 extension field,
+        <span class="math">\text&#123;GF&#125;(p^5)</span>, is sufficient
+        to achieve 128-bit security against all known attacks on discrete
+        logarithm on elliptic curves.
+      </p>
+
+      <p class="text-gray-300">
+        All finite fields with the same cardinality are isomorphic to
+        each other; we can thus choose whatever definition of that field
+        provides the best performance. The paper then discusses the
+        choice of the irreducible polynomial for defining the extension.
+        Among polynomials in
+        <span class="math">\text&#123;GF&#125;(p)[z]</span>, none of the
+        simpler candidates
+        (<span class="math">z^5, z^5 \pm 1, z^5 \pm z^i \pm 1, z^5 \pm 2</span>)
+        is irreducible. The next best choices are
+        <span class="math">z^5 - 3</span> and
+        <span class="math">z^5 + 3</span>, which are both irreducible;
+        thus the paper chooses
+        <span class="math">M = z^5 - 3</span>.
+      </p>
+    </section>
+
+    <!-- ============================================================ -->
+    <!-- 3. IN-VM IMPLEMENTATION                                      -->
+    <!-- ============================================================ -->
+
+    <section id="sec-3" class="mb-10">
+      <h2 class="text-2xl font-bold">
+        3. In-VM Implementation
+      </h2>
+
+      <!-- 3.1 VM Opcodes -->
+
+      <h3 id="sec-3.1" class="text-xl font-semibold mt-8 mb-3">
+        3.1 VM Opcodes
+      </h3>
+      <p class="text-gray-300">
+        The paper assumes the following opcodes are offered by the target
+        compute model, all with cost exactly 1 cycle:
+      </p>
+      <ul class="list-disc list-inside space-y-1 text-gray-300 ml-4">
+        <li>
+          <strong>add, sub, mul, div</strong> perform addition,
+          subtraction, multiplication and division in
+          <span class="math">\text&#123;GF&#125;(p)</span>. Division
+          fails if the divisor is zero.
+        </li>
+        <li>
+          <strong>and, or, xor, not</strong> perform operations on
+          Boolean values (1 for true, 0 for false). Opcodes
+          <strong>eq</strong> and <strong>neq</strong> compare two
+          <span class="math">\text&#123;GF&#125;(p)</span> elements.
+        </li>
+        <li>
+          <strong>select</strong> applied on three values
+          <span class="math">x, y, c</span> returns
+          <span class="math">x</span> if
+          <span class="math">c = 0</span>, or
+          <span class="math">y</span> if
+          <span class="math">c = 1</span>.
+        </li>
+        <li>
+          <strong>add32, sub32, mul32, div32, shl32, shr32,
+          gte32</strong> implement operations on 32-bit values.
+        </li>
+      </ul>
+
+      <p class="text-gray-300">
+        The compute model should be understood as a general circuit
+        emulation in which only arithmetic gates have a cost, while data
+        routing is free, provided that it can be resolved statically.
+        Function calls, loop control, reading from memory and writing to
+        memory are all free; however, data-dependent conditional jumps
+        and array accesses at data-dependent indexes are forbidden
+        (very expensive in Miden). The model is close to constant-time
+        implementations, although for different reasons.
+      </p>
+
+      <!-- 3.2 Field Operations -->
+
+      <h3 id="sec-3.2" class="text-xl font-semibold mt-8 mb-3">
+        3.2 Field Operations
+      </h3>
+      <p class="text-gray-300">
+        An element <span class="math">x</span> of
+        <span class="math">\text&#123;GF&#125;(p^5)</span> is
+        represented as five coefficients
+        <span class="math">x_0</span> to
+        <span class="math">x_4</span>, such that
+        <span class="math">x = x_0 + x_1 z + x_2 z^2 + x_3 z^3 + x_4 z^4</span>.
+        Addition and subtraction are done coefficient-wise; thus, an
+        addition in <span class="math">\text&#123;GF&#125;(p^5)</span>
+        costs 5 add opcodes.
+      </p>
+
+      <p class="text-gray-300">
+        <strong>Multiplication.</strong> Multiplication in
+        <span class="math">\text&#123;GF&#125;(p^5)</span>
+        (<span class="math">d \leftarrow a \cdot b</span>) is done in a
+        straightforward way:
+      </p>
+      <div class="math-block">
+        d_0 \leftarrow a_0 b_0 + 3(a_1 b_4 + a_2 b_3 + a_3 b_2 + a_4 b_1)
+      </div>
+      <div class="math-block">
+        d_1 \leftarrow a_0 b_1 + a_1 b_0 + 3(a_2 b_4 + a_3 b_3 + a_4 b_2)
+      </div>
+      <div class="math-block">
+        d_2 \leftarrow a_0 b_2 + a_1 b_1 + a_2 b_0 + 3(a_3 b_4 + a_4 b_3)
+      </div>
+      <div class="math-block">
+        d_3 \leftarrow a_0 b_3 + a_1 b_2 + a_2 b_1 + a_3 b_0 + 3 a_4 b_4
+      </div>
+      <div class="math-block">
+        d_4 \leftarrow a_0 b_4 + a_1 b_3 + a_2 b_2 + a_3 b_1 + a_4 b_0
+      </div>
+
+      <p class="text-gray-300">
+        The multiplications by 3 come from the reduction modulo
+        <span class="math">z^5 - 3</span>. Overall multiplication cost
+        is 49 cycles. Squaring can be done with lower cost since
+        symmetric products yield the same value when
+        <span class="math">a = b</span>; squaring cost is 34 cycles.
+      </p>
+
+      <p class="text-gray-300">
+        <strong>Inversion.</strong> Inversion in
+        <span class="math">\text&#123;GF&#125;(p^5)</span> uses the
+        Itoh&ndash;Tsujii method [11]. Define
+        <span class="math">r = 1 + p + p^2 + p^3 + p^4</span>. Then:
+      </p>
+      <div class="math-block">
+        p^5 - 1 = (p - 1)r
+      </div>
+      <p class="text-gray-300">
+        For any non-zero <span class="math">x</span> in
+        <span class="math">\text&#123;GF&#125;(p^5)</span>, we have
+        <span class="math">x^r \in \text&#123;GF&#125;(p)</span>, so:
+      </p>
+      <div class="math-block">
+        \frac&#123;1&#125;&#123;x&#125; = \frac&#123;x^&#123;r-1&#125;&#125;&#123;x^r&#125;
+      </div>
+      <p class="text-gray-300">
+        which is the product of
+        <span class="math">x^&#123;r-1&#125;</span> (in
+        <span class="math">\text&#123;GF&#125;(p^5)</span>) by the
+        inverse of <span class="math">x^r</span> (in
+        <span class="math">\text&#123;GF&#125;(p)</span>).
+      </p>
+
+      <p class="text-gray-300">
+        The Frobenius operator
+        <span class="math">\phi_1(x) = x^p</span> is a field
+        automorphism. For our modulus
+        <span class="math">p \equiv 1 \pmod&#123;5&#125;</span>, it
+        amounts to multiplying each coefficient by a precomputed
+        constant with no reordering, at a cost of only 4 cycles.
+        Using the Frobenius operator,
+        <span class="math">x^&#123;r-1&#125;</span> is computed with
+        three Frobenius applications and two multiplications in
+        <span class="math">\text&#123;GF&#125;(p^5)</span>. The overall
+        cost of inversion in
+        <span class="math">\text&#123;GF&#125;(p^5)</span> is
+        <strong>128 cycles</strong>. If
+        <span class="math">x = 0</span>, the routine returns 0
+        (a feature that simplifies later operations).
+      </p>
+
+      <p class="text-gray-300">
+        <strong>Legendre Symbol.</strong> The Legendre symbol of
+        <span class="math">x</span> is
+        <span class="math">x^&#123;(p^5 - 1)/2&#125;</span>. Using
+        <span class="math">r</span>, this reduces to the Legendre symbol
+        of <span class="math">x^r</span> in
+        <span class="math">\text&#123;GF&#125;(p)</span>. The overall
+        cost is <strong>186 cycles</strong>.
+      </p>
+
+      <p class="text-gray-300">
+        <strong>Square Root.</strong> The paper uses the Frobenius
+        operator to speed up square roots by computing:
+      </p>
+      <div class="math-block">
+        \sqrt&#123;x&#125; = \frac&#123;\sqrt&#123;x^r&#125;&#125;&#123;x^&#123;(r-1)/2&#125;&#125;
+      </div>
+      <p class="text-gray-300">
+        The square root in <span class="math">\text&#123;GF&#125;(p)</span>
+        is computed via a specialized Tonelli&ndash;Shanks algorithm that
+        avoids data-dependent conditional jumps, at a cost of 659 cycles.
+        The total cost of a square root in
+        <span class="math">\text&#123;GF&#125;(p^5)</span> is
+        <strong>3261 cycles</strong>.
+      </p>
+
+      <p class="text-gray-300">
+        <strong>Cost Summary.</strong> The following table summarizes
+        in-VM costs for
+        <span class="math">\text&#123;GF&#125;(p^5)</span> operations:
+      </p>
+      <div class="overflow-x-auto my-4">
+        <table class="w-full text-sm text-gray-300">
+          <thead>
+            <tr class="border-b border-gray-700">
+              <th class="text-left py-2 pr-4">Operation</th>
+              <th class="text-right py-2">Cost (cycles)</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr class="border-b border-gray-800">
+              <td class="py-1 pr-4">Addition</td>
+              <td class="text-right">5</td>
+            </tr>
+            <tr class="border-b border-gray-800">
+              <td class="py-1 pr-4">Subtraction</td>
+              <td class="text-right">5</td>
+            </tr>
+            <tr class="border-b border-gray-800">
+              <td class="py-1 pr-4">Multiplication</td>
+              <td class="text-right">49</td>
+            </tr>
+            <tr class="border-b border-gray-800">
+              <td class="py-1 pr-4">Squaring</td>
+              <td class="text-right">34</td>
+            </tr>
+            <tr class="border-b border-gray-800">
+              <td class="py-1 pr-4">Inversion</td>
+              <td class="text-right">128</td>
+            </tr>
+            <tr class="border-b border-gray-800">
+              <td class="py-1 pr-4">Division</td>
+              <td class="text-right">177</td>
+            </tr>
+            <tr class="border-b border-gray-800">
+              <td class="py-1 pr-4">Legendre symbol</td>
+              <td class="text-right">186</td>
+            </tr>
+            <tr>
+              <td class="py-1 pr-4">Square root</td>
+              <td class="text-right">3261</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p class="text-gray-300">
+        An important point is that inversions in
+        <span class="math">\text&#123;GF&#125;(p^5)</span> are quite
+        inexpensive: the cost of an inversion is only about 2.57 times
+        the cost of a multiplication. This is not the usual situation
+        when dealing with elliptic curve implementations; it impacts
+        the strategy for point addition formulas.
+      </p>
+
+      <!-- 3.3 Curve Formulas -->
+
+      <h3 id="sec-3.3" class="text-xl font-semibold mt-8 mb-3">
+        3.3 Curve Formulas
+      </h3>
+      <p class="text-gray-300">
+        Since inversions in
+        <span class="math">\text&#123;GF&#125;(p^5)</span> are quite
+        efficient (lower than three times a multiplication cost), the
+        most efficient formulas for point additions and doublings are
+        obtained by working with the short Weierstrass equation and
+        affine coordinates. Any elliptic curve over
+        <span class="math">\text&#123;GF&#125;(p^5)</span> can be
+        expressed as a short Weierstrass curve with a suitable change
+        of variable; thus, no curve type will be any better or worse
+        for in-VM computations.
+      </p>
+
+      <p class="text-gray-300">
+        <strong>Change of Variable.</strong> A double-odd curve such as
+        ecGFp5 has equation
+        <span class="math">y^2 = x(x^2 + ax + b)</span>. It can be
+        converted to the short Weierstrass equation:
+      </p>
+      <div class="math-block">
+        Y^2 = X^3 + AX + B
+      </div>
+      <p class="text-gray-300">
+        with constants:
+      </p>
+      <div class="math-block">
+        A = (3b - a^2)/3, \quad B = a(2a^2 - 9b)/27
+      </div>
+      <p class="text-gray-300">
+        using the change of variable
+        <span class="math">(X, Y) = (x + a/3,\; y)</span>.
+        This is very inexpensive: a single constant addition to the
+        <span class="math">x</span> coordinate, costing 1 cycle.
+      </p>
+
+      <p class="text-gray-300">
+        <strong>Point Addition.</strong> The sum of two points
+        <span class="math">(X_1, Y_1)</span> and
+        <span class="math">(X_2, Y_2)</span> is the point
+        <span class="math">(X_3, Y_3)</span> with:
+      </p>
+      <div class="math-block">
+        \lambda = \frac&#123;Y_2 - Y_1&#125;&#123;X_2 - X_1&#125;
+      </div>
+      <div class="math-block">
+        X_3 = \lambda^2 - X_1 - X_2
+      </div>
+      <div class="math-block">
+        Y_3 = \lambda(X_1 - X_3) - Y_1
+      </div>
+
+      <p class="text-gray-300">
+        These formulas are not complete; when
+        <span class="math">X_1 = X_2</span>, the doubling formula must
+        be used instead:
+      </p>
+      <div class="math-block">
+        \lambda = \frac&#123;3X_1^2 + A&#125;&#123;2Y_1&#125;
+      </div>
+
+      <p class="text-gray-300">
+        A complete routine that supports all cases (including
+        point-at-infinity inputs and outputs) has a fixed cost of
+        <strong>387 cycles</strong>. This is about 7.9 times the cost
+        of a single multiplication, faster than the best known
+        inversion-free formulas.
+      </p>
+
+      <p class="text-gray-300">
+        Optimizations reduce the cost to 290 cycles when it is known
+        <em>a priori</em> that the addition is not an edge case, and
+        to 326 cycles for explicit point doublings.
+      </p>
+
+      <p class="text-gray-300">
+        <strong>Point Multiplication.</strong> Multiplication of a point
+        <span class="math">P</span> by a scalar
+        <span class="math">v</span> uses a windowed method with signed
+        digits and window width <span class="math">w = 4</span>. The
+        overall cost of the point multiplication function, including
+        scalar splitting and window building, was measured to be
+        <strong>138482 cycles</strong>.
+      </p>
+
+      <p class="text-gray-300">
+        <strong>Key Pair and Signature Generation.</strong> When
+        multiplying the conventional generator point
+        <span class="math">G</span>, the window can be precomputed and
+        multiple windows for precomputed multiples of
+        <span class="math">G</span> can be used conjointly to reduce
+        the number of loop iterations and doublings.
+      </p>
+
+      <p class="text-gray-300">
+        <strong>Signature Verification.</strong> Verification of a
+        Schnorr signature entails checking that
+        <span class="math">dG + eQ = R</span> for some scalars
+        <span class="math">d</span> and
+        <span class="math">e</span>. Straus&rsquo;s algorithm [18]
+        (often known as &ldquo;Shamir&rsquo;s trick&rdquo;) can be used
+        to mutualize point doublings, performing about 320 doublings
+        total instead of 640.
+      </p>
+    </section>
+
+    <!-- ============================================================ -->
+    <!-- 4. CURVE PARAMETERS SELECTION                                -->
+    <!-- ============================================================ -->
+
+    <section id="sec-4" class="mb-10">
+      <h2 class="text-2xl font-bold">
+        4. Curve Parameters Selection
+      </h2>
+
+      <p class="text-gray-300">
+        In-VM curve operations use a short Weierstrass equation and
+        affine formulas. Any elliptic curve is amenable to such a
+        representation; moreover, the specific values of the Weierstrass
+        constants <span class="math">A</span> and
+        <span class="math">B</span> have little to no incidence on
+        in-VM performance. Thus, the in-VM compute model does not imply
+        any constraint on the curve equation type, and we are free to
+        select a curve type that favours out-of-VM performance while
+        providing the required security characteristics.
+      </p>
+
+      <p class="text-gray-300">
+        For proper security in arbitrary protocols, we need a prime-order
+        group with a unique, canonical and verifiable encoding [5]. In
+        practice, this restricts the choice to:
+      </p>
+      <ul class="list-disc list-inside space-y-1 text-gray-300 ml-4">
+        <li>
+          A curve with a prime order, using the generic short Weierstrass
+          equation.
+        </li>
+        <li>
+          A double-odd curve [16], with order
+          <span class="math">2n</span> for a prime
+          <span class="math">n</span>.
+        </li>
+        <li>
+          A Montgomery or twisted Edwards curve, of order
+          <span class="math">4n</span> or
+          <span class="math">8n</span> for a prime
+          <span class="math">n</span>, along with the
+          Decaf/Ristretto encoding process [10, 2].
+        </li>
+      </ul>
+
+      <p class="text-gray-300">
+        Double-odd curves are chosen because they have better doubling
+        formulas (<span class="math">2M + 5S</span> per-doubling
+        overhead) and simpler encoding/decoding than Decaf/Ristretto.
+        With <span class="math">a = 2</span> (an element of
+        <span class="math">\text&#123;GF&#125;(p)</span>),
+        <span class="math">b</span> must be chosen outside of
+        <span class="math">\text&#123;GF&#125;(p)</span>. A search
+        process finds the first usable curve at
+        <span class="math">b = 263z</span>, yielding the curve whose
+        parameters were given in Section 1.
+      </p>
+
+      <p class="text-gray-300">
+        The paper also verifies that the embedding degree is large.
+        For ecGFp5, the embedding degree is
+        <span class="math">e = (n-1)/5</span>, a 317-bit integer close
+        to the size of <span class="math">n</span> itself, as expected
+        of a randomly selected curve. The factorization of
+        <span class="math">n - 1</span> is:
+      </p>
+      <div class="math-block">
+        n - 1 = 2^5 \cdot 5 \cdot 163 \cdot 769 \cdot 1059871 \cdot 253243826720162431254857814100127 \cdot 198400523053184002814403536918162724916343842520561
+      </div>
+    </section>
+
+    <!-- ============================================================ -->
+    <!-- 5. OUT-OF-VM IMPLEMENTATION                                  -->
+    <!-- ============================================================ -->
+
+    <section id="sec-5" class="mb-10">
+      <h2 class="text-2xl font-bold">
+        5. Out-of-VM Implementation
+      </h2>
+
+      <p class="text-gray-300">
+        EcGFp5 was designed to match the abilities of the target VM
+        compute model, not any specific concrete CPU. Out-of-VM
+        performance is expected to be lower than what is usually expected
+        from fast elliptic curves with 128-bit security, for two
+        reasons: operations in
+        <span class="math">\text&#123;GF&#125;(p)</span> have some
+        overhead from the specific value of
+        <span class="math">p</span>, and
+        <span class="math">\text&#123;GF&#125;(p^5)</span> is a 320-bit
+        field (1.25 times larger than 256-bit), giving a rough cost
+        factor of
+        <span class="math">1.25^3 \approx 1.95</span>.
+      </p>
+
+      <p class="text-gray-300">
+        The implementation is in Rust, constant-time and fully portable
+        (no inline assembly, no architecture-specific intrinsics, no
+        unsafe code). On an Intel i5-8259U &ldquo;Coffee Lake&rdquo;
+        CPU:
+      </p>
+      <div class="overflow-x-auto my-4">
+        <table class="w-full text-sm text-gray-300">
+          <thead>
+            <tr class="border-b border-gray-700">
+              <th class="text-left py-2 pr-4">Operation</th>
+              <th class="text-right py-2">Cost (cycles)</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr class="border-b border-gray-800">
+              <td class="py-1 pr-4">
+                <span class="math">\text&#123;GF&#125;(p)</span>
+                multiplication</td>
+              <td class="text-right">10.18</td>
+            </tr>
+            <tr class="border-b border-gray-800">
+              <td class="py-1 pr-4">
+                <span class="math">\text&#123;GF&#125;(p)</span>
+                inversion</td>
+              <td class="text-right">737.39</td>
+            </tr>
+            <tr class="border-b border-gray-800">
+              <td class="py-1 pr-4">
+                <span class="math">\text&#123;GF&#125;(p^5)</span>
+                multiplication</td>
+              <td class="text-right">94.03</td>
+            </tr>
+            <tr class="border-b border-gray-800">
+              <td class="py-1 pr-4">
+                <span class="math">\text&#123;GF&#125;(p^5)</span>
+                squaring</td>
+              <td class="text-right">68.63</td>
+            </tr>
+            <tr class="border-b border-gray-800">
+              <td class="py-1 pr-4">
+                <span class="math">\text&#123;GF&#125;(p^5)</span>
+                inversion</td>
+              <td class="text-right">1069.75</td>
+            </tr>
+            <tr class="border-b border-gray-800">
+              <td class="py-1 pr-4">
+                <span class="math">\text&#123;GF&#125;(p^5)</span>
+                square root</td>
+              <td class="text-right">12410.38</td>
+            </tr>
+            <tr class="border-b border-gray-800">
+              <td class="py-1 pr-4">ecGFp5 point addition</td>
+              <td class="text-right">1328.50</td>
+            </tr>
+            <tr class="border-b border-gray-800">
+              <td class="py-1 pr-4">ecGFp5 point doubling</td>
+              <td class="text-right">985.37</td>
+            </tr>
+            <tr class="border-b border-gray-800">
+              <td class="py-1 pr-4">ecGFp5 point multiplication</td>
+              <td class="text-right">363168.03</td>
+            </tr>
+            <tr class="border-b border-gray-800">
+              <td class="py-1 pr-4">ecGFp5 generator
+                multiplication</td>
+              <td class="text-right">109516.20</td>
+            </tr>
+            <tr>
+              <td class="py-1 pr-4">ecGFp5 mul+add
+                verification</td>
+              <td class="text-right">336952.88</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- 5.1 Field Operations -->
+
+      <h3 id="sec-5.1" class="text-xl font-semibold mt-8 mb-3">
+        5.1 Field Operations
+      </h3>
+      <p class="text-gray-300">
+        The implementation uses <em>Montgomery representation</em>: an
+        element <span class="math">x \in \text&#123;GF&#125;(p)</span>
+        is represented as
+        <span class="math">2^&#123;64&#125;x \bmod p</span>, normalized
+        in the <span class="math">[0; p-1]</span> range. This is
+        coupled with <em>Montgomery multiplication</em>, which given
+        <span class="math">x</span> and <span class="math">y</span>
+        computes
+        <span class="math">xy / 2^&#123;64&#125; \bmod p</span>.
+        The cornerstone is the reduction function that takes a 128-bit
+        input and returns
+        <span class="math">x / 2^&#123;64&#125; \bmod p</span>.
+      </p>
+
+      <p class="text-gray-300">
+        The paper provides a detailed Rust implementation of the
+        Montgomery reduction function, exploiting the specific form of
+        <span class="math">p = 2^&#123;64&#125; - 2^&#123;32&#125; + 1</span>
+        to achieve reduction with minimal operations. On recent Intel
+        x86 CPUs using the mulx opcode, Montgomery multiplication
+        achieves about 10 cycles.
+      </p>
+
+      <p class="text-gray-300">
+        For multiplications and squarings in
+        <span class="math">\text&#123;GF&#125;(p^5)</span>, Montgomery
+        reductions are mutualized. The paper shows how the five products
+        composing the low coefficient of a field product can be combined
+        using partial reduction with the identity
+        <span class="math">2^&#123;64&#125; = 2^&#123;32&#125; - 1 \pmod&#123;p&#125;</span>.
+        For inversions, Legendre symbols and square roots, the in-VM
+        methods still apply, but since divisions in
+        <span class="math">\text&#123;GF&#125;(p)</span> are much more
+        expensive than multiplications out-of-VM, inversions in
+        <span class="math">\text&#123;GF&#125;(p^5)</span> cost about
+        11.4 times a multiplication&mdash;fast compared to prime fields,
+        but not fast enough for affine coordinates.
+      </p>
+
+      <!-- 5.2 Curve Operations -->
+
+      <h3 id="sec-5.2" class="text-xl font-semibold mt-8 mb-3">
+        5.2 Curve Operations
+      </h3>
+      <p class="text-gray-300">
+        Using fractional <span class="math">(x, u)</span> coordinates,
+        the out-of-VM implementation achieves generic point addition in
+        <span class="math">10M</span> and generic point doubling in
+        <span class="math">4M + 5S</span>; optimizations for sequences
+        of doublings make it worthwhile to organize operations
+        accordingly.
+      </p>
+
+      <p class="text-gray-300">
+        Window optimizations similar to in-VM are used. Inversions in
+        <span class="math">\text&#123;GF&#125;(p^5)</span> are fast
+        enough to allow normalization of window points to affine
+        coordinates; mixed addition costs
+        <span class="math">8M</span> instead of
+        <span class="math">10M</span>. Montgomery&rsquo;s trick is used
+        to batch-invert the window with a single inversion and
+        <span class="math">3(2t - 1)</span> multiplications. On the test
+        x86 system, 5-bit windows seem slightly better.
+      </p>
+
+      <p class="text-gray-300">
+        For generator multiplication, eight precomputed windows are used
+        (for <span class="math">G, 2^&#123;40&#125;G, 2^&#123;80&#125;G, \ldots</span>).
+        For signature verification, the Antipa et al. optimization [1]
+        with Lagrange&rsquo;s lattice reduction algorithm [15] is
+        applied; the lattice reduction runs in about 20400 cycles on
+        average. Verification is not required to be constant-time, so
+        direct array accesses are used for lookups, but w-NAF is not
+        used because regular addition schedules favour long sequences
+        of sequential doublings.
+      </p>
+    </section>
+
+    <!-- ============================================================ -->
+    <!-- 6. CONCLUSION                                                -->
+    <!-- ============================================================ -->
+
+    <section id="sec-6" class="mb-10">
+      <h2 class="text-2xl font-bold">6. Conclusion</h2>
+      <p class="text-gray-300">
+        We presented an elliptic curve designed for a specific compute
+        model. Although we use the Miden VM as a representative of that
+        model, we expect this curve to be generally useful for other
+        projects related to zero-knowledge proofs; curve design and
+        implementation is also an interesting problem in its own right.
+        As a general-purpose curve, ecGFp5 performance is not on par
+        with the fastest standard curves (e.g. Curve25519), but is
+        still decent enough: a single core on a laptop computer or a
+        smartphone can generate or verify thousands of signatures per
+        second.
+      </p>
+    </section>
+
+    <!-- ============================================================ -->
+    <!-- ACKNOWLEDGEMENTS                                             -->
+    <!-- ============================================================ -->
+
+    <section id="acknowledgements" class="mb-10">
+      <h2 class="text-2xl font-bold">Acknowledgements</h2>
+      <p class="text-gray-300">
+        We thank Bobbin Threadbare and Hamish Ivey-Law for providing the
+        target context and useful discussions on optimized
+        implementations in
+        <span class="math">\text&#123;GF&#125;(p^5)</span>, and Pierrick
+        Gaudry for pointers and explanations on the fine details of
+        curve attacks in extension fields. Paul Bottinelli, Marie-Sarah
+        Lacharit&eacute;, Giacomo Pope and Javed Samuel reviewed this
+        manuscript.
+      </p>
+    </section>
+
+    <!-- ============================================================ -->
+    <!-- REFERENCES                                                   -->
+    <!-- ============================================================ -->
+
+    <section id="references" class="mb-10">
+      <h2 class="text-2xl font-bold">References</h2>
+      <ol class="list-decimal list-inside space-y-2 text-gray-400
+        text-sm">
+        <li>
+          [1] A. Antipa, D. Brown, R. Gallant, R. Lambert, R. Struik
+          and S. Vanstone, <em>Accelerated Verification of ECDSA
+          signatures</em>, Selected Areas in Cryptography &ndash;
+          SAC 2005, Lecture Notes in Computer Science, vol 3897,
+          pp. 307&ndash;318, 2005.
+        </li>
+        <li>
+          [2] T. Arcieri, I. Lovecruft and H. de Valence,
+          <em>The Ristretto Group</em>,
+          <a
+            href="https://ristretto.group/"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="text-blue-400 hover:text-blue-300"
+          >ristretto.group</a>.
+        </li>
+        <li>
+          [3] S. Arita, K. Matsuo, K. Nagao and M. Shimura,
+          <em>A Weil Descent Attack against Elliptic Curve Cryptosystems
+          over Quartic Extension Fields</em>, IEICE Transactions on
+          Fundamentals of Electronics, Communications and Computer
+          Sciences, vol. E89-A, issue 5, 2006.
+        </li>
+        <li>
+          [4] E. Ben-Sasson, I. Bentov, Y. Horesh and M. Riabzev,
+          <em>Scalable, transparent, and post-quantum secure
+          computational integrity</em>,
+          <a
+            href="https://eprint.iacr.org/2018/046"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="text-blue-400 hover:text-blue-300"
+          >eprint.iacr.org/2018/046</a>.
+        </li>
+        <li>
+          [5] C. Cremers and D. Jackson, <em>Prime, Order Please!
+          Revisiting Small Subgroup and Invalid Curve Attacks on
+          Protocols using Diffie-Hellman</em>, IEEE 32nd Computer
+          Security Foundations Symposium (CSF), 2019.
+        </li>
+        <li>
+          [6] C. Diem, <em>The GHS attack in odd characteristic</em>,
+          Journal of the Ramanujan Mathematical Society, vol. 18,
+          issue 1, pp. 1&ndash;32, 2003.
+        </li>
+        <li>
+          [7] J.-C. Faug&egrave;re, P. Gianni, D. Lazard and T. Mora,
+          <em>Efficient Computation of Zero-dimensional Groebner Bases
+          by Change of Ordering</em>, Journal of Symbolic Computation,
+          vol. 16, issue 4, pp. 329&ndash;344, 1993.
+        </li>
+        <li>
+          [8] P. Gaudry, <em>Index calculus for abelian varieties of
+          small dimension and the elliptic curve discrete logarithm
+          problem</em>, Journal of Symbolic Computation, vol. 44,
+          issue 12, pp. 1690&ndash;1702, 2009.
+        </li>
+        <li>
+          [9] P. Gaudry, F. Hess and N. Smart, <em>Constructive and
+          destructive facets of Weil descent on elliptic curves</em>,
+          Journal of Cryptology, vol. 15, issue 1, pp. 19&ndash;46,
+          2002.
+        </li>
+        <li>
+          [10] M. Hamburg, <em>Decaf: Eliminating cofactors through
+          point compression</em>, Advances in Cryptology &ndash;
+          CRYPTO 2015, Lecture Notes in Computer Science, vol. 9215,
+          pp. 705&ndash;723, 2015.
+        </li>
+        <li>
+          [11] T. Itoh and S. Tsujii, <em>A Fast Algorithm for
+          Computing Multiplicative Inverses in
+          <span class="math">\text&#123;GF&#125;(2^m)</span> Using
+          Normal Bases</em>, Information and Computation, vol. 78,
+          pp. 171&ndash;177, 1988.
+        </li>
+        <li>
+          [12] A. Joux and V. Vitse, <em>Elliptic curve discrete
+          logarithm problem over small degree extension fields.
+          Application to the static Diffie-Hellman problem on
+          <span class="math">\mathbb&#123;F&#125;_&#123;q^5&#125;</span></em>,
+          Journal of Cryptology, vol. 26, issue 1, pp. 119&ndash;143,
+          2013.
+        </li>
+        <li>
+          [13] Polygon Miden,
+          <a
+            href="https://github.com/maticnetwork/miden"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="text-blue-400 hover:text-blue-300"
+          >github.com/maticnetwork/miden</a>.
+        </li>
+        <li>
+          [14] Miden Assembly, version 0.2, accessed on 2022-02-21,
+          <a
+            href="https://hackmd.io/YDbjUVHTRn64F4LPelC-NA"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="text-blue-400 hover:text-blue-300"
+          >hackmd.io/YDbjUVHTRn64F4LPelC-NA</a>.
+        </li>
+        <li>
+          [15] T. Pornin, <em>Optimized Lattice Basis Reduction In
+          Dimension 2, and Fast Schnorr and EdDSA Signature
+          Verification</em>,
+          <a
+            href="https://eprint.iacr.org/2020/454"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="text-blue-400 hover:text-blue-300"
+          >eprint.iacr.org/2020/454</a>.
+        </li>
+        <li>
+          [16] T. Pornin, <em>Double-Odd Elliptic Curves</em>,
+          <a
+            href="https://eprint.iacr.org/2020/1558"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="text-blue-400 hover:text-blue-300"
+          >eprint.iacr.org/2020/1558</a>.
+        </li>
+        <li>
+          [17] J. Renes, C. Costello and L. Batina, <em>Complete
+          addition formulas for prime order elliptic curves</em>,
+          Advances in Cryptology &ndash; Eurocrypt 2016, Lecture Notes
+          in Computer Science, vol. 9665, pp. 403&ndash;428, 2016.
+        </li>
+        <li>
+          [18] E. Straus, <em>Addition chains of vectors (problem
+          5125)</em>, American Mathematical Monthly, vol. 70,
+          pp. 806&ndash;808, 1964.
+        </li>
+      </ol>
+    </section>
+
+  </article>
+</BaseLayout>
