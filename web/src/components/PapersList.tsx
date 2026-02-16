@@ -191,19 +191,18 @@ export default function PapersList({ papers, meta }: Props) {
                   transition-colors"
               >
                 <div
-                  className="flex items-start justify-between
-                  gap-3"
+                  className="flex flex-col sm:flex-row
+                  sm:items-start sm:justify-between gap-1"
                 >
                   <h3
                     className="text-sm font-medium text-gray-200
-                      leading-snug flex-1 min-w-0"
+                      leading-snug min-w-0"
                     dangerouslySetInnerHTML={{
                       __html: paper.title,
                     }}
                   />
                   <div
-                    className="flex items-center gap-2
-                    shrink-0 mt-0.5"
+                    className="flex items-center gap-2"
                   >
                     <span
                       className="bg-gray-700 text-gray-300
