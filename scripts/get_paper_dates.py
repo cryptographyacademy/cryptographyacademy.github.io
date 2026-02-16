@@ -51,7 +51,9 @@ def main() -> None:
         )
         sys.exit(1)
 
-    papers = sorted(f for f in PAPERS_DIR.glob("*.astro") if f.name != "index.astro")
+    papers = sorted(
+        f for f in PAPERS_DIR.glob("*.astro") if f.name != "index.astro"
+    )
 
     print(f"Found {len(papers)} paper pages\n")
     print(f"{'Filename':<60} {'First Added'}")

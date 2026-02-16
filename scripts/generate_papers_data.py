@@ -67,7 +67,7 @@ def parse_astro_file(path: Path) -> dict | None:
 
     # Read just the frontmatter (first 20 lines is enough)
     lines = []
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         for i, line in enumerate(f):
             if i >= 20:
                 break
@@ -111,7 +111,7 @@ def load_metadata(year: int, number: int) -> dict:
     if not meta_path.exists():
         return {}
     try:
-        with open(meta_path, "r", encoding="utf-8") as f:
+        with open(meta_path, encoding="utf-8") as f:
             data = json.load(f)
         result = {}
         if data.get("title"):
@@ -171,8 +171,7 @@ def main() -> None:
     meta = {
         "years": years,
         "categories": [
-            {"name": name, "count": count}
-            for name, count in categories
+            {"name": name, "count": count} for name, count in categories
         ],
         "total": len(papers),
     }

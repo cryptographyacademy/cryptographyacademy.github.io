@@ -114,7 +114,9 @@ def md_to_html(md_content: str) -> str:
             in_table = False
             return
         html_parts.append('    <div class="overflow-x-auto my-4">')
-        html_parts.append('      <table class="min-w-full text-sm text-gray-300">')
+        html_parts.append(
+            '      <table class="min-w-full text-sm text-gray-300">'
+        )
         # First line is header
         headers = [c.strip() for c in table_lines[0].strip("|").split("|")]
         html_parts.append("        <thead>")
@@ -152,14 +154,20 @@ def md_to_html(md_content: str) -> str:
         # Display math $$...$$ (do before inline)
         text = re.sub(
             r"\$\$(.+?)\$\$",
-            lambda m: '<span class="math-block">' + html.escape(m.group(1)) + "</span>",
+            lambda m: (
+                '<span class="math-block">'
+                + html.escape(m.group(1))
+                + "</span>"
+            ),
             text,
             flags=re.DOTALL,
         )
         # Inline math $...$
         text = re.sub(
             r"(?<!\$)\$(?!\$)(.+?)(?<!\$)\$(?!\$)",
-            lambda m: '<span class="math">' + html.escape(m.group(1)) + "</span>",
+            lambda m: (
+                '<span class="math">' + html.escape(m.group(1)) + "</span>"
+            ),
             text,
         )
         # Bold **...**
@@ -205,8 +213,9 @@ def md_to_html(md_content: str) -> str:
         if line.startswith("```"):
             if in_code_block:
                 code = html.escape("\n".join(code_lines))
+                tag = f"language-{code_lang}"
                 html_parts.append(
-                    f'    <pre><code class="language-{code_lang}">{code}</code></pre>'
+                    f'    <pre><code class="{tag}">{code}</code></pre>'
                 )
                 in_code_block = False
                 code_lines = []
@@ -602,7 +611,9 @@ def main() -> None:
             )
             error_count += 1
 
-    print(f"\nDone: {new_count} new, {skip_count} skipped, {error_count} errors")
+    print(
+        f"\nDone: {new_count} new, {skip_count} skipped, {error_count} errors"
+    )
 
 
 if __name__ == "__main__":

@@ -5,7 +5,8 @@ paper pages.
 Usage:
     python3 scripts/convert-citations.py web/src/pages/papers/my-paper.astro
     python3 scripts/convert-citations.py --dry-run web/src/pages/papers/*.astro
-    python3 scripts/convert-citations.py --add-crosslinks-only web/src/pages/papers/my-paper.astro
+    python3 scripts/convert-citations.py \
+        --add-crosslinks-only web/src/pages/papers/my-paper.astro
 
 The script:
   1. Parses the references section (id="references")
@@ -103,11 +104,8 @@ def extract_surname(name):
     else:
         # "FirstName Surname" or "F. Surname" format
         parts = name.split()
-        if len(parts) >= 2:
-            # Last part is surname (skip initials like "F.")
-            surname = parts[-1]
-        else:
-            surname = parts[0]
+        # Last part is surname (skip initials like "F.")
+        surname = parts[-1] if len(parts) >= 2 else parts[0]
 
     # Clean up
     surname = re.sub(r"[^A-Za-z]", "", surname)
@@ -159,7 +157,7 @@ def parse_reference_entry(li_text):
     # standalone 4-digit year
     year = None
     year_patterns = [
-        r"\((\d{4})\)",           # (2019)
+        r"\((\d{4})\)",  # (2019)
         r"\([A-Z][a-z]+ (\d{4})\)",  # (Aug 2020)
         r"\b((?:19|20)\d{2})\b",  # standalone year
     ]
@@ -212,16 +210,7 @@ def parse_reference_entry(li_text):
 
     authors = []
     for m in author_pattern.finditer(author_str):
-        full_match = m.group(0)
-        # Get the full surname including prefix
-        prefix_match = re.match(
-            r"((?:van\s+der|van|de\s+la|de|el|di|le|du)\s+)?",
-            full_match,
-        )
-        prefix = prefix_match.group(1) or ""
         surname = m.group(1)
-        # For key generation, use surname without prefix
-        # (BibTeX convention: "van der Hoeven" -> "Hoeven")
         authors.append(surname)
 
     # Handle trailing "and Surname, I." that might not match
@@ -250,9 +239,7 @@ def parse_reference_entry(li_text):
 def find_references_section(content):
     """Find the references <section> and return (start, end, tag)
     where tag is 'ol' or 'ul'."""
-    ref_match = re.search(
-        r'<section\s+id="references"', content
-    )
+    ref_match = re.search(r'<section\s+id="references"', content)
     if not ref_match:
         return None, None, None
 
@@ -322,7 +309,7 @@ def parse_ul_reference_entry(li_text):
     if not num_match:
         return None, [], None, None
     ref_num = int(num_match.group(1))
-    rest = clean[num_match.end():]
+    rest = clean[num_match.end() :]
 
     # Extract eprint ID
     eprint_match = re.search(r"eprint\.iacr\.org/(\d{4}/\d+)", li_text)
@@ -340,9 +327,7 @@ def parse_ul_reference_entry(li_text):
     em_match = re.search(r"<em>", li_text)
     if em_match:
         # Authors are between [N] and <em>
-        author_section = li_text[
-            li_text.find("]") + 1:em_match.start()
-        ]
+        author_section = li_text[li_text.find("]") + 1 : em_match.start()]
         author_section = re.sub(r"<[^>]+>", " ", author_section)
         author_section = html.unescape(author_section).strip()
     else:
@@ -350,8 +335,7 @@ def parse_ul_reference_entry(li_text):
         author_section = rest.split(".")[0]
 
     # Split by comma and clean
-    parts = [p.strip().rstrip(".") for p in
-             re.split(r",\s*", author_section)]
+    parts = [p.strip().rstrip(".") for p in re.split(r",\s*", author_section)]
     authors = []
     for p in parts:
         p = re.sub(r"^and\s+", "", p).strip()
@@ -371,7 +355,7 @@ def convert_file(filepath, dry_run=False, crosslinks_only=False):
 
     Returns (success, message).
     """
-    with open(filepath, "r", encoding="utf-8") as f:
+    with open(filepath, encoding="utf-8") as f:
         content = f.read()
 
     original = content
@@ -386,15 +370,11 @@ def convert_file(filepath, dry_run=False, crosslinks_only=False):
     entries = extract_li_entries(list_block)
 
     if not entries:
-        return False, (
-            f"No <li> entries found in references of {filepath}"
-        )
+        return False, (f"No <li> entries found in references of {filepath}")
 
     # Detect if this is a <ul> with [N] prefixes
-    is_ul_numbered = (
-        list_tag == "ul"
-        and re.search(r"^\s*\[\d+\]", re.sub(r"<[^>]+>", "",
-                       entries[0]))
+    is_ul_numbered = list_tag == "ul" and re.search(
+        r"^\s*\[\d+\]", re.sub(r"<[^>]+>", "", entries[0])
     )
 
     # Parse each reference
@@ -404,9 +384,7 @@ def convert_file(filepath, dry_run=False, crosslinks_only=False):
 
     for i, entry in enumerate(entries):
         if is_ul_numbered:
-            ref_num, authors, year, eprint_id = (
-                parse_ul_reference_entry(entry)
-            )
+            ref_num, authors, year, eprint_id = parse_ul_reference_entry(entry)
             if ref_num is None:
                 continue
             num = ref_num
@@ -434,15 +412,21 @@ def convert_file(filepath, dry_run=False, crosslinks_only=False):
 
     if not crosslinks_only:
         print(f"\n  {filepath}:")
-        print(f"  Found {len(entries)} references, "
-              f"generated {len(ref_map)} keys")
+        print(
+            f"  Found {len(entries)} references, generated {len(ref_map)} keys"
+        )
         for num, key in sorted(ref_map.items()):
             eprint = eprint_map.get(num, "")
-            xlink = f" -> /papers/{crosslink_map[num]}" \
-                if num in crosslink_map else ""
-            print(f"    [{num}] -> [{key}]"
-                  f"{'  (eprint ' + eprint + ')' if eprint else ''}"
-                  f"{xlink}")
+            xlink = (
+                f" -> /papers/{crosslink_map[num]}"
+                if num in crosslink_map
+                else ""
+            )
+            print(
+                f"    [{num}] -> [{key}]"
+                f"{'  (eprint ' + eprint + ')' if eprint else ''}"
+                f"{xlink}"
+            )
 
     # ── Phase 1: Replace numeric citations in body ──
 
@@ -486,20 +470,13 @@ def convert_file(filepath, dry_run=False, crosslinks_only=False):
         # Also replace [N] prefixes in the reference entries
         # themselves (for <ul> format)
         if is_ul_numbered:
-            list_start2, list_end2, _ = find_references_section(
-                content
-            )
+            list_start2, list_end2, _ = find_references_section(content)
             if list_start2 is not None:
                 ref_block = content[list_start2:list_end2]
-                for num, key in sorted(
-                    ref_map.items(), reverse=True
-                ):
-                    ref_block = ref_block.replace(
-                        f"[{num}]", f"[{key}]"
-                    )
+                for num, key in sorted(ref_map.items(), reverse=True):
+                    ref_block = ref_block.replace(f"[{num}]", f"[{key}]")
                 content = (
-                    content[:list_start2] + ref_block +
-                    content[list_end2:]
+                    content[:list_start2] + ref_block + content[list_end2:]
                 )
 
     # ── Phase 2: Add crosslinks to references ──
@@ -509,27 +486,19 @@ def convert_file(filepath, dry_run=False, crosslinks_only=False):
         list_block = content[list_start:list_end]
 
         for num, target_slug in crosslink_map.items():
-            li_positions = list(
-                re.finditer(r"<li[^>]*>", list_block)
-            )
+            li_positions = list(re.finditer(r"<li[^>]*>", list_block))
             if num - 1 < len(li_positions):
                 li_start = li_positions[num - 1].start()
                 li_end = list_block.find("</li>", li_start)
                 if li_end != -1:
                     li_content = list_block[li_start:li_end]
                     if not has_crosslink(li_content):
-                        link = CROSSLINK_HTML.format(
-                            slug=target_slug
-                        )
+                        link = CROSSLINK_HTML.format(slug=target_slug)
                         list_block = (
-                            list_block[:li_end] + link +
-                            list_block[li_end:]
+                            list_block[:li_end] + link + list_block[li_end:]
                         )
 
-        content = (
-            content[:list_start] + list_block +
-            content[list_end:]
-        )
+        content = content[:list_start] + list_block + content[list_end:]
 
     if content == original:
         return True, f"No changes needed for {filepath}"
@@ -547,21 +516,21 @@ def main():
     parser = argparse.ArgumentParser(
         description="Convert numeric citations to BibTeX-style keys"
     )
+    parser.add_argument("files", nargs="+", help="Astro paper files to convert")
     parser.add_argument(
-        "files", nargs="+",
-        help="Astro paper files to convert"
+        "--dry-run",
+        action="store_true",
+        help="Print what would be done without modifying files",
     )
     parser.add_argument(
-        "--dry-run", action="store_true",
-        help="Print what would be done without modifying files"
+        "--add-crosslinks-only",
+        action="store_true",
+        help="Only add cross-links, don't convert citation keys",
     )
     parser.add_argument(
-        "--add-crosslinks-only", action="store_true",
-        help="Only add cross-links, don't convert citation keys"
-    )
-    parser.add_argument(
-        "--update-slug-map", metavar="DIR",
-        help="Scan a papers directory to update the eprint->slug map"
+        "--update-slug-map",
+        metavar="DIR",
+        help="Scan a papers directory to update the eprint->slug map",
     )
 
     args = parser.parse_args()
@@ -574,11 +543,9 @@ def main():
             if not fname.endswith(".astro") or fname == "index.astro":
                 continue
             fpath = os.path.join(scan_dir, fname)
-            with open(fpath, "r") as f:
+            with open(fpath) as f:
                 text = f.read()
-            m = re.search(
-                r"eprint\.iacr\.org/(\d{4}/\d+)", text
-            )
+            m = re.search(r"eprint\.iacr\.org/(\d{4}/\d+)", text)
             if m:
                 eid = m.group(1)
                 s = fname.replace(".astro", "")

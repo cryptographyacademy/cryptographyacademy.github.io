@@ -82,7 +82,7 @@ serve-lean: ## Start Lean language server
 # =============================================================================
 
 .PHONY: lint
-lint: lint-lean lint-web ## Run all linters
+lint: lint-lean lint-web lint-python ## Run all linters
 
 .PHONY: lint-lean
 lint-lean: ## Lint Lean code
@@ -94,8 +94,13 @@ lint-web: ## Lint web code
 	@echo "Linting web..."
 	@cd web && npm run lint 2>/dev/null || true
 
+.PHONY: lint-python
+lint-python: ## Lint Python code with ruff
+	@echo "Linting Python..."
+	@ruff check scripts/
+
 .PHONY: format
-format: format-lean format-web fix-trailing-whitespace ## Format all code
+format: format-lean format-web format-python fix-trailing-whitespace ## Format all code
 
 .PHONY: format-lean
 format-lean: ## Format Lean code (no-op, Lean doesn't have official formatter)
@@ -105,6 +110,12 @@ format-lean: ## Format Lean code (no-op, Lean doesn't have official formatter)
 format-web: ## Format web code
 	@echo "Formatting web..."
 	@cd web && npm run format 2>/dev/null || true
+
+.PHONY: format-python
+format-python: ## Format Python code with ruff
+	@echo "Formatting Python..."
+	@ruff format scripts/
+	@ruff check --fix scripts/
 
 .PHONY: check-format
 check-format: check-trailing-whitespace ## Check code formatting

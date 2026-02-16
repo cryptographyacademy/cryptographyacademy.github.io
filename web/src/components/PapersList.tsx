@@ -39,15 +39,13 @@ function categoryColor(cat: string): string {
 
 export default function PapersList({ papers, meta }: Props) {
   const [search, setSearch] = useState('');
-  const [selectedYears, setSelectedYears] = useState<Set<number>>(
-    new Set(),
+  const [selectedYears, setSelectedYears] = useState<Set<number>>(new Set());
+  const [selectedCategories, setSelectedCategories] = useState<Set<string>>(
+    new Set()
   );
-  const [selectedCategories, setSelectedCategories] = useState<
-    Set<string>
-  >(new Set());
 
   const toggleYear = useCallback((year: number) => {
-    setSelectedYears(prev => {
+    setSelectedYears((prev) => {
       const next = new Set(prev);
       if (next.has(year)) {
         next.delete(year);
@@ -59,7 +57,7 @@ export default function PapersList({ papers, meta }: Props) {
   }, []);
 
   const toggleCategory = useCallback((cat: string) => {
-    setSelectedCategories(prev => {
+    setSelectedCategories((prev) => {
       const next = new Set(prev);
       if (next.has(cat)) {
         next.delete(cat);
@@ -77,27 +75,21 @@ export default function PapersList({ papers, meta }: Props) {
   }, []);
 
   const hasFilters =
-    search.length > 0 ||
-    selectedYears.size > 0 ||
-    selectedCategories.size > 0;
+    search.length > 0 || selectedYears.size > 0 || selectedCategories.size > 0;
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase().trim();
-    return papers.filter(p => {
+    return papers.filter((p) => {
       if (selectedYears.size > 0 && !selectedYears.has(p.year)) {
         return false;
       }
       const cat = p.category || 'Uncategorized';
-      if (
-        selectedCategories.size > 0 &&
-        !selectedCategories.has(cat)
-      ) {
+      if (selectedCategories.size > 0 && !selectedCategories.has(cat)) {
         return false;
       }
       if (q) {
-        const haystack =
-          `${p.title} ${p.authors}`.toLowerCase();
-        return q.split(/\s+/).every(w => haystack.includes(w));
+        const haystack = `${p.title} ${p.authors}`.toLowerCase();
+        return q.split(/\s+/).every((w) => haystack.includes(w));
       }
       return true;
     });
@@ -111,7 +103,7 @@ export default function PapersList({ papers, meta }: Props) {
           type="text"
           placeholder="Search by title or authors..."
           value={search}
-          onChange={e => setSearch(e.target.value)}
+          onChange={(e) => setSearch(e.target.value)}
           className="w-full px-4 py-2 bg-gray-800 border
             border-gray-700 rounded-lg text-sm text-gray-200
             placeholder-gray-500 focus:outline-none
@@ -121,7 +113,7 @@ export default function PapersList({ papers, meta }: Props) {
 
       {/* Year pills */}
       <div className="mb-3 flex flex-wrap gap-1.5">
-        {meta.years.map(year => (
+        {meta.years.map((year) => (
           <button
             key={year}
             onClick={() => toggleYear(year)}
@@ -156,8 +148,10 @@ export default function PapersList({ papers, meta }: Props) {
       </div>
 
       {/* Results count + clear */}
-      <div className="mb-4 flex items-center gap-3 text-sm
-        text-gray-400">
+      <div
+        className="mb-4 flex items-center gap-3 text-sm
+        text-gray-400"
+      >
         <span>
           Showing {filtered.length} of {papers.length} papers
         </span>
@@ -186,7 +180,7 @@ export default function PapersList({ papers, meta }: Props) {
         </div>
       ) : (
         <div className="border-t border-gray-800">
-          {filtered.map(paper => {
+          {filtered.map((paper) => {
             const cat = paper.category || 'Uncategorized';
             return (
               <a
@@ -196,8 +190,10 @@ export default function PapersList({ papers, meta }: Props) {
                   border-gray-800 hover:bg-gray-800/50
                   transition-colors"
               >
-                <div className="flex items-start justify-between
-                  gap-3">
+                <div
+                  className="flex items-start justify-between
+                  gap-3"
+                >
                   <h3
                     className="text-sm font-medium text-gray-200
                       leading-snug flex-1 min-w-0"
@@ -205,10 +201,14 @@ export default function PapersList({ papers, meta }: Props) {
                       __html: paper.title,
                     }}
                   />
-                  <div className="flex items-center gap-2
-                    shrink-0 mt-0.5">
-                    <span className="bg-gray-700 text-gray-300
-                      text-xs px-2 py-0.5 rounded-full">
+                  <div
+                    className="flex items-center gap-2
+                    shrink-0 mt-0.5"
+                  >
+                    <span
+                      className="bg-gray-700 text-gray-300
+                      text-xs px-2 py-0.5 rounded-full"
+                    >
                       {paper.year}
                     </span>
                     <span
@@ -220,8 +220,10 @@ export default function PapersList({ papers, meta }: Props) {
                     </span>
                   </div>
                 </div>
-                <p className="text-xs text-gray-500 mt-0.5
-                  truncate">
+                <p
+                  className="text-xs text-gray-500 mt-0.5
+                  truncate"
+                >
                   {paper.authors}
                 </p>
               </a>
