@@ -1,12 +1,10 @@
 ---
 import BaseLayout from '../../layouts/BaseLayout.astro';
-import fs from 'node:fs';
-import path from 'node:path';
 
-const papersDir = path.dirname(new URL(import.meta.url).pathname);
-const files = fs.readdirSync(papersDir)
-  .filter((f: string) => f.endsWith('.astro') && f !== 'index.astro')
-  .sort();
+const rawFiles = import.meta.glob('./*.astro', {
+  as: 'raw',
+  eager: true,
+});
 
 interface PaperEntry {
   slug: string;
@@ -17,79 +15,84 @@ interface PaperEntry {
   crawler: string;
 }
 
-const papers: PaperEntry[] = files.map((f: string) => {
-  const content = fs.readFileSync(path.join(papersDir, f), 'utf-8');
-  const slug = f.replace('.astro', '');
+const papers: PaperEntry[] = Object.entries(rawFiles)
+  .filter(([p]) => !p.endsWith('/index.astro'))
+  .map(([filePath, content]: [string, string]) => {
+    const slug = filePath
+      .replace('./', '')
+      .replace('.astro', '');
 
-  // Extract eprint ID
-  const eprintMatch = content.match(
-    /eprint\.iacr\.org\/(\d{4})\/(\d+)/
-  );
-  const year = eprintMatch?.[1] ?? '????';
-  const number = eprintMatch?.[2] ?? '?';
-
-  // Extract title: try TITLE_HTML first (new format), then <h1>
-  let title = slug;
-  const titleHtmlMatch = content.match(
-    /const TITLE_HTML = '(.+?)';/
-  );
-  if (titleHtmlMatch) {
-    title = titleHtmlMatch[1]
-      .replace(/\\'/g, "'")
-      .replace(/&amp;/g, '&')
-      .replace(/&lt;/g, '<')
-      .replace(/&gt;/g, '>');
-  } else {
-    const h1Match = content.match(
-      /<h1[^>]*>\s*(.+?)\s*<\/h1>/s
+    // Extract eprint ID
+    const eprintMatch = content.match(
+      /eprint\.iacr\.org\/(\d{4})\/(\d+)/
     );
-    if (h1Match) {
-      title = h1Match[1]
-        .replace(/<[^>]+>/g, '')
-        .replace(/\s+/g, ' ')
-        .trim();
-    }
-  }
+    const year = eprintMatch?.[1] ?? '????';
+    const number = eprintMatch?.[2] ?? '?';
 
-  // Extract authors: try AUTHORS_HTML (new), then first gray-400 p
-  let authors = '';
-  const authorsHtmlMatch = content.match(
-    /const AUTHORS_HTML = '(.+?)';/
-  );
-  if (authorsHtmlMatch) {
-    authors = authorsHtmlMatch[1]
-      .replace(/\\'/g, "'")
-      .replace(/&amp;/g, '&')
-      .replace(/&lt;/g, '<')
-      .replace(/&gt;/g, '>');
-  } else {
-    const authorsMatch = content.match(
-      /<p class="text-gray-400 mb-2">\s*(.+?)\s*<\/p>/s
+    // Extract title: try TITLE_HTML first (new format),
+    // then <h1>
+    let title = slug;
+    const titleHtmlMatch = content.match(
+      /const TITLE_HTML = '(.+?)';/
     );
-    if (authorsMatch) {
-      authors = authorsMatch[1]
-        .replace(/<[^>]+>/g, '')
-        .replace(/\s+/g, ' ')
-        .trim();
+    if (titleHtmlMatch) {
+      title = titleHtmlMatch[1]
+        .replace(/\\'/g, "'")
+        .replace(/&amp;/g, '&')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>');
+    } else {
+      const h1Match = content.match(
+        /<h1[^>]*>\s*(.+?)\s*<\/h1>/s
+      );
+      if (h1Match) {
+        title = h1Match[1]
+          .replace(/<[^>]+>/g, '')
+          .replace(/\s+/g, ' ')
+          .trim();
+      }
     }
-  }
 
-  // Truncate long author lists
-  if (authors.length > 80) {
-    const parts = authors.split(',');
-    if (parts.length > 3) {
-      authors = parts.slice(0, 3).join(',') + ' et al.';
+    // Extract authors: try AUTHORS_HTML (new), then
+    // first gray-400 p
+    let authors = '';
+    const authorsHtmlMatch = content.match(
+      /const AUTHORS_HTML = '(.+?)';/
+    );
+    if (authorsHtmlMatch) {
+      authors = authorsHtmlMatch[1]
+        .replace(/\\'/g, "'")
+        .replace(/&amp;/g, '&')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>');
+    } else {
+      const authorsMatch = content.match(
+        /<p class="text-gray-400 mb-2">\s*(.+?)\s*<\/p>/s
+      );
+      if (authorsMatch) {
+        authors = authorsMatch[1]
+          .replace(/<[^>]+>/g, '')
+          .replace(/\s+/g, ' ')
+          .trim();
+      }
     }
-  }
 
-  // Extract crawler
-  const crawlerMatch = content.match(
-    /const CRAWLER = '(.+?)';/
-  );
-  const crawler = crawlerMatch?.[1] ?? '';
+    // Truncate long author lists
+    if (authors.length > 80) {
+      const parts = authors.split(',');
+      if (parts.length > 3) {
+        authors = parts.slice(0, 3).join(',') + ' et al.';
+      }
+    }
 
-  return { slug, title, authors, year, number, crawler };
-});
+    // Extract crawler
+    const crawlerMatch = content.match(
+      /const CRAWLER = '(.+?)';/
+    );
+    const crawler = crawlerMatch?.[1] ?? '';
+
+    return { slug, title, authors, year, number, crawler };
+  });
 
 // Sort by year descending, then by eprint number descending
 papers.sort((a, b) => {
