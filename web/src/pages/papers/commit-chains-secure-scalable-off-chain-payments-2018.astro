@@ -1,0 +1,1855 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+
+const EPRINT_URL = 'https://eprint.iacr.org/2018/642';
+const CRAWLER = 'mistral';
+const CONVERTED_DATE = '2026-02-16';
+const TITLE_HTML = 'Commit-Chains: Secure, Scalable Off-Chain Payments';
+const AUTHORS_HTML = 'Rami Khalil, Alexei Zamyatin, Guillaume Felley, Pedro Moreno-Sanchez, Arthur Gervais';
+
+const CONTENT = `    <p class="text-gray-300">Rami Khalil [ Imperial College London Liquidity Network rami.khalil@imperial.ac.uk ] Alexei Zamyatin [ Imperial College London alexei.zamyatin17@imperial.ac.uk ] Guillaume Felley [ Liquidity Network guillaume.felley@liquidity.network ] Petho Moreno-Sanchez [ TU Wien pedro.sanchez@tuwien.ac.at ] Arthur Gervais [ Imperial College London Liquidity Network arthur@gervais.cc ]</p>
+
+    <h6 id="sec-2" class="text-base font-medium mt-4">Abstract</h6>
+
+    <p class="text-gray-300">Current permissionless blockchains suffer from scalability limitations. To scale without changing the underlying blockchain, one avenue is to lock funds into blockchain smart-contracts (collateral) and enact transactions outside, or off-the blockchain, via accountable peer-to-peer messages. Disputes among peers are resolved with appropriate collateral redistribution <em>on</em> the blockchain. In this work we lay the foundations for <em>commit-chains</em>, a novel off-chain scaling solution for existing blockchains where an untrusted and non-custodial operator <em>commits</em> the state of its user account balances via <em>constant-sized</em>, periodic checkpoints. Users dispute operator misbehavior via a smart contract. The commit-chain paradigm enables for the first time that off-chain users can receive payments while being offline. Moreover, locked funds can be managed efficiently at constant communication costs, alleviating collateral fragmentation.</p>
+
+    <p class="text-gray-300">We instantiate two <em>account-based</em> commit-chain constructions: NOCUST, based on a cost-effective challenge-response dispute mechanism; and NOCUST-ZKP, which provides provably correct operation via zkSNARKs. These constructions offer a trade-off between correctness, verification, and efficiency while both are practical and ensure key properties such as balance safety; that is, no honest user loses coins. We implemented both constructions on a smart contract enabled blockchain. Our evaluation demonstrates that NOCUST’s operational costs in terms of computation and communication scale logarithmically in the number of users and transactions, and allow very efficient lightweight clients (a user involved in e.g. <span class="math">100</span> daily transactions only needs to store a constant <span class="math">46</span> kb of data, allowing secure payments even on mobile devices). NOCUST is operational in production since March 2019.</p>
+
+    <h2 id="sec-3" class="text-2xl font-bold">I Introduction</h2>
+
+    <p class="text-gray-300">Since the beginning of centralized banking in Mesopotamia <em>[1]</em>, financial intermediaries evolved as middlemen between parties that have surplus capital and others that desire access to liquid funds. Such financial intermediaries traditionally operate as custodians, as they (temporarily) hold the transmitted funds, and therefore are entrusted with enacting secure transaction policies.</p>
+
+    <p class="text-gray-300">While the emergence of decentralized Proof-of-Work (PoW) ledgers have portrayed a mechanism of performing financial transactions without a centralized intermediary, low-throughput and volatility of transaction fees constraints are fundamentally hindering the practical use of such ledgers. To improve transaction throughput, different classes of blockchain scaling solutions are being pursued. One such class of scaling solutions focuses on alternative consensus mechanisms <em>[2, 3]</em> or sharding <em>[4, 5]</em>. They, however, typically introduce different trust assumptions and are therefore not backwards compatible with current widely deployed blockchains.</p>
+
+    <p class="text-gray-300">Off-chain scaling (state-of-the-art). In this paper we focus on <span class="math">2^{\\text{nd}}</span>-layer (or off-chain) scaling solutions such as payment channels and payment channel networks (PCN) <em>[6]</em>, which reduce the load on the blockchain ledger by performing operations securely off-chain. Numerous contributions address the performance characteristics of payment channel networks <em>[7, 8, 9, 10, 11, 12, 13]</em>. While PCN improve transaction throughput and enable decentralized channel topologies, they still leave room for future work: (i) bootstrapping cost: each channel establishment requires at least one (expensive and slow) blockchain transaction, (ii) user churn: <em>a user must be continuously online to receive incoming transfers</em> - a drawback over traditional on-chain payments and (iii) collateral management: funds are typically bound to channels between two parties, leading to rigid collateral fragmentation, while transfers that form a path across multiple channels require fee-contingent routing. PCN’s decentralisation requires complex routing topologies which induce setup and maintenance costs.</p>
+
+    <p class="text-gray-300">To alleviate routing challenges, payment channels can be organized in a star-like topology, with one entity maintaining many channels, forming a so-called <em>payment channel hub</em> (PCH) <em>[14]</em>. Given a network of a few PCHs, with long-lived peering and routing agreements, channel routing complexities can be reduced. However, PCH inherit the aforementioned challenges of PCN, namely, bootstrapping cost, user churn and collateral management. For instance, user churn leads to costly recovery and refilling of fragmented collateral: <span class="math">O(n)</span> on-chain transactions for <span class="math">n</span> channels.</p>
+
+    <p class="text-gray-300">Commit-chains (this work). We introduce <em>commit-chains</em>, a novel <span class="math">2^{\\text{nd}}</span>-layer scheme that combines a permissionless blockchain and a centralized, but untrusted payment provider to scale off-chain payments. A commit-chain is instantiated with a (i) <em>non-custodial</em> operator (i.e., users maintain full con</p>
+
+    <p class="text-gray-300">trol over their funds at all times) who processes cryptocurrency payments between the system’s users off-chain, and (ii) an on-chain smart contract which enforces the operator’s correct behavior. The operator commits the latest state of the user’s account balances to the smart contract in regular intervals via constant-sized checkpoints. These checkpoints (i) allow users to challenge the operator in case of disputes or (ii) enable the smart contract to verify and enforce correct operation.</p>
+
+    <p class="text-gray-300">While pursuing the same overall goals, commit-chains and PCNs provide a tradeoff in terms of bootstrapping, user churn, collateral management and decentralization. First, a user can join the commit-chain by only exchanging authenticated off-chain messages with the operator. Second, commit-chain users can receive payments while being offline and are only required to surface online once within a checkpoint interval. Similarly to PCN, commit-chains can provide instant payment finalization to users at full operator transaction volume collateralization. Unlike PCNs, commit-chains can additionally provide delayed payment finalization at no operator transaction volume collateralization. Finally, the collateral in a commit-chain allocated at a checkpoint can be fully reused in the following checkpoints, and redistributed with a single on-chain transaction, independent of the number of registered users. Commit-chains provide these advantages at the cost of centralization (rely on a single, untrusted operator) and lack of interoperability (rely on blockchains with support for Turing-complete smart contracts).</p>
+
+    <p class="text-gray-300">Our contributions. Summarizing, this paper makes the following contributions:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>We introduce commit-chains, a novel scheme for off-chain payments. We show that commit-chains can be combined with any smart-contract capable blockchain to construct fully-fledged account-based payment systems.</li>
+
+      <li>We present two practical commit-chain constructions, building upon a novel multi-layered Merkelized interval tree: (i) NOCUST, which relies on a low-cost challenge-response dispute mechanism, and (ii) NOCUST-ZKP, which achieves provably correct operation via Zero Knowledge Proofs (recursively composed zkSNARKs <em>[15, 16, 17, 18]</em>). We provide a security analysis for both constructions.</li>
+
+      <li>We implement and evaluate NOCUST and NOCUST-ZKP. We show that a commit-chain can scale towards hundreds of thousands of users, while it costs less than <span class="math">1.5</span> USD per month to operate NOCUST, irrespective of the number of users and transfers enacted. We make our smart contract code available as open-source on Github. We went the last mile and deployed NOCUST in production, where it serves reliably zero fee transactions for users since March 24, 2019.</li>
+
+    </ul>
+
+    <p class="text-gray-300">Outline. Section II provides the background and reviews related work, while Section IV provides an overview of commit-chains. Section V presents the details of NOCUST and Section VI of NOCUST-ZKP. Section VII provides the security analysis, Section VIII evaluates NOCUST and NOCUST-ZKP in practice, Section IX discusses open challenges and future work. We conclude the paper in Section X.</p>
+
+    <h2 id="sec-4" class="text-2xl font-bold">II Background and Related Work</h2>
+
+    <p class="text-gray-300">Blockchains allow to build an append-only immutable ledger that is maintained by a distributed network of nodes <em>[19]</em>. Permissionless blockchains in particular allow any party to join/leave the network, write to the underlying ledger, and participate in consensus. The majority of such systems <em>[19, 20]</em> rely on a random leader election process as part of their consensus mechanism. An elected participant decides on the current state transition: a set of transactions altering the ledger state, arranged in a so called block. For example, in Proof-of-Work blockchains, the leader is the first participant to solve a computationally expensive puzzle <em>[21]</em>.</p>
+
+    <p class="text-gray-300">Permissionless blockchains, however, face a significant performance bottleneck: to take effect, a transaction must be included in a block, which is broadcast to the majority of participants, who must then agree on its validity. Transactions are then considered final after a stabilization phase <em>[22, 23, 24]</em> of <span class="math">k</span> blocks, where <span class="math">k</span> is the security parameter of the underlying system <em>[25, 26]</em>. Adjusting the number of transactions per block or the block generation interval thereby warrants caution, as bullish parameterization may severely impact security <em>[25, 27, 28]</em>. As a result, the most widely used permissionless blockchains, such as Bitcoin <em>[19]</em> and Ethereum <em>[29]</em>, process only up to 10 transactions per second.</p>
+
+    <p class="text-gray-300">Payment channel networks (PCN) enable rapid one-way <em>[30, 31]</em> or bi-directional <em>[6]</em> payments without publishing each transfer on-chain. Each channel is established between two parties and follows three phases: (i) an on-chain channel establishment, (ii) off-chain channel state transition(s) and (iii) an on-chain dispute/closure. PCN have received attention from both academia and industry <em>[7, 8, 9, 32, 33, 34]</em>. Many works cover privacy enhanced PCN designs <em>[34, 14, 35, 36, 37, 38, 39]</em>. The Fulgor and Rayo protocols <em>[12]</em> demonstrate tradeoffs between concurrency and privacy in PCN. Perun <em>[10]</em> reduces communication complexity through virtual channels. Teechan <em>[40]</em> and Teechain <em>[41]</em> trade the need for a blockchain clock with a trusted hardware assumption increase efficiency. State channels <em>[42]</em> extend payment channels to support execution of arbitrary smart contracts, whereby participants unanimously agree on state transitions off-chain. A payment-channel hub (PCH) <em>[10, 14]</em> is an entity that opens many payment channels with different users in a star-like topology so they can pay each other with at most one hop via the intermediate operator. Albeit PCH, PCN and state channel networks undoubtedly improve the scalability of current blockchains, they all share room for improvement. First, users are required to be online to receive payments, hindering utility in certain applications</p>
+
+    <p class="text-gray-300">(e.g., offline/energy saving mobile recipients). Second, bootstrapping in this paradigm mandates an on-chain transaction for each channel, which is reasonable for senders (i.e., users that introduce coins into the off-chain system), but not for exclusively recipient users. For instance, assume a PCH with <span class="math">n</span> users, where Alice has <span class="math">n-1</span> coins and wants to send 1 coin to every other user. In this scenario, the PCH operator needs to anticipate and allocate collateral among the other <span class="math">n-1</span> user channels, at a cost of <span class="math">n-1</span> on-chain transactions. We conjecture that it is feasible to have an off-chain system where this scenario can occur with only a single on-chain transaction. Finally, current off-chain channel systems handle the collateral (i.e., coins locked on-chain) sub-optimally. In our PCH example, assume that the PCH allocates one coin in each <span class="math">n-1</span> receiver channel. In this case, Alice cannot pay more than one coin to any single receiver, even though her balance is <span class="math">n-1</span> coins. The PCH would have to allocate <span class="math">n-1</span> coins in the channel of each receiver to permit this, requiring that the PCH locks <span class="math">n\\cdot(n-1)</span> coins to allow only <span class="math">n-1</span> coins to be transacted.</p>
+
+    <p class="text-gray-300">Plasma <em>[43]</em> is an effort by the Ethereum community for central operators to maintain UTXO based ledgers atop of an account-based blockchain to enable transfers. The downsides of this UTXO approach compared to ours include a lack of native fungible payment support, a lack of instant finality mechanisms, and linearly growing data storage and computation costs with each ledger update. Several informal variants of this approach, none of which have lead to practical solutions to the best of our knowledge, surfaced across multiple community websites to attempt to remedy these downsides.</p>
+
+    <p class="text-gray-300">In this state of affairs, the current landscape of off-chain scalability solutions has room for alternative execution paradigms that fill the aforementioned gaps.</p>
+
+    <h2 id="sec-5" class="text-2xl font-bold">III Commit-Chains: Problem Definition</h2>
+
+    <p class="text-gray-300">In this section, we introduce the notion of <em>commit-chains</em>, where we overview the system model and main functionality, describe the communication and threat models, and finally present the security goals.</p>
+
+    <h3 id="sec-6" class="text-xl font-semibold mt-8">III-A Commit-chain</h3>
+
+    <p class="text-gray-300">Actors. A commit-chain is composed of the following actors:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>User. A user owns at least one private key/account in the blockchain and acts as a participant in the blockchain and in the commit-chain.</li>
+
+      <li>Operator. The commit-chain operator, who is also uniquely identifiable with a private/public key pair account, handles user transactions and commits data to the blockchain that updates the commit-chain ledger.</li>
+
+      <li>Smart Contract. The smart contract(s) on the blockchain defines and enforces mechanisms in the commit-chain protocol. This component, since it lives on the blockchain, enforces correct execution of operations it receives. Depending on the blockchain, this component may provide also privacy guarantees.</li>
+
+    </ul>
+
+    <p class="text-gray-300">Functionality. Commit-chains process transactions off-chain following a model similar to that of payment channel hubs: a central entity maintains a service for multiple users. To execute transactions in a cost-efficient manner, users submit most of the transactions they would otherwise do in the blockchain to the operator to amortize their blockchain transaction costs. The users then only interact with the parent-chain to carry out tasks that cannot be carried out securely solely through the operator depending on the use-case, such as potentially moderating the operator behavior, or making transfers into or out of the commit-chain. Commit-chains are deployed alongside a blockchain, referred to as the parent-chain, that can already establish consensus in the network. The parent-chain exhibits ledger functionality, containing a global view of user accounts and transactions. Each account is controlled by a private key.</p>
+
+    <h3 id="sec-7" class="text-xl font-semibold mt-8">III-B Communication Model</h3>
+
+    <p class="text-gray-300">A commit-chain operates under the bounded synchronous communication setting <em>[44]</em>, where the execution of the protocol happens in discrete rounds (that we refer to as <em>eons</em> in the rest of this paper). The parties are always aware of the current round and if a message is sent at round <span class="math">i</span>, then it is delivered to the recipient at the beginning of round <span class="math">i+1</span>. We further assume an upper bound <span class="math">\\delta</span> on the delay between transaction broadcast an inclusion in the underlying blockchain. We remark that these are standard assumptions in blockchain literature <em>[6, 7, 10, 12]</em>.</p>
+
+    <p class="text-gray-300">The operator and users participating in the commit-chain each have a verification/signing key pair (e.g., key pair from the parent-chain). Moreover, each user knows the verification key of the operator. Finally, all users are aware of the smart contract for the commit-chain. In practice, the operator can announce its public key and the commit-chain contract on its website and users can verify it by checking the publicly available blockchain.</p>
+
+    <h3 id="sec-8" class="text-xl font-semibold mt-8">III-C Threat Model</h3>
+
+    <p class="text-gray-300">We assume that the cryptographic primitives of the blockchain hosting the smart contract are secure, and that the adversary cannot corrupt any trusted setup component in the cryptographic primitives used. We further assume that adversaries are computationally bounded and can corrupt at most 1/3 of the consensus participants of the blockchain (or 33% of the computational power for blockchains with Nakamoto consensus <em>[25, 27, 48]</em>). As such, users can always read and write to the blockchain and an adversary cannot tamper with the correct execution of the smart contract. However, we allow an adversary to corrupt the commit chain operator and an arbitrary number of commit-chain users, as well as to execute Sybil <em>[49]</em> and Denial-of-Service attacks. Under these assumptions, commit-chain users must be online at least once within an <em>eon</em> (unless this requirement is outsourced to</p>
+
+    <p class="text-gray-300">a monitoring service (e.g., a watchtower <em>[50]</em>), or the operator broadcasts an offline user’s state to the blockchain as in NOCUST-ZKP).</p>
+
+    <h3 id="sec-9" class="text-xl font-semibold mt-8">III-D Security Goals</h3>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Safety. Generally, safety means that the system should not be exploited to mint nonexistent coins or steal from honest users. Specifically, the system must provide the following guarantes: (i) the total funds locked into a commit-chain must correspond 1-1 with the balances of the registered users; (ii) The adversary cannot debit a user without the user’s authorization, and must correctly credit the intended recipient; (iii) User balances must be correctly updated by the system operations even in the presence of the adversary.</li>
+
+      <li>Liveness. Essentially, we formulate liveness as the guarantee that an honest user will always be able to access its funds within a bounded amount of time, regardless of adversary behavior. More explicitly, users must always be able to: (i) learn the latest confirmed states of their commit-chain accounts; (ii) withdraw their balances to their blockchain accounts.</li>
+
+    </ul>
+
+    <p class="text-gray-300">We make several remarks here. First, the above two guarantees are only provided as securely as the underlying parent-chain can also provide them in their own sense. For example, a parent-chain with a consensus protocol that does not provide liveness would also affect the guarantees of our commit-chain. As mentioned in subsection III-C, in this work we assume the underlying parent-chain is operated by an honest majority.</p>
+
+    <p class="text-gray-300">Second, the safety property largely resembles that of balance security defined for payment-channel hubs <em>[14, 35]</em> and payment-channel networks <em>[12, 13]</em>. However, balance security in payment-channels does not cover offline transfer delivery, which is crucial for commit-chains and thus covered by our safety definition.</p>
+
+    <p class="text-gray-300">Third, since a commit-chain operator manages the balance of many users on their behalf (even when some of them might be offline), achieving liveness is crucial to commit-chains. A similar property has not been defined for payment-channel hubs/networks since users actively participate in each operation that updates their account.</p>
+
+    <p class="text-gray-300">Finally, it is important to note that safety and liveness only disqualify the operator from being a trusted custodian of its users’ funds. These guarantees need to be provided by the system to an honest participant regardless of the behavior of the operator or any other participant (cf. proofs in Section VII). However, the operator can still selectively censor users from performing transfers in the commit-chain, and leave them no option but to withdraw their funds back into their blockchain accounts.</p>
+
+    <h2 id="sec-10" class="text-2xl font-bold">IV Solution Overview</h2>
+
+    <p class="text-gray-300">Our objective is to increase the transaction throughput by safely offloading payments from the parent-chain to a commit-chain. Users register with an operator without publishing messages in the parent-chain. Transfers are sent through the operator, who periodically commits to the latest state of user balances on the smart contract. Transfers are considered final once the corresponding commitments stabilize in the parent-chain, i.e., received <span class="math">k</span> confirmations. Users come online to retain custody of their account balances once per checkpoint interval.</p>
+
+    <h3 id="sec-11" class="text-xl font-semibold mt-8">IV-A High-Level Operation</h3>
+
+    <p class="text-gray-300">Figure 1 presents an overview of our systems’ lifecycles.</p>
+
+    <p class="text-gray-300">Register. A user registers with the operator via an off-chain message, receiving a new account identifier in the commit-chain. Afterwards, the user can solicit payments from other users in the commit-chain. Deposit. Users lock the desired amount of coins in the smart contract. Then they can send them off-chain to any other user registered in the commit-chain or always claim them back. Recipients do not need to perform any deposits. Transfer. Users authorize the operator to debit their accounts, and credit the recipients. The recipient can then immediately transfer these funds to other commit-chain users or withdraw them after finalization. Withdraw/Exit. Users submit off-chain requests to the operator, who queues withdrawals in the smart contract within the following checkpoint. Alternatively, users can initiate full forced exits via the smart contract, closing their commit-chain accounts and refunding all their balances. Checkpoint. At the end of each eon, the operator commits the latest state of all user accounts to the smart contract. User operations are then only finalized once the corresponding state changes are reflected in an on-chain checkpoint and passed a dispute period. Challenge. If an operator misbehaves in any way, users publish challenges on the smart contract, which secures user funds and penalizes the operator in case of fraud. Recover. If the operator is penalized, the smart contract forces the commit-chain into recovery mode. The smart contract no longer accepts checkpoints, halting the commit-chains. Users can then recover their funds, at their earliest convenience, from the last valid checkpoint via on-chain transactions.</p>
+
+    <h3 id="sec-12" class="text-xl font-semibold mt-8">IV-B Design Roadmap: NOCUST and NOCUST-ZKP</h3>
+
+    <p class="text-gray-300">NOCUST: In Section V our first construction follows a simple but cost-effective approach. Checkpoints represent the root (hash) of our novel multi-layered Merkelized interval tree</p>
+
+    <p class="text-gray-300">!<a href="img-0.jpeg">img-0.jpeg</a> Fig. 1: Overview of the main NOCUST commit-chain sub-protocols: Register, Deposit, Transfer, Withdraw, Exit, Checkpoint, Challenge and Recover. Solid orange lines represent on-chain transactions. Blue dotted lines denote off-chain messages/actions. The operator handles transfers between users and commits the state of all accounts to the smart contract once per eon. Users come online once per eon and, in case of disputes, challenge the operator via the smart contract, recovering funds in case of failure. Protocol steps correspond to descriptions in Section V-E.</p>
+
+    <p class="text-gray-300">introduced in this paper (Section V-B), which aggregates the state of all user accounts and their balances. In case a checkpoint containing invalid account changes is published at the end of an eon, or none at all, users must challenge the operator via the smart contract. The operator in turn must produce a proof of adherence to the protocol. Thereby, users can only challenge the most recent checkpoint, and must come online once per eon to ensure the safety and liveness of their funds. Our novel commitment data-structure facilitates this process securely and efficiently.</p>
+
+    <p class="text-gray-300">NOCUST-ZKP: In Section VI our second construction mitigates safety and liveness risks by requiring the operator to construct a non-interactive Zero Knowledge Proof (NIZKP) [16, 51], proving to the smart contract that all updates to user accounts are correct and have been signed by users. We present constraint systems that can be utilized through recursive composition of zkSNARKS [17, 18], allowing incremental computation of proofs, while maintaining constant verification time and cost (Section VIII). As a result, the operator can no longer submit an inconsistent checkpoint or withhold user state data. Users still come online once per eon to check the freshness of their account and balance, i.e., verify that the operator has included all relevant transactions and not gone offline. This approach improves security guarantees at the cost of zero-knowledge proof generation and potential additional data submission to the smart contract, but still offers zero-gas fees on commit-chain transfers to honest parties.</p>
+
+    <p class="text-gray-300">The commit-chain ledger is divided into: (i) local, information stored locally at the operator about balances or</p>
+
+    <p class="text-gray-300">transfers performed through the operator; and (ii) global, information stored at the blockchain and globally available to all participants that covers balances or operations done through the smart contract. We note that naturally, different parties may have different views of local information whereas they must have the same view of global information, as we trust the blockchain for availability and integrity.</p>
+
+    <p class="text-gray-300">Local Information. The operator stores the following in the local ledger for every user  <span class="math">i</span>  at every eon  <span class="math">e</span> :</p>
+
+    <p class="text-gray-300">allotment  <span class="math">i(e)</span>  : The allotted balance.</p>
+
+    <p class="text-gray-300">received  <span class="math">i(e)</span>  : The total received.</p>
+
+    <p class="text-gray-300"><span class="math">\\operatorname{sent}_i(e)</span> : The total sent.</p>
+
+    <p class="text-gray-300">position  <span class="math">i(e)</span>  : The offset of the last outgoing transfer.</p>
+
+    <p class="text-gray-300"><span class="math">\\mathrm{txOut}_i(e)</span>  : Outgoing commit-chain transfers.</p>
+
+    <p class="text-gray-300"><span class="math">\\mathrm{txIn}_i(e)</span>  : Incoming commit-chain transfers.</p>
+
+    <p class="text-gray-300">collateral  <span class="math">i(e)</span>  : The instant finality collateral.</p>
+
+    <p class="text-gray-300">Global Information. The contract stores the following in the global ledger for every user  <span class="math">i</span>  at every eon  <span class="math">e</span> :</p>
+
+    <p class="text-gray-300">deposited  <span class="math">i(e)</span>  : The total deposited in  <span class="math">e</span></p>
+
+    <p class="text-gray-300">withdrawn  <span class="math">i(e)</span>  : The total requested for withdrawal in  <span class="math">e</span></p>
+
+    <p class="text-gray-300">exit  <span class="math">i(e)</span>  : A flag for whether an exit was requested.</p>
+
+    <p class="text-gray-300">extra  <span class="math">i(e)</span>  : The extra insurance collateral for eon  <span class="math">e</span></p>
+
+    <p class="text-gray-300"><span class="math">t_{root}(e)</span>  : The state commitment of eon  <span class="math">e</span></p>
+
+    <p class="text-gray-300">Additionally the smart contract can store the challenges posted by users until the operator responds.</p>
+
+    <p class="text-gray-300">The initially allotted balance of a user in the current eon is calculated from all the data of the previous eon as the sum of: (i) the user's initially allotted balance, (ii) the amount deposited, (iii) the amount received in the commit-chain (iv) minus the amount requested for withdrawal, and (v) minus the</p>
+
+    <p class="text-gray-300">amount sent in the commit-chain.</p>
+
+    <h3 id="sec-15" class="text-xl font-semibold mt-8">III-B Merkleized Interval Tree-Structure</h3>
+
+    <p class="text-gray-300">To provably account for the balances and additional collateral of each user at each <em>eon</em>, we design a novel <em>Merkleized interval tree</em>. The nodes in this Merkle tree <em>[52]</em> are augmented with continuous intervals so that the smart contract can efficiently verify the correct and exclusive allotment of funds by the operator. A node <span class="math">t_{n}(e)</span> whose contents represent information at <em>eon</em> <span class="math">e</span> is structured as defined in Equation 1.</p>
+
+    <p class="text-gray-300"><span class="math">t_{n}(e):=\\left\\langle\\,\\text{\\rm offset\\,}_{n}(e),\\text{\\rm information}_{n}(e),\\text{\\rm allotment}_{n}(e)\\right\\rangle</span> (1)</p>
+
+    <p class="text-gray-300">allotment is defined as the amount exclusively allotted to the node, while offset is defined per Equation 2. information is a cryptographic commitment to the information within this node. Leaves. A leaf <span class="math">t_{i}(e)</span> is used to represent the commit-chain account of user <span class="math">i</span> at <em>eon</em> <span class="math">e</span>, whereby <span class="math">\\text{\\rm allotment}_{i}(e)</span> is equal to their starting balance in <em>eon</em> <span class="math">e</span>, and <span class="math">\\text{\\rm offset\\,}_{i}(e)</span> corresponds to the sum of the starting balances of all users ordered before user <span class="math">i</span>.</p>
+
+    <p class="text-gray-300"><span class="math">\\text{\\rm offset\\,}_{i}(e)=\\sum_{j&lt;i}\\text{\\rm allotment}_{j}(e)</span> (2)</p>
+
+    <p class="text-gray-300">Using these two numeric values, a balance can then be represented as the length of the interval <span class="math">\\left[\\,\\text{\\rm offset\\,,\\,offset}+\\text{\\rm allotment}\\right]</span>. We utilize the condition that different intervals do not intersect each other to secure users’ accounts and transfers in NOCUST. <span class="math">\\text{\\rm information}_{i}(e)</span> is the cryptographic hash of the blockchain address of the user and the commitment of the last state update the user signed in the previous <em>eon</em>, as defined in Equation 3:</p>
+
+    <p class="text-gray-300"><span class="math">\\{\\text{\\rm address}_{i},\\text{\\rm update}_{i}^{p}(e-1),\\text{\\rm update}_{i}^{a}(e-1)\\}</span> (3)</p>
+
+    <p class="text-gray-300">where <span class="math">\\text{\\rm update}_{i}^{p}(e-1)</span> and <span class="math">\\text{\\rm update}_{i}^{a}(e-1)</span> represent the last passive and authorized state updates, respectively, of the commit-chain account of the i^{th} user at <em>eon</em> <span class="math">e-1</span>, as explained further in Section V.</p>
+
+    <p class="text-gray-300">Internal Nodes. An internal node <span class="math">t_{u}(e)</span>, with a left child <span class="math">t_{p}(e)</span> and a right child <span class="math">t_{q}(e)</span>, is constructed per Eq. 4 and Eq. 5:</p>
+
+    <p class="text-gray-300"><span class="math">\\text{\\rm allotment}_{u}(e)=\\text{\\rm allotment}_{p}(e)+\\text{\\rm allotment}_{q}(e)</span> (4) <span class="math">\\text{\\rm offset\\,}_{u}(e)=\\text{\\rm offset\\,}_{p}(e)</span> (5)</p>
+
+    <p class="text-gray-300"><span class="math">\\text{\\rm information}_{u}(e)</span> is a cryptographic commitment to <span class="math">t_{p}(e)</span> and <span class="math">t_{q}(e)</span> , with <span class="math">\\text{\\rm offset\\,}_{q}(e)</span> as a middle border value.</p>
+
+    <p class="text-gray-300"><span class="math">\\text{\\rm information}_{u}(e):=\\left\\{t_{p}(e),\\text{\\rm offset\\,}_{q}(e),t_{q}(e)\\right\\}</span> (6)</p>
+
+    <p class="text-gray-300">With these definitions, an internal node <span class="math">t_{u}</span> then takes the offset of its left child <span class="math">t_{p}</span> as its own, and the offset of its right child <span class="math">t_{q}</span> as a border between the two children. It is important to note that the middle value of <span class="math">\\text{\\rm offset\\,}_{q}(e)</span> is interchangeable with that of <span class="math">\\text{\\rm offset\\,}_{p}(e)+\\text{\\rm allotment}_{p}(e)</span> as they must be equal in correct intersection-free instances of this interval structure.</p>
+
+    <p class="text-gray-300">!<a href="img-1.jpeg">img-1.jpeg</a> Figure 2: Visualization of a Merkleized interval tree representing the commit-chain accounts. There are six accounts with their respective balances (36 total commit-chain coins) visualized. An account consists of an address, the roots of the active/authorized and passive trees (and additional data relevant for implementation). Intermediate nodes are annotated with balance intervals (cf. Section V-B). Note: only the passive tree of incoming transactions is annotated with intervals.</p>
+
+    <h3 id="sec-16" class="text-xl font-semibold mt-8">III-C Monotonic User-State Structure</h3>
+
+    <p class="text-gray-300">The information in <span class="math">\\text{\\rm update}_{i}(e)</span> is divided into an authorized/active portion <span class="math">\\text{\\rm update}_{i}^{a}(e)</span>, and a passive portion <span class="math">\\text{\\rm update}_{i}^{p}(e)</span>. The authorized portion must be accompanied by a signature from the user, while the passive portion can be set by the operator. The authorized portion <span class="math">\\text{\\rm update}_{i}^{a}(e)</span> is structured as follows:</p>
+
+    <p class="text-gray-300"><span class="math">\\text{\\rm update}_{i}^{a}(e)=\\left\\langle\\text{\\rm txOut}_{i}(e),\\text{\\rm sent}_{i}(e)\\right\\rangle</span> (7)</p>
+
+    <p class="text-gray-300"><span class="math">\\text{\\rm txOut}_{i}(e)</span> is committed to using an unannotated Merkle tree where the leaves are the individual commit-chain transfers authorized by the user during <em>eon</em> <span class="math">e</span>. A commit-chain transfer is a tuple of the following information:</p>
+
+    <p class="text-gray-300"><span class="math">\\langle\\text{\\rm eon, sender, recipient, nonce, amount, offset}\\rangle</span></p>
+
+    <p class="text-gray-300">The passive portion <span class="math">\\text{\\rm update}_{i}^{p}(e)</span> is structured as follows:</p>
+
+    <p class="text-gray-300"><span class="math">\\text{\\rm update}_{i}^{p}(e)=\\left\\langle\\text{\\rm txIn}_{i}(e),\\text{\\rm position}_{i}(e),\\text{\\rm received}_{i}(e)\\right\\rangle</span> (8)</p>
+
+    <p class="text-gray-300"><span class="math">\\text{\\rm position}_{i}(e)</span> is a numeric offset value specified by the operator to secure delivered transfers. Like <span class="math">\\text{\\rm offset\\,}</span> values, the position value is used to ensure that intervals representing transfer amounts do not intersect. <span class="math">\\text{\\rm txIn}_{i}(e)</span> may only contain incoming transfers for the user during <span class="math">e</span>, and the commitment is constructed using the annotated Merkle tree structure from Section V-B where, for a leaf, allotment equals the transfer amount, and information is a commitment to the transfer.</p>
+
+    <h3 id="sec-17" class="text-xl font-semibold mt-8">III-D Proofs Of Exclusive Allotment</h3>
+
+    <p class="text-gray-300">We now describe the proofs that are derived from this annotated merkle-tree structure to efficiently secure NOCUST balances and transfers. These proofs are extensively utilized throughout Section V-E. We prove in Appendix B-A that no valid instance of our annotated merkle trees may contain two overlapping allotments, and therefore that a fraudulent proof of exclusive allotment cannot be constructed or be accepted by an honest verifier such as the smart-contract.</p>
+
+    <p class="text-gray-300">User Balances. For each user, a proof of exclusive balance allotment is constructed. The main goal of this construct is to prove that the user <em>exclusively</em> owns an allotment of size <span class="math">\\mathrm{allotment}_{i}(e)</span> within the pool of user funds at the beginning of an <em>eon</em>. This proof is constructed similar to a regular Merkle tree membership proof: the proof consists of the hashes of the siblings of the nodes in the path from the root to the leaf. However, in addition to the hash, a boundary value <span class="math">\\Omega</span> is required for each sibling <span class="math">t_{n}(e)</span> along the path to the root:</p>
+
+    <p class="text-gray-300">\\[ \\Omega(t_{n}(e))=\\left\\{\\begin{array}[]{ll}\\mathrm{offset}\\,{}_{n}(e)&t_{n}(e)\\text{ is L. child }\\\\ \\mathrm{offset}\\,{}_{n}(e)+\\mathrm{allotment}_{n}(e)&t_{n}(e)\\text{ is R. child }\\end{array}\\right. \\] (9)</p>
+
+    <p class="text-gray-300">Verification is similar to validating set membership in a Merkle tree, but node reconstruction is done per the definitions in Section V-B using the <span class="math">\\Omega</span> values. The size of this proof then grows <em>logarithmically</em> in the <em>number of users</em>.</p>
+
+    <p class="text-gray-300">Transfer Delivery. We utilize our exclusive allotment data-structure to ensure that the operator properly credits the amounts to offline recipients through making any misbehavior efficiently provable. A proof of transfer membership in <span class="math">\\mathrm{txIn}_{i}(e)</span> includes the respective <span class="math">\\Omega</span> values, similar to a balance proof. The root node <span class="math">\\mathrm{allotment}</span> is the value of <span class="math">\\mathrm{received}_{i}(e)</span>, which is the total amount received by a participant, while each leaf’s <span class="math">\\mathrm{allotment}</span> is the transferred amount.</p>
+
+    <p class="text-gray-300">Account Exits. The operator is required to post a commitment to an annotated-merkle tree that enables users to exit from the commit-chain instance with all of their funds. In this structure, <span class="math">\\mathrm{information}_{i}(e)</span> is only comprised of <span class="math">\\mathrm{address}_{i}</span> and <span class="math">\\mathrm{allotment}_{i}(e)</span>. The latter represents the finalized balance the user can claim.</p>
+
+    <p class="text-gray-300">Insurance Collateral. To guarantee instant transaction finality, the operator stakes additional collateral that recipients claim in case of failure to finalize transactions within <em>two eons</em>. To efficiently manage the allocations of the staked collateral, the operator commits each <em>eon</em> <span class="math">e</span> to an annotated merkle-tree that <em>exclusively</em> divides the insurance collateral pool among the users. All funds in this pool are separated from those in the user account balance pool. In the collateral structure, <span class="math">\\mathrm{information}_{i}(e)</span> in leaf nodes is only comprised of <span class="math">\\mathrm{address}_{i}</span>, while <span class="math">\\mathrm{allotment}_{i}(e)</span> is equal to the allocated collateral.</p>
+
+    <h3 id="sec-18" class="text-xl font-semibold mt-8">III-E Subprotocols</h3>
+
+    <p class="text-gray-300">In this section we describe the sub-protocols in NOCUST. We utilize the following symbols to refer to participants in the protocols. U: User, O: Operator, S: Sender, R: Recipient, and C: Contract.</p>
+
+    <p class="text-gray-300">Register:</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>The User submits a signed update of an empty account <span class="math">\\{\\lvert\\mathrm{update}_{U}^{a}(e)\\rvert\\}_{U}</span> to the Operator;</li>
+
+      <li>The Operator verifies the User’s signature, countersigns and returns the empty account update <span class="math">\\{\\lvert\\mathrm{update}_{U}^{a}(e)\\rvert\\}_{O}</span> to the user.</li>
+
+    </ol>
+
+    <p class="text-gray-300">After verifying the Operator’s signature, the User can safely make deposits and solicit payments.</p>
+
+    <p class="text-gray-300">Deposit:</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>The User sends a transaction to the Contract, which adds the amount to <span class="math">\\mathrm{deposited}_{U}(e)</span> in its memory.</li>
+
+      <li>The Operator reads this deposit from the Contract.</li>
+
+      <li>The Operator updates the user <span class="math">\\mathrm{allotment}</span> in <em>local</em> and notifies the User of its commit-chain balance increase.</li>
+
+    </ol>
+
+    <p class="text-gray-300">The User can then transfer these funds or withdraw them. The user may also later exit with them or challenge that they were not credited.</p>
+
+    <p class="text-gray-300">Transfer:</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>The Sender creates a new active state update to authorize the transfer. If the Sender’s <span class="math">\\mathrm{position}_{S}(e)</span> is not empty before enacting a new transfer, then the new active state update must also move this value into the offset field of the previous outgoing transfer. The new transfer is inserted into <span class="math">\\mathrm{txOut}_{S}(e)</span>, and the authorized state update is sent to the Operator.</li>
+
+      <li>The Operator validates if the received update is correct and the Sender has sufficient balance to carry out the transfer. The Operator then decides on the offset of the transfer, and copies the offset value into the Sender’s <span class="math">\\mathrm{position}_{S}(e)</span> value. This marks exactly where the transferred amount was allotted in <span class="math">\\mathrm{txIn}_{R}(e)</span>, without this value being known beforehand by the Sender to safely avoid race conditions. The Operator responds to the Sender with its countersignature on <span class="math">\\mathrm{update}_{S}^{a}(e)\\lVert\\mathrm{position}_{S}(e)</span>.</li>
+
+      <li>The Operator simply notifies the Recipient that a transfer was received whenever the Recipient comes online.</li>
+
+    </ol>
+
+    <p class="text-gray-300">The funds can then be transferred or withdrawn by the Recipient, or its delivery can be disputed.</p>
+
+    <p class="text-gray-300">Withdraw:</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>The User submits its withdrawal request to the Operator.</li>
+
+      <li>The Operator validates that the user possesses sufficient balance, and responds with the authorization.</li>
+
+      <li>The User (or any party) submits the authorization to the smart contract to <em>initiate</em> the withdrawal.</li>
+
+      <li>After the current <em>eon</em> <span class="math">e</span> and the next <em>eon</em> <span class="math">e+1</span> <em>successfully</em> pass without challenges, the User finalizes this withdrawal request, and the Contract credits the User with the funds in a parent-chain transaction.</li>
+
+    </ol>
+
+    <p class="text-gray-300">Instant Withdrawal. Additionally, an Operator can immediately pay out the withdrawal from its own personal funds and</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Register.</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Exit.</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Challenge (Transfer Delivery).</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">1. U → O: {</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">updateU(e)</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">}U</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1. U → C: requestExit()</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1. U → C: Accounting data for S in eon e,</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">2. U ← O: {</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">updateU(e)</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">}O</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">2. O ← C: ExitInitialization(e, U)</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">• Exclusive allotment proof</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Deposit.</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">3. U → C: Exclusive allotment proof in e + 2</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">• updateS(e-1)</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">1. U → C: Transaction(U, C, amount)</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">4. U ← C: Transaction(C, U, Amount)</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">• Transfer debit proof</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">2. O ← C: Deposit(e, U, amount)</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">Checkpoint.</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">2. O ← C: Challenge(e, S, R, Transfer)</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">3. O → U: Balance update</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1. O → C: troot(e)</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">3. O → C: Accounting data for R in eon e,</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Transfer.</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">2. U ← C: CheckpointSubmission(e, troot(e))</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">• Exclusive allotment proof</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">1. S → O: {</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">updateS(e)</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">}S</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">Challenge (State Update).</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">• updateR(e-1)</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">2. S ← O: {</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">updateS(e)</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">}O, positionS(e)</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1. U → C: Accounting data for U in eon e - 1,</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">• Transfer credit proof</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">3. R ← O: Balance update</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">• Exclusive allotment proof</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">Recover.</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Withdraw.</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">• updateU(e-1)</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1. U → C: Last confirmed accounting data for U,</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">1. U → O: {</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">C, O, U, Expiry, Amount</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">}U</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">2. O ← C: Challenge(e, U)</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">• Exclusive allotment proof</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">2. U ← O: {</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">C, O, U, Expiry, Amount</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">}O</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">3. O → C: Accounting data for U in eon e,</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">• Insurance collateral proof</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">3. U → C: {</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">C, O, U, Expiry, Amount</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">}O</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">• Exclusive allotment proof</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">2. U ← C: Transaction(C, User, Amount)</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">4. U ← C: WithdrawalInitialization(e, U, Amount)</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">• updateU(e-1)</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">Audit.</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">5. U → C: confirmWithdrawal(e + 2)</td>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1. U → O: {</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">e</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">}U</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">6. U ← C: Transaction(C, U, Amount)</td>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+            <td class="px-3 py-2 border-b border-gray-700">2. U ← O: Exclusive allotment proof</td>
+
+          </tr>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">|   |  | Transfer delivery proofs  |</p>
+
+    <p class="text-gray-300">Fig. 3: Communication flow of the NOCUST sub-protocols. Communication with the Contract (C) is visible to all observers of the blockchain. Users interact only with the Operator in Registration, Transfer and Audit.</p>
+
+    <p class="text-gray-300">replace the intended recipient of the withdrawal finalization in  <span class="math">e + 2</span>  with itself.</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>The User submits an exit request to the Contract.</li>
+
+      <li>The Operator is notified that this User must exit in the next eon  <span class="math">e + 1</span> . The Operator then moves this User's funds from the balance allotment tree to the exit allotment tree, and provides the User with a proof of exclusive exit allotment in eon  <span class="math">e + 1</span> .</li>
+
+      <li>If eon  <span class="math">e + 1</span>  passes successfully without challenge. The User, in possession of its exclusive exit allotment proof, finalizes its exit in eon  <span class="math">e + 2</span> . In this process the Contract credits the User with the funds in a parent-chain transaction.</li>
+
+    </ol>
+
+    <p class="text-gray-300">The Exit protocol is a fallback for Users to recover their funds from the commit-chain if the Operator blocks withdrawals. If the Operator fails to comply with the request then it gets punished by a state update challenge from the user.</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>The Operator submits the merkleized interval tree-structure checkpoint to the Contract, which will reject the checkpoint if the Operator is suspended, or if a checkpoint has already been submitted for the current eon  <span class="math">e</span> , or if the sizes of the root allotments are inconsistent.</li>
+
+      <li>Users can then read on the parent-chain that a new checkpoint had been submitted and audit their proofs from the Operator.</li>
+
+    </ol>
+
+    <p class="text-gray-300">The Operator needs to respond to User audits with proofs to avoid being challenged and allow efficient validation of its operations. The Operator can increase individual collateral allotments on the blockchain of individual participants during the current eon  <span class="math">e</span> , and submit a complete re-assignment of all collateral that takes effect starting from  <span class="math">e + 2</span>  using a single constant-sized commitment. The Operator is required to commit to valid instances of the collateral, account balance and exit tree commitments within the first epoch of every eon. Commitments are rejected by the Contract in case of any outstanding challenges from eon  <span class="math">e - 1</span> .</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>The User sends to the Contract its accounting data for the eon  <span class="math">e - 1</span> .</li>
+
+      <li>The Operator reads that a challenge has been initiated.</li>
+
+      <li>The Operator responds with the accounting data for eon  <span class="math">e</span>  before an epoch passes, and this data has to be consistent with what the Contract expects. Such that the authorized update in the response, which is used to construct the proof of exclusive allotment, is at least as fresh as the one in the challenge, and the allotment size of the proof corresponds to the expected amount.</li>
+
+    </ol>
+
+    <p class="text-gray-300">Reading the challenge response allows the User to retain custody of its account. If the User had requested an exit in  <span class="math">e - 1</span> , then the response will be the proof of exit allotment for finalizing its exit.</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>The accounting data used to initiate this challenge is that of the current eon  <span class="math">e</span> , where the exclusive allotment proof, authorized state update, and outgoing transfer inclusion proof are validated.</li>
+
+      <li>The Operator reads that a challenge has been initiated.</li>
+
+      <li>The Operator responds within an epoch with the corresponding transfer credit proof to avoid being punished by the Contract.</li>
+
+    </ol>
+
+    <p class="text-gray-300">Senders directly communicate with Recipients to verify the delivery of transfers before issuing this challenge to avoid parent-chain costs and only issue challenges that they know the Operator won't be able to respond to.</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>In case the commit-chain is halted at eon  <span class="math">e</span> , the exclusive allotment trees are reverted to those of eon  <span class="math">e - 1</span> . The User submits its exclusive allotment proofs from  <span class="math">e - 1</span> , and the Contract accepts the request only once if the commit-chain is indeed suspended.</li>
+
+      <li>The Contract credits the User with the funds in a parent-chain transaction.</li>
+
+    </ol>
+
+    <p class="text-gray-300">All unfinalized transactions that were to be committed to in the reverted eon are then also cancelled, and only a User's insurance collateral may be collected instead.</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>The User simply requests its proofs related to the checkpoint of  <span class="math">eon</span> <span class="math">e</span>  from the Operator.</li>
+
+      <li>The Operator responds with the requested proofs.</li>
+
+    </ol>
+
+    <p class="text-gray-300">If valid proofs are not provided, such that the updated balances are inconsistent, an outdated authorized state was used, or a transfer was not properly delivered, then Users resort to the challenge operations to retain custody of their accounts and potentially punish the Operator.</p>
+
+    <p class="text-gray-300">NOCUST-ZKP is our second commit-chain construction which augments NOCUST with provably secure checkpoints. The crux of this design is requiring the operator to generate a non-interactive Zero-Knowledge Proof (NIZKP) at every checkpoint, proving that all user account updates are safe, i.e., authorized by the users and executed according to the commitchain safety criteria, and live, i.e., the users have received their proofs of exclusive allotment or can infer them from some additional data posted in the parent-chain by the operator. The smart contract then only accepts a checkpoint as valid if the provided proof is correct. This proof needs to be provided for the last submitted checkpoint (within one eon) before a new checkpoint can be submitted.</p>
+
+    <p class="text-gray-300">Proving Methodology. We refer to the publicly available statement of the NIZKP as the verifier input, and to the private witness as prover input (i.e., input only known to the prover). Naively, including all proofs individually with each checkpoint explicitly, or constructing a constraint system with very large verifier inputs, would require a significant amount of additional on-chain storage and computation that would completely defeat our scalability efforts. In NOCUST-ZKP, instead, we combine all zero-knowledge proofs into a single one using recursive composition [15-18], and employ several methods to minimize the verifier overhead. In a hierarchical recursive manner, we combine the results from every two related NIZKP into one parent NIZKP as in [18]. For different procedures, proof combination requires different validations and steps to ensure the consistency of the protocol. For example, in some contexts we validate the merger of two adjacent continuous intervals, while in other contexts we open the commitments provided in the verifier inputs of the nested verifiers (cf. Appendix C). This generic concept enables NOCUST-ZKP's flexibility, security and efficiency. The sizes of the verifier input and prover output from the final combiner remain constant while encapsulating several sub-proofs. <span class="math">^{11}</span></p>
+
+    <p class="text-gray-300">Safety Constraints. We designed our constraint systems to non-interactively prove the safety of the checkpoint posted by the operator in zero knowledge. First, we validate that for each user, the transfers included in txOut are correctly delivered, such that they have a verifiable exclusive allotment proof in the intended recipient's txIn annotated merkle tree. Second,</p>
+
+    <p class="text-gray-300">the complete state update transition applied by the operator is validated to have correctly calculated each user's allotment in the new eon, from all global and local information. Finally, the user's signature on the authorized state update that was used to construct the new checkpoint is validated. This entire proof is akin to successfully simulating state update and transfer delivery challenges on the new checkpoint for every single account and transfer without any inconsistency.</p>
+
+    <p class="text-gray-300">!<a href="img-2.jpeg">img-2.jpeg</a> Fig. 4: High-level overview of the Checkpoint and Challenge sub-protocols in NOCUST-ZKP. The checkpoint is validated in the zkSNARK. In addition to the constant-sized checkpoint, the operator broadcasts the state data for offline users.</p>
+
+    <p class="text-gray-300">Liveness Constraints. Liveness is achieved when a user learns its exclusive allotment proof to access its account balance. To prove this, the NIZKP must attest that all users achieved liveness. This then warrants an extension of the audit subprotocol to end with the user providing this receipt to the operator after successful validation. Honest users online within an eon send the operator a signed proof-receipt, and the operator includes these receipts in the NIZKP. For users that don't provide receipts, the operator broadcasts their state data  <span class="math">\\langle</span>  address <span class="math">^{12}</span> , state <span class="math">^{13}</span> , allotment <span class="math">^{14}</span> <span class="math">\\rangle</span>  to guarantee these users' liveness via the parent-chain, and proves broadcasting this data in the NIZKP instead of obtaining a receipt (cf. Appendix C-C and Figure 8). The operator moreover disables the offline users from further transfers, until they surface back online and provide receipts. If a user remains offline for more subsequent eons, the user state data does not need to be broadcast again. Because broadcasting this data would incur additional parent-chain transaction costs for the operator, the user and the operator pre-agree to an amount that will be deducted from the user account balance to make up for the broadcast cost. If the user account balance cannot cover this amount, the data is never broadcast and instead the account is simply closed with the fee burned in the parent-chain. Moreover, if the operator broadcasts the user state data at a cost less than what was agreed upon (e.g. the operator used a small gas price in Ethereum), the difference is kept by the user. This broadcast debit is also verified in our constraint systems. The operator must maintain the freshness of the authorized state</p>
+
+    <p class="text-gray-300">updates it applies, and periodically commit checkpoints. The challenges that users can now issue in the smart-contract are non-interactive simplified versions. The first proves that the operator had countersigned an authorized state update that is more fresh than the one applied in the checkpoint. The second proves that the operator had countersigned a transfer to be delivered, but never included it in the checkpoint.</p>
+
+    <p class="text-gray-300">Specification. We present an extended specification detailing the NIZK constraint systems required to enforce this system in Appendix C, along with the additional cryptographic accumulators and datastructures required to enable this construction. Admittedly, even though we design NOCUST-ZKP to minimize running costs, this approach still comes at the added burdens of proof generation, verification and non-constant sized checkpoints, which are now comprised of merkle roots, and offline user state data. NOCUST-ZKP raises the bar for the adversary to carry out withholding attacks or grief the operator while lowering the dependence on the security of the parent-chain.</p>
+
+    <h2 id="sec-26" class="text-2xl font-bold">VII Security Analysis</h2>
+
+    <p class="text-gray-300">In this section we analyze the security and prove the provision of our required guarantees by NOCUST and NOCUST-ZKP under our stated system, communication and threat models. As a proof strategy, we argue that an honest participant or honest operator following the prescribed protocol may not end in a state where they cannot utilize the smart contract to enforce the safety or liveness of the commit-chain.</p>
+
+    <h3 id="sec-27" class="text-xl font-semibold mt-8">VII-A Safety</h3>
+
+    <p class="text-gray-300">By breaking down our protocol into smaller sub-properties and proving their security, our analysis demonstrates that an adversary who attempts to violate the safety guarantees of our protocols would have to violate the security of at least one of these sub-properties.</p>
+
+    <p class="text-gray-300">Off-Chain Registration. As fully off-chain channel establishment is not common in <span class="math">2^{\\text{nd}}</span>-layer solutions, we start our discussion with why our commit-chains securely provide this feature. The registration procedure allows a user to learn the operator’s signature on an initially empty account. This signature and the account information allow the user to instantiate challenges in the smart contract, even in case no other operations involving the user were performed. This guarantees that a participant would be able to initiate a state update challenge in case it has not received a proof of its expected allotment in the next <em>eon</em> <span class="math">e+1</span>, and allows the operator to securely federate user entry. An adversary that attempts to misbehave with a newly registered account would then be left vulnerable to a state update challenge by its owner.</p>
+
+    <p class="text-gray-300">Balance Update. The exclusive allotment guarantees of the proofs from Section V-D prevent an adversary from minting new funds and creating an exclusive allotment tree with a root allotment not greater than the total funds locked in the smart contract. Such an allotment would trigger an immediate rejection by the smart-contract. Moreover, an adversary who attempts to seize user funds or break the 1-1 correspondence between user balances and the funds locked in the smart-contract would be left vulnerable to a state update challenge by the affected users. The exclusive <span class="math">\\text{\\tiny allotment}(e)</span> of a user at a given <em>eon</em> <span class="math">e</span> is directly derived from its operations in the previous <em>eon</em> <span class="math">e-1</span>, which are verified by a state update challenge to protect from any inconsistency in this information. A correct response to a state update challenge proves that the user balance was updated correctly according to the operations in the parent-chain and the commit-chain.</p>
+
+    <p class="text-gray-300">Due to the implicit validation in zero-knowledge by the smart-contract of all user account data in NOCUST-ZKP, an adversarial operator is left unable to mint or seize funds.</p>
+
+    <p class="text-gray-300">Transfer Delivery. A participant in possession of its proofs of exclusive allotment can decide if it needs to challenge the correct delivery of a transfer. Our communication model assumes that participants are able to communicate directly. Without this assumption, and assuming that the operator is withholding data, the ability of a participant to reason in advance whether a transfer delivery challenge is justifiable, before incurring the costs of issuing that challenge in the blockchain, is hindered.</p>
+
+    <p class="text-gray-300">A recipient of a transfer <span class="math">(t_{1})</span> can immediately check whether it knows of a different incoming transfer <span class="math">(t_{2})</span> in the same <em>eon</em> where the intervals <span class="math">[\\operatorname{\\text{\\tiny offset}}\\nolimits_{t_{1}},\\operatorname{\\text{\\tiny offset}}\\nolimits_{t_{1}}+t_{1}.amount)</span> and <span class="math">[\\operatorname{\\text{\\tiny offset}}\\nolimits_{t_{2}},\\operatorname{\\text{\\tiny offset}}\\nolimits_{t_{2}}+t_{2}.amount)</span> intersect, or if <span class="math">\\operatorname{\\text{\\tiny offset}}\\nolimits_{t_{1}}+t_{1}.amount&gt;\\operatorname{\\text{\\tiny received}}_{i}(e-1)</span>. All it requires is a proof that the transfer was debited from the sender, along with the corresponding <span class="math">\\operatorname{\\text{\\tiny offset}}\\nolimits_{t_{1}}</span> value, either in the form of <span class="math">\\operatorname{\\text{\\tiny position}}(e)</span> or <span class="math">t_{1}.offset</span>. If there is an inconsistency, then the receiving participant can infer that a transfer delivery challenge should be executed as it will not be refutable by the operator. This is because <span class="math">\\operatorname{\\text{\\tiny txln}}_{i}(e-1)</span> is constructed with its transfers reserving exclusive allotments for their amounts. An adversarial operator is then vulnerable to a transfer delivery challenge by an honest user in two cases. 1) It debits the sender but does not credit the recipient, or 2) It colludes with the sender to exclude the transfer from the next checkpoint after notifying the recipient.</p>
+
+    <p class="text-gray-300">NOCUST-ZKP improves the safety of this guarantee, as all committed transfers are correctly verified to have been delivered in the zero knowledge proof to the smart-contract, eliminating the possibility to debit the sender without crediting the recipient.</p>
+
+    <p class="text-gray-300">Instant Transaction Finality. The halt of the commit-chain can cause financial damage to a recipient that accepted a non-finalized transaction. The instant finality mechanism guarantees that a recipient can always claim owed amounts, up to the coverage of the finality collateral, in case of failure. The smart contract maintains the insurance collateral pool balance so that a valid proof of exclusive collateral allotment can always be used at most once in case the commit-chain instance enters recovery to claim the amount allotted. A user waiting for its incoming transfers to be committed and finalized can then either withdraw its funds from the smart contract starting from <em>eon</em> <span class="math">e+2</span> if the commit-chain instance remains operational, or</p>
+
+    <p class="text-gray-300">can withdraw the insurance collateral from the smart contract if the instance enters recovery during eons <span class="math">e</span> or <span class="math">e+1</span>. For a participant to guarantee itself instant finality on its incoming amounts, it must only solicit incoming transfers if they do not lead to a state update that violates either of the following two constraints:</p>
+
+    <p class="text-gray-300"><span class="math">\\mathrm{received}_{i}(e-1,e)</span> <span class="math">\\leq\\ \\mathrm{collateral}\\ _{i}(e)+\\mathrm{extra}_{i}(e-1,e)</span> (10) <span class="math">\\mathrm{received}_{i}(e)</span> <span class="math">\\leq\\ \\mathrm{collateral}\\ _{i}(e+1)+\\mathrm{extra}_{i}(e)</span> (11)</p>
+
+    <p class="text-gray-300">We refer the reader to Appendix B-E for our proof of soundness of this methodology, which prevents an adversary from breaking the safety of instant finalization.</p>
+
+    <p class="text-gray-300">Double-Spending. In the following we define double-spending as an attempt by the adversary to perform one of the following two actions while in control of a participant, and possibly while colluding with the operator:</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Spend the same balance more than once in the commit-chain.</li>
+
+      <li>Spend its balance in the commit-chain and then withdraw it onto the blockchain.</li>
+
+    </ol>
+
+    <p class="text-gray-300">An adversary without control of the operator cannot double-spend in the commit-chain as an honest operator would not countersign invalid transfers. Similarly, attempted withdrawals in eon <span class="math">e</span> of funds spent in <span class="math">e-1</span> are denied by an honest operator through withholding the signatures required for initiation. Even with control of the operator, an adversary may not double-spend in the current eon <span class="math">e</span> and be able to construct valid exclusive allotment trees in the next eon <span class="math">e+1</span>. Since instances that contain no interval intersections guarantee exclusive allotments, the allotment sizes must correspond to the confirmed balances expected by each honest participant (cf. Appendix B-C for our proof). In case an honest user receives an invalid (intersecting) proof of exclusive allotment, then it can initiate an irrefutable state update challenge using the smart-contract. In NOCUST-ZKP, the smart contract will reject a checkpoint violating any of the balance conditions.</p>
+
+    <p class="text-gray-300">Thus far, each safety goal presented in Section III-D was covered by at least one of the above sub-properties, which are all simultaneously enforceable by an honest user.</p>
+
+    <h3 id="sec-28" class="text-xl font-semibold mt-8">V-B Liveness</h3>
+
+    <p class="text-gray-300">We assume that the underlying parent-chain is secure (e.g., there are no blockchain forks) and provides enough bandwidth to handle challenges and dispute resolutions (cf. Section III-D), as largely assumed in related literature <em>[10, 12]</em>. We follow the strategy of proving the security of sub-properties of our protocol to demonstrate the liveness of the overall system.</p>
+
+    <p class="text-gray-300">Data Availability. Honest users must maintain ongoing knowledge about their states to be able to utilize the smart contract for dispute and account access. This requirement holds regardless of how other users or the operator behave. By keeping track of every authorized <span class="math">\\mathrm{update}_{i}^{a}(e)</span> and every exclusive allotment proof from the operator for previous eons, a user can open a balance update challenge in case the operator fails to provide a proof of exclusive allotment for the current eon. This guarantees that users are always able to learn correct exclusive allotment proofs, or halt the commit-chain.</p>
+
+    <p class="text-gray-300">In NOCUST, an adversarial operator can take note of which users went offline and did not acquire their proofs of exclusive balance allotment in the previous eon. The operator can then submit a new checkpoint that seizes the balance of the offline users, knowing that they no longer possess sufficient data to initiate any challenges. On the other hand, an adversary only in control of a sizeable portion of users can flood the smart-contract with unwarranted challenges. To mitigate this Denial-Of-Service vulnerability, the operator should be selective about user registrations (e.g. requiring human verification) and the smart-contract should require that the transaction fees incurred by the operator to answer a challenge are subsidized by the users.</p>
+
+    <p class="text-gray-300">NOCUST-ZKP resolves this issue and neither leaves the operator open to the same griefing vector by adversarial users, nor allows the operator to withholding user state data, as users who do not provide receipts may always resort to reading data from the parent-chain.</p>
+
+    <p class="text-gray-300">Checkpoint Freshness. Honest users should be able to ensure that the operator does not commit outdated states of their accounts. Learning the operator’s countersignature on an authorized state update in the current eon allows a user to enforce that the commit-chain is reverted if a state update is dropped.</p>
+
+    <p class="text-gray-300">In NOCUST, we recall what the smart contract accepts as a valid response from the operator to a state update challenge. The <span class="math">\\mathrm{update}_{i}^{a}(e-1)</span> in the commitment must be as recent as that submitted in the challenge by the user, and must bear the user’s signature. This prevents the operator from attempting to commit an outdated or forged authorized state, and provides users with sufficient knowledge to enact any future delivery challenges. Therefore, if the operator constructs the checkpoint without the most fresh version of <span class="math">\\mathrm{update}_{i}^{a}(e-1)</span>, then it would not be able to answer the user’s state update challenge, and the user can effectively halt the commit-chain.</p>
+
+    <p class="text-gray-300">In NOCUST-ZKP, the state update challenge is reduced to only handle the freshness of accounts. As both the data availability and consistency of the update are already guaranteed, the state update challenge only becomes a non-interactive challenge, where the user submits a countersigned <span class="math">\\mathrm{update}_{i}^{a}(e-1)</span> that is fresher than the one the operator committed to in the user’s exclusive allotment proof, immediately halting the commit-chain. The transfer delivery challenge is further simplified to allow an honest sender or recipient who learns of the operator’s countersignature on an authorized state update to be able to non-interactively prove that the state update was not committed. Moreover, these two challenges may now be submitted at any point in time, and not just during the eon at which they are relevant.</p>
+
+    <p class="text-gray-300">Withdrawal. Users are guaranteed to be able to transfer their commit-chain balances back to their parent-chain accounts through withdrawal, exit or recovery. The Withdrawal can be</p>
+
+    <p class="text-gray-300">censored by the operator, but Exit and Recovery mechanisms are guaranteed to progress by the smart-contract.</p>
+
+    <p class="text-gray-300">Analysing the exit protocol, we see that the operator cannot stop the user from initiating the exit request. If the operator does not move the user data from the balance allotment tree to the exit allotment tree, and provide the relevant proof to the user, it can be halted by a state update challenge, or have its next checkpoint rejected in NOCUST-ZKP.</p>
+
+    <p class="text-gray-300">In case of halt, the user can then simply utilize the recovery protocol, using the proofs of exclusive allotment that it already knows to retrieve its confirmed commit-chain balance, unclaimed deposits, unfinalized withdrawals, and any pending insurance collateral.</p>
+
+    <p class="text-gray-300">We implement NOCUST (1894 LOC) and NOCUST-ZKP (2782 LOC) in Solidity 0.4.24 and release the smart-contract code as open source <span class="math">^{17}</span> . We implement the operator code in Python 3.6 (6937 LOC) and the NIZK proof generation (18864 LOC) in C++11 (gcc 7.4 compiler). We also develop a JavaScript wallet (9281 LOC) for users.</p>
+
+    <p class="text-gray-300">In the following, we evaluate NOCUST and NOCUST-ZKP in terms of real-world practicality and light-client usability. For our measurements, we deploy the smart contracts on a local Ethereum blockchain using the Parity 2.5.1 client <span class="math">^{18}</span> . We assume a gas price of 5 Gwei and an Ether price of 150 USD (as per 13 September 2019). We also deploy NOCUST on the Ethereum mainnet and process real-world payments.</p>
+
+    <p class="text-gray-300">Operation costs. We registered a large number of addresses in exponential steps to measure gas costs (cf. Figure 5). We repeatedly chose 10 random users to make 20 random transactions, and then commit a checkpoint. Table I shows the base gas costs and complexity of all blockchain operations. Contract Storage: A deposit adds 160 bytes, a withdrawal 192 bytes. A checkpoint to 68 bytes and hash of all blockchain operations amounts to 32 bytes. User Storage: Users store at least the data for the current and previous eons, including the account state (529 bytes) and all signed commit-chain transfers (312 bytes/transfer). The exclusive allotment proof sizes grow logarithmically, 1280 bytes for 1M users, 1920 bytes for 1B users, allowing efficient lightweight clients. Operator Storage: User accounts (529 bytes/tx) and signed transfers in the current and previous eons (312 bytes/tx). Transaction Throughput: We benchmark a single-threaded prototype implementation. Remote clients initiate transactions with a network latency of 19ms to the operator (16GB RAM, 4 virtual cores, SSD). We measured a throughput of 28 transactions per second, with a countersignature latency (avg. over 100 transactions) of  <span class="math">435\\mathrm{ms}\\pm 257.8\\mathrm{ms}</span> .</p>
+
+    <p class="text-gray-300">zkSNARK Evaluation. Table II shows the complexities and experimental computing times of our libsnark implementation, built to verify commitments containing up to 4 billion users.</p>
+
+    <p class="text-gray-300">!<a href="img-3.jpeg">img-3.jpeg</a> Fig. 5: Costs in Ethereum gas and USD for challenges and exits depending on the number of users in the commit-chain. Costs increase with each additional height of the Merkle trees, remaining below 0.3 USD with 100000 addresses.</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">NOCUST Operation</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Paid by</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Gas</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">USD</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Complexity</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Checkpoint</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">Operator</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">96 073</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">0.07</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">O(1)</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Deposit</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">User</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">64 720</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">0.05</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">O(1)</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Exit</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">User</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">169 238</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">0.13</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">O(log n)</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Initiate State Challenge</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">User</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">281 786</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">0.21</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">O(log n)</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Answer State Challenge</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">Operator</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">80 769</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">0.06</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">O(log n)</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Initiate delivery Challenge</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">User</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">225 642</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">0.17</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">O(log n + log v)</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Answer delivery Challenge</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">Operator</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">68 152</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">0.05</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">O(log n + log v)</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">ZK Checkpoint</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">Operator</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">523 618</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">0.39</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">O(1)</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">+ Offline User State</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">User</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">160 to 3876</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">0.003</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">O(f)</td>
+
+          </tr>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">TABLE I: Blockchain costs for a NOCUST commit-chain with 10 users. The cost complexity depends on:  <span class="math">n</span> , the number of commit-chain users.  <span class="math">v</span> , the number of transfers in the eon of the challenged user.  <span class="math">f</span>  the number of offline users.</p>
+
+    <p class="text-gray-300">Verification times are all  <span class="math">\\leq 0.01s</span> , practical for smart contracts. The operator can parallelize checkpoint proof(constant-size 2690 bits) generation. Figure 6 shows proving times depending on the fraction of users collaborating (ignoring network latencies) with the operator. Given e.g. one billion users, 25 transfers per eon per user, generating a checkpoint proof requires about 6 hours with only  <span class="math">3\\%</span>  of all users' computational power.</p>
+
+    <p class="text-gray-300">Our measured zkSNARK[53] verification cost on the Ethereum mainnet at the time of writing is 523618 gas (0.39 USD). Moreover, depending on the state of users, between 0 and 58 bytes of data is broadcast, costing 680 to 3876 gas, for each offline user within the last eon. At the time of writing, the planned upgrade to the Ethereum network <span class="math">^{19}</span>  should reduce the verification costs to around 100000 gas <span class="math">^{20}</span>  and the cost per offline user to be between 160 and 912 gas <span class="math">^{21}</span> .</p>
+
+    <p class="text-gray-300">In Table II (cf. Appendix), we observe that the NIZK proof sizes range from 128 to 187 bytes. With the task of generating the checkpoint proof designed as a hierarchical tree of subtasks, where each node represents a proof, and edges represent dependencies, the storage required for storing the</p>
+
+    <p class="text-gray-300">!<a href="img-4.jpeg">img-4.jpeg</a> Fig. 6: Estimated time required to create a checkpoint consistency proof with a fraction of users generating proofs in parallel. We assume one user runs one CPU.</p>
+
+    <p class="text-gray-300">output (proof) of a task is then  <span class="math">\\leq 187</span>  bytes per task <span class="math">^{22}</span> .</p>
+
+    <p class="text-gray-300">The proof generation time must be taken into consideration when deciding the length of an eon, such that the operator is granted a sufficient amount of time to prove the consistency of a checkpoint. From Figure 6, we can observe that with a  <span class="math">5\\%</span>  proving power it would take about 2 hours to generate a consistency proof. While this is a considerable amount of time, it is shorter than our 36 hour eon. To accommodate a shorter eon, more computational power should be invested.</p>
+
+    <p class="text-gray-300">Instant Finality Collateral Costs. No stake is required to provide transaction finality within two eons. For instant finality, only the incoming transactions of a user within two eons need collateralization.</p>
+
+    <p class="text-gray-300">With a 24-hour eon, the operator can stake e.g. 2M USD to provide instant transaction finality towards its users, at e.g.  <span class="math">n = 100\\mathrm{k}</span>  users, each receiving at most 10 USD. If the operator halves the eon duration to 12 hours, it can still provide the same instant transaction finality volume within 24 hours while halving the required stake to 1M USD. Shortening the eon, however, also reduces the maximum transaction amount that a user can instantly receive within an eon. Following the previous example, in a 12-hour eon, a user can accept instantly at most 5 USD in a 12-hour period.</p>
+
+    <p class="text-gray-300">Live Deployment. We deployed an instance of NOCUST on the Ethereum mainnet <span class="math">^{23}</span>  on 24 March 2019. The deployment costs amounted to  <span class="math">3.9\\mathrm{M}</span>  gas (11.14 USD). Since then, we count over 37 244 registered user accounts and observed 15 577 off-chain payments. At the time of writing, the total amount of deposited funds into the smart contract accounts for 7.312 ETH (about 1300 USD). We set a 36 hour eon interval to allow for sufficient time to manually intervene if necessary.</p>
+
+    <p class="text-gray-300">Centralization. A shortcoming of our commit-chains, and PCH designs, is that the operator becomes a central point of failure. Some possible countermeasures to this issue could be</p>
+
+    <p class="text-gray-300">22The operator can drop the results of tasks whose dependents completed 23NOCUST smart contract address on Ethereum mainnet: 0x83aFD697144408C344ce2271Ce16F33A74b3d98b</p>
+
+    <p class="text-gray-300">as follows. Watchtowers [50, 54, 55] can act as mirrors of all the data in a checkpoint, and the operator could possibly be required to provide the signatures of multiple watch towers on the checkpoint before the smart contract can accept it. One other possible strategy to explore would be to require that users retrieve the data of several other users and not just their own. Users could be offered an incentive to recover other users' accounts, such as a fee paid per recovery from the balance of that account. We leave an extensive analysis of how to build incentive compatible redundancy mechanisms as an open avenue for future work.</p>
+
+    <p class="text-gray-300">Multiple Commit-Chains. We have presented a protocol for users only within the same commit-chain to transfer funds among each other. A protocol to perform cross-commit-chain payments without users having to migrate funds could reduce the disincentive for users to join small hubs, promoting more decentralization in the network, and amortizing costs even further. To this end, well known cross-chain communication protocols [56-58] can be adopted, but an extensive specification is outside the scope of our work.</p>
+
+    <p class="text-gray-300">Privacy. The commit-chain operator learns all data in the commit-chain, while users learn some information about other users through commit-chain and parent-chain operations. A possible direction for future work would be to design a scheme to minimize information leakage, possibly hiding transaction details from the operator, and possibly minimizing the information leakage that occurs in the smart-contract.</p>
+
+    <p class="text-gray-300">Eon Duration. In NOCUST the fixed eon length sets the lower and upper bounds on when a checkpoint can be submitted. While this permits disputes and reduces user online presence, it would be useful to make it dynamic. An interesting mechanism to design would be a securely adaptive upper-bound for submission based on blockchain congestion, or how much activity occurred in the commit-chain. More concrete strategies for how to determine the best eon time for certain use cases would be an interesting future work.</p>
+
+    <p class="text-gray-300">NIZK Costs. Proving costs must be taken into consideration by the operator when deciding the fees to place on the transactions, which would raise the minimum value that is cost effective to transfer using NOCUST-ZKP compared to NOCUST. We have chosen to evaluate NOCUST-ZKP using zkSNARKS in this work. An interesting avenue of future work would be to explore the efficacy of utilizing other non-interactive proving systems such as Bulletproofs or zkSTARKS. While the proof sizes for these other systems are, to the best of our knowledge as of today, not as small as those of zkSNARKS, we leave exploring whether other advantages may offset the difference in the cost of verification in the blockchain for future work.</p>
+
+    <p class="text-gray-300">Off the chain transactions have emerged as a promising scalability solution for blockchains. In this work, we lay the foundations for a novel paradigm for off-chain transactions: commit-chains, whereby non-custodial operators that can securely facilitate payments among users without participating</p>
+
+    <p class="text-gray-300">in a consensus algorithm (as in side-chains) and without forcing users to remain always online to receive payments (as in payment channels). Additionally, commit-chains eliminate blockchain costs for user-onboarding, amortizing user registration costs. The collateral management cost complexity for instant finality of commit-chains is <span class="math">O(1)</span>, instead of <span class="math">O(n)</span> as in payment channels.</p>
+
+    <p class="text-gray-300">We instantiate two account-based commit-chain constructions: NOCUST, and NOCUST-ZKP. Their security guarantees rely on a practical challenge-response protocol and proactive asserts via zkSNARKs. Our evaluation demonstrates that commit-chains can accommodate hundreds of thousands of users while enabling efficient, lightweight clients with only tens of kilobytes of data storage requirements.</p>
+
+    <h2 id="sec-32" class="text-2xl font-bold">XI Acknowledgements</h2>
+
+    <p class="text-gray-300">This work is partially funded by the Imperial College London President’s PhD Scholarship.</p>
+
+    <h2 id="sec-33" class="text-2xl font-bold">References</h2>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>[1] Jimuta Naik. Beginning of the early banking industry in mesopotamia civilization from 8th century bce. 2014. https://ssrn.com/abstract=2377309.</li>
+
+      <li>[2] Eleftherios Kokoris Kogias, Philipp Jovanovic, Nicolas Gailly, Ismail Khoffi, Linus Gasser, and Bryan Ford. Enhancing bitcoin security and performance with strong consistency via collective signing. In 25th {USENIX} Security Symposium ({USENIX} Security 16), pages 279–296, 2016.</li>
+
+      <li>[3] Rafael Pass and Elaine Shi. Hybrid consensus: Efficient consensus in the permissionless model. In 31st International Symposium on Distributed Computing, DISC 2017, October 16-20, 2017, Vienna, Austria, pages 39:1–39:16, 2017.</li>
+
+      <li>[4] Loi Luu, Viswesh Narayanan, Chaodong Zheng, Kunal Baweja, Seth Gilbert, and Prateek Saxena. A secure sharding protocol for open blockchains. In Proceedings of the 2016 ACM SIGSAC Conference on Computer and Communications Security, pages 17–30. ACM, 2016.</li>
+
+      <li>[5] Eleftherios Kokoris-Kogias, Philipp Jovanovic, Linus Gasser, Nicolas Gailly, Ewa Syta, and Bryan Ford. Omniledger: A secure, scale-out, decentralized ledger via sharding. In 2018 IEEE Symposium on Security and Privacy (SP), pages 583–598. IEEE, 2018.</li>
+
+      <li>[6] Joseph Poon and Thaddeus Dryja. The bitcoin lightning network: Scalable off-chain instant payments, 2015. https://lightning.network.</li>
+
+      <li>[7] Andrew Miller, Iddo Bentov, Ranjit Kumaresan, and Patrick McCorry. Sprites: Payment channels that go faster than lightning. In Financial Cryptography and Data Security, 2019.</li>
+
+      <li>[8] Pavel Prihodko, Slava Zhigulin, Mykola Sahno, Aleksei Ostrovskiy, and Olaoluwa Osuntokun. Flare: An approach to routing in lightning network. 2016. https://bitfury.com/content/downloads/whitepaper_flare_an_approach_to_routing_in_lightning_network_7_7_2016.pdf.</li>
+
+      <li>[9] Rami Khalil and Arthur Gervais. Revive: Rebalancing off-blockchain payment networks. Proceedings of the 2017 ACM SIGSAC Conference on Computer and Communications Security, 2017.</li>
+
+      <li>[10] Stefan Dziembowski, Lisa Eckey, Sebastian Faust, and Daniel Malinowski. Perun: Virtual payment channels over cryptographic currencies. In Security and Privacy (SP), 2019 IEEE Symposium on. IEEE, 2019.</li>
+
+      <li>[11] Matthew Green and Ian Miers. Bolt: Anonymous payment channels for decentralized currencies. In Proceedings of the 2017 ACM SIGSAC Conference on Computer and Communications Security, pages 473–489. ACM, 2017.</li>
+
+      <li>[12] Giulio Malavolta, Pedro Moreno-Sanchez, Aniket Kate, Matteo Maffei, and Srivatsan Ravi. Concurrency and privacy with payment-channel networks. In Proceedings of the 2017 ACM SIGSAC Conference on Computer and Communications Security, pages 455–471. ACM, 2017.</li>
+
+      <li>[13] Giulio Malavolta, Pedro Moreno-Sanchez, Clara Schneidewind, Aniket Kate, and Matteo Maffei. Anonymous multi-hop locks for blockchain scalability and interoperability. In Network and Distributed System Security Symposium (NDSS), 2019.</li>
+
+      <li>[14] Ethan Heilman, Leen Alshenibr, Foteini Baldimtsi, Alessandra Scafuro, and Sharon Goldberg. Tumblebit: An untrusted bitcoin-compatible anonymous payment hub. Proceedings of NDSS 2017, 2017.</li>
+
+      <li>[15] Uriel Feige, Amos Fiat, and Adi Shamir. Zero-knowledge proofs of identity. Journal of cryptology, 1(2):77–94, 1988.</li>
+
+      <li>[16] Nir Bitansky, Ran Canetti, Alessandro Chiesa, and Eran Tromer. From extractable collision resistance to succinct non-interactive arguments of knowledge, and back again. In Proceedings of the 3rd Innovations in Theoretical Computer Science Conference, pages 326–349. ACM, 2012.</li>
+
+      <li>[17] Nir Bitansky, Ran Canetti, Alessandro Chiesa, and Eran Tromer. Recursive composition and bootstrapping for snarks and proof-carrying data. In Proceedings of the forty-fifth annual ACM symposium on Theory of computing, pages 111–120. ACM, 2013.</li>
+
+      <li>[18] Eli Ben-Sasson, Alessandro Chiesa, Eran Tromer, and Madars Virza. Scalable zero knowledge via cycles of elliptic curves. Algorithmica, 79(4):1102–1160, 2017.</li>
+
+      <li>[19] Satoshi Nakamoto. Bitcoin: A peer-to-peer electronic cash system. 2008.</li>
+
+      <li>[20] Gavin Wood. Ethereum: A secure decentralised generalised transaction ledger. Ethereum Project Yellow Paper, 2014.</li>
+
+      <li>[21] Cynthia Dwork and Moni Naor. Pricing via processing or combatting junk mail. In Annual International Cryptology Conference, pages 139–147. Springer, 1992.</li>
+
+      <li>[22] Dana Angluin, James Aspnes, Zoë Diamadi, Michael J Fischer, and René Peralta. Computation in networks</li>
+
+    </ul>
+
+    <p class="text-gray-300">of passively mobile finite-state sensors. Distributed computing, 18(4):235–253, 2006.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>[23] Marko Vukolic. Eventually returning to strong consistency. IEEE Data Eng. Bull., 39(1):39–44, 2016.</li>
+
+      <li>[24] Nicholas Stifter, Aljosha Judmayer, Philipp Schindler, Alexei Zamyatin, and Edgar Weippl. Agreement with satoshi–on the formalization of nakamoto consensus. 2018.</li>
+
+      <li>[25] Arthur Gervais, Ghassan O Karame, Karl Wüst, Vasileios Glykantzis, Hubert Ritzdorf, and Srdjan Capkun. On the security and performance of proof of work blockchains. In Proceedings of the 2016 ACM SIGSAC Conference on Computer and Communications Security, pages 3–16. ACM, 2016.</li>
+
+      <li>[26] Juan Garay, Aggelos Kiayias, and Nikos Leonardos. The bitcoin backbone protocol: Analysis and applications. In Annual International Conference on the Theory and Applications of Cryptographic Techniques, pages 281–310. Springer, 2015.</li>
+
+      <li>[27] Ittay Eyal and Emin Gün Sirer. Majority is not enough: Bitcoin mining is vulnerable. In Financial Cryptography and Data Security, pages 436–454. Springer, 2014.</li>
+
+      <li>[28] Christian Decker and Roger Wattenhofer. Information propagation in the bitcoin network. In IEEE P2P 2013 Proceedings, pages 1–10. IEEE, 2013.</li>
+
+      <li>[29] Vitalik Buterin. Ethereum: A next-generation smart contract and decentralized application platform. URL https://github. com/ethereum/wiki/wiki/% 5BEnglish% 5D-White-Paper, 2014.</li>
+
+      <li>[30] Mike Hearn. Micro-payment channels implementation now in bitcoinj, 2013. Available at: https://bitcointalk. org/index.php?topic=244656.0.</li>
+
+      <li>[31] Christian Decker and Roger Wattenhofer. A fast and scalable payment network with bitcoin duplex micropayment channels. In Symposium on Self-Stabilizing Systems, pages 3–18. Springer, 2015.</li>
+
+      <li>[32] Conrad Burchert, Christian Decker, and Roger Wattenhofer. Scalable funding of bitcoin micropayment channel networks. Royal Society open science, 5(8):180089, 2018.</li>
+
+      <li>[33] Christian Decker, Rusty Russell, and Olaoluwa Osuntokun. eltoo: A simple layer2 protocol for bitcoin. White paper: https://blockstream. com/eltoo. pdf, 2018.</li>
+
+      <li>[34] Ethan Heilman, Sebastien Lipmann, and Sharon Goldberg. The arwen trading protocols.</li>
+
+      <li>[35] Matthew Green and Ian Miers. Bolt: Anonymous payment channels for decentralized currencies. In Proceedings of the 2017 ACM SIGSAC Conference on Computer and Communications Security, pages 473–489. ACM, 2017.</li>
+
+      <li>[36] The inevitability of privacy in lightning networks. https://www.kristovatlas.com/the-inevitability-of-privacy-in-lightning-networks/.</li>
+
+      <li>[37] Stefanie Roos, Pedro Moreno-Sanchez, Aniket Kate, and Ian Goldberg. Settling payments fast and private: Efficient decentralized routing for path-based transactions. In 25th Annual Network and Distributed System Security Symposium, NDSS 2018, San Diego, California, USA, February 18-21, 2018, 2018.</li>
+
+      <li>[38] Christoph Egger, Pedro Moreno-Sanchez, and Matteo Maffei. Atomic multi-channel updates with constant collateral in bitcoin-compatible payment-channel networks. Cryptology ePrint Archive, Report 2019/583, 2019. https://eprint.iacr.org/2019/583.</li>
+
+      <li>[39] Erkan Tairi, Pedro Moreno-Sanchez, and Matteo Maffei. A^{2}l: Anonymous atomic locks for scalability and interoperability in payment channel hubs. Cryptology ePrint Archive, Report 2019/589, 2019. https://eprint.iacr.org/2019/589.</li>
+
+      <li>[40] Joshua Lind, Ittay Eyal, Peter Pietzuch, and Emin Gün Sirer. Teechan: Payment channels using trusted execution environments. arXiv preprint arXiv:1612.07766, 2016.</li>
+
+      <li>[41] Joshua Lind, Oded Naor, Ittay Eyal, Florian Kelbert, Peter R. Pietzuch, and Emin Gün Sirer. Teechain: Reducing storage costs on the blockchain with offline payment channels. In Proceedings of the 11th ACM International Systems and Storage Conference, SYSTOR 2018, HAIFA, Israel, June 04-07, 2018, page 125, 2018.</li>
+
+      <li>[42] Stefan Dziembowski, Sebastian Faust, and Kristina Hostáková. General state channel networks. In Proceedings of the 2018 ACM SIGSAC Conference on Computer and Communications Security, pages 949–966. ACM, 2018.</li>
+
+      <li>[43] Joseph Poon and Vitalik Buterin. Plasma: Scalable autonomous smart contracts. White paper, 2017.</li>
+
+      <li>[44] Hagit Attiya and Jennifer Welch. Distributed computing: fundamentals, simulations, and advanced topics, volume 19. John Wiley & Sons, 2004.</li>
+
+      <li>[45] Eli Ben-Sasson, Alessandro Chiesa, Matthew Green, Eran Tromer, and Madars Virza. Secure sampling of public parameters for succinct zero knowledge proofs. In 2015 IEEE Symposium on Security and Privacy, pages 287–304. IEEE, 2015.</li>
+
+      <li>[46] Sean Bowe, Ariel Gabizon, and Ian Miers. Scalable multiparty computation for zk-snark parameters in the random beacon model. Technical report, Cryptology ePrint Archive, Report 2017/1050, 2017.</li>
+
+      <li>[47] Sean Bowe, Ariel Gabizon, and Matthew D Green. A multi-party protocol for constructing the public parameters of the pinocchio zk-snark. In International Conference on Financial Cryptography and Data Security, pages 64–77. Springer, 2018.</li>
+
+      <li>[48] Ayelet Sapirshtein, Yonatan Sompolinsky, and Aviv Zohar. Optimal selfish mining strategies in bitcoin. In International Conference on Financial Cryptography and Data Security, pages 515–532. Springer, 2016.</li>
+
+      <li>[49] John R Douceur. The sybil attack. In International workshop on peer-to-peer systems, pages 251–260. Springer, 2002.</li>
+
+      <li>[50] Patrick McCorry, Surya Bakshi, Iddo Bentov, Andrew Miller, and Sarah Meiklejohn. Pisa: Arbitration outsourcing for state channels. IACR Cryptology ePrint Archive,</li>
+
+    </ul>
+
+    <p class="text-gray-300">2018:582, 2018.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>[51] Manuel Blum, Paul Feldman, and Silvio Micali. Non-interactive zero-knowledge and its applications. In Proceedings of the twentieth annual ACM symposium on Theory of computing, pages 103–112. ACM, 1988.</li>
+
+      <li>[52] Ralph C. Merkle. A Digital Signature Based on a Conventional Encryption Function, pages 369–378. Springer Berlin Heidelberg, Berlin, Heidelberg, 1988.</li>
+
+      <li>[53] Jens Groth. On the size of pairing-based non-interactive arguments. In Annual International Conference on the Theory and Applications of Cryptographic Techniques, pages 305–326. Springer, 2016.</li>
+
+      <li>[54] Georgia Avarikioti, Felix Laufenberg, Jakub Sliwinski, Yuyi Wang, and Roger Wattenhofer. Towards secure and efficient payment channels. arXiv preprint arXiv:1811.12740, 2018.</li>
+
+      <li>[55] Georgia Avarikioti, Eleftherios Kokoris Kogias, and Roger Wattenhofer. Brick: Asynchronous state channels. arXiv preprint arXiv:1905.11360, 2019.</li>
+
+      <li>[56] Maurice Herlihy. Atomic cross-chain swaps. In Proceedings of the 2018 ACM Symposium on Principles of Distributed Computing, pages 245–254. ACM, 2018.</li>
+
+      <li>[57] Aggelos Kiayias and Dionysis Zindros. Proof-of-work sidechains. In International Conference on Financial Cryptography and Data Security. Springer, 2018.</li>
+
+      <li>[58] Alexei Zamyatin, Dominik Harz, Joshua Lind, Panayiotis Panayiotou, Arthur Gervais, and William Knottenbelt. Xclaim: Trustless, interoperable, cryptocurrency-backed assets. IEEE Security and Privacy. IEEE, 2019.</li>
+
+      <li>[59] Ran Canetti. Universally composable security: A new paradigm for cryptographic protocols. In Foundations of Computer Science, 2001. Proceedings. 42nd IEEE Symposium on, pages 136–145. IEEE, 2001.</li>
+
+      <li>[60] Ran Canetti. Universally composable signature, certification, and authentication. In 17th IEEE Computer Security Foundations Workshop, (CSFW-17 2004), 28-30 June 2004, Pacific Grove, CA, USA, page 219, 2004.</li>
+
+      <li>[61] Ran Canetti and Marc Fischlin. Universally composable commitments. In Advances in Cryptology - CRYPTO 2001, 21st Annual International Cryptology Conference, Santa Barbara, California, USA, August 19-23, 2001, Proceedings, pages 19–40, 2001.</li>
+
+      <li>[62] Ahmed E. Kosba, Zhichao Zhao, Andrew Miller, Yi Qian, T.-H. Hubert Chan, Charalampos Papamanthou, Rafael Pass, Abhi Shelat, and Elaine Shi. How to use snarks in universally composable protocols. IACR Cryptology ePrint Archive, 2015:1093, 2015.</li>
+
+      <li>[63] Merkle mountain ranges, 2019. https://github.com/opentimestamps/opentimestamps-server/blob/master/doc/merkle-mountain-range.md.</li>
+
+    </ul>
+
+    <h2 id="sec-34" class="text-2xl font-bold">Appendix A Further Discussion and Future Work</h2>
+
+    <p class="text-gray-300">In this section, we briefly discuss some important points about NOCUST that can be considered for future work.</p>
+
+    <h3 id="sec-35" class="text-xl font-semibold mt-8">A-A Security Analysis in the Universal Composability (UC) framework</h3>
+
+    <p class="text-gray-300">The UC framework <em>[59]</em> facilitates the analysis of the security for novel and complex cryptographic protocols. As this work presents a full-fledged system that relies on fairly studied, standard cryptographic operations used independently of each other, we have not analyzed the security of NOCUST in the UC framework. However, we envision that the security of NOCUST can also be seamlessly analyzed in the UC framework, constituting thus an interesting future work direction.</p>
+
+    <p class="text-gray-300">In a nutshell, the security in the UC framework requires to show that, in the presence of an environment that establishes the inputs for parties, an adversary that controls the set of corrupted parties cannot distinguish whether it is executing an instance of the ideal world functionalities or an instance of the protocol. For that, one should show that the view (i.e., the set of input and output messages) of the adversary in both scenarios is indistinguishable.</p>
+
+    <p class="text-gray-300">A bare bone proof sketch may look as follows. The ideal and real world are differentiated by the cryptographic operations and we note that NOCUST relies on three cryptographic schemes: (i) a digital signature scheme instantiated with ECDSA; (ii) a non-interactive zero-knowledge (NIZK) scheme instantiated with zk-SNARKS; and (iii) cryptographic accumulators instantiated with our novel Merkleized interval tree (which one can see as a version of a Merkle tree tailored to represent the data required in NOCUST).</p>
+
+    <p class="text-gray-300">In such setting, one could define the following hybrid scenarios:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li><span class="math">\\mathcal{H}_{0}</span>: real world protocol as defined for NOCUST.</li>
+
+      <li><span class="math">\\mathcal{H}_{1}</span>: <span class="math">\\mathcal{H}_{0}</span> where, additionally, digital signatures are replaced by their corresponding ideal functionality <span class="math">\\mathcal{F}_{SIG}</span> <em>[60]</em>.</li>
+
+      <li><span class="math">\\mathcal{H}_{2}</span>: <span class="math">\\mathcal{H}_{1}</span> where, additionally, the cryptographic accumulator is replaced by the coresponding ideal functionality <span class="math">\\mathcal{F}_{COM}</span> <em>[61]</em>.</li>
+
+      <li><span class="math">\\mathcal{H}_{3}</span>: <span class="math">\\mathcal{H}_{2}</span> where, additionally, the NIZK scheme is replaced by <span class="math">F_{NIZK}</span> <em>[62]</em>.</li>
+
+    </ul>
+
+    <p class="text-gray-300">One could argue then that <span class="math">\\mathcal{H}_{0}\\approx\\mathcal{H}_{1}</span> assuming that ECDSA is a secure digital signature scheme. Similarly, one could argue that <span class="math">\\mathcal{H}_{1}\\approx\\mathcal{H}_{2}</span> and <span class="math">\\mathcal{H}_{2}\\approx\\mathcal{H}_{3}</span>. Thus <span class="math">\\mathcal{H}_{0}\\approx\\mathcal{H}_{3}</span>, showing that real world (<span class="math">\\mathcal{H}_{0}</span>) and ideal world (<span class="math">\\mathcal{H}_{3}</span>) are indistinguishable. We remark, nevertheless, that a detailed security analysis in the UC framework constitutes an interesting future work.</p>
+
+    <h3 id="sec-36" class="text-xl font-semibold mt-8">A-B Transfer method selection strategy</h3>
+
+    <p class="text-gray-300">NOCUST significantly reduces the best case scenario cost of its committed payments. However, the finality guarantees offered by this scheme may not be the best choice for large-value transactions, or others, willing to pay the costs of blockchain transactions. Moreover, with future advances in blockchain transaction throughput, it will become cheaper to utilize the blockchain for payments rather than a commit-chain. The future may also bear other blockchain constructs significantly different from state of the art payment-channels and commit-chains.</p>
+
+    <p class="text-gray-300">This motivates us to conclude that participants wishing to transact using a blockchain would have to make a decision on the best strategy or method to receive their payments or assets. A dynamic method for concluding the best transfer strategy while considering different parameters, such as the current blockchain transaction fees, the transaction volume, or the finality requirements, would certainly be an interesting avenue to explore.</p>
+
+    <p class="text-gray-300">For example, if a machine wishes to perform towards another machine a series of nano-value transactions whose values are less than those of blockchain transfer fees at the time, it could conclude NOCUST to be the most viable option to utilize depending on the operator fee schedule.</p>
+
+    <h2 id="sec-37" class="text-2xl font-bold">Appendix B Proofs</h2>
+
+    <h3 id="sec-38" class="text-xl font-semibold mt-8">B-A Exclusive Allotment</h3>
+
+    <p class="text-gray-300">We proceed to prove that no valid instance of our annotated merkle tree may be used to construct an exclusive allotment proof that permits a non-exclusive allotment by contradiction. Assume a valid tree instance, and without loss of generality let <span class="math">t_{x}</span> and <span class="math">t_{y}</span> be two successively neighboring nodes (<span class="math">y&gt;x</span>) that have overlapping allotments, where <span class="math">\\operatorname{offset}_{y}&lt;\\operatorname{offset}_{x}+\\operatorname{allotment}_{x}</span>.</p>
+
+    <p class="text-gray-300">Let <span class="math">t_{u}</span> be their least common ancestor with <span class="math">t_{p}</span> and <span class="math">t_{q}</span> as its direct children such that <span class="math">t_{p}</span> is an ancestor of <span class="math">t_{x}</span>, and <span class="math">t_{q}</span> of <span class="math">t_{y}</span>. Without loss of generality, assume <span class="math">t_{p}</span> and <span class="math">t_{q}</span> are correctly reconstructible from the exclusive allotment proofs of <span class="math">t_{x}</span> and <span class="math">t_{y}</span> respectively.</p>
+
+    <p class="text-gray-300">Given the proof of <span class="math">t_{x}</span>, constructing <span class="math">t_{u}</span> on the path up to <span class="math">t_{root}</span> will be performed with knowledge of <span class="math">\\operatorname{offset}_{p}</span> and <span class="math">\\operatorname{allotment}_{p}</span> (from reconstructing <span class="math">t_{p}</span>) and the boundary value and commitment of <span class="math">t_{q}</span> supplied in the proof.</p>
+
+    <p class="text-gray-300"><span class="math">\\Omega(t_{u},t_{q})=\\operatorname{offset}_{q}+\\operatorname{allotment}_{q}</span> (12)</p>
+
+    <p class="text-gray-300">Recall the definition in Section V-B. As <span class="math">\\operatorname{offset}_{q}</span> is interchangeable with <span class="math">\\operatorname{offset}_{p}+\\operatorname{allotment}_{p}</span>, reconstructing <span class="math">t_{u}</span> will need to be performed as follows due to the lack of presence of <span class="math">\\operatorname{offset}_{q}</span> in the proof by substitution in equation 6 as follows:</p>
+
+    <p class="text-gray-300"><span class="math">\\operatorname{information}_{u}=\\{t_{p},\\,\\operatorname{offset}_{p}+\\operatorname{allotment}_{p},t_{q}\\}</span> (13)</p>
+
+    <p class="text-gray-300">Given the correctness of the sub-tree of <span class="math">t_{p}</span> in isolation, it follows that <span class="math">\\operatorname{offset}_{p}+\\operatorname{allotment}_{p}=\\operatorname{offset}_{x}+\\operatorname{allotment}_{x}</span>, and therefore, assuming <span class="math">\\operatorname{offset}_{q}</span> was used in the original commitment to the considered exclusive allotment tree instance, the reconstructed <span class="math">t_{u}</span> will not match, and the remaining trail of reconstructed nodes from the proof of <span class="math">t_{x}</span> will lead to a <span class="math">t_{root}^{\\prime}\\neq t_{root}</span>, violating the assumption that the considered instance is a valid tree and that the proof is acceptable.</p>
+
+    <h3 id="sec-39" class="text-xl font-semibold mt-8">B-B Balance Custody</h3>
+
+    <p class="text-gray-300">We proceed to prove how an honest participant in NOCUST can protect its funds through modelling the state of a participant’s custody as a finite state machine whereby the participant may always reach a custodian state. A participant is considered a non-custodian in <em>eon <span class="math">e</span></em> if <span class="math">e-1</span> had passed successfully (the commit-chain did not enter recovery) without the participant learning valid proofs of exclusive allotment that exclusively account for its confirmed balance, assuming the participant joined the commit-chain prior to <span class="math">e-1</span>.</p>
+
+    <p class="text-gray-300">!<a href="img-5.jpeg">img-5.jpeg</a> Figure 7: Finite state automaton capturing the custodian state of an honest participant during an <em>eon <span class="math">e</span></em>. Given the operator’s commitment to exclusive allotment trees, an honest participant always knows a valid proof of exclusive balance allotment either from a cooperative or through the smart contract. Terminal states denote which eon’s balance the participant is given custody of.</p>
+
+    <p class="text-gray-300">It’s straightforward to infer from the automaton in Figure 7 that a participant may always reach a state of custody from <span class="math">s_{1}</span> given that the operator commits to the exclusive allotment trees within the first epoch. Recall that if the operator does not commit to this data within the first <em>epoch</em>, the commit-chain instance is halted, and therefore the participant retains custody of the previous allotment which it may claim through the smart contract’s recovery. This may also happen if the operator ignores the participant’s challenge.</p>
+
+    <h3 id="sec-40" class="text-xl font-semibold mt-8">B-C Double-Spend Futility</h3>
+
+    <p class="text-gray-300">Let the participant and the operator be under the control of the adversary such that the running balance of the participant during <em>eon <span class="math">e</span></em> is double-spent towards a set of other participants whereby <span class="math">\\operatorname{allotment}_{i}(e+1)&lt;0</span> holds by the end of <span class="math">e</span>. The adversary must construct a valid exclusive balance allotment tree for <span class="math">e+1</span> to commit the transfers in <span class="math">e</span> and successfully double-spend, while avoiding the halt of the commit-chain by an honest participant.</p>
+
+    <p class="text-gray-300">With Equation 14 in mind, if the adversary were double-spending in the commit-chain by not updating <span class="math">\\operatorname{sent}_{i}(e)</span>, then <span class="math">\\sum_{j}\\operatorname{received}_{j}(e)-\\operatorname{sent}_{j}(e)&gt;0</span> would follow, and <span class="math">\\operatorname{allotment}_{root}(e+1)&lt;\\sum_{j}\\operatorname{allotment}_{j}(e+1)</span> would lead to a challenge in <span class="math">e+1</span> by the affected honest participant whose allotment is incorrect, foiling as well any concurrent double-spend in the commit-chain.</p>
+
+    <p class="text-gray-300">Moreover, if the adversary were double-spending in the commit-chain and updating <span class="math">\\operatorname{sent}_{i}(e)</span> such</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Procedure</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Constraints</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Variables</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">V Inputs</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Generation (s)</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Proving (s)</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Recurrence</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+            <td class="px-3 py-2 border-b border-gray-700">S</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">W</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">C</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">S</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">W</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">C</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">S</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">W</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">C</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">S</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">W</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">C</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">S</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">W</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">C</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">S</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Merkle Membership</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">81k</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">19k</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">-</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">81k</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">19k</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">-</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">5</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">5</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">-</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">2.2</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">0.7</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">-</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1.3</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">0.8</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">-</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">T</td>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Exclusive Allotment</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">178k</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">29k</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">-</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">178k</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">29k</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">-</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">8</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">8</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">-</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">3.9</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1.1</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">-</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">2.9</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1.1</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">-</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">T</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">+</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">P</td>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Transfer Inclusion</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">47k</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">-</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">-</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">47k</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">-</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">-</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">7</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">-</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">-</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1.8</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">-</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">-</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1.8</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">-</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">-</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">T</td>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Transfer Delivery</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">84k</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">19k</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">56k</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">84k</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">19k</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">56k</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">5</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">5</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">5</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">2.1</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">0.8</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1.5</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">2.7</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1.1</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1.9</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">T</td>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Deposit/Withdrawal</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">58k</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">-</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">-</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">58k</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">-</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">-</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">5</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">-</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">-</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">2.3</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">-</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">-</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">2.6</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">-</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">-</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">P</td>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Exit Notification</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">38k</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">-</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">-</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">38k</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">-</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">-</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">4</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">-</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">-</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1.6</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">-</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">-</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1.9</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">-</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">-</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">P</td>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Chain Accumulator</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">92k</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">25k</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">-</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">97k</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">25k</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">-</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">6</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">6</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">-</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">2.3</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1.1</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">-</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">2.9</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1.4</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">-</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">P</td>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Account Integrity</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">106k</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">35k</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">92k</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">121k</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">35k</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">96k</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">12</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">12</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">5</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">2.7</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1.5</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">2.4</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">3.2</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1.8</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">2.9</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">P</td>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">MNT → BN Wrapper</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">7.4M</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">-</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">-</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">7.6M</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">-</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">-</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">-</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">-</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">140.0</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">-</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">-</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">63.8</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">-</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">-</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1</td>
+
+          </tr>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">TABLE II:  <span class="math">zkSNARKs</span>  implemented in libsnark. Wrapper circuits convert the generated snark from one verifiable in the MNT6 curve to one verifiable in the MNT4 curve. Combiner circuits merge two proofs into one. The MNT  <span class="math">\\rightarrow</span>  BN Wrapper is implemented using long-integer arithmetic to provide efficient verification using pre-compiled Ethereum contracts. zkSNARKs proving and generation times expressed in seconds. Measured on an Intel i9-9980HK 5.00GHz CPU, and 2x 32GB 2667 MT/s DDR4 RAM. Measured verification times were  <span class="math">\\leq 0.01s</span> .</p>
+
+    <p class="text-gray-300"><span class="math">\\sum_{j}\\mathrm{allotment}_{j}(e + 1) = \\sum_{j}\\mathrm{allotment}_{j}(e) + \\mathrm{received}_{j}(e) + \\mathrm{deposited}_{j}(e) - \\mathrm{withdrawn}_{j}(e) - \\mathrm{sent}_{j}(e)</span> <span class="math">= \\sum_{j}\\mathrm{allotment}_{j}(e) + \\sum_{j}\\mathrm{deposited}_{j}(e) - \\mathrm{withdrawn}_{j}(e) + \\sum_{j}\\mathrm{received}_{j}(e) - \\mathrm{sent}_{j}(e)</span>  (14) <span class="math">= \\mathrm{allotment}_{root}(e + 1) + \\sum_{j}\\mathrm{received}_{j}(e) - \\mathrm{sent}_{j}(e)</span></p>
+
+    <p class="text-gray-300">that  <span class="math">\\sum_{j}\\mathrm{received}_{j}(e) - \\mathrm{sent}_{j}(e) = 0</span> , and/or double-spending through withdrawals to the blockchain, then an allotmentroot  <span class="math">(e + 1)</span>  would be rejected by the smart contract.</p>
+
+    <p class="text-gray-300">We proceed to prove how an honest operator in NO-CUST can maintain functionality under a subset of malicious participants, and how a dishonest operator that attempts to compromise transfers will lead to the commit-chain instance being stopped through a proof by case analysis. An operator is defined as maintaining provable integrity during eon  <span class="math">e</span>  so long as it is able to close any challenge using the smart contract.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Given no interactions between the operator and a participant during  <span class="math">e</span> , an honest operator may create exclusive allotment trees with  <span class="math">\\text{allotment}_i(e + 1)</span>  equal to  <span class="math">\\text{allotment}_i(e) + \\text{received}_i(e)</span>  and no  <span class="math">\\text{update}_i^a(e)</span>  applied.</li>
+
+      <li>Once a participant requests an exit, an honest operator can construct the tree of exclusive exit allotment and retain all information necessary to close any balance update challenge.</li>
+
+      <li>The operator can justifiably authorize a participant to initiate a partial withdrawal using the smart contract as long as it does not allow the participant to request to overdraw its funds.</li>
+
+      <li>Given an  <span class="math">\\text{update}_i^a(e)</span>  signed by the sender, an honest operator may discard or enact the transfer, or commit to its delivery by revealing its countersignature on  <span class="math">\\text{update}_i^a(e)</span>  and then must enforce its delivery in the tree of exclusive allotment. The operator retains sufficient information to respond to any challenge.</li>
+
+    </ul>
+
+    <p class="text-gray-300">Moreover, a dishonest server which tries to debit a participant without authorization, or without crediting the corresponding recipient in case of a transfer, or one that provides partial withdrawal authorizations that overspend a participant's balance, may not find itself in a state of provable integrity in  <span class="math">e + 1</span> .</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Given no interactions between the operator and a participant during  <span class="math">e</span> , the operator cannot construct a valid exclusive allotment tree containing an  <span class="math">\\text{update}_i^a(e)</span>  signed by the participant. As the operator cannot forge the participant's signature, it cannot respond to a balance update challenge.</li>
+
+      <li>If the operator authorizes a participant to initiate a partial withdrawal using the smart contract that overdraws its funds, it will not be able to satisfy the exclusive allotment constraint for all users in  <span class="math">e + 1</span> .</li>
+
+      <li>Given an  <span class="math">\\text{update}_i^a(e)</span>  signed by a sender, the operator cannot construct a valid exclusive allotment tree where the delivered transfer does not reserve an exclusive allotment in  <span class="math">\\text{txIn}_j</span> . A transfer delivery challenge by a custodian sender/recipient will not be closeable by the operator.</li>
+
+      <li>Once the operator delivers a countersigned  <span class="math">\\text{update}_i^a(e)</span>  to the sender, it may not back out of enforcing the transfer, as the operator will not be able to close a balance update challenge if it includes an outdated state that does not include the transfer in the exclusive allotment tree.</li>
+
+    </ul>
+
+    <p class="text-gray-300">We proceed to prove prove how a participant enacting transfers in a commit-chain instance is guaranteed to be</p>
+
+    <p class="text-gray-300">able to finalize receipt of incoming amounts up to a known total amount, regardless of the adversary’s behavior while controlling the operator and/or all other participants.</p>
+
+    <p class="text-gray-300">The proof that a participant observing the constraints in Equation 10 and Equation 11 has guaranteed finality of receipt on countesigned incoming transfers is straightforward.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>If the commit-chain instance fails during <em>eon</em> <span class="math">e</span>, then the participant can recover an amount equal to the R.H.S of Equation 10.</li>
+
+      <li>If the commit-chain instance fails during <em>eon</em> <span class="math">e+1</span>, then the participant can recover an amount equal to the R.H.S of Equation 11.</li>
+
+      <li>Otherwise, the transfer has been in included in the tree of exclusive allotment, and its amount can be withdrawn in <span class="math">e+2</span>.</li>
+
+    </ul>
+
+    <p class="text-gray-300"><span class="math">\\text{\\tiny{extra}}_{i}(e-1)</span> and <span class="math">\\text{\\tiny{extra}}_{i}(e)</span> are accounted for by the smart contract, while <span class="math">\\text{\\tiny{collateral}}\\;_{i}(e)</span> and <span class="math">\\text{\\tiny{collateral}}\\;_{i}(e+1)</span> committed to by the operator and learned by the participant before <em>eon</em> <span class="math">e</span> commences, or assumed to be zero. The exclusivity of the collateral amounts are guaranteed through validation of the proofs of exclusive collateral allotment (ref. B-A)</p>
+
+    <p class="text-gray-300">Moreover, the operator cannot withdraw staked collateral such the total amount, <span class="math">\\text{\\tiny{allotment}}_{root}</span>, promised in the tree of exclusive insurance collateral allotment, is unavailable in the smart contract for recovery, which means the recoverable amount from a proof is always available in <em>eon</em> <span class="math">e</span>. <span class="math">\\blacksquare</span></p>
+
+    <h2 id="sec-43" class="text-2xl font-bold">Appendix C NOCUST-ZKP: Extended Specification</h2>
+
+    <p class="text-gray-300">Throughout this specification, we denote a proof of a NIZKP as <span class="math">\\Pi</span>.</p>
+
+    <h3 id="sec-44" class="text-xl font-semibold mt-8">C-A Consistency Verifications</h3>
+
+    <p class="text-gray-300">Transfer Delivery Consistency. We show how to guarantee that every transfer debited from a participant was correctly credited to the intended recipient. Algorithm 3 (cf. Appendix) ensures that a single transfer delivery is enforced in an exclusive balance allotment tree. To verify that a larger set of transfers is entirely enforced, we compose a series of verifiers that combine two proofs by verifying that both proofs validate the same exclusive allotment tree root in their public statements, and that the public statement of this combiner includes the same allotment tree root and a hash of the two verified transaction merkle-subtrees. Consequently, the public statement of the top combiner will contain the merkle root of the set of transfers whose enforcement is being proven for a single user.</p>
+
+    <p class="text-gray-300">State Update Consistency. Algorithm 4 (cf. Appendix) similarly enforces the correct balance update and consistency of a single participant’s account. It validates that the exclusive balance allotment in the new checkpoint is correctly calculated using the exclusive balance allotment of the previous checkpoint, and the amounts deposited, withdrawn, and transferred in the previous <em>eon</em>. Moreover, it validates that the authorized state update <span class="math">\\text{\\tiny{update}}_{i}^{a}</span> committed in the balance tree is signed by the participant if the update is non-empty for this eon. Lastly, it verifies that all transfers under <span class="math">\\text{\\tiny{txOut}}_{i}</span> are correctly delivered using an embedded transfer delivery combiner verifier as previously described. Proofs from this system can then combined to reach a single top-level proof for an entire tree of exclusive balance allotment. The details of this combiner are left as an exercise to the reader, bearing in mind that the combination verifier must merge continuous intervals.</p>
+
+    <p class="text-gray-300">Non-collaborative Exit Consistency. Algorithm 5 (cf. Appendix) can be combined similar to Algorithm 4 to verify the integrity of a exclusive exit allotment tree commitment.</p>
+
+    <h3 id="sec-45" class="text-xl font-semibold mt-8">C-B Bi-Modal Ledger For zkSNARKS</h3>
+
+    <p class="text-gray-300">The motivation for this extended specification is to provide specifications for the three global ledger verifiers: <span class="math">\\mathbb{V}_{D}</span>, <span class="math">\\mathbb{V}_{W}</span>, and <span class="math">\\mathbb{V}_{E}</span>, that are required in Algorithms 4 and 5 without worrying about the storage introspection details of the underlying blockchain. For every <em>eon</em> <span class="math">e</span>, the global ledger is amended with the following:</p>
+
+    <p class="text-gray-300">An accumulator of the smart contract operations performed during <em>eon</em> <span class="math">e</span>.</p>
+
+    <p class="text-gray-300">The accumulator is structured as a set of Merkle Mountain Ranges <em>[63]</em> that are built up as deposits, withdrawals and exits are performed using the smart contract during the current <em>eon</em> <span class="math">e</span>. To enable this structure to be usable, the smart contract will need to keep track of the current set of roots for the current eon accumulator, and append a new element for every deposit made to the deposit accumulator, withdrawal initialized to the withdrawal accumulator and exit requested to the exit accumulator. Each element should be a commitment of the details of the operation made:</p>
+
+    <p class="text-gray-300"><span class="math">\\langle\\text{operation},\\text{address},\\text{amount}\\rangle</span></p>
+
+    <p class="text-gray-300">The operator then re-organizes two of these three accumulators into Merkle tree structures for deposits and withdrawals. Designed to group fragmented amounts of deposit and withdrawal operations according to the participant, these trees are built up as Merkleized Interval Trees akin to the exclusive balance allotment tree structure from Section V-B, and are referred to as operation consolidators.</p>
+
+    <p class="text-gray-300">The following definitions are used for the leaves of the deposit, and similarly for withdrawal, accumulator along with that of Equation 2:</p>
+
+    <p class="text-gray-300"><span class="math">\\text{\\tiny{allotment}}_{i}(e)=\\text{\\tiny{accumulated}}_{i}(e)</span> (15) <span class="math">\\text{\\tiny{information}}_{i}(e)=\\{\\text{\\tiny{address}}_{i},\\text{\\tiny{fragmented}}_{i}(e)\\}</span> (16)</p>
+
+    <p class="text-gray-300"><span class="math">\\text{\\tiny{fragmented}}</span> is defined as another annotated Merkle tree which contains all the operations in the accumulator as leaves for one participant. Meaning that each leaf in a consolidator contains a commitment to the root of the subtree <span class="math">\\text{\\tiny{fragmented}}</span>, and the allotment size of the consolidator leaf is the allotment size of the root of the fragment subtree. The allotment size</p>
+
+    <p class="text-gray-300">then of the leaves of the fragment subtree are the individual amounts of the operations, and the information within them are commitments to their respective details.</p>
+
+    <p class="text-gray-300">The global ledger in the smart contract is further amended to then store commitments to the roots of the consolidators. The smart contract is then extended to accept the submission of these commitments only when they are correctly constructed, the allotment of the root of the consolidators is equal to the total amount of the operation, and the consolidator leaves obey the following constraints:</p>
+
+    <p class="text-gray-300"><span class="math">\\forall p_{i},p_{j}\\in\\mathit{consolidator}:i&lt;j\\rightarrow\\rm{address}_{i}&lt;\\rm{address}_{j}</span></p>
+
+    <p class="text-gray-300"><span class="math">op\\in\\mathit{accumulator}\\leftrightarrow\\exists i:op\\in\\mathit{consolidator}_{i}.\\mbox{\\em fragmented}</span></p>
+
+    <p class="text-gray-300">The conditions on the allotment of the two deposit and withdrawal consolidator roots are easy to validate in the smart contract, but verifying the correct construction of the underlying data and the validity of the above two constraints will require the usage of the same zkSNARK combination scheme previously described in Section VI.</p>
+
+    <p class="text-gray-300">Algorithm 1: verifySingleDepositOperationInclusion ⬇ Verifier Input :</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Deposit accumulator root</li>
+
+      <li>Deposit consolidator root</li>
+
+      <li>offset, information, allotment</li>
+
+    </ul>
+
+    <p class="text-gray-300">Prover Input :</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Proof of inclusion of operation in accumulator</li>
+
+      <li>Proof of exclusive allotment of deposit in fragment tree</li>
+
+      <li>Proof of exclusive allotment of fragment tree root in consolidator</li>
+
+      <li>deposit</li>
+
+    </ul>
+
+    <p class="text-gray-300">verify proof of inclusion of operation in accumulator leads to accumulator root verify proof of exclusive allotment of deposit in the fragment tree leads to the fragment tree root verify proof of exclusive allotment of the fragment tree root leads to the consoildator root verify offset, information, allotment are equal to deposit information</p>
+
+    <p class="text-gray-300">The combiner for the procedure defined in Algorithm 1, denoted as <span class="math">\\mathbb{V}_{DI}</span>, is left as an exercise to the reader, noting that it will have to be instantiated twice to prove both sides of the bi-implication in the second constraint. The verifiers and their combiners for proving the consistency of the withdrawal consolidator with respect to its accumulator will be symmetric to those of deposits.</p>
+
+    <p class="text-gray-300">The combiner for the procedure defined in Algorithm 2 is left as an exercise to the reader, noting that the combiner should enforce the ordering constraint on leaf addresses. Our sought after <span class="math">\\mathbb{V}_{D}</span> then becomes a procedure for retrieving the allotment of a participant from the deposit consolidator, another exercise for the reader. The verifiers and their combiners for proving the consistency of withdrawal consolidators with respect to their accumulators will be symmetric to those of deposits, along with <span class="math">\\mathbb{V}_{W}</span>.</p>
+
+    <p class="text-gray-300">The full specification of <span class="math">\\mathbb{V}_{E}</span> then becomes an exercise for the reader, where the exit consolidator contains no subtrees</p>
+
+    <p class="text-gray-300">Algorithm 2: verifyConsolidatedDepositAllotment ⬇ Verifier Input :</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Deposit accumulator root</li>
+
+      <li>Deposit consolidator root</li>
+
+      <li>offset_{i}(e), information_{i}(e), allotment_{i}(e)</li>
+
+    </ul>
+
+    <p class="text-gray-300">Prover Input :</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Proof of exclusive allotment of consolidated deposits in consolidator</li>
+
+      <li>Proof of inclusion of all participant operations in consolidator</li>
+
+      <li>ZKP: <span class="math">\\pi_{DI}</span></li>
+
+    </ul>
+
+    <p class="text-gray-300">verify <span class="math">\\mathbb{V}_{DI}^{\\pi_{DI}}</span>(accumulator root, consolidator root, offset_{i}(e), information_{i}(e), allotment_{i}(e)) returns 1 verify that the proof of exclusive allotment leads to the expected consolidator root</p>
+
+    <p class="text-gray-300">and is easily verifiable and a participant’s exit entry is easily retrievable.</p>
+
+    <p class="text-gray-300">Algorithm 3: verifySingleTransferDelivery ⬇ Verifier Input :</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Exclusive allotment tree root</li>
+
+      <li>transfer_hash</li>
+
+    </ul>
+
+    <p class="text-gray-300">Prover Input :</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Proof of recipient exclusive balance allotment</li>
+
+      <li>Recipient state update</li>
+
+      <li>Proof of transfer inclusion in recipient state</li>
+
+      <li>transfer</li>
+
+    </ul>
+
+    <p class="text-gray-300">verify recipient’s exclusive balance allotment proof leads to the expected tree root verify that the recipient state update is the one in the proof of exclusive balance allotment verify the proof of inclusion of the transfer in the recipient’s state update verify hash(transfer) is equal to transfer_hash</p>
+
+    <p class="text-gray-300">Algorithm 4 requires the pre-establishment of four verification procedures: <span class="math">\\mathbb{V}_{D}</span>, <span class="math">\\mathbb{V}_{W}</span>, and <span class="math">\\mathbb{V}_{E}</span>, are plug-in subroutines which return deposit and withdrawal request values, along with the exit request flag from the global ledger. These first three procedures must be implemented to verifiably provide global storage values from the blockchain to the calling procedure. Lastly, <span class="math">\\mathbb{V}_{T}</span> is defined to be the top-level instance of the transfer delivery proof combiner defined in the previous paragraph. Enabling the verification then of an entire exclusive balance commitment is accomplished through combining proofs to output the reconstructed parent node of two verified neighbors, along with its offset and allotment.</p>
+
+    <h3 id="sec-46" class="text-xl font-semibold mt-8">V-C Liveness Verifications</h3>
+
+    <p class="text-gray-300">Algorithm 6 presents a recursively composeable procedure to verify that the entire set of user accounts has its data available either with the users themselves, or in the additional data broadcast on-chain by the operator. Combining this procedure to produce a single top-level proof will then entail recomposing the exclusive allotment tree verified, and composing a merkle tree of broadcast data, along with its running hash. The merkle tree root of the broadcast data will permit clients to construct proofs of exclusive allotment, while</p>
+
+    <p class="text-gray-300">|  Algorithm 4: verifyAccountIntegrity  |</p>
+
+    <p class="text-gray-300">| --- |</p>
+
+    <p class="text-gray-300">|  Verifier Input : • last tree root • new tree root • offset i(e), informationi(e), allotmenti(e)  |</p>
+
+    <p class="text-gray-300">|  Prover Input : • Proof of exclusive balance allotment in last tree • Proof of exclusive balance allotment in new tree • Participant's updatei(e-1) • ZKPs: πD, πW, πE, πT  |</p>
+
+    <p class="text-gray-300">|  verify Proof of exclusive balance allotment in last tree leads to the last tree root  |</p>
+
+    <p class="text-gray-300">|  Proof of exclusive balance allotment in new tree leads to the new tree root  |</p>
+
+    <p class="text-gray-300">|  Verify that updatei(e-1) is the state update applied in the proof of exclusive balance allotment for the new tree  |</p>
+
+    <p class="text-gray-300">|  verify that updatei(e-1) is signed by the participant if the update is not empty  |</p>
+
+    <p class="text-gray-300">|  deposited ← ∇P D (deposit accumulator, participant)  |</p>
+
+    <p class="text-gray-300">|  requested ← ∇W W (withdrawal accumulator, participant)  |</p>
+
+    <p class="text-gray-300">|  exit ← ∇E D (exit accumulator, participant)  |</p>
+
+    <p class="text-gray-300">|  verify the allotmenti(e) update and exit status  |</p>
+
+    <p class="text-gray-300">|  verify result of ∇T P (new tree root) is equal to txOuti(e)  |</p>
+
+    <p class="text-gray-300">|  verify that (offset i(e), informationi(e), allotmenti(e)) are equal to the leaf values of the exclusive balance allotment proof in the new tree  |</p>
+
+    <p class="text-gray-300">the running hash of the broadcast data will permit the top-level NIZKP verifier to only validate a single input instead of processing the entire dataset as verifier input.</p>
+
+    <p class="text-gray-300">Algorithm 5: verifyExitIntegrity</p>
+
+    <pre><code class="language-txt">Verifier Input :
+- Previous balance allotment tree root
+- Current exit allotment tree root
+- offset  $i(e)$ , information  $i(e)$ , allotment  $i(e)$
+Prover Input :
+- Proof of exclusive balance allotment in previous tree
+- Proof of exclusive exit allotment in current tree
+- Participant&#x27;s update  $i(e - 1)$
+- ZKPs:  $\\pi_{D}$ ,  $\\pi_{W}$ ,  $\\pi_{E}$ ,  $\\pi_{T}$
+exit_requested  $\\leftarrow \\mathbb{V}_{E}^{\\pi_{E}}$  (exit accumulator, participant)
+assert exit_requested is true
+verify proof of exclusive balance allotment leads to previous balance tree root
+verify proof of exclusive exit allotment leads to current exit tree root
+verify that the proof of exit allotment applies update  $i(e - 1)$
+verify that update  $i(e - 1)$  is signed by the participant if it is not empty
+deposited  $\\leftarrow \\mathbb{V}_{E&#x27;}^{\\pi_{D}}$  (deposit accumulator, participant)
+requested  $\\leftarrow \\mathbb{V}_{W&#x27;}^{\\pi_{T}}$  (withdrawal accumulator, participant)
+verify that the exit allotment amount corresponds to the expected final balance of the participant
+verify that (offset  $i(e)$ , information  $i(e)$ , allotment  $i(e)$ ) are equal to the leaf values of the exclusive exit allotment proof</code></pre>
+
+    <p class="text-gray-300">Algorithm 6: verifyDataAvailability</p>
+
+    <pre><code>Verifier Input :
+- Current checkpoint
+- offset  $i(e)$ , information  $i(e)$ , allotment  $i(e)$
+- previous running hash
+- next running hash
+Prover Input :
+- Proof of exclusive allotment in current checkpoint
+- Receipt by user on  $t_{root}(e)$
+- Signature by user on broadcast costs
+verify proof of exclusive allotment
+verify signature by user on broadcast costs
+verify receipt if it is not empty
+assert next running hash is equal to previous running hash if receipt is not empty
+assert next running hash appends broadcast data to previous running hash if receipt is empty and balance is sufficient for broadcast costs
+
+![img-6.jpeg](img-6.jpeg)
+Fig. 8: Comparison between NOCUST and NOCUST-ZKP. Users in NOCUST must come online every eon, regardless whether they received a transaction and verify their account balance representation in the checkpoint. Users in NOCUST-ZKP can safely remain offline if they have not received any transactions.</code></pre>`;
+---
+
+<BaseLayout title="Commit-Chains: Secure, Scalable Off-Chain Payments (2018/642)">
+  <article class="max-w-4xl mx-auto article-prose">
+    <nav class="mb-8">
+      <a href="/papers" class="text-blue-400 hover:text-blue-300">
+        &larr; Back to Papers
+      </a>
+    </nav>
+
+    <header class="mb-12">
+      <h1 class="text-3xl font-bold mb-4"
+        set:html={TITLE_HTML} />
+      <p class="text-gray-400 mb-2"
+        set:html={AUTHORS_HTML} />
+      <p class="text-gray-500 text-sm mb-4">
+        2018 &middot; eprint 2018/642
+      </p>
+      <div class="flex gap-4 text-sm">
+        <a
+          href={EPRINT_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          class="text-blue-400 hover:text-blue-300"
+        >
+          Paper (eprint) &rarr;
+        </a>
+      </div>
+      <p class="mt-4 text-xs text-gray-500">
+        All content below belongs to the original authors. This page
+        reproduces the paper for educational purposes. Always
+        <a
+          href={EPRINT_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          class="text-blue-400 hover:text-blue-300"
+        >cite the original</a>.
+      </p>
+      <p class="mt-1 text-xs text-gray-600">
+        Converted with: {CRAWLER} &middot; {CONVERTED_DATE}
+      </p>
+    </header>
+
+    <Fragment set:html={CONTENT} />
+
+  </article>
+</BaseLayout>

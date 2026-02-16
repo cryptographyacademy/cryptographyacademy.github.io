@@ -1,0 +1,1891 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+
+const EPRINT_URL = 'https://eprint.iacr.org/2020/352';
+const CRAWLER = 'mistral';
+const CONVERTED_DATE = '2026-02-16';
+const TITLE_HTML = 'Mina: Decentralized Cryptocurrency at Scale';
+const AUTHORS_HTML = 'Joseph Bonneau, Izaak Meckler, Vanishree Rao, Evan Shapiro';
+
+const CONTENT = `    <p class="text-gray-300">Joseph Bonneau^{1}, Izaak Meckler^{2}, Vanishree Rao^{2}, and Evan Shapiro^{2}</p>
+
+    <p class="text-gray-300">^{1}New York University ^{2}O(1) Labs</p>
+
+    <h6 id="sec-2" class="text-base font-medium mt-4">Abstract</h6>
+
+    <p class="text-gray-300">We introduce the notion of a succinct blockchain, a replicated state machine in which each state transition (block) can be efficiently verified in constant time regardless of the number of prior transitions in the system. Traditional blockchains require verification time linear in the number of transitions. We show how to construct a succinct blockchain using recursively composed succinct non-interactive arguments of knowledge (SNARKs). Finally, we instantiate this construction to implement Coda, a payment system (cryptocurrency) using a succinct blockchain. Coda offers payment functionality similar to Bitcoin, with a dramatically faster verification time of 200ms making it practical for lightweight clients and mobile devices to perform full verification of the system’s history.</p>
+
+    <h2 id="sec-3" class="text-2xl font-bold">1 Introduction</h2>
+
+    <p class="text-gray-300">Bitcoin and other distributed payment systems (also called cryptocurrencies or simply blockchains) aim to provide a decentralized system for making and verifying payments. However, for traditional cryptocurrencies, including Bitcoin, decentralization comes at the cost of scalability as each node needs to process the entire system history upon joining the network. Asymptotically, verifying a blockchain containing <span class="math">t</span> transactions requires <span class="math">\\mathcal{U}(t)</span> time (usually more than linear in <span class="math">t</span> as bookkeeping is required to resolve transaction references during verification). At the time of this writing, Bitcoin’s blockchain is over 250 GB and contains over 500 M transactions (see Figure 1). Downloading and verifying this history takes days on a typical laptop.</p>
+
+    <p class="text-gray-300">These resource requirements deter most users from running a <em>full node</em> that stores and verifies the blockchain. As seen in Figure 2, the number of full nodes in Bitcoin is not growing despite its increasing popularity over time. Instead most users run a <em>light node</em>, verifying only block headers but not transactions, or an <em>ultralight node</em> verifying nothing and relying on trusted advice from a trusted server. This undermines decentralization as most clients rely on trust rather than independent verification. It also undermines performance: block size</p>
+
+    <p class="text-gray-300">(and therefore transaction throughput) is artificially capped in part to mitigate the burden of verification.</p>
+
+    <p class="text-gray-300">!<a href="img-0.jpeg">img-0.jpeg</a> Growth of Bitcoin Blockchain Size</p>
+
+    <p class="text-gray-300">!<a href="img-1.jpeg">img-1.jpeg</a> Figure 1: Growth of the Bitcoin blockchain over time, in GB. Source: www.blockchain.com. Bitcoin and Ethereum Full Node Count Figure 2: Estimated number of full nodes participating in the Bitcoin and Ethereum networks over time. Source: www.bitnodes.earn.com and www.Ethernodes.org.</p>
+
+    <p class="text-gray-300">In this work, our goal is to design a decentralized payment system that offers efficient verification of system history from genesis without relying on any external advice. Specifically, we aim to provide verification time constant (<span class="math">O(1)</span>) in the number of transactions; we call such a blockchain, a succinct blockchain.</p>
+
+    <p class="text-gray-300">We achieve this goal by including succinct proofs of state validity in each block. Generically, it is possible to compute a succinct non-interactive argument of knowledge (a SNARK) of any NP statement, including for example that the system stated committed to by the current block in a blockchain can be reached from a the genesis state by a series of valid transactions in the system. This (large) list of transactions is a witness that the current block is valid. However, computing a new proof of validity of the entire system history for each block would be prohibitively expensive. Instead, we employ techniques from incrementally computable SNARKs to ensure that the cost of computing a proof for each block is proportional only to the number of transactions added since the previous block.</p>
+
+    <p class="text-gray-300">We instantiate the notion of a succinct blockchain and introduce the Coda protocol. Coda is a payment-oriented blockchain offering similar functionality to Bitcoin, although with different transaction semantics. In particular, Coda uses an account-based model (as in Ethereum <em>[25]</em>) (instead of the UTXO model as in Bitcoin<em>[19]</em> and others <em>[20]</em>), wherein the current state of the blockchain is a list of all account balances rather than a list of unspent coins (UTXOs).</p>
+
+    <p class="text-gray-300">Each block contains a commitment to this state (in a Merkle tree) and not the entire state. Therefore a full node need not store the entire state, but can verify account balances efficiently given only the state commitment in the latest block header. However, a prover in our system (roughly equivalent to a miner in Bitcoin) does needs to store the full state since it is part of the witness when proving the validity of new blocks.</p>
+
+    <p class="text-gray-300">For the consensus protocol of Coda, we present the first provably-secure proof-of-stake (PoS) consensus protocol for succinct blockchains called Ouroboros Samasika. Note that an off-the-shelf consensus mechanism is not necessarily compatible with a succinct blockchain framework, since the way consensus is achieved when there are multiple contending chains could relying on arbitrary transaction history, forcing nodes to store the entire transaction history. In fact, this is a natural approach for consensus mechanisms, since the information needed to tell apart an honest chain from a dishonest one is likely to involve details at the point of the fork; since it is possible for a party to learn about a fork long after it occurred, it may need to store the entire history to assist in the chain selection process. This is indeed the case in the known PoS consensus mechanisms <em>[17, 13, 4]</em>. Furthermore, other PoS consensus mechanisms rely on a trusted external advice for bootstrapping <em>[12]</em>.</p>
+
+    <p class="text-gray-300">Concretely, in our current implementation, a state proof size is just and it takes around 200ms to verify it. Thus, any device that can support this level of computation, such as the current smartphones, can verify the current state of the system with no trusted advice.</p>
+
+    <p class="text-gray-300">Beyond incrementally computable SNARKs, we employ multiple optimiza</p>
+
+    <p class="text-gray-300">tions, the most significant of which is <em>parallel scan state</em>. At a high level, this improves transaction throughput beyond the limits of sequentially computed proofs. Roughly, the idea is to enqueue all the blocks that still need to be absorbed into a proof and distribute their proving across parallel provers. We also introduce a special queue of recent transactions to reduce transaction confirmation latency below the limits imposed by minimum proving times. Furthermore, we introduce a special incentive structure to maximizing prover participation in the network.</p>
+
+    <h3 id="sec-4" class="text-xl font-semibold mt-8">1.1 Our Contributions</h3>
+
+    <p class="text-gray-300">In summary, our contributions are:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>We formalize the notion of a <em>succinct blockchain</em>. This notion may be of independent interest for alternative constructions of succinct blockchains.</li>
+
+      <li>We present an approach to constructing a succinct blockchain for generic functionalities modeled as replicated state machines using incrementally-computable SNARKs.</li>
+
+      <li>We present a concrete implementation of our approach for the specific functionality of a payments system called Coda.</li>
+
+      <li>We present Ouroboros Samasika, a provably-secure PoS consensus protocol that is adaptively secure and offers bootstrapping from genesis.</li>
+
+      <li>We introduce the notion of <em>a parallel scan state</em> to improve transaction confirmation time beyond the limits otherwise imposed by the proof construction.</li>
+
+      <li>We present a performance evaluation report of executing the protocol involving a public community.</li>
+
+    </ul>
+
+    <h2 id="sec-5" class="text-2xl font-bold">2 Succinct Blockchains</h2>
+
+    <p class="text-gray-300">In this section, we introduce the notion of succinct blockchains.</p>
+
+    <h4 id="sec-6" class="text-lg font-semibold mt-6">Underlying concepts of a blockchain.</h4>
+
+    <p class="text-gray-300">We begin by recalling definitions of certain underlying concepts of a blockchain <em>[13]</em>. This will assist in defining succinct blockchains.</p>
+
+    <h6 id="sec-7" class="text-base font-medium mt-4">Definition 2.1 (State, Block Proof, Block Producer, Block, Blockchain, Genesis Block).</h6>
+
+    <p class="text-gray-300">A state is a string <span class="math">\\mathrm{st}\\in\\{0,1\\}^{4}</span>. A block proof is a value (or a set of values) <span class="math">\\pi_{i}^{B}</span> containing information to verify whether the block is valid. Each block is associated with a unique party called its block producer. A block <span class="math">B_{i}=(\\mathrm{sn}_{i},\\mathrm{st}_{i},\\pi_{i}^{B},d_{i},\\mathsf{b}\\text{-}\\mathsf{p}\\mathsf{k}_{i},b\\text{-}\\mathrm{sig}_{i})</span> generated with a serial number <span class="math">\\mathrm{sn}_{i}\\in\\mathbb{N}</span> contains the current state <span class="math">\\mathrm{st}_{i}</span>, a block proof <span class="math">\\pi_{i}^{B}</span>, data <span class="math">d_{i}\\in\\{0,1\\}^{*}</span>, the block producer’s public key <span class="math">\\mathsf{b}\\text{-}\\mathsf{p}\\mathsf{k}_{i}</span> and a signature <span class="math">b\\text{-}\\mathrm{sig}_{i}</span> on <span class="math">(\\mathrm{sn}_{i},\\mathrm{st}_{i},\\pi_{i}^{B},d_{i})</span> with respect to <span class="math">\\mathsf{b}\\text{-}\\mathsf{p}\\mathsf{k}_{i}</span>.</p>
+
+    <p class="text-gray-300">######</p>
+
+    <p class="text-gray-300">A blockchain is a sequence of blocks <span class="math">\\mathcal{C}=(B_{1},\\ldots,B_{n})</span> associated with a strictly increasing sequence of serial numbers. The first block <span class="math">B_{1}</span> is called the genesis block. The length <span class="math">\\mathsf{len}(\\mathcal{C})=n</span> of a blockchain is the number of blocks in it.</p>
+
+    <h4 id="sec-8" class="text-lg font-semibold mt-6">Succinct blockchains.</h4>
+
+    <p class="text-gray-300">We are now ready to introduce the definition of a succinct blockchain protocol. The definition will also introduce the notion of a blockchain summary, which, at a high level, is some summary of a blockchain such that the summary is valid if and only if the blockchain is valid. The concept of a blockchain underlying a blockchain summary will not be evident from the definition of a succinct blockchain protocol itself. However, it will be captured via the notion of chain extractability in Definition 2.4.</p>
+
+    <h6 id="sec-9" class="text-base font-medium mt-4">Definition 2.2 (Succinct Blockchain Protocol).</h6>
+
+    <p class="text-gray-300">A succinct blockchain protocol <span class="math">\\Pi</span> is characterized by a tuple of five PPT algorithms (VerifyConsensus, UpdateConsensus, VerifyBlock, UpdateChain, VerifyChain) syntactically defined as follows.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>VerifyConsensus(consensusState, consensusProof) <span class="math">\\rightarrow\\top/\\bot</span> : This algorithm takes as input a consensusState and a consensusProof, verifies according to some notion of correctness and outputs <span class="math">\\top</span> or <span class="math">\\bot</span>, respectively.</li>
+
+      <li>UpdateConsensus(consensusState, consensusProof) <span class="math">\\rightarrow</span> nextConsensusState : This algorithm also takes as input a consensusState and a consensusProof and outputs an updated consensus state.</li>
+
+      <li>VerifyChainSummary(<span class="math">\\mathcal{S}_{i}</span>) <span class="math">\\rightarrow\\top/\\bot</span> : This algorithms verifies whether a given blockchain summary <span class="math">\\mathcal{S}_{i}</span> is valid or not.</li>
+
+      <li>VerifyBlock(<span class="math">\\mathcal{S}_{i-1},B_{i}</span>) <span class="math">\\rightarrow\\top/\\bot</span> : This algorithms verifies whether a given block <span class="math">B_{i}</span> is valid with respect to a given blockchain summary <span class="math">\\mathcal{S}_{i-1}</span>. As a part of the verification, it checks that VerifyConsensus(consensusState_{i-1}, consensusProof<span class="math">{}_{i}\\rightarrow\\top</span>, where, <span class="math">\\mathcal{S}_{i-1}</span> contains consensusState_{i-1} and <span class="math">\\pi_{i}^{B}</span> contains consensusProof<span class="math">{}_{i}</span>, where, <span class="math">B_{i}=(\\cdot,\\cdot,\\pi_{i}^{B},\\cdot,\\cdot,\\cdot)</span>.</li>
+
+      <li>UpdateChainSummary(<span class="math">\\mathcal{S}_{i-1},B_{i}</span>) <span class="math">\\rightarrow\\mathcal{S}_{i}</span> : This algorithm takes a blockchain summary <span class="math">\\mathcal{S}_{i-1}</span> and a new block <span class="math">B_{i}</span> and outputs an updated blockchain summary <span class="math">\\mathcal{S}_{i}</span>.</li>
+
+    </ul>
+
+    <p class="text-gray-300">The protocol satisfies the following succinctness property.</p>
+
+    <p class="text-gray-300">Each of the algorithms VerifyBlock, VerifyChainSummary, and VerifyConsensus runs in time <span class="math">\\mathsf{poly}(\\lambda)</span>. Furthermore, the size of the blockchain summary <span class="math">\\mathcal{S}_{i}</span> at any time <span class="math">t_{i}</span> is of size <span class="math">\\mathsf{poly}(\\lambda)</span> (i.e., constant in the number of chain summary updates).</p>
+
+    <h6 id="sec-10" class="text-base font-medium mt-4">Remark 2.1 (Consensus mechanism).</h6>
+
+    <p class="text-gray-300">The algorithm pair (VerifyConsensus, UpdateConsensus) is said to constitute a consensus mechanism. The following</p>
+
+    <p class="text-gray-300">are some examples of how the notion can be instantiated. For proof-of-work protocols (e.g. Bitcoin), the consensus state would contain several previous difficulty targets and block times (from which to compute the current difficulty target) and a consensus proof would contain the proof-of-work itself along with a new time to update the state with. For an Ouroboros Praos-style <em>[13]</em> proof-of-stake mechanism, the consensus state would contain the current random seed, the (Merkle root of) the current epoch’s stakes, and some information about the previous blocks and block times. A consensus proof would contain a public-key and a verifiable random function (VRF) evaluation proof meeting the threshold target corresponding to that public-key and the stakes indicated in the consensus state.</p>
+
+    <h4 id="sec-11" class="text-lg font-semibold mt-6">Types of Roles.</h4>
+
+    <p class="text-gray-300">Per the above definition, there are three kinds of roles in a succinct blockchain. (There can be additional roles depending on the instantiation.)</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Full node: In this role, a party keeps track of the blockchain summary and verifies it.</li>
+
+      <li>Block producer: In this role, a party produces a block.</li>
+
+      <li>Blockchain summary producer: In this role, a party generates blockchain summaries.</li>
+
+    </ol>
+
+    <p class="text-gray-300">Note that the significant advantage of a succinct blockchain is that any party with reasonable resources can be a full node, due to the succinctness property. That is, a succinct blockchain does not require the role of light clients to cope with growing blockchain sizes.</p>
+
+    <h4 id="sec-12" class="text-lg font-semibold mt-6">Relationship between blockchain summary and underlying blockchain.</h4>
+
+    <p class="text-gray-300">Having defined a succinct blockchain in terms of blockchain summaries, we will now show how the summaries are related to the underlying blockchains. Roughly speaking, we would like that the blockchain summaries inherit validity of underlying blockchains. That is, a summary is valid if and only if the underlying blockchain is valid.</p>
+
+    <p class="text-gray-300">Furthermore, given a blockchain summary, we arrive at its underlying blockchain through the notion of extractability. Specifically, we define extraction recursively; that is, given a blockchain summary with serial number <span class="math">i</span>, an extractor (using some additional information) extracts a blockchain summary with serial number <span class="math">i-1</span> and a block <span class="math">B_{i}</span>, wherein all the components satisfy the necessary verification tests. The additional information the extractor uses is the execution transcript which we call the execution trace formally defined below.</p>
+
+    <h6 id="sec-13" class="text-base font-medium mt-4">Definition 2.3 (Execution Trace, Blockchain Summary in an Execution Trace).</h6>
+
+    <p class="text-gray-300">For an (adaptive) adversary <span class="math">\\mathcal{A}</span> and an environment <span class="math">\\mathcal{Z}</span>, an execution trace <span class="math">\\mathcal{E}</span> of a blockchain protocol <span class="math">\\Pi</span> by a set of parties <span class="math">\\mathcal{U}</span> with security parameter <span class="math">\\lambda</span> is a transcript including the inputs provided by <span class="math">\\mathcal{Z}</span>, the random coins of the</p>
+
+    <p class="text-gray-300">parties and the random coins of the adversary. This data determines the entire dynamics of the protocol: messages sent and delivered, the internal states of the parties at each step and the set of corrupt parties at each step. We denote the trace by  <span class="math">\\mathcal{E} \\gets \\Pi(1^A, \\mathcal{U})</span>  or simply  <span class="math">\\mathcal{E} \\gets \\Pi(\\mathcal{U})</span> .</p>
+
+    <p class="text-gray-300">For every blockchain protocol  <span class="math">\\varPi</span> , there exists an algorithm CurrChain, such that for every set of PPT parties  <span class="math">\\mathcal{U}</span> ,  <span class="math">\\mathcal{E} \\gets \\varPi(\\mathcal{U})</span> , time  <span class="math">t</span> , honest party  <span class="math">P \\in \\mathcal{U}</span> , we have that CurrChain outputs a valid blockchain summary; i.e.,  <span class="math">\\mathrm{CurrChain}(\\mathcal{E}, P, t) \\to S</span>  and  <span class="math">\\mathrm{VerifyChainSummary}(S) \\to \\top</span> .  <span class="math">S</span>  is said to be the blockchain summary in  <span class="math">P</span> 's view of  <span class="math">\\mathcal{E}</span>  at time  <span class="math">t</span> . A blockchain summary in an execution trace  <span class="math">\\mathcal{E}</span>  is a blockchain summary  <span class="math">\\mathcal{C}</span>  in any honest party's view at any time  <span class="math">t</span> ; we denote this by  <span class="math">S \\in \\mathcal{E}</span> .</p>
+
+    <p class="text-gray-300">We will now define the notion of chain extractability. This definition utilizes a notion of 'serial number of a blockchain summary'. Intuitively, it is just a natural number  <span class="math">j</span>  that represents the number of blocks in the underlying blockchain. It is indicated in the subscript as  <span class="math">S_{j}</span> .</p>
+
+    <p class="text-gray-300">Definition 2.4 (Chain Extractability). A succinct blockchain protocol  <span class="math">\\varPi=</span>  (VerifyConsensus, UpdateConsensus, VerifyBlock, UpdateChain, VerifyChain) is said to satisfy chain extractability if the following probability  <span class="math">\\mathsf{Adv}_{\\varPi,\\mathcal{U}}(1^A)</span>  is negligibly close to 1 for every  <span class="math">\\mathcal{U} = \\{\\mathcal{A}_i\\}_i</span> , a set of PPT algorithms. For every  <span class="math">\\mathcal{A}_i</span> , there exists a PPT algorithm  <span class="math">\\mathsf{Ext}_{\\mathcal{A}_i}</span> , called an extractor, and  <span class="math">\\mathsf{Adv}_{\\varPi,\\mathcal{U}}</span>  is defined as follows.</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">AdvΠ,U(1A) := Pr</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">VerifyChainSummary(Sj-1) = T ∧ VerifyBlock(Sj-1,Bj) = T ∧ : ∀Sj ∈ E, ∃Ai ∈ U B1 is a Genesis block ∧ (Sj-1,Bj) ← ExtAi(E,Sj,r) S0 is an empty string</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">|   |  |</p>
+
+    <p class="text-gray-300">where,  <span class="math">r</span>  is the random coins of  <span class="math">\\mathcal{A}_i</span> .</p>
+
+    <p class="text-gray-300">Definition 2.5 (Blockchain underlying a Blockchain Summary). Let  <span class="math">\\varPi</span>  be a blockchain protocol which satisfies chain extractability. Let  <span class="math">\\mathcal{E}</span>  be an execution of the protocol by a set of parties  <span class="math">\\mathcal{U}</span> . Let  <span class="math">P\\in \\mathcal{U}</span>  be an honest party that has been active since the beginning of the protocol. Let  <span class="math">S_{\\ell}</span>  be the blockchain in  <span class="math">\\mathcal{E}&#x27;</span> . For every  <span class="math">1\\leq i\\leq \\ell</span> , let  <span class="math">B_{i}</span>  be a block guaranteed by the property of chain extractability. The sequence  <span class="math">(B_{1},\\ldots ,B_{\\ell})</span>  is called the blockchain underlying  <span class="math">S_{\\ell}</span> .</p>
+
+    <p class="text-gray-300">We will now enlist the security properties of a succinct blockchain. Rather than the blockchain summaries, the properties pertain to the underlying blockchain guaranteed by the chain extractability property.</p>
+
+    <p class="text-gray-300">Consider a blockchain protocol  <span class="math">\\varPi</span>  and an execution  <span class="math">\\mathcal{E}</span> . Let  <span class="math">\\mathcal{C}</span>  be the underlying blockchain of the blockchain summary  <span class="math">S</span>  in  <span class="math">\\mathcal{E}</span> . We recall the following</p>
+
+    <p class="text-gray-300">properties that were first rigorously formulated in <em>[15]</em>. We will assume that time is divided into predefined slots.</p>
+
+    <p class="text-gray-300">The blockchains <span class="math">\\mathcal{C}_{1},\\mathcal{C}_{2}</span> corresponding to two alert parties at the onset of the slots <span class="math">\\mathsf{sl}_{1}\\leq\\mathsf{sl}_{2}</span> are such that <span class="math">\\mathcal{C}_{1}^{\\lceil k\\rceil}\\preccurlyeq\\mathcal{C}_{2}</span>, where <span class="math">\\mathcal{C}_{1}^{\\lceil k\\rceil}</span> denotes the blockchain obtained by removing the last <span class="math">k</span> blocks from <span class="math">\\mathcal{C}_{1}</span> and <span class="math">\\preccurlyeq</span> denotes the prefix relation.</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Consider <span class="math">\\mathcal{C}</span>, a blockchain possessed by an alert party at the onset of a slot <span class="math">\\mathsf{sl}</span>. Let <span class="math">\\mathsf{sl}_{1}</span> and <span class="math">\\mathsf{sl}_{2}</span> be two previous slots for which <span class="math">\\mathsf{sl}_{1}+s\\leq\\mathsf{sl}_{2}\\leq\\mathsf{sl}</span>, so <span class="math">\\mathsf{sl}_{1}</span> is at least <span class="math">s</span> slots prior to <span class="math">\\mathsf{sl}_{2}</span>. Then $</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mathcal{C}[\\mathsf{sl}_{1},\\mathsf{sl}_{2}]</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\geq\\tau\\cdot s<span class="math">. We call </span>\\tau$ the speed coefficient.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">Consider any portion of length at least <span class="math">k</span> of the blockchain corresponding by an alert party at the onset of a slot; the ratio of blocks originating from alert parties in this portion is at least <span class="math">\\mu</span>, called the chain quality coefficient.</p>
+
+    <h2 id="sec-15" class="text-2xl font-bold">3 Preliminaries</h2>
+
+    <p class="text-gray-300">In this section we provide several requisite definitions of SNARK systems which we use to construct a succinct blockchain.</p>
+
+    <h3 id="sec-16" class="text-xl font-semibold mt-8">Notations.</h3>
+
+    <p class="text-gray-300">We use the abbreviation PPT to stand for probabilistic polynomial time. We use <span class="math">\\lambda</span> to denote the security parameter.</p>
+
+    <h6 id="sec-17" class="text-base font-medium mt-4">Definition 3.1 (SNARKs).</h6>
+
+    <p class="text-gray-300">Let <span class="math">R=\\{(\\phi,w)\\}</span> be a polynomial relation of statements <span class="math">\\phi</span> and witnesses <span class="math">w</span>. A Succinct Non-interactive ARgument of Knowledge for <span class="math">R</span> is a quadruple of algorithms (sSetup,sProve,sVerify,sSim), which is complete, succinct and knowledge sound (defined below) and works as follows:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li><span class="math">(\\operatorname{srs},\\tau)\\leftarrow\\textsf{sSetup}(R)</span>: The setup algorithm generates the structured random string <span class="math">\\operatorname{srs}</span> and a trapdoor <span class="math">\\tau</span>.</li>
+
+      <li><span class="math">\\pi\\leftarrow\\textsf{sProve}(\\operatorname{srs},\\phi,w)</span>: the prover algorithm generates a proof <span class="math">\\pi</span>.</li>
+
+      <li><span class="math">\\top/\\bot\\leftarrow\\textsf{sVerify}(\\operatorname{srs},\\phi,\\pi)</span>: the verifier algorithm verifies a given proof.</li>
+
+      <li><span class="math">\\pi\\leftarrow\\textsf{sSim}(\\operatorname{srs},\\phi,\\tau)</span>: the PPT simulator simulates a proof without the witness but by using the trapdoor.</li>
+
+    </ul>
+
+    <h3 id="sec-18" class="text-xl font-semibold mt-8">Completeness.</h3>
+
+    <p class="text-gray-300">It simply states that given a true statement, a prover with a witness can convince the verifier. That is, for every <span class="math">(\\operatorname{srs},\\tau)\\leftarrow\\textsf{sSetup}(R)</span> and <span class="math">\\pi\\leftarrow\\textsf{sProve}(\\operatorname{srs},\\phi,w)</span>, we have that <span class="math">\\top\\leftarrow\\textsf{sVerify}(\\operatorname{srs},\\phi,\\pi)</span>.</p>
+
+    <h3 id="sec-19" class="text-xl font-semibold mt-8">Succinctness.</h3>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">It states that the proof size $</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\pi</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"><span class="math"> is </span>\\mathsf{poly}(\\lambda)$.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">##</p>
+
+    <h5 id="sec-20" class="text-base font-semibold mt-4">Knowledge soundness.</h5>
+
+    <p class="text-gray-300">It states that whenever somebody produces a valid argument it is possible to extract a valid witness from their internal data. Formally, for every PPT adversary <span class="math">\\mathcal{A}</span>, there exists a PPT extractor <span class="math">\\chi_{\\mathcal{A}}</span>, such that the following probability is negligible in <span class="math">\\lambda</span>:</p>
+
+    <p class="text-gray-300">\\[ \\Pr\\left[\\begin{matrix}(\\text{srs},\\tau)\\leftarrow\\text{sSetup}(R)&(\\phi,w)\\notin R\\\\ (\\phi,\\pi)\\leftarrow\\mathcal{A}(\\text{srs})&:\\hskip 56.9055pt\\wedge\\\\ w\\leftarrow\\chi_{\\mathcal{A}}(\\text{trans}_{\\mathcal{A}})&{\\text{sVerify}}(\\text{srs},\\phi,\\pi)\\rightarrow\\top\\end{matrix}\\right] \\]</p>
+
+    <h5 id="sec-21" class="text-base font-semibold mt-4">Simulation-extractable SNARKs.</h5>
+
+    <p class="text-gray-300">A simulation-extractable SNARK is a SNARK that achieves a higher level of security, namely, simulation extractability. The notion of simulation extractability is similar to the notion of knowledge soundness except that an adversary gets to see also simulated proofs.</p>
+
+    <h5 id="sec-22" class="text-base font-semibold mt-4">Signatures of Knowledge (SoK).</h5>
+
+    <p class="text-gray-300">An SoK is a generalization of digital signatures by replacing a public key with an instance in an NP language. For a formal definition, see <em>[16]</em>. The notion of SoKs is related to the notion of simulation-extractable non-interactive zero-knowledge arguments, such as, SNARKs. In fact, <em>[16]</em> showed that the former can be constructed based on the latter. In this work, we rely on SoKs constructed using SNARKs, thereby being able to exploit succinctness of such SoKs.</p>
+
+    <h2 id="sec-23" class="text-2xl font-bold">4 Coda: A Succinct Blockchain based on Recursive SNARKs</h2>
+
+    <p class="text-gray-300">In this section, we introduce a succinct blockchain construction called Coda based on SNARKs. At a high-level, validity of a blockchain’s sequence of transitions is proved using a SNARK. Then, the blockchain proof consists of this SNARK and omits the detailed list of blocks, since verifying the SNARK verifies the embedded blocks. Succinctness of SNARK ensures succinctness of the blockchain.</p>
+
+    <p class="text-gray-300">Note that a blockchain is dynamic and new blocks keep getting added to it. However, we would like to ensure succinctness at any given point in time. Therefore, as the blockchain “grows”, we compute a new SNARK proof that not only validates the new blocks, but also the existing SNARK proof itself. The notion of a SNARK proof that attests to the verifiability of another SNARK proof is the notion of “incrementally-computable SNARK” <em>[24, 8, 6]</em>.</p>
+
+    <p class="text-gray-300">We will first specify the SNARK construction and then demonstrate how it can be employed to achieve a succinct blockchain.</p>
+
+    <h3 id="sec-24" class="text-xl font-semibold mt-8">4.1 Incrementally-computable SNARKs</h3>
+
+    <p class="text-gray-300">We now recall the notion of incrementally-computable SNARKs described variously in <em>[24]</em>, <em>[8]</em> and <em>[6]</em>. Instead of phrasing the construction in the language</p>
+
+    <p class="text-gray-300">of incrementally verifiable computation as in <em>[24]</em> or in the language of PCD (proof-carrying data) systems as in <em>[8]</em> and <em>[6]</em>, we opt to describe it in terms of state-transition systems as it maps more clearly onto the application of producing a succinct blockchain.</p>
+
+    <p class="text-gray-300">We will first recall the definition of a state transition system.</p>
+
+    <h6 id="sec-25" class="text-base font-medium mt-4">Definition 4.1 (State transition system).</h6>
+
+    <p class="text-gray-300">A state transition system is a tuple <span class="math">(\\mathcal{L},\\mathrm{T},\\mathrm{Update})</span>, where <span class="math">\\mathcal{L}</span> is the set of states, <span class="math">\\mathrm{T}</span> is the set of transitions and <span class="math">\\mathrm{Update}</span> is a (non-deterministic) poly-time computable function <span class="math">\\mathrm{Update}\\colon\\mathrm{T}\\times\\mathcal{L}\\to\\mathcal{L}</span>. <span class="math">\\mathrm{Update}</span> may also “throw an exception” (i.e., fail to produce a new state for certain inputs). Moreover, elements in <span class="math">\\mathcal{L}</span> and <span class="math">\\mathrm{T}</span> need to be representable by bit-strings of length <span class="math">\\mathsf{poly}(\\lambda)</span>.</p>
+
+    <p class="text-gray-300">We now define SNARKs for state transition systems. At a high level, we would like <span class="math">\\mathsf{poly}(\\lambda)</span>-size proofs (which are verifiable in <span class="math">\\mathsf{poly}(\\lambda)</span> time) which attest to statements of the form “there exist a state <span class="math">\\sigma_{1}</span> and a sequence of transitions <span class="math">t_{1},\\ldots,t_{k}\\in\\mathrm{T}</span> such that <span class="math">\\mathrm{Update}(t_{k},\\mathrm{Update}(t_{k-1},\\ldots,\\mathrm{Update}(t_{1},\\sigma_{1})))=\\sigma_{2}</span>”. In other words, we would like succinct certificates of the existence of state-transition sequences joining two states. The application to blockchains is the following: we will take our state to be the database of accounts (along with some metadata needed for correctly validating new blocks) and transitions to be blocks.</p>
+
+    <h6 id="sec-26" class="text-base font-medium mt-4">Definition 4.2 (Incrementally-computable SNARKs).</h6>
+
+    <p class="text-gray-300">An incrementally-computable SNARK for a state transition system <span class="math">(\\mathcal{L},\\mathrm{T},\\mathrm{Update})</span> is a tuple of algorithms (sSetup, sProve, sVerify, sSim) such that the following holds. Suppressing parameter generation and passing the parameters to sProve and sVerify,</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>(sSetup, sProve, sVerify, sSim) is a SNARK.</li>
+
+    </ol>
+
+    <p class="text-gray-300">(sSetup, sProve, sVerify, sSim) is a SNARK for the relation <span class="math">R=\\{(\\sigma_{i+k}),</span> <span class="math">\\sigma_{i},t_{i+1},\\ldots,t_{i+k})\\}</span>, where, <span class="math">\\sigma_{i+k}=\\mathrm{Update}(t_{i+k},\\mathrm{Update}(t_{i+k-1},\\ldots,\\mathrm{Update}</span> <span class="math">(t_{i+1},\\sigma_{i})))</span> for any <span class="math">k</span>.</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>(sSetup, sProve, sVerify, sSim) is succinct.</li>
+
+    </ol>
+
+    <p class="text-gray-300">Every honestly generated proof has size <span class="math">\\mathsf{poly}(\\lambda)</span> and for any <span class="math">\\pi</span>, <span class="math">\\sigma</span>, we have that <span class="math">\\mathsf{sVerify}(\\sigma,\\pi)</span> runs in time <span class="math">\\mathsf{poly}(\\lambda)</span>.</p>
+
+    <h4 id="sec-27" class="text-lg font-semibold mt-6">4.1.1 Incrementally-computable SNARKs using Recursive Proof Composition</h4>
+
+    <p class="text-gray-300">Naïve recursive composition is theoretically viable, since, for a SNARK, proof verification is asymptotically cheaper than merely verifying the corresponding NP statement. However, it is extremely expensive. Although SNARK verifiers execution is quite fast – in the order of just a few milliseconds on a desktop computer, generating a SNARK proof to attest to an accepting verifier circuit is expensive. This is because, executing the verifiers still takes millions of steps</p>
+
+    <p class="text-gray-300">in computation, proving which is impractical even for a single layer of recursion, as explained in <em>[6]</em>.</p>
+
+    <p class="text-gray-300">To address this, we employ the “cycle of elliptic curves” technique (as described in <em>[6]</em>) in which two SNARK constructions – classically called Tick and Tock – are designed such that each can efficiently verify proofs from the other. Then, to exploit the parallelism mentioned in Remark LABEL:TICK, we define the Tick and Tock SNARKs to result in a “binary tree of proofs” as follows. A Tick SNARK is used to certify state transitions at the “base” of the tree. Then, to enable efficient merging of those proofs, each of them is “wrapped” using a Tock SNARK. Then, two Tock proofs are merged using a Tick SNARK.</p>
+
+    <p class="text-gray-300">Therefore, note that, we will need two Tick SNARKs - one for proving state transitions and another for merging two Tock proofs. And we will need one Tock SNARK to wrap a Tick proof into a Tock proof. More formally:</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>The base SNARK. A Tick-based SNARK for certifying single state transitions, which we will call the “base” SNARK.</li>
+
+    </ol>
+
+    <p class="text-gray-300">Statement: <span class="math">(\\sigma_{1},\\sigma_{2})\\in\\Sigma^{2}</span>.</p>
+
+    <p class="text-gray-300">Witness: <span class="math">t\\in\\mathrm{T}</span>.</p>
+
+    <p class="text-gray-300">Computation: There exists <span class="math">t\\in\\mathrm{T}</span> such that <span class="math">\\mathrm{Update}(t,\\sigma_{1})=\\sigma_{2}</span>.</p>
+
+    <p class="text-gray-300">We will denote the proof by <span class="math">\\sigma_{1}\\xrightarrow{}\\textsc{Tick}\\sigma_{2}</span>.</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>The merge SNARK. A Tick-based SNARK for merging two Tock proofs, which we will call the “merge” SNARK.</li>
+
+    </ol>
+
+    <p class="text-gray-300">Statement: <span class="math">(\\sigma_{1},\\sigma_{3})\\in\\Sigma^{2}</span>.</p>
+
+    <p class="text-gray-300">Witness: <span class="math">\\sigma_{2}\\in\\Sigma</span> and Tock-proofs <span class="math">\\pi_{1},\\pi_{2}</span>.</p>
+
+    <p class="text-gray-300">Computation: There exist <span class="math">\\sigma_{2}\\in\\Sigma</span> and Tock-proofs <span class="math">\\pi_{1},\\pi_{2}</span> such that <span class="math">\\mathsf{Verify}_{\\mathsf{Tock}}((\\sigma_{1},\\sigma_{2}),\\pi_{1})</span> and <span class="math">\\mathsf{Verify}_{\\mathsf{Tock}}((\\sigma_{2},\\sigma_{3}),\\pi_{2})</span></p>
+
+    <p class="text-gray-300">We will denote the proof by <span class="math">\\sigma_{1}\\xrightarrow{}\\textsc{Tick}\\sigma_{3}</span>. <span class="math">\\sigma_{1}</span> to <span class="math">\\sigma_{2}</span> and a SNARK proof certifying the existence of transitions from <span class="math">\\sigma_{2}</span> to <span class="math">\\sigma_{3}</span>.</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>The wrap SNARK. A Tock-based SNARK for wrapping a Tick proof, which we will call the “wrap” SNARK.</li>
+
+    </ol>
+
+    <p class="text-gray-300">Statement: <span class="math">(\\sigma_{1},\\sigma_{2})\\in\\Sigma^{2}</span>.</p>
+
+    <p class="text-gray-300">Witness: A Tick proof <span class="math">\\pi</span>.</p>
+
+    <p class="text-gray-300">Computation: There exists a Tick proof <span class="math">\\pi</span> such that <span class="math">\\mathsf{Verify}_{\\mathsf{Tick}}((\\sigma_{1},\\sigma_{2}),\\pi)</span>.</p>
+
+    <p class="text-gray-300">We will denote the proof by <span class="math">\\sigma_{1}\\xrightarrow{}\\textsc{Tock}\\sigma_{2}</span>.This SNARK merely wraps a Tick SNARK into a Tock SNARK so that another Tick SNARK can verify it efficiently.</p>
+
+    <h4 id="sec-28" class="text-lg font-semibold mt-6">4.1.2 An example transition system</h4>
+
+    <p class="text-gray-300">To illustrate this, we’ll show how it can be applied to prove statements in a very simple transition system where each state is simply the hash H of the previous</p>
+
+    <p class="text-gray-300">state. Assume the current state is  <span class="math">x&#x27; = \\underbrace{\\mathsf{H}(\\mathsf{H}(\\ldots\\mathsf{H}(x)\\ldots))}_{k}</span>  for some  <span class="math">k</span> , starting</p>
+
+    <p class="text-gray-300">from an initial state  <span class="math">x</span> . We apply the above technique with our state  <span class="math">\\Sigma</span>  being the union of domain and range of  <span class="math">\\mathsf{H}</span> ,  <span class="math">T</span>  being a singleton set containing an empty string, and the update function being  <span class="math">\\mathrm{Update}(t,x) = \\mathsf{H}(x)</span> .</p>
+
+    <p class="text-gray-300">This gives us a SNARK for proving that there exists a sequence of transitions  <span class="math">(t_1, \\ldots, t_k)</span>  such that  <span class="math">\\mathrm{Update}(t_k, \\mathrm{Update}(t_{k-1}, \\ldots, \\mathrm{Update}(t_1, x), \\ldots)) = x&#x27;</span> , which since  <span class="math">\\mathrm{Update}(t, y) = \\mathsf{H}(y)</span>  gives us exactly what we want. For strings  <span class="math">x_0, x_4</span>  with  <span class="math">\\mathsf{H}(\\mathsf{H}(\\mathsf{H}(x_0)))) = x_4</span> , the tree of SNARK proofs appears as follows:</p>
+
+    <p class="text-gray-300">!<a href="img-2.jpeg">img-2.jpeg</a></p>
+
+    <p class="text-gray-300">In this section, we present the Coda protocol, a succinct blockchain based on incrementally-computable SNARKs. Intuitively, blockchain updates can be seen as a state transition system, and thus incrementally-computable SNARKs (which are simply SNARKs for state transition systems) can enable the construction of succinct blockchains.</p>
+
+    <p class="text-gray-300">In this section, we present the Coda protocol. Specifically, we discuss the details for generic Turing-complete functionalities that transform a database. Then, in Section 5, we will instantiate the protocol with the payments functionality.</p>
+
+    <p class="text-gray-300">At a high level, we will treat a blockchain as a state transition function. Consider, for example, a UTXO (Unpaid Transaction Output) model wherein every party has an 'account' with some 'balance', like in Bitcoin. The state of the blockchain is a database (such as a Merkle tree) of all the account balances. A transition is transfer of some part of the balance from one account to another account. While this is just an example, our protocol is generic and considers any state set  <span class="math">\\Sigma&#x27;</span>  and a Turing-complete transition function  <span class="math">\\mathrm{Update}&#x27;</span>  with some transition set  <span class="math">\\mathrm{T}&#x27;</span> ; that is, we begin with  <span class="math">(\\Sigma&#x27;, \\mathrm{T}&#x27;, \\mathrm{Update}&#x27;)</span> .</p>
+
+    <p class="text-gray-300">Then, the Coda protocol for  <span class="math">(\\Sigma&#x27;, \\mathrm{T}&#x27;, \\mathrm{Update}&#x27;)</span>  is constructed as follows. We employ our consensus protocol, namely Ouroboros Samasika, that we present in Section 7. We will combine  <span class="math">(\\Sigma&#x27;, \\mathrm{T}&#x27;, \\mathrm{Update}&#x27;)</span>  and the consensus protocol</p>
+
+    <p class="text-gray-300">to construct a new state transition system (<span class="math">\\Sigma</span>,T,Update), mainly to subsume consensus verification in the update function. An incrementally-computable SNARK for (<span class="math">\\Sigma</span>,T,Update) is employed and the proofs attest to the current state being computed correctly. The blockchain summary simply consists of the state in <span class="math">\\Sigma</span> and the proof. A blockchain summary producer will just be a prover and a full node will only need to perform proof verification to verify the blockchain correctness.</p>
+
+    <p class="text-gray-300">Having described the protocol at an intuitive level, we will now discuss the details. Given (<span class="math">\\Sigma^{\\prime}</span>,T^{′},Update^{′}) and a collision-resistant hash function H, the protocol components are as follows.</p>
+
+    <p class="text-gray-300">The Coda Protocol</p>
+
+    <p class="text-gray-300">The Coda protocol has the following components.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Consensus mechanism (UpdateConsensus, VerifyConsensus): The consensus mechanism is the Ouroboros Samasika protocol that we present in Section 7. In Ouroboros Samasika VerifyConsensus runs in time <span class="math">\\mathsf{poly}(\\lambda)</span>, as required.</li>
+
+      <li>Blocks: Consider a transition <span class="math">t_{i}^{\\prime}\\in Tau^{\\prime}</span> that acts on a state <span class="math">\\sigma_{i-1}^{\\prime}</span>. The corresponding block <span class="math">B_{i}=(\\mathrm{sn}_{i},\\mathrm{st}_{i},\\pi_{i}^{B},d_{i},\\mathsf{b-pk}_{i},b\\text{-sig}_{i})</span> is constructed with <span class="math">\\mathrm{st}_{i}=\\sigma_{i-1}^{\\prime}</span>, <span class="math">\\pi_{i}^{B}=\\mathrm{consensusProof}_{i}</span> and <span class="math">d_{i}=t_{i}^{\\prime}</span>.</li>
+
+      <li>State transition system for SNARK: Consider the state transition system (<span class="math">\\Sigma</span>,T,Update) defined as follows: <span class="math">\\Sigma=\\{\\mathsf{H}(\\sigma^{\\prime})</span>, <span class="math">\\mathrm{consensusState}\\}_{\\sigma^{\\prime}\\in\\Sigma^{\\prime},\\mathrm{consensusState}}</span>. A transition is a block. The function <span class="math">\\mathrm{Update}(B_{i},\\sigma_{i-1})</span> verifies if <span class="math">\\mathsf{H}(\\mathrm{st}_{i})=\\sigma_{i-1}</span>, the signature verifies in the block verifies and that VerifyConsensus(<span class="math">\\mathrm{consensusState}_{i-1}</span>, <span class="math">\\mathrm{consensusProof}_{i}</span>), where <span class="math">\\mathrm{consensusState}_{i-1}</span> is part of <span class="math">\\sigma_{i-1}</span> and <span class="math">\\pi_{i}^{B}</span> contains <span class="math">\\mathrm{consensusProof}_{i}</span>.</li>
+
+      <li>Blockchain summary: The blockchain summary consists of a state in <span class="math">\\Sigma</span> and a proof <span class="math">\\mathrm{snark}_{i}</span>.</li>
+
+      <li>VerifyChainSummary(<span class="math">\\mathcal{S}_{i-1}=(\\sigma_{i},\\mathrm{snark}_{i})</span>): As mentioned earlier, this algorithm simply verifies the proof <span class="math">\\mathrm{snark}_{i}</span> against the statement <span class="math">\\sigma_{i}</span>.</li>
+
+      <li>VerifyBlock(<span class="math">\\mathcal{S}_{i_{1}}</span>, <span class="math">B_{i}</span>): This algorithm, simply checks the consistencies, namely, verifying consensus, verifying signature and verifying that the state in <span class="math">\\mathcal{S}_{i_{1}}</span> is the hash of the state in the block.</li>
+
+      <li>UpdateChainSummary(<span class="math">\\mathcal{S}_{i-1}</span>, <span class="math">B_{i}</span>): Let <span class="math">\\mathcal{S}_{i-1}=(\\sigma_{i-1},\\mathrm{snark}_{i-1})</span>. This algorithm runs the Update function as <span class="math">\\mathrm{Update}(B_{i},\\sigma_{i-1})</span> to obtain <span class="math">\\sigma_{i}</span>. Then, it verifies the proof <span class="math">\\mathrm{snark}_{i-1}</span>. Finally, it runs the prover to obtain the new proof <span class="math">\\mathrm{snark}_{i}</span></li>
+
+    </ul>
+
+    <p class="text-gray-300">Figure 3: The Coda protocol.</p>
+
+    <p class="text-gray-300">Remark 4.1. We assume that the length of the blockchain does not affect chain extractability, because no evidence suggests otherwise for the constructions of SNARKs that we use, as also noted in [7].</p>
+
+    <p class="text-gray-300">In this section, we will focus on the payments application, where each party has an account with some balance and a transaction moves a part of its balance to a different party's account.</p>
+
+    <p class="text-gray-300">In the following, we will first specify the payments application framework followed by the underlying SNARK construction and then present the Coda protocol for payments.</p>
+
+    <p class="text-gray-300">Let  <span class="math">\\mathcal{U}</span>  be a set of parties. The framework consists of the following notions.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Accounts. Every party is said to have an account characterized by  <span class="math">(\\mathsf{pk},\\mathsf{balance},\\mathsf{none})</span> , with  <span class="math">\\mathsf{pk}</span>  the party's public key for authorizing payments, balance  <span class="math">\\in \\mathbb{N}</span> , and  <span class="math">\\mathsf{none} \\in \\mathbb{I}</span>  which functions to prevent transaction replay.</li>
+
+      <li>Ledger. We define a ledger as the list of all the accounts. We will refer to a party's account by  <span class="math">\\mathsf{L}(\\mathsf{pk})</span>  and the fields of the account, such as balance, by  <span class="math">\\mathsf{L}(\\mathsf{pk})</span> .balance.</li>
+
+      <li>Transaction. A transaction is a transfer of value amt from a Sender's account  <span class="math">\\mathsf{L}(\\mathsf{pk}_s)</span> . balance to a Receiver's account  <span class="math">\\mathsf{L}(\\mathsf{pk}_r)</span> . balance. It is represented as  <span class="math">\\mathrm{txn} = (\\mathsf{pk}_s, \\mathsf{pk}_r, \\mathrm{amt}, \\mathrm{none}_s, \\mathrm{sig}_s)</span> , where  <span class="math">\\mathsf{pk}_s, \\mathsf{pk}_r</span>  are the Sender's and the Receiver's public keys, respectively,  <span class="math">\\mathrm{none}_s</span>  is the nonce in the Sender's account and  <span class="math">\\mathrm{sig}_s</span>  is a signature on  <span class="math">(\\mathsf{pk}_r, \\mathrm{amt}, \\mathrm{none}_s)</span>  by the Sender.</li>
+
+      <li>Transaction verification. Given a transaction txn and a ledger L, the following algorithm verifies validity of the transaction.</li>
+
+    </ul>
+
+    <p class="text-gray-300">|  VerifyTransaction(txn = (pk_s, pk_r, amt, nonce_s, sig_s), L):  |</p>
+
+    <p class="text-gray-300">| --- |</p>
+
+    <p class="text-gray-300">|  assert (L(pk_s).balance ≥ amt);  |</p>
+
+    <p class="text-gray-300">|  assert (L(pk_s).nonce = nonce_s);  |</p>
+
+    <p class="text-gray-300">|  assert (VerifySig(pk_s, (pk_r, amt, nonce_s), sig_s) = T);  |</p>
+
+    <p class="text-gray-300">|  return T  |</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Ledger update. Given a ledger  <span class="math">\\mathsf{L}</span>  and a set of transactions  <span class="math">\\{\\mathrm{txn} = (\\mathsf{pk}_s, \\mathsf{pk}_r, \\mathrm{amt}, \\mathrm{none}_s, \\mathrm{sig}_s)\\}</span> , the following algorithm processes the set by updating the ledger.</li>
+
+    </ul>
+
+    <p class="text-gray-300">UpdateLedger(L,{txn}):  <span class="math">\\forall \\mathrm{txn}\\in \\{\\mathrm{txn}\\}</span>  -  <span class="math">L(pk_{s})</span>  .balance  <span class="math">\\leftarrow L(pk_{s})</span>  .balance - amt; -  <span class="math">L(pk_{r})</span>  .balance  <span class="math">\\leftarrow L(pk_{r})</span>  .balance + amt; -  <span class="math">L(pk_{s})</span>  .nonce  <span class="math">\\leftarrow L(pk_{s})</span>  .nonce + 1; return L</p>
+
+    <p class="text-gray-300">We will now describe the incrementally-computable SNARK  <span class="math">S</span>  used for constructing our succinct blockchain. Recall that a state transition system characterizes an incrementally-computable SNARK (cf. Definition 4.2).  <span class="math">S</span>  is specified in Figure 4.</p>
+
+    <p class="text-gray-300">Let  <span class="math">\\mathsf{H}</span>  be a collision-resistant hash function.  <span class="math">S</span>  is defined as an incrementally-computable SNARK for the following state transition system  <span class="math">(\\Sigma, \\mathrm{T}, \\mathrm{Update})</span> :</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li><span class="math">\\Sigma</span>  is the set  <span class="math">\\{\\sigma\\}_i</span>  of pairs of ledger hash values and consensus states  <span class="math">\\{(\\text{ledgerHash}_i, \\text{consensusState}_i)\\}</span> .</li>
+
+      <li>T is the set of blocks  <span class="math">B_{i}</span>  is of the form  <span class="math">(i, L_{i-1}, \\text{consensusProof}_i, \\{\\text{txn}_j\\}_j, \\text{b-pk}_i, b\\text{-sig}_i)</span> ,  <span class="math">\\{\\text{txn}_j\\}_j</span>  is a set of transactions and  <span class="math">\\text{b-pk}_i</span>  is a public key for verifying the signature  <span class="math">b\\text{-sig}_i</span> .</li>
+
+      <li>The function  <span class="math">\\mathrm{Update}(t_i, \\sigma_{i-1}) \\to \\sigma_i</span>  is defined as follows:  <span class="math">\\underline{\\mathrm{Update}(t_i, \\sigma_{i-1}) \\to \\sigma_i}</span> :</li>
+
+    </ul>
+
+    <pre><code class="language-txt">assert (VerifyTransaction(txnj,  $L_{i - 1}) = \\top$  ),  $\\forall \\mathrm{txn}_j$  .
+assert (ledgerHashi-1 = H(Li-1));
+assert (VerifyConsensus(consensusStatei-1, consensusProofi) = T);
+assert (VerifySig(b-pki, m, b-sigi) = T), where m = (i,  $L_{i - 1}$  , consensusProofi,  $\\{\\mathrm{txn}_j\\}_j$  );
+$L_{i}\\gets \\mathrm{UpdateLedger}(L_{i - 1},\\{\\mathrm{txn}_j\\}_j)$
+ledgerHashi  $\\leftarrow$  H(Li);
+consensusStatei  $\\leftarrow$  UpdateConsensus(consensusStatei-1,consensusProofi);
+return  $\\sigma_{i}\\gets$  (ledgerHashi,consensusStatei)</code></pre>
+
+    <p class="text-gray-300">Figure 4: The underlying SNARK  <span class="math">S</span> .</p>
+
+    <p class="text-gray-300">16</p>
+
+    <h2 id="sec-35" class="text-2xl font-bold">5.0.3 Our Construction</h2>
+
+    <p class="text-gray-300">Let (VerifyConsensus, UpdateConsensus) be the Ouroboros Samasika consensus mechanism. Let <span class="math">\\mathsf{H}</span> be a collision-resistant hash function. The Coda protocol is defined as follows.</p>
+
+    <h3 id="sec-36" class="text-xl font-semibold mt-8">The Coda Protocol for Payments</h3>
+
+    <p class="text-gray-300">The Coda protocol for payments, defined in the framework from Section 5.0.1, is based on the SNARK in Figure 4. It has the following components.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li><strong>A blockchain</strong> <span class="math">C_{i-1}</span>. A blockchain consists of the hash of the current ledger, the current consensus state and a SNARK proof. That is,</li>
+
+    </ul>
+
+    <div class="my-4 text-center"><span class="math-block">C_{i-1} = (\\text{ledgerHash}_{i-1}, \\text{consensusState}_{i-1}, \\text{snark}_{i-1})</span></div>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li><strong>A block</strong> <span class="math">B_i</span>. Recall that a block in general is of the form <span class="math">B_i = (\\text{sn}_i, \\text{st}_i, \\pi_i^B, d_i, \\mathsf{b-pk}_i, b\\text{-sig}_i)</span>, where <span class="math">\\text{sn}_i, \\mathsf{b-pk}_i, b\\text{-sig}_i</span> are serial number, block proposer's public key and a signature on <span class="math">(\\text{sn}_i, \\text{st}_i, \\pi_i^B, d_i)</span> by the block proposer, respectively. <span class="math">\\text{st}_i, \\pi_i^B, d_i</span> are specified as follows.</li>
+
+    </ul>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li><span class="math">\\text{st}_i = \\mathsf{L}_{i-1}</span>;</li>
+
+      <li><span class="math">\\pi_i^B = \\text{consensusProof}_i</span>;</li>
+
+      <li><span class="math">d_i = \\{\\text{txn}_j\\}_j</span>.</li>
+
+    </ul>
+
+    <p class="text-gray-300">The algorithms VerifyBlock, UpdateChain, VerifyChain are defined as follows.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li><strong>VerifyBlock(<span class="math">S_{i-1}, B_i</span>) → <span class="math">\\top / \\bot</span></strong>:</li>
+
+    </ul>
+
+    <pre><code class="language-text">assert (H(L_{i-1}) = ledgerHash_{i-1});
+assert (VerifyConsensus(consensusState_{i-1}, consensusProof_i) = $\\top$);
+∀j assert (VerifyTransaction(txn_j, L_{i-1}) = $\\top$);
+assert (VerifySig(b-pk_i, m, sig_i) = $\\top$),
+where m = (sn_i, L_{i-1}, consensusProof_i, \\{txn_j\\}_j)
+return $\\top$</code></pre>
+
+    <p class="text-gray-300">!<a href="img-3.jpeg">img-3.jpeg</a> Figure 5: The Coda protocol for payments.</p>
+
+    <p class="text-gray-300">In this section, we will introduce two optimization techniques, namely, 'parallel scan state' and 'prover incentives'. They both target the following issue.</p>
+
+    <p class="text-gray-300">The issue. Observe from Figure 3 that to compute  <span class="math">S_{i}</span> , we need  <span class="math">S_{i-1}</span> . Thus, there is a sequential dependency for SNARK proof computation. As a result, a naive implementation suffers from a block time that is at least the time required to compute the proof. Furthermore, it suffers from high memory requirements for block proposers due to high transaction latency (where, transaction latency is the time required for a transaction to be summarized in a SNARK proof).</p>
+
+    <p class="text-gray-300">The solution. The goal is to design techniques that maximize the throughput. Specifically, our goal is to maximize the rate at which transactions can be processed and validated in the Coda protocol network. This enables more simultaneous users on the network.</p>
+
+    <p class="text-gray-300">Recall that a raw chain of blocks is inherently sequential (i.e., cannot be parallelized in general). However, thanks to incremental computability of the SNARK, the SNARK work can be parallelized. This is the key observation that leads to the notion of a 'parallel scan state', where we decouple producing a block from computing SNARK proofs.</p>
+
+    <p class="text-gray-300">We maintain a special queue, called the work queue, where we enqueue new blocks as they are proposed. In other words, it is a queue of the 'SNARK work' to be performed by the network.</p>
+
+    <p class="text-gray-300">The network then computes the SNARK proofs in parallel; a tree of proofs is computed where the leaves correspond to the proofs proving validity of single blocks and the other proofs simply attest to the correctness of their children proofs. Finally, the root proof attests to correctness of all the blocks corresponding to the leaves of the tree. Consider, for example, a sequence of blocks  <span class="math">B_{i}, B_{i+1}, \\ldots, B_{j}</span>  in the work queue. The root proof attests to the validity of each of the blocks. This root proof can be combined with the SNARK proof for the validity of  <span class="math">S_{i-1}</span>  to result in a SNARK proof that attests to the validity of  <span class="math">S_{j}</span> . This is illustrated in Figure 6. Note that this tree, under the hood, works similarly to the example transition system described in Section 4.1.2.</p>
+
+    <p class="text-gray-300">!<a href="img-4.jpeg">img-4.jpeg</a> Figure 6: A snapshot of a parallel scan state.</p>
+
+    <p class="text-gray-300">Observe that, by careful design of parallelism, we can ensure that the throughput completely keeps up with the rate transactions are added, which is optimal. While the transaction latency in the naive approach was  <span class="math">O(R)</span> , where  <span class="math">R</span>  is the rate at which blocks are produced, in the proposed approach, the transaction latency is  <span class="math">O(\\log (R))</span> . With a careful designing of data structure, the storage requirement can be reduced from  <span class="math">O(R)</span>  in the naive approach to  <span class="math">2R - 1 + O(1)</span>  in the proposed approach; we will omit the details of the data structure [2].</p>
+
+    <p class="text-gray-300">A party that generates SNARK proofs is called a snarker. We will describe prover incentives with the goal of achieving lowest possible transaction latency (i.e., to minimize the time gap between when a block is produced and when it is absorbed in the blockchain's SNARK proof).</p>
+
+    <p class="text-gray-300">The proposed incentive structure is the following. Every block producer that pushes a block to the work queue is required to pop a block by generating a proof validating the block. It posts a fee request together with the SNARK proof it generates. It also includes a transaction in the same block that pays the fee to the prover that will compute the snark for that block. Typically, the fees are paid out from the transaction fees the block producer would otherwise receive.</p>
+
+    <p class="text-gray-300">In essence, there is a lowest-price auction for each piece of SNARK work. Block producers would like to pay snarkers as little as possible for their proofs and snarkers would like to receive as high a fee as possible for their proofs. Therefore, enforcing a block producer to also be a prover but for a different block enforces stability in the system.</p>
+
+    <p class="text-gray-300">Note that this notion is similar to the aforementioned naïve approach in that a block producer also computes a SNARK proof, but with the difference that the block producer computes proof for the block in the head of the queue.</p>
+
+    <h6 id="sec-40" class="text-base font-medium mt-4">Remark 6.1.</h6>
+
+    <p class="text-gray-300">Given a proof and an associated fee request, we require that an adversary cannot maul the fee request. Otherwise, an attacker could pass-off a different party’s proof as their own (by replacing the public key) or modify someone’s fee request.</p>
+
+    <p class="text-gray-300">Signatures of knowledge are a cryptographic primitive that allows us to accomplish exactly this, as recalled in Section 3. In Coda, we use a construction based on the Bowe–Gabizon simulation-extractable SNARK <em>[9]</em>.</p>
+
+    <h2 id="sec-41" class="text-2xl font-bold">7 Ouroboros Samasika – PoS Consensus for Succinct Blockchains</h2>
+
+    <p class="text-gray-300">One of the main technical contributions of this paper is the first provably-secure proof-of-stake consensus protocol for a succinct blockchain. Existing protocols are either not adaptively secure or rely on a centralized trusted third party for checkpointing advice to nodes trying to bootstrap or rely on arbitrary information in the history of the protocol for chain selection, immediately rendering the protocol incompatible for succinct settings <em>[17, 13, 4, 12]</em>.</p>
+
+    <p class="text-gray-300">We construct a consensus protocol that is secure against adaptive corruption and does not require a trusted checkpointing service for bootsrapping, is adaptively secure and, most importantly, succicnt. That is, it requires only succinct information to tell apart honest chains from dishonest ones, immaterial of how far in history they had forked. Our starting point is the Ouroboros Genesis <em>[4]</em> (sometimes referred to as Genesis in this paper) PoS consensus protocol.</p>
+
+    <p class="text-gray-300">Ouroboros Genesis already enjoys adaptive security and offers boostrapping from Genesis. However, the chain selection rules require information about an arbitrary distance in a chain’s history; this is natural, since, an adversary might modify arbitrary aspects of the blockchain to create a fork and the timing of the fork might be learned by parties long after it has occurred. For this reason, Ouroboros Genesis by itself is not usable in the succinct setting. The challenge is to somehow craft a <em>constant-sized</em> summary of the history that suffices in correctly choosing one chain from multiple candidates.</p>
+
+    <p class="text-gray-300">In this section, we present <em>Ouroboros Samasika</em> wherein we resolve the above challenge. Specifically, we demonstrate an approach to succinctly summarize the information necessary to correctly arbitrate chains with long-range forks.</p>
+
+    <h3 id="sec-42" class="text-xl font-semibold mt-8">7.1 Intuitive Description</h3>
+
+    <p class="text-gray-300">In this part of the section, we will particularly focus on the core of a consensus protocol, namely, the chain selection rules. The entire consensus protocol appears in detail, along with the proofs of security, in Section 7.3.</p>
+
+    <p class="text-gray-300">We will begin by recalling the rules of Ouroboros Genesis.</p>
+
+    <h5 id="sec-43" class="text-base font-semibold mt-4">The chain selection rules of Ouroboros Genesis.</h5>
+
+    <p class="text-gray-300">There are two chain selection rules in Ouroboros Genesis. One is when the fork is a short-range one; in this case, the rule is to simply to choose the longest chain. The other is when the fork is a long-range one; in this case, one may not simply choose the longest chain, since an adversary could have posed various attacks over time to perhaps skew the leader selection distribution and managed to create a longer chain. Therefore, for long-range forks, the rule is to limit the comparison of chains to just a few slots immediately following the fork.</p>
+
+    <p class="text-gray-300">Note that the rule for long-range forks requires information at arbitrary times in the history. Clearly, it is not trivial to summarize the information succinctly.</p>
+
+    <p class="text-gray-300">We now present the chain selection rules of Ouroboros Samasika.</p>
+
+    <h5 id="sec-44" class="text-base font-semibold mt-4">The chain selection rules of Ouroboros Samasika.</h5>
+
+    <p class="text-gray-300">Similar to Genesis, Ouroboros Samasika also has two consensus rules applicable depending on how far in history the fork has occurred.</p>
+
+    <p class="text-gray-300">Roughly speaking, this rule is triggered whenever the fork is in such a way that the adversary has not yet been able to modify the block density distribution and the rule is to simply choose the longest chain. While the action of the rule is the same as in Ouroboros Genesis, the predicate for deciding whether a given fork is a short-range one or not is slightly different. Since the main contribution is the long-range fork rule, we defer the exact description of the predicate to Appendix 7.7. This rule is applied for forks that occurred more than <em>k</em> blocks ago. Before we describe the rule itself, following is the intuition. Firstly, recall the reason why simply the longest chain rule might not choose the right chain in this case; after an adversary creates a fork, over time, it might skew the leader selection distribution leading to a longer adversarial chain. Due to this, we can only rely on the density difference in the first few slots following the fork (which is indeed what Ouroboros Genesis utilizes). <em>The challenge is to somehow “carry forward” the summary of that density difference, even when the fork position – and hence the slot range in question – is not known ahead of time.</em></p>
+
+    <p class="text-gray-300">The idea is to consider a moving window of slots and only store the <em>minimum</em> of all the densities observed so far in that window. Observe that this idea almost resolves the challenge: for a dishonest chain, even if the adversary manages to increase the chain density, the minimum density value points to the window following the fork, providing the required summary. On the other hand, for the honest chain, there is not a huge fluctuation in the densities and, due to majority stake on the chain, the minimum density value across the chain is likely to be higher than that for the dishonest chain.</p>
+
+    <p class="text-gray-300">While this almost completely resolves the challenge, there is one other part to the challenge we still need to address. Namely, how long the window should be and how it should slide. This is critical, as it is constrained by two conflicting requirements: (1) The max-length of the window, since post a certain point after the fork, no guarantees can be made on the block densities in the adversarial chain and (2) The min-length of the window, since some minimum number of samples are required to tell apart the given two distributions. Let us call the window of the critical length following the fork, that satisfies both the constrains as the “critical window”. So the challenge is to design the window length and its movement so that no matter where the fork is positioned, the moving window will capture the entire critical window in one shot. The idea is to have the window length slightly greater than the critical window length. As far as moving of the window is considered, firstly note that a naïve shifting window (where the next shift moves the beginning of the window to after its current end) may not capture the entire critical window in any given position, since a fork can occur at arbitrary slots. The idea is to have the window shift by a fraction of its size. We call the resulting window as the “<span class="math">\\nu</span>-shifting <span class="math">\\omega</span>-window”, where <span class="math">\\omega</span> is the window length and <span class="math">\\nu</span> is the length by which it shifts (cf. Definition 1). With careful calibration of <span class="math">\\nu</span> and <span class="math">\\omega</span>, we can ensure that the window captures the critical window.</p>
+
+    <p class="text-gray-300">This intuition is formally proven later in Theorem 2.</p>
+
+    <p class="text-gray-300">Below, we formally describe the chain selection rules. Our new chain selection rule, formally specified as algorithm maxvalid-sc<span class="math">(\\cdot)</span> (see Figure 7), surgically adapts the chain selection rule of Ouroboros Genesis, namely maxvalid-bg<span class="math">(\\cdot)</span> (see Figure 20), but by replacing the long-range fork rule with a new one. We will continue all the discussions by referring to the underlying blockchains of chain summaries. We will note that the only information about the underlying blockchains needed in any part of the consensus mechanism is a fixed number of blocks in the immediate history. Therefore, the consensus verification is succinct.</p>
+
+    <p class="text-gray-300">Here, <span class="math">\\mathcal{C}_{\\textsf{loc}}</span> is the local chain, <span class="math">\\mathcal{N}=\\{\\mathcal{C}_{1},\\ldots,\\mathcal{C}_{M}\\}</span> is the list of chains to choose from. The function isShortRange<span class="math">(\\mathcal{C},\\mathcal{C}^{\\prime})</span> outputs whether or not the chains fork in the “short range” or not. The function getMinDen<span class="math">(\\mathcal{C})</span> outputs the minimum of all the window densities observed thus far in <span class="math">\\mathcal{C}</span>; it is formally defined in Figure 16.</p>
+
+    <p class="text-gray-300">!<a href="img-5.jpeg">img-5.jpeg</a> Figure 7: The new chain selection rule.</p>
+
+    <p class="text-gray-300">We introduce many relevant concepts from Ouroboros Genesis which remain the same in our setting too. We begin by recalling a summary of the Ouroboros family of protocols.</p>
+
+    <p class="text-gray-300">The Ouroboros family of consensus protocols. Kiayias et al. proposed the first proof-of-stake (PoS) protocol Ouroboros [17] with rigorous security guarantees. However, the adversarial model only considered synchronous networks. Here, the protocol execution is divided into time units called slots and groups of slots form epochs.</p>
+
+    <p class="text-gray-300">The adversarial model was strengthened in the follow-up work Ouroboros Praos [13] by considering the semi-synchronous setting (where, the protocol execution is still divided into slots and epochs, but the network could experience a maximum delay of  <span class="math">\\Delta</span>  slots in delivering messages.) This work introduced the notion of "empty slots" as an artificial way to provide short periods of silence for parties to catch up in the cases of message delivery delays. An important point to note about the Ouroboros Praos is its chain selection rule. Whenever there are two chains that have forked 'recently' (i.e., when there is a so-called 'short-range fork'), it chooses the longer chain. On the other hand, i.e., if the</p>
+
+    <p class="text-gray-300">ork is far back in history (or when there is a so-called ‘long-range fork’), then it simply relies on a trusted external service (called the checkpointing service) to provide the advice on the honest chain. Clearly, this introduces a strong element of centralization which is tackled in the follow up project.</p>
+
+    <p class="text-gray-300">Finally, Ouroboros Genesis overcame the Ouroboros Praos’s drawback of relying on an external service for resolving long-range forks by providing an additional chain selection rule <em>[4]</em>. Specifically, the rule considers a short range <span class="math">s</span> of slots soon after the long-range fork and chooses the chain with higher density in those <span class="math">s</span> slots.</p>
+
+    <h4 id="sec-46" class="text-lg font-semibold mt-6">Modeling time: Slots, epochs and empty slots.</h4>
+
+    <p class="text-gray-300">The protocol execution time is divided into epochs which are further divided into slots. There are <span class="math">R</span> slots in an epoch. Like in Ouroboros Praos and Ouroboros Genesis, some slots can be “empty” (i.e., without any block associated with them). Specifically, a consensus parameter, <span class="math">f</span>, denotes the probability that any given slot has a block producer assigned to it. If no block producer is assigned to a slot, then the slot is empty (i.e., without a block).</p>
+
+    <h4 id="sec-47" class="text-lg font-semibold mt-6">Types of parties.</h4>
+
+    <p class="text-gray-300">We categorize parties in a way that models various real-life scenarios, such as, newly joining parties and parties with temporary connectivity/availability issues, as detailed fully in <em>[4]</em>. The model defines three kinds of parties as follows. Alert parties are parties that have access to all the required resources, and are also synchronized. These parties enjoy full security guarantees and we will require a lower bound on their stake (see below) to ensure security. Potentially active parties (or active, for short) are all parties that, broadly speaking, might potentially act in the current time slot of the protocol execution. This includes honest parties that have access to all the required resources as well as adversarial parties. Inactive parties are all other parties, such as honest parties that cannot access some of the necessary resources to engage with the protocol, e.g., their network connection.</p>
+
+    <h4 id="sec-48" class="text-lg font-semibold mt-6">Stake distributions.</h4>
+
+    <p class="text-gray-300">The protocol is assumed to maintain the following ratios:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li><span class="math">\\alpha\\geq 1/2</span> is the ratio of the alert stake to the active stake.</li>
+
+      <li><span class="math">\\beta</span> is the ratio of the active stake to the entire stake.</li>
+
+    </ul>
+
+    <h4 id="sec-49" class="text-lg font-semibold mt-6">Epoch randomness and leader selection distributions.</h4>
+
+    <p class="text-gray-300">Stake distribution considered in an epoch <span class="math">\\mathsf{ep}</span> is actually the stake distribution at the last slot of <span class="math">\\mathsf{ep}-2</span>. Besides stake distribution, the notion of epoch randomness influences leader selection distribution in any epoch. Specifically, epoch randomness is derived as a function of certain blocks information from the first two-thirds of <span class="math">\\mathsf{ep}-1</span>.</p>
+
+    <p class="text-gray-300">An important remark which we will use in our proofs is the following fact: Consider a fork at <span class="math">\\mathsf{sl}</span>”, where a dishonest chain forks from an honest chain. For</p>
+
+    <p class="text-gray-300"><span class="math">R/3</span> slots following <span class="math">\\mathsf{sl}^{*}</span>, the epoch randomness and leader selection distributions are guaranteed to be unskewed. However, in the slots following the <span class="math">R/3</span> slots, no such guarantee can be placed on the distribution in the dishonest chain.</p>
+
+    <h4 id="sec-50" class="text-lg font-semibold mt-6">Notations.</h4>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">For a chain <span class="math">\\mathcal{C}</span> and an interval of slots <span class="math">I\\triangleq[\\mathsf{sl}_{i},\\mathsf{sl}_{j}]=\\{\\mathsf{sl}_{i},\\ldots,\\mathsf{sl}_{j}\\}</span>, we denote by <span class="math">\\mathcal{C}[I]=\\mathcal{C}[\\mathsf{sl}_{i},\\mathsf{sl}_{j}]</span> the sequence of blocks in <span class="math">\\mathcal{C}</span> such that their slot numbers fall into the interval <span class="math">I</span>. We replace the brackets in this notation with parentheses to denote intervals that do not include endpoints; e.g., <span class="math">(\\mathsf{sl}_{i},\\mathsf{sl}_{j}]=\\{\\mathsf{sl}_{i+1},\\ldots,\\mathsf{sl}_{j}\\}</span>. Finally, we denote by $</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mathcal{C}[I]</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"><span class="math"> the number of blocks in </span>\\mathcal{C}[I]<span class="math">. We typically denote a party by </span>P$.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <h3 id="sec-51" class="text-xl font-semibold mt-8">7.3 The New Chain Selection Rules</h3>
+
+    <p class="text-gray-300">In this section, we describe the proposed chain selection rule for the succinct setting. The description is structured so as to clearly highlight (in blue) the differences from the corresponding Ouroboros Genesis protocols and algorithms. Algorithms/protocols that are completely novel to Ouroboros Samasika have only their names highlighted; the description is not highlighted for readability. Moreover, in protocol descriptions, the details that are common to Ouroboros Samasika and Ouroboros Genesis are mentioned but not delved deep into, so as to (a) stay focused on the main contribution and (b) maintain a pseudocode level of description. We defer the reader to <em>[4]</em> for the details common to Ouroboros Samasika and Ouroboros Genesis. The formal chain selection algorithm maxvalid-sc was presented in Figure 7.</p>
+
+    <h4 id="sec-52" class="text-lg font-semibold mt-6">7.3.1 The short-range chain selection rule</h4>
+
+    <p class="text-gray-300">Recall that a fork is a short-range one when it can be guaranteed that an adversary has not yet modified the block density distribution. maxvalid-sc calls the predicate isShortRange that outputs whether a given range is short-range one or not in this sense. The predicate is described as follows.</p>
+
+    <p class="text-gray-300">Algorithm isShortRange  <span class="math">(C_1,C_2)</span></p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Let prevLock <span class="math">_{1}</span>  and prevLock <span class="math">_{2}</span>  be the prevLock <span class="math">_{2}</span>  components in the last blocks of  <span class="math">C_1, C_2</span> , respectively.</li>
+
+      <li>if prevLock <span class="math">_{1}</span>  = prevLock <span class="math">_{2}</span>  then</li>
+
+      <li>return  <span class="math">\\top</span></li>
+
+      <li>else</li>
+
+      <li>return  <span class="math">\\bot</span></li>
+
+    </ol>
+
+    <p class="text-gray-300">Figure 8: The algorithm to determine when a given fork is a short-range one or not.</p>
+
+    <p class="text-gray-300">Below in Figure 12 is the protocol executed to select a new chain, denoted as SelectChain.</p>
+
+    <p class="text-gray-300">Protocol SelectChain  <span class="math">(P,\\mathrm{sid},C_{\\mathrm{loc}},\\mathcal{N} = \\{C_1,\\dots ,C_M\\} ,k)</span> // Step 1: Discard invalid chains</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Initialize  <span class="math">\\mathcal{N}_{\\mathrm{valid}}\\gets \\emptyset</span></li>
+
+      <li>for  <span class="math">i = 1,\\ldots ,M</span>  do</li>
+
+    </ol>
+
+    <p class="text-gray-300">Invoke Protocol IsValidChain  <span class="math">(P,\\mathrm{sid},C_{\\mathrm{loc}},C_i,k)</span>  ; if it returns  <span class="math">\\top</span>  then update  <span class="math">\\mathcal{N}_{\\mathrm{valid}}\\gets \\mathcal{N}_{\\mathrm{valid}}\\cup \\{C_i\\}</span>  end for // Step 2: Apply chain selection rule on valid chains</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Execute Algorithm maxvalid-sc  <span class="math">(C_{\\mathrm{loc}},\\mathcal{N}_{\\mathrm{valid}},k)</span>  . Denote the output chain by  <span class="math">C_\\mathrm{max}</span></li>
+
+      <li>Set  <span class="math">C_\\mathrm{loc}\\gets C_\\mathrm{max}</span>  . Output  <span class="math">C_\\mathrm{loc}</span></li>
+
+    </ol>
+
+    <p class="text-gray-300">OUTPUT: Output  <span class="math">C_\\mathrm{loc}</span></p>
+
+    <p class="text-gray-300">Figure 9: The protocol for parties to select a chain when there is more than one.</p>
+
+    <p class="text-gray-300">The core concept in the new chain selection rule is that of the window mind-density. As mentioned earlier in this section, the idea is to consider a shifting</p>
+
+    <p class="text-gray-300">window and to always maintain a minimum of densities in all the windows so far.</p>
+
+    <p class="text-gray-300">More formally, we employ a <span class="math">\\nu</span>-shifting <span class="math">\\omega</span>-window (see Definition 1), wherein a <span class="math">\\omega</span>-long window shifts at a time by <span class="math">\\nu</span> slots.</p>
+
+    <h6 id="sec-54" class="text-base font-medium mt-4">Definition 1 (<span class="math">\\nu</span>-shifting <span class="math">\\omega</span>-window).</h6>
+
+    <p class="text-gray-300">For <span class="math">\\nu,\\omega\\in\\mathbb{N}</span> and <span class="math">0&lt;\\nu&lt;\\omega</span>, a <span class="math">\\nu</span>-shifting <span class="math">\\omega</span>-window over a sequence of slots <span class="math">\\mathsf{sl}_{1},\\mathsf{sl}_{2},\\ldots</span> is characterized by an algorithm shiftWindow that takes as input a variable (or a set of variables) which is a function of slots in the interval <span class="math">[\\mathsf{sl}_{i+1},\\mathsf{sl}_{i+\\omega}]</span> and assigns/updates it with a function of the slots <span class="math">[\\mathsf{sl}_{i+1+\\nu},\\mathsf{sl}_{i+\\omega+\\nu}]</span>. We call <span class="math">\\nu</span> the shift parameter and <span class="math">\\omega</span> the window-length parameter.</p>
+
+    <p class="text-gray-300">The shift parameter <span class="math">\\nu</span> and the window-length parameter <span class="math">\\omega</span> are set as follows. Let <span class="math">s_{\\mathsf{CG}}</span> be the chain growth parameter ensured by the short-range chain selection rule (which is equivalent to the chain selection rule of Ouroboros Genesis) (cf. Theorem 2 in <em>[4]</em>).</p>
+
+    <p class="text-gray-300">The starting point for Ouroboros Samasika is Ouroboros Genesis. In Ouroboros Genesis, a (non-shifting) window of size of the order <span class="math">s_{\\mathsf{CG}}</span> was considered immediately after the fork. In Ouroboros Samasika, due to succinctness, we consider the window positioning independent of the fork position. However, we do need to consider a window <em>almost</em> close to the fork. For this reason, we consider a window of size slightly larger than <span class="math">s_{\\mathsf{CG}}</span> (see (1)) and shift it slightly by <span class="math">\\nu</span> slots as time progresses (see (2)) to capture a window close to the fork. For implementation purposes, one can imagine <span class="math">n_{s}</span> sub-windows, each of length <span class="math">\\nu</span> slots, making up a window (see (3)).</p>
+
+    <p class="text-gray-300"><span class="math">\\omega</span> <span class="math">=(1+\\epsilon_{s})s_{\\mathsf{CG}},</span> (1) <span class="math">\\nu</span> <span class="math">=\\epsilon_{s}s_{\\mathsf{CG}},</span> (2) <span class="math">n_{s}</span> <span class="math">=(1/\\epsilon_{s})+1,</span> (3)</p>
+
+    <p class="text-gray-300">while ensuring that <span class="math">\\nu</span> and <span class="math">1/\\epsilon_{s}</span> are whole numbers and that <span class="math">\\epsilon_{s}&gt;0</span>. For intuition, here is an example: Let <span class="math">s_{\\mathsf{CG}}=6</span> slots. Let <span class="math">\\epsilon_{s}=1/3</span>. Then, the window is of size <span class="math">\\omega=8</span> slots, with the shift being <span class="math">\\nu=2</span> slots long (See Figure 10).</p>
+
+    <p class="text-gray-300">!<a href="img-6.jpeg">img-6.jpeg</a> Figure 10: An example of the shifting window with  <span class="math">s_{\\mathsf{CG}} = 6</span>  slots and  <span class="math">\\epsilon_s = 1/3</span> . Therefore, the window size  <span class="math">\\omega = 8</span>  slots and the shift size  <span class="math">\\nu = 2</span>  slots. The first shift occurs when the current time is  <span class="math">t_2</span> , the second at  <span class="math">t_3</span> , and so on. Figure 11: The algorithm to check if the end of the window is reached.</p>
+
+    <p class="text-gray-300">We present an example implementation algorithm in Figures 11 and 13. We denote the window min-density by minDen. As mentioned earlier, we maintain  <span class="math">n_s</span>  sub-windows, each of size  <span class="math">\\nu</span>  slots; namely,  <span class="math">\\mathsf{pDen}_1, \\ldots, \\mathsf{pDen}_{n_s}</span> . We also maintain an additional sub-window  <span class="math">\\mathsf{pDen}_{\\mathrm{curr}}</span>  also of size  <span class="math">\\nu</span>  slots, to keep track of the density in the ongoing sub-window before there is a shift. The sequence of all these parameters is denoted by  <span class="math">\\overrightarrow{\\mathsf{Den}} = (\\mathsf{pDen}_1, \\ldots, \\mathsf{pDen}_{n_s}, \\mathsf{pDen}_{\\mathrm{curr}}, \\min \\mathsf{Den})</span> .</p>
+
+    <p class="text-gray-300">Algorithm isWindowStop(sl, v)</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>if (sl % v) = 0</li>
+
+      <li>return T</li>
+
+      <li>else</li>
+
+      <li>return ⊥</li>
+
+    </ol>
+
+    <p class="text-gray-300">Protocol SelectChain(P, sid,  <span class="math">C_{\\mathrm{loc}}</span> ,  <span class="math">N = \\{C_1, \\ldots, C_M\\}</span> , k)</p>
+
+    <p class="text-gray-300">// Step 1: Discard invalid chains</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Initialize  <span class="math">\\mathcal{N}_{\\mathrm{valid}} \\gets \\emptyset</span></li>
+
+      <li>for  <span class="math">i = 1,\\dots ,M</span>  do</li>
+
+    </ol>
+
+    <p class="text-gray-300">Invoke Protocol IsValidChain(P, sid,  <span class="math">C_{\\mathrm{loc}}, C_i, k</span> ); if it returns  <span class="math">\\top</span>  then update  <span class="math">\\mathcal{N}_{\\mathrm{valid}} \\gets \\mathcal{N}_{\\mathrm{valid}} \\cup \\{C_i\\}</span>  end for</p>
+
+    <p class="text-gray-300">// Step 2: Apply chain selection rule on valid chains</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Execute Algorithm maxvalid-sc  <span class="math">(\\mathcal{C}_{\\mathrm{loc}},\\mathcal{N}_{\\mathrm{valid}},k)</span> . Denote the output chain by  <span class="math">\\mathcal{C}_{\\mathrm{max}}</span> .</li>
+
+      <li>Set  <span class="math">\\mathcal{C}_{\\mathrm{loc}} \\gets \\mathcal{C}_{\\mathrm{max}}</span> . Output  <span class="math">\\mathcal{C}_{\\mathrm{loc}}</span> .</li>
+
+    </ol>
+
+    <p class="text-gray-300">OUTPUT: Output  <span class="math">C_{\\mathrm{loc}}</span></p>
+
+    <p class="text-gray-300">Figure 12: The protocol that chooses a chain using maxvalid-sc.</p>
+
+    <p class="text-gray-300">Algorithm shiftWindow(Den) Let  <span class="math">\\overrightarrow{\\mathrm{Den}} = (\\mathsf{pDen}_1,\\dots ,\\mathsf{pDen}_{n_s},\\mathsf{pDen}_{\\mathrm{curr}},\\min \\mathrm{Den})</span></p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Set minDen  <span class="math">\\leftarrow</span>  min(minDen,minDen-pDen1+pDencurr)</li>
+
+      <li>for  <span class="math">i = 1</span>  to  <span class="math">n_{s} - 1</span></li>
+
+      <li>Set pDen  <span class="math">\\leftarrow</span>  pDeni+1</li>
+
+      <li>end for</li>
+
+      <li>Set pDen  <span class="math">\\leftarrow</span>  pDencurr and pDencurr  <span class="math">\\leftarrow 0</span></li>
+
+      <li>return (pDen1,...,pDenns,pDencurr,minDen)</li>
+
+    </ol>
+
+    <p class="text-gray-300">Figure 13: The algorithm to shift the window.</p>
+
+    <p class="text-gray-300">Remark 7.1 (Divisibility of window length by the shift). The requirement of the shift length  <span class="math">\\nu</span>  completely dividing the window length  <span class="math">\\omega</span>  is only to have clean algorithm descriptions. All the arguments hold even if it is not the case.</p>
+
+    <p class="text-gray-300">We now discuss how the modifications introduced in the maxvalid-sc algorithm of Ouroboros Genesis percolates to the other consensus sub-protocols.</p>
+
+    <p class="text-gray-300">The  <span class="math">\\overrightarrow{\\mathrm{Den}} = (\\mathsf{pDen}_1,\\dots ,\\mathsf{pDen}_{n_s},\\mathsf{pDen}_{\\mathrm{curr}},\\min \\mathrm{Den})</span>  parameters are first set when the Genesis block is generated by running the Initialization-Genesis protocol. A party that has been registered with all its resources becomes operational by invoking this protocol.</p>
+
+    <p class="text-gray-300">Algorithm Initialization-Genesis(<span class="math">P</span>, sid, <span class="math">R</span>, <span class="math">n_{s}</span>, <span class="math">\\omega</span>)</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Send (KeyGen, sid, <span class="math">P</span>) to <span class="math">\\mathcal{F}_{\\mathrm{VRF}}</span> and <span class="math">\\mathcal{F}_{\\mathrm{KES}}</span>; receiving (VerificationKey, sid, <span class="math">v_{P}^{\\mathrm{vrf}}</span>) and (VerificationKey, sid, <span class="math">v_{P}^{\\mathrm{kes}}</span>), respectively.</li>
+
+    </ol>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>if <span class="math">\\tau = 0</span> then</li>
+
+    </ol>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Send (ver_keys, sid, <span class="math">P</span>, <span class="math">v_{P}^{\\mathrm{vrf}}</span>, <span class="math">v_{P}^{\\mathrm{kes}}</span>) to <span class="math">\\mathcal{F}_{\\mathrm{INIT}}</span> to claim stake from the genesis block.</li>
+
+    </ol>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Invoke FinishRound(<span class="math">P</span>) and invoke UpdateTime(<span class="math">P</span>) to update <span class="math">\\tau</span>, ep, sl.</li>
+
+    </ol>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>while <span class="math">\\tau = 0</span> do</li>
+
+    </ol>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Call UpdateTime(<span class="math">P</span>) to update <span class="math">\\tau</span>, ep, and sl and give up the activation</li>
+
+    </ol>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>end while</li>
+
+    </ol>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>end if // The following is executed if this is a non-genesis round.</li>
+
+    </ol>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>if <span class="math">\\tau &amp;gt; 0</span> then</li>
+
+    </ol>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Set each of the variables <span class="math">\\{\\mathsf{pDen}_{1}, \\ldots, \\mathsf{pDen}_{n_{s}}, \\mathsf{pDen}_{\\mathrm{curr}}\\}</span> to <span class="math">\\varnothing</span>. Also, set minDen <span class="math">\\leftarrow \\omega</span>.</li>
+
+    </ol>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Set <span class="math">\\overrightarrow{\\mathrm{Den}} = (\\mathsf{pDen}_1, \\ldots, \\mathsf{pDen}_{n_s}, \\mathsf{pDen}_{\\mathrm{curr}}, \\min \\mathrm{Den})</span>.</li>
+
+    </ol>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>if <span class="math">\\mathcal{F}_{\\mathrm{INIT}}</span> signals an error then</li>
+
+    </ol>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Halt the execution.</li>
+
+    </ol>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>end if</li>
+
+    </ol>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Send (genblock_req, sid, <span class="math">P</span>) to <span class="math">\\mathcal{F}_{\\mathrm{INIT}}</span>.</li>
+
+    </ol>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Receive from <span class="math">\\mathcal{F}_{\\mathrm{INIT}}</span> the response (genblock, sid, <span class="math">\\mathbf{G}&#x27; = (\\mathbb{S}_1, \\eta_1, \\overrightarrow{\\mathrm{Den}})</span>), where</li>
+
+    </ol>
+
+    <div class="my-4 text-center"><span class="math-block">\\mathbb{S}_1 = ((U_1, v_1^{\\mathrm{vrf}}, v_1^{\\mathrm{kes}}, s_1), \\ldots, (U_n, v_n^{\\mathrm{vrf}}, v_n^{\\mathrm{kes}}, s_n)).</span></div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">17. Set CP = (prevLock<span class="math">^{\\mathrm{cp}}</span>, currStart<span class="math">^{\\mathrm{cp}}</span>, currStart<span class="math">^{\\mathrm{cp}}</span>), where, prevLock<span class="math">^{\\mathrm{cp}}</span> <span class="math">\\leftarrow \\varnothing</span>, currStart<span class="math">^{\\mathrm{cp}}</span> <span class="math">\\leftarrow \\mathbf{G}&#x27;</span>, currStart<span class="math">^{\\mathrm{cp}}</span> <span class="math">\\leftarrow \\mathbf{G}&#x27;</span>. Also set $\\mathbf{G} \\leftarrow (\\mathbf{G}'</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mathrm{CP})$.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Set <span class="math">\\mathcal{C}_{\\mathrm{loc}} \\gets \\mathbf{G}</span>. Also, Set <span class="math">T_P^{\\mathrm{ep}} \\gets 2^{\\ell_{\\mathrm{VRF}}} \\phi_f(\\alpha_P^{\\mathrm{ep}})</span> the threshold for stakeholder <span class="math">P</span> for epoch <span class="math">\\mathbf{ep}</span>, where <span class="math">\\alpha_P^{\\mathrm{ep}}</span> is the relative stake of stakeholder <span class="math">P</span> in <span class="math">\\mathbb{S}_{\\mathrm{ep}}</span> and <span class="math">\\ell_{\\mathrm{VRF}}</span> denotes the output length of <span class="math">\\mathcal{F}_{\\mathrm{VRF}}</span>. Finally, send (HELLO, sid, <span class="math">P</span>, <span class="math">v_P^{\\mathrm{vrf}}</span>, <span class="math">v_P^{\\mathrm{kes}}</span>) to <span class="math">\\mathcal{F}_{\\mathrm{N-MC}}^{\\mathrm{new}}</span>.</li>
+
+    </ol>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>end if</li>
+
+    </ol>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Set isInit  <span class="math">\\leftarrow \\top</span> ,  <span class="math">t_{\\mathrm{on}} \\leftarrow \\tau</span> , and  <span class="math">t_{\\mathrm{work}} \\leftarrow 0</span> .</li>
+
+    </ol>
+
+    <p class="text-gray-300">GLOBAL VARIABLES: The protocol stores the list of variables  <span class="math">\\nu_{p}^{\\mathrm{vrf}}</span> ,  <span class="math">\\nu_{p}^{\\mathrm{kes}}</span> ,  <span class="math">\\tau</span> ,  <span class="math">\\mathsf{ep}</span> ,  <span class="math">\\mathsf{sl}</span> ,  <span class="math">\\mathcal{C}_{\\mathrm{loc}}</span> ,  <span class="math">T_{p}^{\\mathrm{ep}}</span> , isInit, and  <span class="math">t_{\\mathrm{on}}</span>  to make each of them accessible by all protocol parts.</p>
+
+    <p class="text-gray-300">Figure 14: The initialization protocol of Ouroboros Samasika (run only the first time a party joins).</p>
+
+    <p class="text-gray-300">Protocol StakingProcedure  <span class="math">(P,\\mathrm{sid},k,\\mathrm{ep},\\mathrm{sl},</span>  buffer,  <span class="math">C_{\\mathrm{loc}})</span></p>
+
+    <p class="text-gray-300">The following steps are executed in an (MAINTAIN-LEDGER, sid, minerID)-interruptible manner:</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">1. Send (EvalProve, sid, noncej  $\\</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mathsf{sl}\\</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"><span class="math">  NONCE) to  </span>\\mathcal{F}_{\\mathrm{VRF}}<span class="math">  , denote the response from  </span>\\mathcal{F}_{\\mathrm{VRF}}<span class="math">  by (Evaluated, sid,  </span>y_{\\rho},\\pi_{\\rho})<span class="math">  . Also, send (EvalProve, sid, noncej  </span>\\</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mathsf{sl}\\</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"><span class="math">  TEST)) to  </span>\\mathcal{F}_{\\mathrm{VRF}}<span class="math">  , denote the response from  </span>\\mathcal{F}_{\\mathrm{VRF}}<span class="math">  by (Evaluated, sid,  </span>y,\\pi)$</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>if  <span class="math">y &amp;lt; T_p^{\\mathrm{ep}}</span>  then // Generate a new block</li>
+
+      <li>Set buffer'  <span class="math">\\leftarrow</span>  buffer,  <span class="math">\\vec{N} \\gets \\mathrm{txnp}^{\\mathrm{base - tx}}</span>  and st  <span class="math">\\leftarrow</span>  blockifyOG(  <span class="math">\\vec{N}</span> )</li>
+
+      <li>repeat</li>
+
+      <li>Parse buffer' as sequence  <span class="math">(\\mathrm{txn1},\\dots ,\\mathrm{txnn})</span></li>
+
+      <li>for  <span class="math">i = 1</span>  to  <span class="math">n</span>  do</li>
+
+    </ol>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">7. if ValidTxOG(txni, st</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">st) = 1 then</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>end if</li>
+
+      <li>end for</li>
+
+      <li>until  <span class="math">\\vec{N}</span>  does not increase anymore</li>
+
+      <li>Set  <span class="math">\\operatorname{crit} = (P, y, \\pi)</span> ,  <span class="math">\\rho = (y_{\\rho}, \\pi_{\\rho})</span>  and  <span class="math">h \\gets \\mathsf{H}(\\mathsf{head}(\\mathcal{C}_{\\mathrm{loc}}))</span>  and send (USign, sid,  <span class="math">P</span> ,  <span class="math">(h, \\mathrm{st}, \\mathrm{sl}, \\mathrm{crit}, \\rho)</span> , sl) to  <span class="math">\\mathcal{F}_{\\mathrm{KES}}</span> ; denote the response by (Signature, sid,  <span class="math">(h, \\mathrm{st}, \\mathrm{sl}, \\mathrm{crit}, \\rho)</span> , sl,  <span class="math">\\sigma</span> ).</li>
+
+      <li>Update min-density variables as follows:</li>
+
+    </ol>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Execute  <span class="math">\\overrightarrow{\\mathrm{Den}} \\gets \\mathrm{get}\\overrightarrow{\\mathrm{Den}}(\\mathcal{C}_{\\mathrm{loc}})</span> , where  <span class="math">\\overrightarrow{\\mathrm{Den}} = (\\mathsf{pDen}_1, \\ldots, \\mathsf{pDen}_{n_n}, \\mathsf{pDen}_{\\mathrm{curr}}, \\min \\mathrm{Den})</span> .</li>
+
+      <li>pDencurr  <span class="math">\\leftarrow</span>  pDencurr + 1</li>
+
+    </ul>
+
+    <p class="text-gray-300">!<a href="img-7.jpeg">img-7.jpeg</a> Figure 15: The Ouroboros Samasika staking procedure.</p>
+
+    <p class="text-gray-300">In Figure 7.5, we demonstrate where in the protocol architecture to maintain and update the window min-density  <span class="math">\\widetilde{\\mathsf{Den}}</span>  parameters. Specifically, we will have every block hold the current values of these parameters. For any block, the parameters are generated by the slot leader. Specifically, the slot leader begins by retrieving  <span class="math">\\widetilde{\\mathsf{Den}}</span>  for the last block in the chain the party is about to extend. Then, the party updates the parameters (using algorithms shiftWindow( <span class="math">\\cdot</span> ) and isWindowStop( <span class="math">\\cdot</span> ,  <span class="math">\\cdot</span> )).</p>
+
+    <p class="text-gray-300">Algorithm getMinDen(C)</p>
+
+    <p class="text-gray-300">Let  <span class="math">B_{\\mathrm{last}}</span>  be the last block in  <span class="math">C</span> .</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>if  <span class="math">B_{\\mathrm{last}} = \\mathbf{G}</span>  then // i.e., if  <span class="math">B_{\\mathrm{last}}</span>  is the genesis block</li>
+
+      <li>return 0</li>
+
+      <li>else</li>
+
+      <li>Parse  <span class="math">B_{\\mathrm{last}}</span>  to obtain the parameter minDen.</li>
+
+      <li>return minDen</li>
+
+    </ol>
+
+    <p class="text-gray-300">Figure 16: The protocol to obtain the current window min-density of a given chain.</p>
+
+    <p class="text-gray-300">In this section, we prove security of the Ouroboros Samasika protocol. We begin with some preliminaries which will be useful in the proofs.</p>
+
+    <p class="text-gray-300">In various parts of the proofs, we need to estimate the expected number of blocks for a given characteristic string. Below, we define and design various tools that will facilitate the estimations.</p>
+
+    <p class="text-gray-300">Many of the arguments employ the Azuma's inequality (cf. [18], Section 4) stated below.</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Lemma 1 (Azuma's inequality (Azuma; Hoeffding)). Let  <span class="math">X_0, \\ldots, X_n</span>  be a sequence of real-valued random variables so that, for all  <span class="math">t</span> ,  $</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">X_{t+1} - X_t</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\leq c<span class="math">  for some constant  </span>c<span class="math"> . If  </span>\\mathbb{E}[X_{t+1} \\mid X_0, \\ldots, X_t] \\leq X_t<span class="math">  for all  </span>t<span class="math">  then for every  </span>\\Lambda \\geq 0$</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="my-4 text-center"><span class="math-block">\\Pr \\left[ X _ {n} - X _ {0} \\geq \\Lambda \\right] \\leq \\exp \\left(- \\frac {\\Lambda^ {2}}{2 n c ^ {2}}\\right).</span></div>
+
+    <p class="text-gray-300">Alternatively, if  <span class="math">\\mathbb{E}[X_{t + 1}\\mid X_0,\\ldots ,X_t]\\geq X_t</span>  for all  <span class="math">t</span>  then for every  <span class="math">\\varLambda\\geq 0</span></p>
+
+    <div class="my-4 text-center"><span class="math-block">\\Pr \\left[ X _ {n} - X _ {0} \\leq - \\Lambda \\right] \\leq \\exp \\left(- \\frac {\\Lambda^ {2}}{2 n c ^ {2}}\\right).</span></div>
+
+    <p class="text-gray-300">Another large deviation bound that we use in our probabilistic arguments is the Chernoff bound, recalled below.</p>
+
+    <p class="text-gray-300">Theorem 1 (Chernoff bound.). Let  <span class="math">X_{1},\\ldots ,X_{n}</span>  be independent random variables with  <span class="math">\\mathbb{E}[X_i] = p_i</span>  and  <span class="math">X_{i}\\in [0,1]</span> . Let  <span class="math">X = \\sum_{i = 1}^{n}X_{i}</span>  and  <span class="math">\\mu = \\sum_{i = 1}^{n}p_{i} = \\mathbb{E}[X]</span> .</p>
+
+    <p class="text-gray-300">Then, for all <span class="math">\\Lambda\\geq 0</span>,</p>
+
+    <p class="text-gray-300"><span class="math">Pr[X\\geq(1+\\Lambda)\\mu]</span> <span class="math">\\leq e^{-\\frac{\\Lambda^{2}}{2i\\Lambda}\\mu}</span> <span class="math">Pr[X\\geq(1+\\Lambda)\\mu]</span> <span class="math">\\leq e^{-\\frac{\\Lambda^{2}}{2i\\Lambda}\\mu}</span></p>
+
+    <h6 id="sec-58" class="text-base font-medium mt-4">Definition 2 (The super-binomial martingale conditions).</h6>
+
+    <p class="text-gray-300">Consider a family of random variables <span class="math">X_{1},\\ldots,X_{n}</span> taking values in <span class="math">\\{0,1\\}^{n}</span>. We say that they satisfy the <span class="math">\\gamma</span>-super-binomial martingale conditions (or, simply, the <span class="math">\\gamma</span>-martingale conditions) if</p>
+
+    <p class="text-gray-300"><span class="math">\\Pr[X_{k}=0\\mid X_{1},\\ldots,X_{k-1}]\\geq\\gamma,\\text{ and hence}</span> <span class="math">\\Pr[X_{k}=1\\mid X_{1},\\ldots,X_{k-1}]\\leq 1-\\gamma.</span></p>
+
+    <p class="text-gray-300">We may naturally apply the same terminology to infinite sequences of variables taking values in <span class="math">\\{0,1\\}</span>.</p>
+
+    <h6 id="sec-59" class="text-base font-medium mt-4">Corollary 1 (Corollary of the Azuma’s inequality (cf. Lemma 7 in <em>[4]</em>)).</h6>
+
+    <p class="text-gray-300">Let <span class="math">X_{1},\\ldots,X_{n}</span> satisfy the <span class="math">\\gamma</span>-super-binomial martingale conditions with <span class="math">\\gamma\\geq 1/2</span>. Then, for any <span class="math">\\delta&gt;0</span>,</p>
+
+    <p class="text-gray-300"><span class="math">\\Pr[\\#_{0}(X)\\leq(1-\\delta)\\gamma n]\\leq\\exp(-\\delta^{2}n/2)</span></p>
+
+    <p class="text-gray-300">and</p>
+
+    <p class="text-gray-300"><span class="math">\\Pr[\\#_{1}(X)\\geq(1+\\delta)(1-\\gamma)n]\\leq\\exp(-\\delta^{2}n/2)</span></p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">where, $\\#_{0}(X)=</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\{i\\mid X_{i}=0\\}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"><span class="math"> and </span>\\#_{1}(X)=</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\{i\\mid X_{i}=1\\}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">$.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <h4 id="sec-60" class="text-lg font-semibold mt-6">7.6.2 The Proofs</h4>
+
+    <p class="text-gray-300">Like in Ouroboros Praos and Ouroboros Genesis, much of the analysis on characteristic strings is done by transforming them to their synchronous versions and analyzing the latter. The resulting distribution is called the ‘induced distribution’, denoted by <span class="math">\\rho_{A}(\\cdot)</span>. In Lemma 6 of Genesis, it is shown that the induced distribution is a prefix of a distribution that satisfies <span class="math">\\gamma(1-f)^{A+1}</span>-martingale conditions (cf. Definition 3). In the following, we prove certain useful properties about the distribution which is employed in the crux of our main proof.</p>
+
+    <h6 id="sec-61" class="text-base font-medium mt-4">Definition 3 (The super-binomial martingale conditions).</h6>
+
+    <p class="text-gray-300">Consider a family of random variables <span class="math">X_{1},\\ldots,X_{n}</span> taking values in <span class="math">\\{0,1\\}^{n}</span>. We say that they satisfy the <span class="math">\\gamma</span>-super-binomial martingale conditions (or, simply, the <span class="math">\\gamma</span>-martingale conditions) if</p>
+
+    <p class="text-gray-300"><span class="math">\\Pr[X_{k}=0\\mid X_{1},\\ldots,X_{k-1}]\\geq\\gamma,\\text{ and hence}</span> <span class="math">\\Pr[X_{k}=1\\mid X_{1},\\ldots,X_{k-1}]\\leq 1-\\gamma.</span></p>
+
+    <p class="text-gray-300">We may naturally apply the same terminology to infinite sequences of variables taking values in <span class="math">\\{0,1\\}</span>.</p>
+
+    <p class="text-gray-300">######</p>
+
+    <h6 id="sec-62" class="text-base font-medium mt-4">Lemma 2 (Structure of the induced distribution).</h6>
+
+    <p class="text-gray-300">Let <span class="math">W=W_{1},\\ldots,W_{n}</span> be a sequence of random variables, each taking values in <span class="math">\\{0,1,\\bot\\}</span>, which satisfy the <span class="math">(f;\\gamma)</span>-characteristic conditions and let</p>
+
+    <p class="text-gray-300"><span class="math">X=X_{1},\\ldots,X_{\\ell}=\\rho_{\\lrcorner}(W_{1},\\ldots,W_{n})</span></p>
+
+    <p class="text-gray-300">be the synchronous equivalent random variables obtained by applying the <span class="math">\\lrcorner</span>-reduction mapping to <span class="math">W</span>. Also, let <span class="math">\\Pr[W_{i}=\\bot\\mid W_{1},\\ldots,W_{i-1}]\\leq(1-a)</span>. If <span class="math">\\gamma(1-f)^{\\lrcorner+1}\\geq(1+\\epsilon)/2</span> for some <span class="math">\\epsilon\\geq 0</span> then, the following hold.</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>For any <span class="math">\\delta_{\\ell},\\delta_{0}&gt;0</span>,</li>
+
+    </ol>
+
+    <p class="text-gray-300"><span class="math">\\epsilon_{\\#_{0}}(a,n)</span> <span class="math">\\stackrel{{\\scriptstyle\\triangle}}{{=}}\\Pr[\\#_{0}(X)&lt;(1-\\delta_{0})\\frac{(1+\\epsilon)}{2}((1-\\delta_{\\ell})an)-\\lrcorner]</span> <span class="math">\\leq\\exp\\left(-\\frac{\\delta_{\\ell}^{2}a^{2}n}{2(1-a)^{2}}\\right)+\\exp\\left(-\\frac{\\delta_{0}^{2}((1-\\delta_{\\ell})an)}{2}\\right)</span> (4)</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>For any <span class="math">\\delta_{1}&gt;0</span>,</li>
+
+    </ol>
+
+    <p class="text-gray-300"><span class="math">\\epsilon_{\\#_{1}}(a,n)</span> <span class="math">\\stackrel{{\\scriptstyle\\triangle}}{{=}}\\Pr[\\#_{1}(X)&gt;(1+\\delta_{1})\\frac{(1-\\epsilon)}{2}an-\\lrcorner]</span> <span class="math">\\leq</span> <span class="math">=\\exp\\left(-\\frac{\\delta_{1}^{2}an}{2}\\right)</span> (5)</p>
+
+    <h6 id="sec-63" class="text-base font-medium mt-4">Proof.</h6>
+
+    <p class="text-gray-300">We establish the bounds by employing Corollary 1. Recall that Corollary 1 provides bounds on the number of ones and zeros in a sequence of <em>binary</em> random variables that satisfy the martingale conditions. However, <span class="math">W</span> might contain <span class="math">\\bot</span> also. Therefore, we consider the <span class="math">\\lrcorner</span>-reduced mapping of <span class="math">W</span>: namely, <span class="math">X=X_{1},\\ldots,X_{\\ell}=\\rho_{\\lrcorner}(W_{1},\\ldots,W_{n})</span> and apply the Lemma on the mapped distribution.</p>
+
+    <p class="text-gray-300">From Lemma 8 (i) and (ii) in Ouroboros Genesis, we have that <span class="math">X_{1},\\ldots,X_{\\ell-\\lrcorner}</span> is a prefix to a sequence of random variables <span class="math">Z_{1},Z_{2},\\ldots</span> that satisfy the <span class="math">\\gamma(1-f)^{\\lrcorner+1}</span>-martingale conditions (for definition, see Appendix 7.6.1). Therefore, we can apply Lemma 1 on <span class="math">X_{1},\\ldots,X_{\\ell-\\lrcorner}</span>.</p>
+
+    <h4 id="sec-64" class="text-lg font-semibold mt-6">Proof of (i).</h4>
+
+    <p class="text-gray-300">The proof of (i) is structured as follows. We will first establish a lower bound on <span class="math">\\ell</span> by applying the Azuma’s inequality. Then, for this lower bound, we will apply Lemma 1 on <span class="math">X_{1},\\ldots,X_{\\ell-\\lrcorner}</span> to obtain a lower bound on the number of zeroes.</p>
+
+    <p class="text-gray-300">Consider the random variables</p>
+
+    <p class="text-gray-300">\\[ A_{i}\\stackrel{{\\scriptstyle\\triangle}}{{=}}\\begin{cases}0,&\\text{if }W_{i}=\\bot\\\\ 1,&\\text{if }W_{i}\\neq\\bot\\end{cases} \\]</p>
+
+    <p class="text-gray-300">and let <span class="math">\\ell = \\sum_{i=1}^{n} A_i</span>. Then, <span class="math">\\operatorname{Pr}[A_i = 1 \\mid A_1, \\ldots, A_{i-1}] \\geq a</span>. By applying Azuma's inequality to the random variables <span class="math">B_i \\triangleq \\sum_{i=1}^{t} (A_i - a)</span>, we obtain</p>
+
+    <div class="my-4 text-center"><span class="math-block">\\Pr \\left[ \\ell &amp;lt;   (1 - \\delta_ {\\ell}) a n \\right] \\leq \\exp \\left(- \\frac {\\delta_ {\\ell} ^ {2} a ^ {2} n}{2 (1 - a) ^ {2}}\\right) \\leq \\exp \\left(- \\frac {\\delta_ {\\ell} ^ {2} a ^ {2} n}{2}\\right) \\tag {6}</span></div>
+
+    <p class="text-gray-300">With this length bound established, we must have <span class="math">\\#_0(X) \\geq \\#_0(Z_1, \\ldots, Z_\\ell) - \\Delta</span>. Applying Lemma 1 to <span class="math">Z_i</span>, we conclude that</p>
+
+    <div class="my-4 text-center"><span class="math-block">\\Pr \\left[ \\# _ {0} \\left(Z _ {1}, \\dots , Z _ {\\ell}\\right) \\leq \\left(1 - \\delta_ {0}\\right) \\frac {(1 + \\epsilon)}{2} \\ell \\right] \\leq \\exp \\left(- \\frac {\\delta_ {0} ^ {2} \\ell}{2}\\right) \\tag {7}</span></div>
+
+    <p class="text-gray-300">Taking the union bound over these two bad events yields Equation (4).</p>
+
+    <p class="text-gray-300">Proof of (ii). By assuming the worst case of <span class="math">\\ell = an</span> and applying Lemma 1 to the prefix of <span class="math">Z_{i}</span>s, we immediately obtain (5).</p>
+
+    <p class="text-gray-300">□</p>
+
+    <p class="text-gray-300">Theorem 2. Consider the protocol Ouroboros-Samasika using maxvalid-sc as described in Figure 7, executed in the <span class="math">\\mathcal{F}_{\\mathrm{N - MC}}</span>-registration. Let <span class="math">f</span> be the active-slot coefficient, let <span class="math">\\varDelta</span> be the upper bound on the network delay. Let <span class="math">\\alpha ,\\beta \\in [0,1]</span> denote a lower bound on the alert ratio and participating ratio throughout the whole execution, respectively. Let <span class="math">R</span> and <span class="math">L</span> denote the epoch length and the total lifetime of the system (in slots). If for some <span class="math">\\epsilon_w\\in (0,1)</span> we have <span class="math">\\alpha \\cdot (1 - f)^{\\varDelta +1}\\geq (1 + \\epsilon_w) / 2</span> and if the maxvalid-sc parameters, <span class="math">\\epsilon_w,s_{\\mathrm{CG}},s_{\\mathrm{3CQ}}</span> and the network parameter <span class="math">\\varDelta</span> satisfy</p>
+
+    <div class="my-4 text-center"><span class="math-block">2 8 8 \\Delta / (\\epsilon \\beta) &amp;lt;   k, 2 (1 + \\epsilon_ {w}) s _ {\\mathrm {C G}} + \\Delta \\leq R / 3 \\text { and } s _ {\\mathrm {C G}} + s _ {\\mathrm {3 C Q}} \\leq R / 3,</span></div>
+
+    <p class="text-gray-300">then the following guarantees for common prefix, chain growth, chain quality, and existential chain quality hold except for an additional error probability</p>
+
+    <div class="my-4 text-center"><span class="math-block">\\begin{array}{l} \\exp (\\ln L - \\Omega (k)) + \\epsilon_ {\\# _ {0}} (\\beta f, \\omega) + \\epsilon_ {\\# _ {1}} (\\beta f, \\omega) \\\\ \\epsilon_ {\\mathrm {C G}} (\\beta f / 1 6, s _ {\\mathrm {C G}}) + \\epsilon_ {\\mathrm {3 C Q}} (s _ {\\mathrm {3 C Q}}) + \\epsilon_ {\\mathrm {C P}} (s _ {\\mathrm {C G}}) \\\\ \\end{array}</span></div>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Common prefix. The probability that the protocol violates the common prefix property with parameter <span class="math">k</span> is no more than</li>
+
+    </ul>
+
+    <div class="my-4 text-center"><span class="math-block">\\epsilon_ {\\mathrm {C P}} (k) \\triangleq \\frac {1 9 L}{\\epsilon^ {4}} \\exp (\\Delta - \\epsilon^ {4} k / 1 8) + \\epsilon_ {\\mathrm {l i f t}};</span></div>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Chain growth. The probability that the protocol violates the chain growth property with parameters <span class="math">s \\geq s_{\\mathrm{CG}} \\triangleq 48\\Delta / (\\epsilon \\beta f)</span> and <span class="math">\\tau_{\\mathrm{CG}} = \\beta f / 16</span> is no more than</li>
+
+    </ul>
+
+    <div class="my-4 text-center"><span class="math-block">\\epsilon_ {\\mathrm {C G}} (\\tau_ {\\mathrm {C G}}, s) \\triangleq \\frac {s L ^ {2}}{2} \\exp (- (\\epsilon \\beta f) ^ {2} s / 2 5 6) + \\epsilon_ {\\mathrm {l i f t}};</span></div>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Existential chain quality. The probability that the protocol violates the existential chain quality property with parameter <span class="math">s \\geq s_{\\exists CQ} \\triangleq 12\\varDelta / (\\epsilon \\beta f)</span> is no more than</li>
+
+    </ul>
+
+    <div class="my-4 text-center"><span class="math-block">\\epsilon_{\\exists CQ}(s) \\triangleq (s + 1) L^2 \\exp(-(\\epsilon \\beta f)^2 s / 64) + \\epsilon_{\\mathrm{lift}};</span></div>
+
+    <p class="text-gray-300">where <span class="math">\\epsilon_{\\mathrm{lift}}</span> is a shorthand for the quantity</p>
+
+    <div class="my-4 text-center"><span class="math-block">\\epsilon_{\\mathrm{lift}} \\triangleq Q L \\cdot \\left[ R^3 \\exp\\left(-\\frac{(\\epsilon \\beta f)^2 R}{768}\\right) + \\frac{38R}{\\epsilon^4} \\exp\\left(\\varDelta - \\frac{\\epsilon^4 \\beta f R R}{864}\\right) \\right]</span></div>
+
+    <p class="text-gray-300">Proof. We begin with a high-level description of the proof. Recall that our goal is to show that when we replace maxvalid-bg with maxvalid-sc, the overall execution of the protocol remains the same. To see this, consider a run of the protocol with maxvalid-bg and consider the first <span class="math">\\mathsf{sl}_{\\mathrm{curr}}</span> an honest party discovers a long-range fork. Let <span class="math">C_{\\mathrm{loc}}</span> be the local chain and <span class="math">C_{\\mathrm{cand}}</span> be the candidate chain. We will show that maxvalid-sc will output the same chain recommendation as maxvalid-bg with all but negligible probability. (Note that, until <span class="math">\\mathsf{sl}_{\\mathrm{curr}}</span>, the whole execution would proceed identically if parties were using maxvalid-sc instead, as in both the cases they would always prefer the longer of the compared chains using the short-range fork rule.) This will then imply the full statement, as the reasoning can be applied inductively to each of the slots where maxvalid-bg encounters a long-range fork, throughout the whole execution.</p>
+
+    <p class="text-gray-300">The proof is structured as follows:</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>In Lemma 3, we will show that the <span class="math">\\omega</span>-window with lowest density in <span class="math">C_{\\mathrm{loc}}</span> has at least <span class="math">t_{\\mathrm{high}}</span> number of blocks.</li>
+
+      <li>In Lemma 4 and 5, we will consider a specific <span class="math">\\omega</span>-window and establish an upper bound on the number of blocks in <span class="math">C_{\\mathrm{cand}}</span> in that window.</li>
+
+    </ol>
+
+    <p class="text-gray-300">We will see that <span class="math">t_{\\mathrm{high}} &amp;gt; t_{\\mathrm{low}}</span> thereby establishing the theorem.</p>
+
+    <p class="text-gray-300">Lemma 3. There exists <span class="math">t_{\\mathrm{high}}</span> such that <span class="math">\\operatorname{getMinDen}(C_{\\mathrm{loc}}) \\geq t_{\\mathrm{high}}</span> except with probability <span class="math">\\epsilon_{\\#_0}(\\beta f, \\omega)</span>.</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Proof. Let <span class="math">w_{\\mathrm{loc}}^{\\mathrm{min}}</span> denote the window in <span class="math">C_{\\mathrm{loc}}</span> with the lowest density (i.e., $\\operatorname{getMinDen}(C_{\\mathrm{loc}}) =</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">C_{\\mathrm{loc}}[w_{\\mathrm{loc}}^{\\mathrm{min}}]</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"><span class="math">). Let </span>W<span class="math"> denote the characteristic string induced by this protocol execution within </span>w_{\\mathrm{loc}}^{\\mathrm{min}}$.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">Note that the number of blocks in <span class="math">w_{\\mathrm{loc}}^{\\mathrm{min}}</span> is at least <span class="math">\\#_0(W)</span>, since <span class="math">W_i = 0</span> means that the corresponding slot has a uniquely alert slot leader. Therefore, it suffices to lower bound <span class="math">\\#_0(W)</span>.</p>
+
+    <p class="text-gray-300">From Lemma 2, by setting <span class="math">a = \\beta f</span>, we get that, for any <span class="math">0 &amp;lt; \\delta_{\\ell}, \\delta_{\\mathrm{loc}} &amp;lt; 1</span>,</p>
+
+    <div class="my-4 text-center"><span class="math-block">\\Pr[\\#_0(W) \\leq (1 - \\delta_{\\mathrm{loc}}) \\frac{(1 + \\epsilon)}{2} ((1 - \\delta_{\\ell}) \\beta f \\omega) - \\varDelta] \\leq \\epsilon_{\\#_0}(\\beta f, \\omega)</span></div>
+
+    <p class="text-gray-300">Hence, we have that <span class="math">t_{\\mathrm{high}} = (1 - \\delta_{\\mathrm{loc}})\\frac{(1 + \\epsilon)}{2} ((1 - \\delta_{\\ell})\\beta f\\omega) - \\varDelta</span> and <span class="math">\\operatorname{getMinDen}(C_{\\mathrm{loc}}) \\geq t_{\\mathrm{high}}</span> except with probability <span class="math">\\epsilon_{\\#_0}(\\beta f, \\omega)</span>.</p>
+
+    <p class="text-gray-300">Towards establishing an upper bound on the window density for <span class="math">\\mathcal{C}_{\\mathsf{cand}}</span>, we will first need to establish a helper lemma (Lemma 4) that states that no honest party holds the chain <span class="math">\\mathcal{C}_{\\mathsf{cand}}</span> at any slot <span class="math">&amp;gt;\\mathsf{sl}_{\\mathsf{fork}}+s_{\\mathsf{CG}}+\\varDelta</span>.</p>
+
+    <p class="text-gray-300"><strong>Lemma 4.</strong> No honest party extends <span class="math">\\mathcal{C}_{\\mathrm{cand}}</span> at any slot later than <span class="math">\\mathsf{sl}_{\\mathrm{fork}}+s_{\\mathrm{CG}}+\\varDelta</span> except with probability <span class="math">\\epsilon_{\\mathrm{CG}}(\\beta f / 16, s_{\\mathrm{CG}}) + \\epsilon_{\\exists \\mathrm{CQ}}(s_{\\exists \\mathrm{CQ}}) + \\epsilon_{\\mathrm{CP}}(s_{\\mathrm{CG}}, \\beta f / 16)</span>.</p>
+
+    <p class="text-gray-300"><strong>Proof.</strong> At a high level, the proof is structured as follows. We will consider two consecutive intervals of slots <span class="math">I_{\\mathrm{growth}} = [\\mathsf{sl}_{\\mathrm{fork}} + 1, \\mathsf{sl}_{\\mathrm{fork}} + s_{\\mathrm{CG}}]</span> and <span class="math">I_{\\mathrm{stabilize}} = [\\mathsf{sl}_{\\mathrm{fork}} + s_{\\mathrm{CG}} + 1, \\mathsf{sl}_{\\mathrm{fork}} + s_{\\mathrm{CG}} + s_{\\exists \\mathrm{CQ}}]</span>. Firstly, we will show that <span class="math">\\mathcal{C}_{\\mathrm{loc}}</span> has a large number of blocks in <span class="math">I_{\\mathrm{growth}}</span> by employing the chain growth property; secondly, we will show that it has at least one honest block in <span class="math">I_{\\mathrm{stabilize}}</span> by employing the existential chain quality property; finally, in the crux of the proof, we show that if an honest party holds <span class="math">\\mathcal{C}_{\\mathrm{cand}}</span> at a slot later than <span class="math">\\mathsf{sl}_{\\mathrm{fork}} + s_{\\mathrm{CG}} + \\varDelta</span>, then it contradicts the chain prefix property.</p>
+
+    <p class="text-gray-300">In the rest of the proof, we will assume that and</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>there is no <span class="math">s_{\\mathsf{CG}}\\beta f / 16</span>-CP violation,</li>
+
+      <li>there is no <span class="math">s_{\\exists \\mathsf{CQ}} - \\exists \\mathsf{CQ}</span> violation, and</li>
+
+      <li>there is no <span class="math">(\\beta f / 16, s_{\\mathsf{CG}})</span>-CG violation.</li>
+
+    </ul>
+
+    <p class="text-gray-300">We observe that <span class="math">\\mathcal{C}_{\\mathrm{loc}}</span> exhibits significant growth over the interval <span class="math">I_{\\mathrm{growth}}</span>: specifically, by the chain growth property established in Theorem 1 of [4],</p>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\left</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mathcal {C} _ {\\text {l o c}} \\left[ I _ {\\text {g r o w t h}} \\right] \\right</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\geq s _ {\\mathrm {C G}} \\beta f / 1 6 \\tag {8}</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Furthermore, observe that <span class="math">\\mathcal{C}_{\\mathrm{loc}}</span> possesses at least one honestly-generated block over the interval <span class="math">I_{\\mathrm{stabilize}}</span>: specifically, since $</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">I_{\\mathrm{stabilize}}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">= s_{\\exists \\mathrm{CQ}}<span class="math"> and by the existential chain quality property established in Theorem 1 of [4], there must exist a slot </span>\\mathsf{sl}_{\\mathrm{loc}}^{<em>} \\in I_{\\mathrm{stabilize}}<span class="math"> for which the block </span>\\mathcal{C}_{\\mathrm{loc}}[\\mathsf{sl}_{\\mathrm{loc}}^{</em>}]$ was honestly generated.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">In order to establish the lemma, we observe that an honest party extending <span class="math">\\mathcal{C}_{\\mathrm{cand}}</span> after the slot <span class="math">\\mathsf{sl}_{\\mathrm{fork}} + s_{\\mathsf{CG}} + \\varDelta</span> would yield a violation of common prefix. Assume for contradiction that there exists an honestly generated block in <span class="math">\\mathcal{C}_{\\mathrm{cand}}</span> after <span class="math">\\mathsf{sl}_{\\mathrm{fork}} + s_{\\mathsf{CG}} + \\varDelta</span> slots. Let that slot be denoted by <span class="math">\\mathsf{sl}_{\\mathrm{cand}}^{*}</span>.</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Let $A =</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mathcal{C}_{\\mathrm{loc}}[I_{\\mathrm{growth}}]</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"><span class="math"> and let </span>B =</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mathcal{C}_{\\mathrm{cand}}[I_{\\mathrm{growth}}]</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"><span class="math">. Also, consider the tines </span>t_{\\mathrm{loc}} = \\mathcal{C}_{\\mathrm{loc}}[1, \\mathsf{sl}_{\\mathrm{loc}}^<em>]<span class="math"> and </span>t_{\\mathrm{cand}} = \\mathcal{C}_{\\mathrm{cand}}[1, \\mathsf{sl}_{\\mathrm{cand}}^</em>]$.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">Now, we will consider the following two cases.</p>
+
+    <p class="text-gray-300"><strong>Case 1: <span class="math">B \\geq A</span>:</strong> Recall that there is an honest block in <span class="math">\\mathcal{C}_{\\mathrm{loc}}</span> at <span class="math">\\mathsf{sl}_{\\mathrm{loc}}^<em></span> and in <span class="math">\\mathcal{C}_{\\mathrm{cand}}</span> at <span class="math">\\mathsf{sl}_{\\mathrm{cand}}^</em></span>. Therefore, <span class="math">t_{\\mathrm{loc}}</span> and <span class="math">t_{\\mathrm{cand}}</span> are viable tines. This gives rise to a divergence of <span class="math">\\operatorname{div}(t_{\\mathrm{loc}}, t_{\\mathrm{cand}}) \\geq A</span>. In other words, there is a divergence violation (or CP violation) with parameter <span class="math">A \\geq s_{\\mathrm{CG}} \\beta f / 16</span> (from (8)).</p>
+
+    <p class="text-gray-300">38</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Case 2: <span class="math">A &amp;gt; B</span>: Recall that there exists an honestly-generated block at <span class="math">C_{\\text{cand}}[\\mathfrak{sl}_{\\text{cand}}^<em>]</span>. Also, recall that <span class="math">\\mathfrak{sl}_{\\text{cand}}^</em> &amp;gt; \\mathfrak{sl}_{\\text{fork}} + s_{\\text{CG}} + \\Delta</span>. Given that the delay of <span class="math">\\Delta</span> has passed, the honest party that generated <span class="math">C_{\\text{cand}}[\\mathfrak{sl}_{\\text{cand}}^*]</span> has completely learned <span class="math">C_{\\text{loc}}[1, \\mathfrak{sl}_{\\text{fork}} + s_{\\text{CG}}]</span>. Since the honest party still extended <span class="math">C_{\\text{cand}}</span> instead of <span class="math">C_{\\text{loc}}</span>, we have that $\\bar{B} \\triangleq</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">C_{\\text{cand}}[\\mathfrak{sl}_{\\text{fork}} + 1, \\mathfrak{sl}_{\\text{cand}}^*]</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\geq A<span class="math">. Similar to the above case, this results in divergence violation with parameter </span>A \\geq s_{\\text{CG}}\\beta f / 16$.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">Recall that <span class="math">\\operatorname{getMinDen}(C)</span> outputs the minimum density of blocks over windows of length <span class="math">w</span> slots. Consider the window corresponding to which <span class="math">\\operatorname{getMinDen}</span> output the density. Let the slot right before the window begins be denoted by <span class="math">\\mathfrak{sl}_{\\min}</span>. Consider the interval <span class="math">I_{\\mathrm{growth}} = (\\mathfrak{sl}_{\\min}, \\mathfrak{sl}_{\\min} + \\omega]</span>. By the chain growth property established in Theorem 1 of [4] and by the assumption <span class="math">w = 1.1</span></p>
+
+    <p class="text-gray-300">Towards establishing Lemma 5 and Lemma 3, we will employ the chain growth and the existential chain quality properties; specifically, we will consider two disjoint consecutive intervals of length <span class="math">s_{\\mathrm{CG}}</span> and <span class="math">s_{\\exists \\mathrm{CQ}}</span> between <span class="math">\\mathfrak{sl}_{\\mathrm{fork}}</span> and <span class="math">\\mathfrak{sl}_{\\mathrm{curr}}</span>. For this, we need to first show that there are at least <span class="math">s_{\\mathrm{CG}} + s_{\\exists \\mathrm{CQ}}</span> slots between <span class="math">\\mathfrak{sl}_{\\mathrm{fork}}</span> and <span class="math">\\mathfrak{sl}_{\\mathrm{curr}}</span> so that we can apply the properties.</p>
+
+    <p class="text-gray-300">Lemma 5. <span class="math">\\operatorname{getMinDen}(C_{\\text{cand}}) \\leq t_{\\text{low}}</span> except with probability <span class="math">\\epsilon_{\\#_1}(\\beta f, \\omega)</span>.</p>
+
+    <p class="text-gray-300">Proof. In order to establish an upper bound on the min-density for <span class="math">C_{\\text{cand}}</span>, we will consider a specific window close to the fork and establish an upper bound of its density. It follows that the min-density of the chain is at most the upper bound.</p>
+
+    <p class="text-gray-300">We will now specify the window we will focus on. Consider the first window that begins after the slot <span class="math">\\mathfrak{sl}_{\\mathrm{fork}} + s_{\\mathrm{CG}} + \\Delta</span>. Denote this window by <span class="math">\\mathsf{w}_{\\mathrm{cand}}^*</span>.</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">We will show that $</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mathsf{w}_{\\mathrm{cand}}^*</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\leq t_{\\mathrm{low}}$.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">From Lemma 4, we have that there are no honestly-generated blocks in <span class="math">C_{\\text{cand}}</span> after the slot <span class="math">\\mathfrak{sl}_{\\text{fork}} + s_{\\text{CG}} + \\Delta</span> except with probability <span class="math">\\epsilon_{\\text{CG}}(\\beta f / 16, s_{\\text{CG}}) + \\epsilon_{\\exists \\text{CQ}}(s_{\\exists \\text{CQ}}) + \\epsilon_{\\text{CP}}(s_{\\text{CG}}, \\beta f / 16)</span>. Therefore, all the blocks in <span class="math">C_{\\text{cand}}</span> after <span class="math">\\mathfrak{sl}_{\\text{fork}} + s_{\\text{CG}} + \\Delta</span> are adversarially generated. In other words, $</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mathsf{w}_{\\text{cand}}^*</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">= \\#_1(\\bar{W})<span class="math">, where </span>\\bar{W}<span class="math"> denotes the characteristic string induced by this protocol execution within </span>\\mathsf{w}_{\\text{cand}}^*$.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">We can now employ Lemma 2, by setting <span class="math">a = \\beta f</span>, we get that, for any <span class="math">0 &amp;lt; \\delta_1 &amp;lt; 1</span>,</p>
+
+    <div class="my-4 text-center"><span class="math-block">\\Pr \\left[ \\# _ {1} (W) &amp;gt; \\left(1 + \\delta_ {1}\\right) \\frac {(1 - \\epsilon)}{2} \\beta f - \\Delta \\right] \\leq \\epsilon_ {\\# _ {1}} (\\beta f, \\omega)</span></div>
+
+    <p class="text-gray-300">Hence, we have that <span class="math">\\mathfrak{t}_{\\mathrm{low}} = (1 + \\delta_1)\\frac{(1 - \\epsilon)}{2}\\beta f - \\Delta</span> and <span class="math">\\operatorname{getMinDen}(C_{\\mathrm{cand}}) \\leq \\mathfrak{t}_{\\mathrm{low}}</span> except with probability <span class="math">\\epsilon_{\\#_1}(\\beta f, \\omega)</span>.</p>
+
+    <p class="text-gray-300">□</p>
+
+    <p class="text-gray-300">Consistent distribution. We have considered various ranges of slots in Lemma 3, 4 and 5. It is required that all those ranges have the same the same stake distribution and randomness to determine slot leaders throughout the ranges.</p>
+
+    <p class="text-gray-300">39</p>
+
+    <p class="text-gray-300">This is ensured by the following two constraints:</p>
+
+    <p class="text-gray-300"><span class="math">s_{\\text{CG}}+\\varDelta+\\nu+\\omega</span> <span class="math">\\leq R/3</span> <span class="math">s_{\\text{CG}}+s_{\\text{\\exists CQ}}</span> <span class="math">\\leq R/3</span></p>
+
+    <p class="text-gray-300">These constraints correspond to those in the theorem statement, since we have assigned <span class="math">\\omega=(1+\\epsilon_{w})s_{\\text{CG}}</span> and <span class="math">\\nu=\\epsilon_{w}s_{\\text{CG}}</span>.</p>
+
+    <h5 id="sec-65" class="text-base font-semibold mt-4">To ensure slot ranges are within <span class="math">\\mathfrak{sl}_{\\text{fork}}</span> and <span class="math">\\mathfrak{sl}_{\\text{curr}}</span>.</h5>
+
+    <p class="text-gray-300">Observe that we have considered various ranges of slot positions in the above proof. It remains to ensure that they all lie between <span class="math">\\mathfrak{sl}_{\\text{fork}}</span> and <span class="math">\\mathfrak{sl}_{\\text{curr}}</span>. Towards this, we will first establish a lower bound on <span class="math">\\mathfrak{sl}_{\\text{curr}}-\\mathfrak{sl}_{\\text{fork}}</span>. Then we will illustrate example assignments to various parameters with which the slot ranges lie within the limits.</p>
+
+    <p class="text-gray-300">Recall that <span class="math">\\mathfrak{sl}_{\\text{fork}}</span> is the slot associated with the last common block of <span class="math">\\mathcal{C}_{\\text{loc}}</span> and <span class="math">\\mathcal{C}_{\\text{cand}}</span>. Recall that by the design of the protocol (independently of the underlying maxvalid rule), for every slot <span class="math">\\mathfrak{sl}_{i}</span> there is an event <span class="math">E_{i}</span> such that, if <span class="math">E_{i}</span> occurs, then no valid block can be created for the slot <span class="math">\\mathfrak{sl}_{i}</span>. Moreover, the events <span class="math">E_{1},E_{2},\\ldots</span> are independent and <span class="math">\\Pr[E_{i}]=1-f</span>. Therefore, using a Chernoff bound (cf. Appendix 7.6.1) and a union bound over the running time <span class="math">L</span> of the system, and by using the fact that there are <span class="math">k</span> blocks between <span class="math">\\mathfrak{sl}_{\\text{fork}}</span> and <span class="math">\\mathfrak{sl}_{\\text{curr}}</span>, we can lower-bound the number of slots between <span class="math">\\mathfrak{sl}_{\\text{fork}}</span> and <span class="math">\\mathfrak{sl}_{\\text{curr}}</span>: <span class="math">\\mathfrak{sl}_{\\text{curr}}-\\mathfrak{sl}_{\\text{fork}}\\geq k/2f</span>, except with error probability <span class="math">\\exp(\\ln L-\\varOmega(k))</span>. For the remainder of the proof, we will assume that the execution satisfies <span class="math">\\mathfrak{sl}_{\\text{curr}}</span>: <span class="math">\\mathfrak{sl}_{\\text{curr}}-\\mathfrak{sl}_{\\text{fork}}\\geq k/2f</span> for all pairs of slots bounding at least <span class="math">k</span> blocks on an honestly held chain).</p>
+
+    <p class="text-gray-300">The following is a potential assignment that ensures that the ranges fit within the limits. <span class="math">s_{\\text{CG}},s_{\\text{\\exists CQ}}=k/(6f)</span>. Typically, <span class="math">\\varDelta\\ll k/(6f)</span>. And by setting <span class="math">\\epsilon_{w}=1</span>, we get that <span class="math">2(1+\\epsilon_{w})s_{\\text{CG}}+\\varDelta\\leq k/(2f)</span>. Further, by setting <span class="math">s_{\\text{\\exists CQ}}=k/(6f)</span>, we get <span class="math">s_{\\text{CG}}+s_{\\text{\\exists CQ}}\\leq k/(2f)</span>. In these assignments, we needed to assume <span class="math">48\\varDelta/(\\epsilon\\beta)&lt;k/6</span> which conforms with the theorem statement. ∎</p>
+
+    <h3 id="sec-66" class="text-xl font-semibold mt-8">7.7 An Efficient Implementation of the Short-range Fork Rule</h3>
+
+    <p class="text-gray-300">Recall that the short-range fork rule is simply to choose the longest chain, like in Ouroboros Genesis. Recall that a fork is a short-range one if it is less than <span class="math">k</span> blocks ago in history. A naïve implementation of this rule is to always store the last <span class="math">k</span> blocks. However, this is not efficient. In the following, we propose an approach where only information about just two block needs to be stored at any given point in time.</p>
+
+    <p class="text-gray-300">The idea is to maintain two checkpoints in every epoch, that can provide an estimate on how long ago a fork has occurred. One, a ‘start checkpoint’, which is at the beginning of each epoch, and the other, a ‘lock checkpoint’, which is at the last block in the first two-thirds of an epoch. That is, in the current epoch, as time progresses away from the first slot, the lock checkpoint is the last block so far until we reach the last block in the first two-thirds of the epoch, when the lock checkpoint “freezes” at that block. These checkpoints are compared</p>
+
+    <p class="text-gray-300">for candidate chains to determine when the fork has occurred. To estimate the fork position, we consider the following two cases.</p>
+
+    <p class="text-gray-300">We categorize this as a short-range fork. This is because the leader selection distribution for the current epoch was already determined by the end of the first two-thirds of the previous epoch. Therefore, we can safely assume that the adversary has not skewed the distribution for the current epoch and the simple longest chain rule suffices in this case. Since the lock checkpoints for the previous epoch are the same for the candidate chains, as noted in the previous case, the leader selection distribution is well distributed even after the fork. Hence, again, the simple longest chain rule suffices.</p>
+
+    <h2 id="sec-67" class="text-2xl font-bold">8 Experimental Results</h2>
+
+    <p class="text-gray-300">We have implemented the Coda protocol and launched the testnet with participation from across the world. In this section, we report the results from a representative duration between November 12, 2019, 10 AM Pacific Time Zone and December 15, 2019, 10 AM Pacific Time Zone.</p>
+
+    <h3 id="sec-68" class="text-xl font-semibold mt-8">8.1 The Implementation Details</h3>
+
+    <p class="text-gray-300">The implementation is written in OCaml. The SNARK themselves are written in a special intuitive OCaml-based language called <em>Snarky</em>, with a backend based on libsnark <em>[5]</em>. The underlying gossip protocol is based on libp2p <em>[1]</em>.</p>
+
+    <h4 id="sec-69" class="text-lg font-semibold mt-6">The incrementally-computable SNARK.</h4>
+
+    <p class="text-gray-300">Recall that the Coda protocol is based on an incrementally-computable SNARK. The SNARK implementation employs the parallel scan state technique from Section 6.1, where for a queue of blocks, a tree of SNARK proofs are generated and the root proof is combined with the proof for the blockchain prior the queue, to obtain a new proof for the updated blockchain. The SNARK proof attesting validity of a blockchain is called a <em>blockchain proof</em> and all the other proofs in the trees are called block proofs. Recall from Section 4.1.1 that, under the hood, there are three different types of proofs, namely the base proofs, the wrap proofs and the merge proofs. In effect, we have <em>blockchain-base proofs, blockchain-wrap proofs, block-base proofs, block-wrap proofs and block-merge proofs</em>. (Note that we do not have blockchain-merge proofs, since the blockchain proofs are only computed sequentially and therefore, multiple blockchain proofs are never merged.)</p>
+
+    <h4 id="sec-70" class="text-lg font-semibold mt-6">The consensus parameters.</h4>
+
+    <p class="text-gray-300">The Coda protocol is instantiated with the Ouroboros Samasika consensus mechanism. We set the main consensus param</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Type of SNARK proof</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Number of constraints</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">block-base proof</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">42700</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">block-wrap proof</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">34954</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">block-merge proof</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">206388</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">blockchain-base proof</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">248006</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">blockchain-wrap proof</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">28313</td>
+
+          </tr>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">Table 1: Number of constraints in the different proofs used for the Coda protocol.</p>
+
+    <p class="text-gray-300">eters at  <span class="math">k = 10</span>  (the number of slots before guaranteed finality), slot duration  <span class="math">R = 240 \\, \\text{s}</span> , and  <span class="math">f = 0.5</span>  (the average fraction of filled slots in an epoch).</p>
+
+    <p class="text-gray-300">Community members across the world participated in the testnet. Besides, a few nodes were also run by us.</p>
+
+    <p class="text-gray-300">Recall that, in the Coda protocol, every node is a full node, since verifying the entire blockchain is as simple as verifying just a short, constant-sized proof. However, every full node can have one or more of the following roles: a prover and a block producer.</p>
+
+    <p class="text-gray-300">In total, the testnet had 85 unique participants. Among them, there were 49 block producers (where, 44 of the nodes were run by the community and 5 by us) and 8 unique provers.</p>
+
+    <p class="text-gray-300">The block producer nodes run by us used the following instance size: 'c5.2xlarge'. The prover nodes run by us used the following instance size: 'c5.9xlarge'. The community members ran their nodes on Linux, OS X, or Windows through WSL (Windows Subsystem for Linux).</p>
+
+    <p class="text-gray-300">Filled vs. unfilled slots. Observe that the total number of slots in the duration of interest is 15839. Among them, 7926 slots were filled. Recall that  <span class="math">f = 0.5</span>  implied that the expect fraction of filled slots is 0.5. In the experiment, 0.5004 fraction of slots were filled.</p>
+
+    <p class="text-gray-300">Transactions and SNARK proofs. A total of 24826 transactions were sent, 17256 of which were from the community members. There were 78 unique senders and 183 unique receivers. In total, 53120 block SNARK proofs were generated.</p>
+
+    <p class="text-gray-300">The figures 17, 18 and 19 report the number of daily transactions, number of daily blocks produced and number of daily SNARKs produced.</p>
+
+    <p class="text-gray-300">!<a href="img-8.jpeg">img-8.jpeg</a> Figure 17: Transactions produced from November 12, 2019, 10 AM to December 15, 2019, 10 AM, Pacific Time Zone</p>
+
+    <p class="text-gray-300">!<a href="img-9.jpeg">img-9.jpeg</a> Figure 18: Blocks produced from November 12, 2019, 10 AM to December 15, 2019, 10 AM, Pacific Time Zone</p>
+
+    <p class="text-gray-300">!<a href="img-10.jpeg">img-10.jpeg</a> Figure 19: SNARKs produced from November 12, 2019, 10 AM to December 15, 2019, 10 AM, Pacific Time Zone</p>
+
+    <p class="text-gray-300">While the presented description of the Coda protocol is for the payments sytem, the notion can be easily extended to any Turing-complete functionalities. For</p>
+
+    <p class="text-gray-300">example, the framework can be extended to support user-defined tokens and multisignature accounts. Also, our roadmap includes upgrading the underlying SNARKs to the recent advances in the SNARK line of research, such as, those with universal setup <em>[10, 11]</em>.</p>
+
+    <h2 id="sec-73" class="text-2xl font-bold">10 Related Work</h2>
+
+    <p class="text-gray-300">Coda is, of course, not the only project working on solutions to the tradeoff between scaling and decentralization. Indeed, this tradeoff has been a key challenge since the very beginning of blockchains. The very first reply to the original post of the bitcoin whitepaper raised this issue <em>[14]</em>.</p>
+
+    <p class="text-gray-300">Since then, many solutions have been suggested, all with various tradeoffs <em>[3]</em>. These solutions can be categorized into those that leverage existing chains, and those, like Coda, that propose novel architectures.</p>
+
+    <h3 id="sec-74" class="text-xl font-semibold mt-8">10.1 Existing Chain Solutions</h3>
+
+    <p class="text-gray-300">The Lightning and Plasma networks move transactions off the main chain to side channels. However, chain operations still require downloading the entire blockchain and suffer from unsolved routing challenges <em>[23]</em>. There have also been critical attacks on Lightning that limit its usefulness <em>[22]</em>.</p>
+
+    <p class="text-gray-300">Light nodes have been suggested as a possible solution to enable wider access to cryptocurrencies. They work by downloading block headers in order to determine the Merkle root of the database state that has the strongest protocol state.</p>
+
+    <p class="text-gray-300">Sharding has also been suggested as a way to increase capacity. Nodes however have full certainty only over shards they possess the full data for. In the case of shards that nodes do not have the full data for, those nodes essentially have to trust the consensus nodes, and in so doing are operating as light nodes. Furthermore, this technique suffers from the high cost of having to download a new shard in every validator rotation <em>[21]</em>.</p>
+
+    <p class="text-gray-300">Another proposed solution to blockchain access is reliance on third-party nodes. Instead of connecting to the blockchain trustlessly, a third-party operates a full node which is relied upon for state updates. Inherently, this approach requires trusting the third party. Such access precludes both censorship resistance and guaranteed liveness.</p>
+
+    <h2 id="sec-75" class="text-2xl font-bold">Acknowledgement</h2>
+
+    <p class="text-gray-300">We thank Amit Sahai for his valuable comments.</p>
+
+    <p class="text-gray-300">##</p>
+
+    <p class="text-gray-300">References</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>[1] libp2p: Modular peer-to-peer networking stack. [Online; accessed February 15, 2020].</li>
+
+      <li>[2] The coda protocol. https://github.com/CodaProtocol/coda, 2018.</li>
+
+      <li>[3] Vitalik Buterin talks scalability: ‘Ethereum blockchain is almost full’, 2019 (accessed October, 2019). https://cointelegraph.com/news.</li>
+
+      <li>[4] Christian Badertscher, Peter Gazi, Aggelos Kiayias, Alexander Russell, and Vassilis Zikas. Ouroboros genesis: Composable proof-of-stake blockchains with dynamic availability. Cryptology ePrint Archive, Report 2018/378, 2018. “https://eprint.iacr.org/2018/378”.</li>
+
+      <li>[5] Eli Ben-Sasson, Alessandro Chiesa, Daniel Genkin, Shaul Kfir, Eran Tromer, Madars Virza, and Howard Wu. libsnark. https://github.com/scipr-lab/libsnark, 2017.</li>
+
+      <li>[6] Eli Ben-Sasson, Alessandro Chiesa, Eran Tromer, and Madars Virza. Scalable zero knowledge via cycles of elliptic curves. In CRYPTO (2), volume 8617 of Lecture Notes in Computer Science, pages 276–294. Springer, 2014.</li>
+
+      <li>[7] Eli Ben-Sasson, Alessandro Chiesa, Eran Tromer, and Madars Virza. Scalable zero knowledge via cycles of elliptic curves. Algorithmica, 79(4):1102–1160, Dec 2017.</li>
+
+      <li>[8] Nir Bitansky, Ran Canetti, Alessandro Chiesa, and Eran Tromer. Recursive composition and bootstrapping for SNARKS and proof-carrying data. In STOC, pages 111–120. ACM, 2013.</li>
+
+      <li>[9] Sean Bowe and Ariel Gabizon. Making groth’s zk-snark simulation extractable in the random oracle model. Cryptology ePrint Archive, Report 2018/187, 2018. https://eprint.iacr.org/2018/187.</li>
+
+      <li>[10] Sean Bowe, Jack Grigg, and Daira Hopwood. Halo: Recursive proof composition without a trusted setup. IACR Cryptology ePrint Archive, 2019:1021, 2019.</li>
+
+      <li>[11] Alessandro Chiesa, Yuncong Hu, Mary Maller, Pratyush Mishra, Noah Vesely, and Nicholas P. Ward. Marlin: Preprocessing zksnarks with universal and updatable SRS. IACR Cryptology ePrint Archive, 2019:1047, 2019.</li>
+
+      <li>[12] Phil Daian, Rafael Pass, and Elaine Shi. Snow white: Robustly reconfigurable consensus and applications to provably secure proof of stake. In Financial Cryptography, volume 11598 of Lecture Notes in Computer Science, pages 23–41. Springer, 2019.</li>
+
+    </ul>
+
+    <p class="text-gray-300">-</p>
+
+    <p class="text-gray-300">[13] Bernardo David, Peter Gaži, Aggelos Kiayias, and Alexander Russell. Ouroboros praos: An adaptively-secure, semi-synchronous proof-of-stake protocol. Cryptology ePrint Archive, Report 2017/573, 2017. http://eprint.iacr.org/2017/573.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>[14] James A. Donald. Bitcoin P2P e-cash paper, 2008 (accessed October, 2019).</li>
+
+      <li>[15] Juan A. Garay, Aggelos Kiayias, and Nikos Leonardos. The bitcoin backbone protocol: Analysis and applications. In EUROCRYPT (2), volume 9057 of Lecture Notes in Computer Science, pages 281–310. Springer, 2015.</li>
+
+      <li>[16] Jens Groth and Mary Maller. Snarky signatures: Minimal signatures of knowledge from simulation-extractable snarks. In CRYPTO (2), volume 10402 of Lecture Notes in Computer Science, pages 581–612. Springer, 2017.</li>
+
+      <li>[17] Aggelos Kiayias, Alexander Russell, Bernardo David, and Roman Oliynykov. Ouroboros: A provably secure proof-of-stake blockchain protocol. In CRYPTO (1), volume 10401 of Lecture Notes in Computer Science, pages 357–388. Springer, 2017.</li>
+
+      <li>[18] Rajeev Motwani and Prabhakar Raghavan. Randomized Algorithms. Cambridge University Press, New York, NY, USA, 1995.</li>
+
+      <li>[19] Satoshi Nakamoto. Bitcoin: A peer-to-peer electronic cash system,” http://bitcoin.org/bitcoin.pdf, 2008.</li>
+
+      <li>[20] Eli Ben Sasson, Alessandro Chiesa, Christina Garman, Matthew Green, Ian Miers, Eran Tromer, and Madars Virza. Zerocash: Decentralized anonymous payments from bitcoin. In 2014 IEEE Symposium on Security and Privacy, pages 459–474. IEEE, 2014.</li>
+
+      <li>[21] Alexander Skidanov. Unsolved Problems in Blockchain Sharding, 2018 (accessed October, 2019). https://medium.com/nearprotocol.</li>
+
+      <li>[22] Saar Tochner, Stefan Schmid, and Aviv Zohar. Hijacking routes in payment channel networks: A predictability tradeoff. CoRR, abs/1909.06890, 2019.</li>
+
+      <li>[23] Trustnodes. Lightning Network Has Many Routing Problems Says Lead Dev at Lightning Labs, 2019 (accessed October, 2019). https://www.trustnodes.com.</li>
+
+      <li>[24] Paul Valiant. Incrementally verifiable computation or proofs of knowledge imply time/space efficiency. In TCC, volume 4948 of Lecture Notes in Computer Science, pages 1–18. Springer, 2008.</li>
+
+      <li>[25] Gavin Wood et al. Ethereum: A secure decentralised generalised transaction ledger. Ethereum project yellow paper, 151(2014):1–32, 2014.</li>
+
+    </ul>
+
+    <p class="text-gray-300">Here, we recall the chain selection rule of Ouroboros Genesis. The protocol SelectChain is the same as in Ouroboros Samasika, except for calling the algorithm maxvalid-bg instead of maxvalid-sc. The algorithm maxvalid-bg is recalled below.</p>
+
+    <p class="text-gray-300">Algorithm maxvalid-bg  <span class="math">(C_{\\mathrm{loc}},\\mathcal{N} = \\{C_1,\\dots ,C_M\\} ,k,s)</span> // Compare  <span class="math">C_{\\mathrm{loc}}</span>  with each candidate chain in  <span class="math">\\mathcal{N}</span></p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Set  <span class="math">C_{\\mathrm{max}}\\gets C_{\\mathrm{loc}}</span></li>
+
+    </ol>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">2. for  <span class="math">i = 1,\\ldots ,M</span>  do if  <span class="math">(C_i</span>  forks from  <span class="math">C_\\mathrm{max}</span>  at most  <span class="math">k</span>  blocks ago) then // The case of a short-range fork if  $</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">C_i</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">&gt;</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">C_{\\mathrm{max}}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"><span class="math">  then Set  </span>C_\\mathrm{max}\\gets C_i<span class="math">  end if else // The case of a long-range fork Let  </span>j\\gets \\max \\{j^{\\prime}\\geq 0\\mid C_{\\mathrm{max}}<span class="math">  and  </span>C_i<span class="math">  have the same block in  </span>\\mathsf{sl}_{j'}<span class="math">  } if getLocalForkDen  </span>(C_i,j + s) &gt;<span class="math">  getLocalForkDen  </span>(C_{\\mathrm{max}},j + s)<span class="math">  then Set  </span>C_\\mathrm{max}\\gets C_i$  end if end if end for</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Return  <span class="math">C_\\mathrm{max}</span></li>
+
+    </ol>
+
+    <p class="text-gray-300">Figure 20: The chain selection rule of Ouroboros Genesis.</p>
+
+    <p class="text-gray-300">Algorithm getLocalForkDen  <span class="math">(C,n)</span></p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">return  $</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">C[\\mathsf{sl}_1,\\mathsf{sl}_n]</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"><span class="math">  , the number of blocks in the first  </span>n<span class="math">  slots of  </span>C$</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">Figure 21: The algorithm for parties to obtain chain density until a slot local to the fork.</p>`;
+---
+
+<BaseLayout title="Mina: Decentralized Cryptocurrency at Scale (2020/352)">
+  <article class="max-w-4xl mx-auto article-prose">
+    <nav class="mb-8">
+      <a href="/papers" class="text-blue-400 hover:text-blue-300">
+        &larr; Back to Papers
+      </a>
+    </nav>
+
+    <header class="mb-12">
+      <h1 class="text-3xl font-bold mb-4"
+        set:html={TITLE_HTML} />
+      <p class="text-gray-400 mb-2"
+        set:html={AUTHORS_HTML} />
+      <p class="text-gray-500 text-sm mb-4">
+        2020 &middot; eprint 2020/352
+      </p>
+      <div class="flex gap-4 text-sm">
+        <a
+          href={EPRINT_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          class="text-blue-400 hover:text-blue-300"
+        >
+          Paper (eprint) &rarr;
+        </a>
+      </div>
+      <p class="mt-4 text-xs text-gray-500">
+        All content below belongs to the original authors. This page
+        reproduces the paper for educational purposes. Always
+        <a
+          href={EPRINT_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          class="text-blue-400 hover:text-blue-300"
+        >cite the original</a>.
+      </p>
+      <p class="mt-1 text-xs text-gray-600">
+        Converted with: {CRAWLER} &middot; {CONVERTED_DATE}
+      </p>
+    </header>
+
+    <Fragment set:html={CONTENT} />
+
+  </article>
+</BaseLayout>

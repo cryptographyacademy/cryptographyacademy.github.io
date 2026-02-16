@@ -1,0 +1,1357 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+
+const EPRINT_URL = 'https://eprint.iacr.org/2016/1118';
+const CRAWLER = 'mistral';
+const CONVERTED_DATE = '2026-02-16';
+const TITLE_HTML = 'Designing Optimal Implementations of Linear Layers (Full Version)';
+const AUTHORS_HTML = 'Ruoxin Zhao, Baofeng Wu, Rui Zhang, Qian Zhang';
+
+const CONTENT = `    <p class="text-gray-300">Ruoxin Zhao^{1,2} Baofeng Wu^{1} Rui Zhang^{1,2} and Qian Zhang^{1}</p>
+
+    <h6 id="sec-2" class="text-base font-medium mt-4">Abstract</h6>
+
+    <p class="text-gray-300">Linear layer is a fundamental primitive for many aspects of information technology. For information security, the performance of a linear layer depends on two aspects: diffusion ability and implementation cost, where the latter is usually measured by the number of XORs required to implement it. For many years, linear layers have been implemented by computing co-ordinates of the output independently. With this method, costs are determined only by the matrices representing linear layers. However, we note that the implementation cost of a given linear layer depends not only on its matrix but also on its implementation methods. So, in this paper, we focus on another implementation method: modifying input vectors to output step by step. This method uses fewer XORs than previous methods do and makes the implementation cost of every linear layer same as that of its inverse. With the new implementation method, we first clarify the measurement of implementation cost and the optimal implementation procedure of invertible linear layers. Here, “optimal” means using fewest XORs. Then, to find the optimal implementation procedure of a given invertible linear layer, we construct a graph-theoretical model and transfer the problem to the shortest path problem in graph theory. Next, we construct a new “double-direction” algorithm that uses less storage and makes the search for a shortest path more efficient in a regular graph. However, this algorithm is not practical enough for heavyweight invertible linear layers because of its high space/time complexity. So, we present another algorithm for finding efficient implementations of invertible linear layers. The advantages of this algorithm are its low complexity and high practicality. By this algorithm, we design highly efficient implementations of the linear layers of AES. To handle more general linear layers, we finally construct a practical algorithm for finding efficient implementations of singular linear layers.</p>
+
+    <h6 id="sec-3" class="text-base font-medium mt-4">Keywords:</h6>
+
+    <p class="text-gray-300">Linear Layer XOR Count Equivalence Relation Regular Graph The Shortest Path</p>
+
+    <h2 id="sec-4" class="text-2xl font-bold">1 Introduction</h2>
+
+    <p class="text-gray-300">Linear layer is a fundamental primitive for cryptography and is widely used in many aspects of computer science, electronic engineering and telecommunication. For example, it is used as diffusion layer in cryptography. Most modern block ciphers and hash functions are composed by confusion layers and diffusion layers. From the viewpoint of mathematics, confusion layers are usually nonlinear functions (S-boxes) while diffusion layers are usually linear functions. The goal of confusion layers is to increase chaos of information. And the goal of diffusion layers is to spread the chaos caused by confusion layers as much as possible. The performance of a linear layer depends on two aspects: diffusion ability and</p>
+
+    <p class="text-gray-300">implementation efficiency. In general, these two aspects often contradict. In other words, the higher its diffusion ability is, the lower its implementation efficiency is. So, finding proper tradeoffs is a challenge for designers.</p>
+
+    <p class="text-gray-300">Efficient hardware implementation draws more and more attention in recent years. Implementation efficiency on hardware depends on several factors including running time, area, and power consumption. In most cases, these factors restrict mutually. So, “optimal implementation” has different meanings under different circumstances. For example, there are many lightweight equipments such as a variety of sensors in internet of things (IoT). Consequently, area of circuits naturally becomes the primary factor when designing them.</p>
+
+    <p class="text-gray-300">Essentially, linear layers are <span class="math">\\mathbb{F}_{q}</span>-linear transformations over <span class="math">(\\mathbb{F}_{q})^{n}</span>. We only concern about <span class="math">q</span> as powers of <span class="math">2</span> since they are almost all the cases in computer science. According to correspondence between linear transformations and matrices, every <span class="math">\\mathbb{F}_{q}</span>-linear layer can be represented by a matrix over <span class="math">\\mathbb{F}_{q}</span>. And this representation is unique under a fixed basis of <span class="math">(\\mathbb{F}_{q})^{n}</span>. Some linear layers are just matrices over <span class="math">\\mathbb{F}_{2}</span>, such as the candidates presented in <em>[10, 13, 8]</em>. They are very convenient for implementation. However, there are also many linear layers over the extension fields of <span class="math">\\mathbb{F}_{2}</span>, such as the candidates presented in <em>[4, 1, 9, 12]</em>. A typical example of this type is the linear layers used in AES. They are <span class="math">(4\\times 4)</span> matrices over <span class="math">\\mathbb{F}_{2^{8}}</span>. Note that multiplying a fixed element in <span class="math">\\mathbb{F}_{2^{m}}</span> is actually an <span class="math">\\mathbb{F}_{2}</span>-linear transformation over <span class="math">(\\mathbb{F}_{2})^{m}</span> and can be represented by an <span class="math">(m\\times m)</span> matrix over <span class="math">\\mathbb{F}_{2}</span>. So, an <span class="math">\\mathbb{F}_{2^{m}}</span>-linear layer over <span class="math">(\\mathbb{F}_{2^{m}})^{n}</span> is essentially an <span class="math">\\mathbb{F}_{2}</span>-linear transformation over <span class="math">(\\mathbb{F}_{2})^{mn}</span> and can be represented by an <span class="math">(mn\\times mn)</span> matrix over <span class="math">\\mathbb{F}_{2}</span>. Hence, matrices over <span class="math">\\mathbb{F}_{2}</span> are generic forms for linear layers.</p>
+
+    <p class="text-gray-300">Because every linear layer can be represented by a matrix over <span class="math">\\mathbb{F}_{2}</span> and every element in <span class="math">\\mathbb{F}_{2^{m}}</span> is represented by a bit string in computers, the number of bit-operations required for implementing linear layers naturally becomes the measurement of implementation cost of them. In this work, we concentrate on how to implement a given linear layer with as few XORs as possible.</p>
+
+    <h3 id="sec-5" class="text-xl font-semibold mt-8">1.1 Related Work</h3>
+
+    <p class="text-gray-300">As we mentioned above, the implementation efficiency of a linear layer is measured by the number of XORs needed to implement it. For an invertible <span class="math">n\\times n</span> matrix <span class="math">L</span> over <span class="math">\\mathbb{F}_{2}</span> and an input column vector <span class="math">X</span>, <span class="math">LX</span> is usually implemented by computing the co-ordinates independently. For example, the first co-ordinate of <span class="math">LX</span> is computed as the product of the first row of <span class="math">L</span> and <span class="math">X</span>. Consequently, the number of XORs of <span class="math">L</span> is naturally considered to be the difference between the Hamming weight of <span class="math">L</span> and the its order <span class="math">n</span>. However, if a linear layer <span class="math">L^{\\prime}</span> is an invertible <span class="math">n\\times n</span> matrix over <span class="math">\\mathbb{F}_{2^{m}}</span>, counting its number of XORs is a little complicated. In <em>[12]</em>, the authors investigated this case in details. They formally defined the XOR counts of elements in <span class="math">\\mathbb{F}_{2^{m}}</span> which is closely relevant to the computational pattern over <span class="math">\\mathbb{F}_{2^{m}}</span>, or more specifically, the basis of <span class="math">\\mathbb{F}_{2^{m}}</span>. Then, the XOR count of <span class="math">L^{\\prime}</span> is the sum of XOR counts of all entries of <span class="math">L^{\\prime}</span> plus <span class="math">mn(n-1)</span>. In fact, according to our statement above, <span class="math">L^{\\prime}</span> can be alternatively represented by an <span class="math">(mn\\times mn)</span> matrix <span class="math">L^{\\prime\\prime}</span> over <span class="math">\\mathbb{F}_{2}</span> once we fix an <span class="math">\\mathbb{F}_{2}</span>-basis of <span class="math">\\mathbb{F}_{2^{m}}</span>. From this viewpoint, the XOR count of <span class="math">L^{\\prime}</span> defined in <em>[12]</em> is exactly the number of XORs needed to implement the <span class="math">(mn\\times mn)</span> matrix <span class="math">L^{\\prime\\prime}</span>, namely, the difference between the Hamming weight of <span class="math">L^{\\prime\\prime}</span> and its order <span class="math">mn</span>. Later, some papers (<em>[11, 9, 8]</em>) about linear layers adopted the essentially same measurement of implementation cost as in <em>[12]</em>. Here we point out that all those papers have identical essence: computing the co-ordinates of outputs of a linear layer independently. Thus, the implementation cost of linear layers in those papers is only related to their matrices over <span class="math">\\mathbb{F}_{2}</span> once bases are fixed.</p>
+
+    <p class="text-gray-300">In recent years, a new notion of implementation cost of linear layers were presented by Jean, Peyrin, and Sim (<em>[7]</em>). Later, Beierle, Kranz, and Leander (<em>[1]</em>) presented a measurement of implementation cost of multiplication with a fixed element in finite field <span class="math">\\mathbb{F}_{2^{m}}</span> and constructed a series of lightweight maximum distance separable (MDS) linear</p>
+
+    <p class="text-gray-300">layers. In brief, their new measurement originally came from an implementation method different from previous ones. And this new one can indeed save XORs in comparison with previous methods.</p>
+
+    <h3 id="sec-6" class="text-xl font-semibold mt-8">1.2 Our Contributions</h3>
+
+    <p class="text-gray-300">In this work, our goal is to find the optimal implementation for any given linear layer. Here, “optimal” means using fewest XORs. To attain the goal, we investigate the relation between implementation cost and implementation procedure. From the investigation, we present a generic measurement for implementation cost of linear layers. After that, we construct a graph-theoretical model and transfer the main problem to the shortest path problem in graph theory. Then, we construct a particular algorithm that is very proper to solve the particular shortest path problem related to invertible linear layers. However, this algorithm for finding optimal implementations of linear layers is not practical enough because of its high space/time complexity. So, we construct another practical algorithm with very low space/time complexity for finding efficient implementations of invertible linear layers, although we cannot guarantee that it necessarily gives optimal implementations. To handle more general linear layers, we finally present a highly practical algorithm for finding efficient implementations of singular linear layers.</p>
+
+    <p class="text-gray-300">In Section 3, we firstly investigate the effect of different implementation procedures for implementation cost of invertible linear layers. Briefly, we compare two implementation strategies: computing the co-ordinates of output vectors independently and modifying the input vectors to output step by step (MIOSS). The former is straightforward and has been used for years. However, the latter requires fewer XORs. Therefore, we focus on the latter one. From the investigation, we present a reasonable measurement of implementation cost of a invertible linear layer <span class="math">L</span>: the minimum number of additive elementary matrices in <span class="math">L</span>’s factorization of the form <span class="math">P_{1}A_{1}\\cdots P_{s}A_{s}P_{s+1}</span> where every <span class="math">P_{i}</span> is a permutation matrix and every <span class="math">A_{j}</span> is an additive elementary matrix. Then, we give some properties that make our measurement more flexible.</p>
+
+    <p class="text-gray-300">In Section 4, we firstly give an equivalence relation over all invertible linear layers of order <span class="math">n</span> over <span class="math">\\mathbb{F}_{2}</span>. Based on this equivalence relation, we construct a graph whose vertices are all the equivalence classes. Then we show finding an optimal implementation of a given invertible linear layer <span class="math">L</span> is essentially same as finding a shortest path between the vertex containing <span class="math">L</span> and the vertex containing the identity matrix <span class="math">I_{n}</span>.</p>
+
+    <p class="text-gray-300">In Section 5, our main goal is to solve the shortest path problem in the graph defined in Section 4. Although there has already been “single-direction” methods (Dijkstra’s algorithm, for example) for the shortest path problem, we abandon them and construct a “double-direction” algorithm. That is because the graph that we are talking about is a regular graph, and our double-direction algorithm uses less storage and makes the search for a shortest path more efficient in a regular graph. With our algorithm, we perform experiments to some linear layers and obtain good results.</p>
+
+    <p class="text-gray-300">Although the algorithm in Section 5 can give us optimal implementations, it is not practical enough for heavyweight invertible linear layers because of its high space/time complexity. To solve this problem, we present another algorithm in Section 6. An important advantage of this algorithm is that its space/time complexity is incredibly low. On the other hand, we have to admit that it does not necessarily give us optimal implementations of linear layers. As an application, we investigate the linear layers of AES with the algorithm and get implementations much more efficient than before.</p>
+
+    <p class="text-gray-300">In above sections, we talked about minimum-XOR-implementations and efficient implementations of invertible linear layers. However, we are confronted with singular (even not square) matrices sometimes. So, in Section 7, we pay attention to singular linear layers and construct a highly practical algorithm for finding efficient implementations of singular linear layers.</p>
+
+    <p class="text-gray-300">Designing Optimal Implementations of Linear Layers (Full Version)</p>
+
+    <h3 id="sec-8" class="text-xl font-semibold mt-8">2.1 Notations</h3>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">In this paper, <span class="math">\\mathbb{F}_{q}</span> or <span class="math">GF(q)</span> denotes the finite field of <span class="math">q</span> elements. <span class="math">\\mathcal{M}_{m\\times n}(R)</span> denotes the set consisting of all <span class="math">(m\\times n)</span> matrices over a ring <span class="math">R</span>, <span class="math">\\mathcal{IM}_{n\\times n}(R)</span> denotes the set consisting of all <span class="math">(n\\times n)</span> invertible matrices over a ring <span class="math">R</span>, <span class="math">\\mathcal{PM}_{n\\times n}(R)</span> denotes the set consisting of all <span class="math">(n\\times n)</span> permutation matrices over a ring <span class="math">R</span>, <span class="math">\\mathcal{EM}_{n\\times n}(R)</span> denotes the set consisting of all <span class="math">(n\\times n)</span> exchanging elementary matrices over a ring <span class="math">R</span>, <span class="math">\\mathcal{MEM}_{n\\times n}(R)</span> denotes the set consisting of all <span class="math">(n\\times n)</span> multiplicative elementary matrices over a ring <span class="math">R</span>, and <span class="math">\\mathcal{AM}_{n\\times n}(R)</span> denotes the set consisting of all <span class="math">(n\\times n)</span> additive elementary matrices over a ring <span class="math">R</span>. For a matrix <span class="math">A</span>, <span class="math">A^{T}</span> denotes the transpose of <span class="math">A</span> and <span class="math">W_{H}(A)</span> denotes the Hamming weight (the number of nonzero entries) of <span class="math">A</span>. <span class="math">E_{i,j}</span> denotes the matrix whose <span class="math">(i,j)</span>th entry is <span class="math">1</span> and other entries are <span class="math">0</span>. <span class="math">I_{n}</span> denotes the <span class="math">(n\\times n)</span> identity matrix. For a set <span class="math">S</span>, <span class="math">\\sharp S</span> or $</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">S</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"><span class="math"> denotes the cardinality of </span>S$.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <h3 id="sec-9" class="text-xl font-semibold mt-8">2.2 Some Basic Facts about Linear Algebra</h3>
+
+    <p class="text-gray-300">In this subsection, we review some basic facts about linear algebra. For more details, refer to <em>[6]</em>.</p>
+
+    <p class="text-gray-300">To begin with, let us talk about elementary operations to matrices. For every matrix <span class="math">L\\in\\mathcal{M}_{m\\times n}(F)</span> where <span class="math">F</span> is a field, there are three types of elementary row operations on it: row exchanging, row multiplication, and row addition. Row exchanging means exchanging tow rows of <span class="math">L</span>. Row multiplication means multiplying every entries of a row by an invertible element of <span class="math">F</span>. Row addition means adding a scalar-product of an element in <span class="math">F</span> and a row to another row. In addition to elementary row operations, there are also three types of corresponding elementary column operations. All the elementary operations to matrices are invertible.</p>
+
+    <p class="text-gray-300">Corresponding to elementary operations, there are three types of elementary matrices: exchanging elementary matrices, multiplicative elementary matrices, and additive elementary matrices. An <span class="math">(n\\times n)</span> exchanging elementary matrix is the matrix obtained by exchanging two rows of <span class="math">I_{n}</span>. An <span class="math">(n\\times n)</span> multiplicative elementary matrix is the matrix obtained from <span class="math">I_{n}</span> by substituting an invertible element in <span class="math">F</span> for a <span class="math">1</span> on the diagonal of <span class="math">I_{n}</span>. An <span class="math">(n\\times n)</span> additive elementary matrix <span class="math">A_{i,j}</span> is the matrix <span class="math">I_{n}+aE_{i,j}</span> where <span class="math">a\\in F</span> and <span class="math">i\\neq j</span>. For any matrix <span class="math">L\\in\\mathcal{M}_{m\\times n}(F)</span>, left-multiplying <span class="math">L</span> by an <span class="math">(m\\times m)</span> elementary matrix causes a corresponding elementary row operation to it, while right-multiplying <span class="math">L</span> by an <span class="math">(n\\times n)</span> elementary matrix causes a corresponding elementary column operation to it. A useful fact is that every elementary matrix is invertible. The inverse matrix of an exchanging elementary matrix is just itself. And the inverse matrix of an additive elementary matrix <span class="math">A_{i,j}=I_{n}+aE_{i,j}</span> is <span class="math">I_{n}-aE_{i,j}</span>.</p>
+
+    <p class="text-gray-300">Another type of matrices important for this paper is permutation matrix. An <span class="math">n\\times n</span> permutation matrix is the matrix obtained from <span class="math">I_{n}</span> by permutes the rows of it. It is trivial that a matrix <span class="math">P\\in\\mathcal{M}_{n\\times n}(F)</span> is a permutation matrix if and only if it is invertible and its entries are zero except <span class="math">n</span> entries equal to <span class="math">1</span>. For any matrix <span class="math">L\\in\\mathcal{M}_{m\\times n}(F)</span>, left-multiplying <span class="math">L</span> by an <span class="math">(m\\times m)</span> permutation matrix permutes the rows of it, while right-multiplying <span class="math">L</span> by an <span class="math">(n\\times n)</span> permutation matrix permutes the columns of it. In this paper, we sometimes write a permutation matrix <span class="math">P\\in\\mathcal{M}_{n\\times n}(F)</span> as a column <span class="math">(\\rho(1),\\cdots,\\rho(n))^{T}</span>, where <span class="math">\\rho</span> is a permutation over the set <span class="math">N=\\{1,\\cdots,n\\}</span> and <span class="math">\\rho(i)</span> is the column index of the nonzero entry in the <span class="math">i</span>-th row of <span class="math">P</span> for <span class="math">i=1,\\cdots,n</span>. For example, we write the permutation matrix</p>
+
+    <p class="text-gray-300">\\[ \\left(\\begin{array}[]{cccc}0&amp;0&amp;1&amp;0\\\\ 0&amp;0&amp;0&amp;1\\\\ 0&amp;1&amp;0&amp;0\\\\ 1&amp;0&amp;0&amp;0\\end{array}\\right)=\\left(\\begin{array}[]{c}3\\\\ 4\\\\ 2\\\\ 1\\end{array}\\right)=\\left(\\begin{array}[]{c}\\rho(1)\\\\ \\rho(2)\\\\ \\rho(3)\\\\ \\rho(4)\\end{array}\\right). \\]</p>
+
+    <p class="text-gray-300">With this notation, if <span class="math">P=(\\rho(1),\\cdots,\\rho(n))^{T}</span>, then <span class="math">P^{-1}=(\\rho^{-1}(1),\\cdots,\\rho^{-1}(n))^{T}</span> is also a permutation matrix, and the <span class="math">i</span>-th row of <span class="math">PL</span> is the <span class="math">\\rho(i)</span>-th row of <span class="math">L</span>.</p>
+
+    <h3 id="sec-10" class="text-xl font-semibold mt-8">2.3 Some Basic Facts about Graph Theory</h3>
+
+    <p class="text-gray-300">In this subsection, we review some basic facts about graph theory. For more details, refer to <em>[2, 5]</em>.</p>
+
+    <p class="text-gray-300">A graph <span class="math">G</span> is composed of two types of objects. It has a set <span class="math">V</span> of elements called vertices (or nodes) and a set of unordered pairs of vertices called edges. We denote the graph whose vertex set is <span class="math">V</span> and edge set is <span class="math">E</span> by <span class="math">G=(V,E)</span>. The cardinality of the vertex set <span class="math">V</span> is called the order of the graph <span class="math">G</span>. If <span class="math">\\alpha=\\{x,y\\}</span> is an edge of <span class="math">G</span>, we say that <span class="math">\\alpha</span> joins <span class="math">x</span> and <span class="math">y</span>, <span class="math">x</span> and <span class="math">y</span> are adjacent, and <span class="math">x</span> and <span class="math">\\alpha</span> are incident. The degree of a vertex <span class="math">x</span> is a the number of edges that are incident with <span class="math">x</span> and is denoted by <span class="math">\\deg(x)</span>. If the degree of every vertex of the graph <span class="math">G</span> is <span class="math">r</span>, we say <span class="math">G</span> is an <span class="math">r</span>-regular graph.</p>
+
+    <p class="text-gray-300">In a graph <span class="math">G=(V,E)</span>, a sequence of <span class="math">m</span> edges of the form</p>
+
+    <p class="text-gray-300"><span class="math">\\{x_{0},x_{1}\\},\\{x_{1},x_{2}\\},\\cdots,\\{x_{m-1},x_{m}\\}</span></p>
+
+    <p class="text-gray-300">is called a walk of length <span class="math">m</span>. We also denote it by <span class="math">x_{0}-x_{1}-\\cdots-x_{m}</span>. The walk <span class="math">x_{0}-x_{1}-\\cdots-x_{m}</span> is closed (open) if <span class="math">x_{0}=x_{m}</span> (<span class="math">x_{0}\\neq x_{m}</span>). If a walk has distinct edges, we call it a trail. In addition, if a trail has distinct vertices, we call it a path. A closed path is called a cycle. The distance between two vertices <span class="math">x</span> and <span class="math">y</span> is the shortest length of walks joining them and denoted by <span class="math">d(x,y)</span>. It is clear that a walk joining <span class="math">x</span> and <span class="math">y</span> of length <span class="math">d(x,y)</span> is a path. We say two vertices <span class="math">x</span> and <span class="math">y</span> are connected if there exists a walk joining them. And we say a graph <span class="math">G</span> is connected if every pair of vertices of <span class="math">G</span> is connected.</p>
+
+    <h3 id="sec-11" class="text-xl font-semibold mt-8">2.4 Linear Layers</h3>
+
+    <p class="text-gray-300">In general, an <span class="math">F</span>-linear layer is an <span class="math">F</span>-linear transformation over <span class="math">F^{n}</span> for a field <span class="math">F</span>. In this paper, we merely focus on fields of characteristic <span class="math">2</span> because they are widely used in computer science and telecommunication.</p>
+
+    <p class="text-gray-300">Suppose <span class="math">L</span> is an <span class="math">\\mathbb{F}_{q}</span>-linear layer over <span class="math">(\\mathbb{F}_{q})^{n}</span>, where <span class="math">q=2^{m}</span>. According to the correspondence between linear transformations and matrices, <span class="math">L</span> can be uniquely represented by a matrix in <span class="math">\\mathcal{M}_{n\\times n}(\\mathbb{F}_{q})</span> under a given <span class="math">\\mathbb{F}_{q}</span>-basis of <span class="math">(\\mathbb{F}_{q})^{n}</span>. Let</p>
+
+    <p class="text-gray-300">\\[ L=\\left(\\begin{array}[]{cccc}\\alpha_{1,1}&\\alpha_{1,2}&\\cdots&\\alpha_{1,n}\\\\ \\alpha_{2,1}&\\alpha_{2,2}&\\cdots&\\alpha_{2,n}\\\\ \\cdots&\\cdots&\\cdots&\\cdots\\\\ \\alpha_{n,1}&\\alpha_{n,2}&\\cdots&\\alpha_{n,n}\\end{array}\\right)\\in\\mathcal{M}_{n\\times n}(\\mathbb{F}_{q}). \\]</p>
+
+    <p class="text-gray-300">Then for every input column <span class="math">X=(\\bm{x}_{1},\\bm{x}_{2},\\cdots,\\bm{x}_{n})^{T}\\in(\\mathbb{F}_{q})^{n}</span>, the output is <span class="math">Y=LX=(\\bm{y}_{1},\\bm{y}_{2},\\cdots,\\bm{y}_{n})^{T}\\in(\\mathbb{F}_{q})^{n}</span>, where <span class="math">\\bm{y}_{i}=\\sum_{j=1}^{n}\\alpha_{i,j}\\bm{x}_{j}</span> for <span class="math">i=1,\\cdots,n</span>. Note that being multiplied by a fixed element in <span class="math">\\mathbb{F}_{q}</span> is an <span class="math">\\mathbb{F}_{2}</span>-linear transformation over <span class="math">\\mathbb{F}_{q}</span> and can be uniquely represented by a matrix in <span class="math">\\mathcal{M}_{m\\times m}(\\mathbb{F}_{2})</span> under a given <span class="math">\\mathbb{F}_{2}</span>-basis of <span class="math">\\mathbb{F}_{q}</span>. Therefore, <span class="math">L</span> is essentially an <span class="math">\\mathbb{F}_{2}</span>-linear transformation over <span class="math">\\mathbb{F}_{2}^{mn}</span> and can be represented by a matrix</p>
+
+    <p class="text-gray-300">\\[ L=\\left(\\begin{array}[]{cccc}L_{1,1}&L_{1,2}&\\cdots&L_{1,n}\\\\ L_{2,1}&L_{2,2}&\\cdots&L_{2,n}\\\\ \\cdots&\\cdots&\\cdots&\\cdots\\\\ L_{n,1}&L_{n,2}&\\cdots&L_{n,n}\\end{array}\\right)\\in\\mathcal{M}_{mn\\times mn}(\\mathbb{F}_{2}), \\]</p>
+
+    <p class="text-gray-300">where <span class="math">L_{i,j}\\in\\mathcal{M}_{m\\times m}(\\mathbb{F}_{2})</span> for <span class="math">i,j=1,\\cdots,n</span>. From this viewpoint, every <span class="math">\\mathbb{F}_{q}</span>-linear layer is essentially an <span class="math">\\mathbb{F}_{2}</span>-linear transformation and can be represented by a matrix over <span class="math">\\mathbb{F}_{2}</span>. That gives us a uniform pattern for linear layers.</p>
+
+    <p class="text-gray-300">Designing Optimal Implementations of Linear Layers (Full Version)</p>
+
+    <p class="text-gray-300">In this section, we clarify how to measure the implementation costs of linear layers. As we mentioned above, considering invertible linear layers over  <span class="math">GF(2)</span>  suffices.</p>
+
+    <p class="text-gray-300">In general, the implementation cost of a given linear layer  <span class="math">L</span>  over  <span class="math">GF(2)</span>  is measured by the number of additions (XORs) required to compute the output vector  <span class="math">LX</span>  for input  <span class="math">X</span> . In [12], the authors formally presented a measurement of the number of XORs (XOR-count) of elements in  <span class="math">GF(2^m)</span>  as well as of whole diffusion layers. Later, some papers ([11, 9, 8]) adopted that measurement. We know that multiplication with a given element in  <span class="math">GF(2^m)</span>  can be represented by an  <span class="math">\\mathbb{F}_2</span> -linear transformation over  <span class="math">\\mathbb{F}_2^m</span> , namely, a matrix  <span class="math">L</span>  in  <span class="math">\\mathcal{M}_{m\\times m}(\\mathbb{F}_2)</span> . From this viewpoint, their measurement XOR-count is exactly  <span class="math">W_{H}(L) - m</span>  since co-ordinates of output vector are computed independently. In fact, this notion has been used for years. However, the implementation cost of a given linear layer depends not only on the linear layer itself but also on ways by which we implement it. To show the effect of different implementation methods on implementation costs, we at first give Example 1.</p>
+
+    <p class="text-gray-300">Example 1. Suppose</p>
+
+    <div class="my-4 text-center"><span class="math-block">L = \\left( \\begin{array}{c c c c} 1 &amp;amp; 1 &amp;amp; 1 &amp;amp; 0 \\\\ 0 &amp;amp; 1 &amp;amp; 0 &amp;amp; 0 \\\\ 1 &amp;amp; 1 &amp;amp; 1 &amp;amp; 1 \\\\ 1 &amp;amp; 1 &amp;amp; 0 &amp;amp; 0 \\end{array} \\right) \\in \\mathcal {I M} _ {4 \\times 4} (\\mathbb {F} _ {2})</span></div>
+
+    <p class="text-gray-300">is a linear transformation over  <span class="math">\\mathbb{F}_2^4</span> . Then for every input vector  <span class="math">X = (x_{1},x_{2},x_{3},x_{4})^{T}\\in GF(2)^{4}</span> , the corresponding output is</p>
+
+    <div class="my-4 text-center"><span class="math-block">Y = L X = \\left( \\begin{array}{c} x _ {1} + x _ {2} + x _ {3} \\\\ x _ {2} \\\\ x _ {1} + x _ {2} + x _ {3} + x _ {4} \\\\ x _ {1} + x _ {2} \\end{array} \\right).</span></div>
+
+    <p class="text-gray-300">We may compute  <span class="math">Y</span>  with a common method that has been used for years. That is, we compute the co-ordinates of  <span class="math">Y</span>  independently. In this case, it requires  <span class="math">W_{H}(L) - 4 = 6</span>  additions (XORs) over  <span class="math">GF(2)</span> . However, we can adopt another method to compute  <span class="math">Y</span>  - modifying the input  <span class="math">X</span>  to the output  <span class="math">LX</span>  step by step as Figure 1. In Figure 1, we</p>
+
+    <p class="text-gray-300">!<a href="img-0.jpeg">img-0.jpeg</a></p>
+
+    <p class="text-gray-300">!<a href="img-1.jpeg">img-1.jpeg</a> Figure 1: Modifying input to output step by step (MIOSS)</p>
+
+    <p class="text-gray-300">compute  <span class="math">LX</span>  through a series of operations on the co-ordinates of  <span class="math">X</span> . These operations can be easily implemented on programmable hardware (ASIC or FPGA, for instance). Step (1) adds  <span class="math">x_{2}</span>  to  <span class="math">x_{1}</span>  and remain  <span class="math">x_{2}, x_{3}, x_{4}</span> . So, its delay is  <span class="math">T_{X}</span> . Likewise, step (2) and step (3) costs  <span class="math">T_{X}</span>  delay, respectively. Note that step (2) requires only  <span class="math">T_{X}</span>  delay but not  <span class="math">2T_{X}</span>  delays because  <span class="math">x_{1} + x_{2}</span>  has been already computed on preceding steps and saved in the</p>
+
+    <p class="text-gray-300">Ruoxin Zhao, Baofeng Wu, Rui Zhang and Qian Zhang</p>
+
+    <p class="text-gray-300">!<a href="img-2.jpeg">img-2.jpeg</a> Figure 2: Implementing Example 1 by MIOSS in one clock cycle</p>
+
+    <p class="text-gray-300">register. Step (4) does not cost any delay because it is merely performed by twisting wires. Although we illustrate the procedure by four steps, it can actually be implemented in one clock cycle as Figure 2. Regardless of 4 clock cycles or 1 clock cycle, the whole procedure of the second method uses 3 XORs. It is quite fewer than 6 XORs of the first method. In form of matrices, we can express the second method as  <span class="math">LX = PA_{4,3}A_{3,1}A_{1,2}X</span> , where each  <span class="math">A_{i,j} = I_4 + E_{i,j}</span>  and  <span class="math">P = (\\rho(1),\\rho(2),\\rho(3),\\rho(4))^T = (3,2,4,1)^T</span> .</p>
+
+    <p class="text-gray-300">Computing every co-ordinate independently is indeed easy to implement and has been used for years. However, it is not necessarily the optimal implementation according to Example 1. Here, "optimal" means "using fewest XORs". To find the optimal implementations of linear layers, we must take implementation procedures into account. Let us give a lemma at first.</p>
+
+    <p class="text-gray-300">Lemma 1. Suppose  <span class="math">L \\in \\mathcal{IM}_{n \\times n}(\\mathbb{F}_2)</span> . Then there exists a series of matrices  <span class="math">P_i \\in \\mathcal{PM}_{n \\times n}(\\mathbb{F}_2)</span>  and  <span class="math">A_j \\in \\mathcal{AEM}_{n \\times n}(\\mathbb{F}_2)</span>  such that  <span class="math">L = P_1A_1P_2A_2 \\cdots P_sA_sP_{s+1}</span> .</p>
+
+    <p class="text-gray-300">Proof. As we know,  <span class="math">L</span>  can be transformed to its equivalent standard form through a series of elementary row/column operations.  <span class="math">L</span> 's equivalent standard form is  <span class="math">I_{n} \\in \\mathcal{IM}_{n \\times n}(\\mathbb{F}_{2})</span>  because  <span class="math">L</span>  is invertible. According to the invertibility of elementary operations,  <span class="math">I_{n}</span>  can be transformed to  <span class="math">L</span>  through a series of elementary row/column operations. So,  <span class="math">L</span>  is equal to the product of a series of elementary matrices. Note that multiplicative elementary matrix over  <span class="math">GF(2)</span>  is just  <span class="math">I_{n}</span>  and can be omitted from the product. Besides, the product of some exchanging elementary matrices with order  <span class="math">n</span>  is a permutation matrix. Thus,  <span class="math">L</span>  is equal to the form  <span class="math">P_{1}A_{1}P_{2}A_{2}\\dots P_{s}A_{s}P_{s + 1}</span> , where  <span class="math">P_{i} \\in \\mathcal{PM}_{n \\times n}(\\mathbb{F}_{2})</span>  for  <span class="math">i = 1,\\dots ,s</span> ,  <span class="math">A_{j} \\in \\mathcal{AEM}_{n \\times n}(\\mathbb{F}_{2})</span>  for  <span class="math">j = 1,\\dots ,s + 1</span> .</p>
+
+    <p class="text-gray-300">In accordance with Lemma 1, for every linear layer  <span class="math">L \\in \\mathcal{IM}_{n \\times n}(\\mathbb{F}_2)</span>  and input vector  <span class="math">X = (x_1, \\dots, x_n)^T \\in \\mathbb{F}_2^n</span> , the output vector is  <span class="math">LX = P_1A_1P_2A_2 \\cdots P_sA_sP_{s+1}X</span>  which means we can get the output vector through a series of co-ordinate permutations or additive elementary operations. On the contrary, every modification procedure from  <span class="math">X</span>  to  <span class="math">LX</span>  can be expressed by the form  <span class="math">P_1A_1P_2A_2 \\cdots P_sA_sP_{s+1}X</span>  as in Example 1. Note that for implementation of  <span class="math">P_1A_1P_2A_2 \\cdots P_sA_sP_{s+1}X</span> , left-multiplying every  <span class="math">P_j</span>  costs 0 XOR while left-multiplying every  <span class="math">A_i</span>  costs 1 XOR. In detail, for a column vector  <span class="math">X = (x_1, \\dots, x_n)^T</span>  in  <span class="math">\\mathbb{F}_2^n</span>  and a permutation matrix  <span class="math">P = (\\rho(1), \\dots, \\rho(n))^T</span>  where  <span class="math">\\rho(i)</span>  denotes the column index of nonzero entry in the  <span class="math">i</span> -th row of  <span class="math">P</span> ,</p>
+
+    <div class="my-4 text-center"><span class="math-block">P X = \\left(x _ {\\rho (1)}, x _ {\\rho (2)}, \\dots , x _ {\\rho (n)}\\right).</span></div>
+
+    <p class="text-gray-300">For a column vector  <span class="math">X = (x_{1},\\dots ,x_{n})^{T}</span>  in  <span class="math">\\mathbb{F}_2^n</span>  and an additive elementary matrix  <span class="math">A_{i,j} = E_{i,j} + I_n</span>  in  <span class="math">\\mathcal{AEM}_{n\\times n}(\\mathbb{F}_2)</span> , left-multiplying  <span class="math">X</span>  by  <span class="math">A_{i,j}</span>  will add the  <span class="math">j</span> -th row of  <span class="math">X</span>  to its  <span class="math">i</span> -th row. Therefore,  <span class="math">L</span> 's factorization  <span class="math">P_{1}A_{1}P_{2}A_{2}\\dots P_{s}A_{s}P_{s + 1}</span>  in Lemma 1 indicates the number of XORs used for its implementation. Now we can give the following definition.</p>
+
+    <p class="text-gray-300">Definition 1. For a linear layer  <span class="math">L \\in \\mathcal{IM}_{n \\times n}(\\mathbb{F}_2)</span> , its minimum XOR-count  <span class="math">Min - XOR - \\text{Count}(L)</span>  is the minimum number of additive elementary matrices  <span class="math">A_i</span>  such that  <span class="math">L</span>  can be</p>
+
+    <p class="text-gray-300">Designing Optimal Implementations of Linear Layers (Full Version)</p>
+
+    <p class="text-gray-300">written as form <span class="math">P_{1}A_{1}P_{2}A_{2}\\cdots P_{s}A_{s}P_{s+1}</span>, where every <span class="math">P_{i}\\in\\mathcal{PM}_{n\\times n}(\\mathbb{F}_{2})</span> and every <span class="math">A_{j}\\in\\mathcal{AEM}_{n\\times n}(\\mathbb{F}_{2})</span>. And we call an implementation procedure <span class="math">LX=P_{1}A_{1}P_{2}A_{2}\\cdots P_{r}A_{r}P_{r+1}X</span> containing <span class="math">Min-XOR-Count(L)</span> additive elementary matrices a minimum-XOR-implementation of <span class="math">L</span>.</p>
+
+    <p class="text-gray-300">In addition to Definition 1, we have other ways to describe the optimal implementation procedures of linear layers. To clarify those ways, we need the following lemma.</p>
+
+    <h6 id="sec-13" class="text-base font-medium mt-4">Lemma 2.</h6>
+
+    <p class="text-gray-300">Suppose <span class="math">P=(\\rho(1),\\cdots,\\rho(n))^{T}\\in\\mathcal{PM}_{n\\times n}(\\mathbb{F}_{2})</span>, <span class="math">A_{r,s}=I_{n}+E_{r,s}\\in\\mathcal{AEM}_{n\\times n}(\\mathbb{F}_{2})</span>. Then <span class="math">PA_{r,s}=A_{\\rho^{-1}(r),\\rho^{-1}(s)}P</span> where <span class="math">A_{\\rho^{-1}(r),\\rho^{-1}(s)}=I_{n}+E_{\\rho^{-1}(r),\\rho^{-1}(s)}\\in\\mathcal{AEM}_{n\\times n}(\\mathbb{F}_{2})</span>.</p>
+
+    <h6 id="sec-14" class="text-base font-medium mt-4">Proof.</h6>
+
+    <p class="text-gray-300">As we mentioned before, left-multiplying <span class="math">P</span> permutes the rows of <span class="math">A_{r,s}</span>. In detail, the <span class="math">i</span>-th row of <span class="math">PA_{r,s}</span> is the <span class="math">\\rho(i)</span>-th row of <span class="math">A_{r,s}</span>. So, the <span class="math">\\rho^{-1}(r)</span>-th row of <span class="math">PA_{r,s}</span> is the <span class="math">r</span>-th row of <span class="math">A_{r,s}</span>, and the <span class="math">\\rho^{-1}(s)</span>-th row of <span class="math">PA_{r,s}</span> is the <span class="math">s</span>-th row of <span class="math">A_{r,s}</span>. Obviously, <span class="math">PA_{r,s}</span> will become <span class="math">P</span> if we add <span class="math">\\rho^{-1}(s)</span>-th row of <span class="math">PA_{r,s}</span> to <span class="math">\\rho^{-1}(r)</span>-th row of it. Thus, <span class="math">A_{\\rho^{-1}(r),\\rho^{-1}(s)}PA_{r,s}=P</span>. Then we get <span class="math">PA_{r,s}=(A_{\\rho^{-1}(r),\\rho^{-1}(s)})^{-1}P=A_{\\rho^{-1}(r),\\rho^{-1}(s)}P</span> since <span class="math">(A_{\\rho^{-1}(r),\\rho^{-1}(s)})^{-1}=A_{\\rho^{-1}(r),\\rho^{-1}(s)}</span>. ∎</p>
+
+    <p class="text-gray-300">Combining Lemma 1 and Lemma 2, we get the next lemma easily. We omit its proof because it is really trivial.</p>
+
+    <h6 id="sec-15" class="text-base font-medium mt-4">Lemma 3.</h6>
+
+    <p class="text-gray-300">Every <span class="math">L\\in\\mathcal{IM}_{n\\times n}(\\mathbb{F}_{2})</span> can be factorized to the form <span class="math">L=\\prod_{i=1}^{s}B_{i}</span> where every <span class="math">B_{i}</span> is either in <span class="math">\\mathcal{PM}_{n\\times n}(\\mathbb{F}_{2})</span> or in <span class="math">\\mathcal{AEM}_{n\\times n}(\\mathbb{F}_{2})</span>.</p>
+
+    <p class="text-gray-300">We call every factorization of <span class="math">L</span> as the form in Lemma 3 a P-AE factorization of it. Obviously, the factorization form in Lemma 1 is a P-AE factorization. On the contrary, every P-AE factorization can be written as the form in Lemma 1 since identity matrix is also a permutation matrix, and the product of permutation matrices in <span class="math">\\mathcal{PM}_{n\\times n}(\\mathbb{F}_{2})</span> is a permutation matrix too. Therefore, the minimum XOR count of a given linear layer <span class="math">L\\in\\mathcal{IM}_{n\\times n}(\\mathbb{F}_{2})</span> is exactly equal to the minimum number of additive elementary matrices in <span class="math">L</span>’s P-AE factorizations. In summary of this paragraph, we present the following theorem.</p>
+
+    <h6 id="sec-16" class="text-base font-medium mt-4">Theorem 1.</h6>
+
+    <p class="text-gray-300">For every linear layer <span class="math">L\\in\\mathcal{IM}_{n\\times n}(\\mathbb{F}_{2})</span>, <span class="math">Min-XOR-Count(L)</span> is equal to the minimum number of additive elementary matrices in <span class="math">L</span>’s P-AE factorizations.</p>
+
+    <p class="text-gray-300">In <em>[1]</em>, the authors measured the lowest implementation cost (it is called XOR count in <em>[1]</em>) of a linear layer <span class="math">L\\in\\mathcal{IM}_{n\\times n}(\\mathbb{F}_{2})</span> by the minimum number <span class="math">t</span> such that <span class="math">L</span> can be written as <span class="math">L=P\\prod_{i=1}^{t}A_{i}</span> where <span class="math">P\\in\\mathcal{PM}_{n\\times n}(\\mathbb{F}_{2})</span> and every <span class="math">A_{i}\\in\\mathcal{AEM}_{n\\times n}(\\mathbb{F}_{2})</span>. It is easy to see that every factorization of the form <span class="math">L=P\\prod_{i=1}^{t}A_{i}</span> corresponds to a factorization of the form in Definition 1 according to Lemma 2. So, our definition of Min-XOR-count does not contradict theirs. We shall indicate the advantage of our definition later.</p>
+
+    <p class="text-gray-300">Because a linear layer is often used bidirectionally (for example encryption and decryption), we also need to consider the inverse of it.</p>
+
+    <h6 id="sec-17" class="text-base font-medium mt-4">Theorem 2.</h6>
+
+    <p class="text-gray-300">For every linear layer <span class="math">L\\in\\mathcal{IM}_{n\\times n}(\\mathbb{F}_{2})</span>, <span class="math">Min-XOR-Count(L^{-1})</span> is equal to <span class="math">Min-XOR-Count(L)</span>. Moreover, if a minimum-XOR-implementation of <span class="math">L</span> is <span class="math">P_{1}A_{1}P_{2}A_{2}\\cdots P_{r}A_{r}P_{r+1}</span>, then <span class="math">P_{r+1}^{-1}A_{r}P_{r}^{-1}\\cdots A_{1}P_{1}^{-1}</span> is a minimum-XOR-implementation of <span class="math">L^{-1}</span>.</p>
+
+    <h6 id="sec-18" class="text-base font-medium mt-4">Proof.</h6>
+
+    <p class="text-gray-300">Suppose a factorization <span class="math">L=Q_{1}B_{1}\\cdots Q_{s}B_{s}Q_{s+1}</span> is a minimum-XOR-implementation of <span class="math">L</span>, where each <span class="math">Q_{i}\\in\\mathcal{PM}_{n\\times n}(\\mathbb{F}_{2})</span> and each <span class="math">B_{j}\\in\\mathcal{AEM}_{n\\times n}(\\mathbb{F}_{2})</span>. Then we have a factorization <span class="math">L^{-1}=Q_{s+1}^{-1}B_{s}^{-1}Q_{s}^{-1}\\cdots B_{1}^{-1}Q_{1}^{-1}</span> of <span class="math">L^{-1}</span>. Note that the inverse of a permutation matrix is a permutation too, and the inverse of each additive elementary matrix <span class="math">B_{j}</span> is just <span class="math">B_{j}</span> itself. Thus,</p>
+
+    <p class="text-gray-300"><span class="math">Min-XOR-Count(L)\\geq Min-XOR-Count(L^{-1}).</span></p>
+
+    <p class="text-gray-300">Likewise, we can get</p>
+
+    <p class="text-gray-300"><span class="math">Min-XOR-Count(L^{-1})\\geq Min-XOR-Count(L).</span></p>
+
+    <p class="text-gray-300">So, <span class="math">Min-XOR-Count(L^{-1})</span> is equal to <span class="math">Min-XOR-Count(L)</span>. And the second part of the theorem is trivial. ∎</p>
+
+    <p class="text-gray-300">At the end of this section, we point out that if a linear layer <span class="math">L^{\\prime}</span> is a power of another linear layer <span class="math">L</span>, for example <span class="math">L^{\\prime}=L^{5}</span>, then minimum-XOR-implementation of <span class="math">L^{\\prime}</span> is better successive 5 times minimum-XOR-implementations of <span class="math">L</span>. That is because successive 5 times minimum-XOR-implementations of <span class="math">L</span> is merely an implementation procedure of <span class="math">L^{\\prime}</span> and it cannot perform better than minimum-XOR-implementation of <span class="math">L^{\\prime}</span>. Consequently, if <span class="math">L^{\\prime}=L^{\\prime}</span>, then <span class="math">Min-XOR-Count(L^{\\prime})\\leq rMin-XOR-Count(L)</span>.</p>
+
+    <h2 id="sec-19" class="text-2xl font-bold">4 A Graph-Theoretical Model</h2>
+
+    <p class="text-gray-300">After clarifying the measurement of the lowest implementation cost of linear layers, we are confronted by two problems:</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>How to calculate the Min-XOR-Count of a given linear layer <span class="math">L\\in\\mathcal{IM}_{n\\times n}(\\mathbb{F}_{2})</span>;</li>
+
+      <li>How to get a minimum-XOR-implementation of a given linear layer <span class="math">L\\in\\mathcal{IM}_{n\\times n}(\\mathbb{F}_{2})</span>.</li>
+
+    </ol>
+
+    <p class="text-gray-300">Obviously, the 1st problem will be trivial provided that we solve the 2nd one. In this section, we would like to handle the two problems by a graph-theoretical model.</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">First of all, we introduce a relation over <span class="math">\\mathcal{IM}_{n\\times n}(\\mathbb{F}_{2})</span>. We say two matrices <span class="math">B,C\\in\\mathcal{IM}_{n\\times n}(\\mathbb{F}_{2})</span> are row-permutation-equivalent (denoted by <span class="math">B\\sim_{RP}C</span>) if there exists a <span class="math">Q\\in\\mathcal{PM}_{n\\times n}(\\mathbb{F}_{2})</span> such that <span class="math">B=QC</span>. For every <span class="math">B\\in\\mathcal{IM}_{n\\times n}(\\mathbb{F}_{2})</span>, <span class="math">B\\sim_{RP}B</span> since <span class="math">B=I_{n}B</span>. If <span class="math">B\\sim_{RP}C</span>, then <span class="math">C\\sim_{RP}B</span> because <span class="math">C=Q^{-1}B</span> and <span class="math">Q^{-1}\\in\\mathcal{PM}_{n\\times n}(\\mathbb{F}_{2})</span> too. If there exists <span class="math">Q_{1},Q_{2}\\in\\mathcal{PM}_{n\\times n}(\\mathbb{F}_{2})</span> such that <span class="math">B=Q_{1}C</span> and <span class="math">C=Q_{2}D</span>, then <span class="math">B=Q_{1}Q_{2}D</span> and <span class="math">Q_{1}Q_{2}\\in\\mathcal{PM}_{n\\times n}(\\mathbb{F}_{2})</span>. Therefore, “<span class="math">\\sim_{RP}</span>” is an equivalence relation over <span class="math">\\mathcal{IM}_{n\\times n}(\\mathbb{F}_{2})</span>. For every <span class="math">B\\in\\mathcal{IM}_{n\\times n}(\\mathbb{F}_{2})</span>, let <span class="math">[B]_{RP}</span> denote the equivalence class containing <span class="math">B</span> under “<span class="math">\\sim_{RP}</span>”. It is easy to see that for every <span class="math">B\\in\\mathcal{IM}_{n\\times n}(\\mathbb{F}_{2})</span>, $[B]_{RP}=\\{QB</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Q\\in\\mathcal{PM}_{n\\times n}(\\mathbb{F}_{2})\\}<span class="math">, and </span>Q_{1}B\\neq Q_{2}B<span class="math"> if </span>Q_{1}\\neq Q_{2}$.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">Next, we define a graph dependent on row-permutation-equivalence over <span class="math">\\mathcal{IM}_{n\\times n}(\\mathbb{F}_{2})</span>.</p>
+
+    <h6 id="sec-20" class="text-base font-medium mt-4">Definition 2.</h6>
+
+    <p class="text-gray-300">For a positive integer <span class="math">n</span>, let <span class="math">G(n)=(V,E)</span> be a graph where the vertex set consists of all the equivalence classes under row-permutation-equivalence relation over <span class="math">\\mathcal{IM}_{n\\times n}(\\mathbb{F}_{2})</span>. And two vertices <span class="math">[B]_{RP}</span> and <span class="math">[C]_{RP}</span> are adjacent if there exists <span class="math">B^{\\prime}\\in[B]_{RP}</span>, <span class="math">C^{\\prime}\\in[C]_{RP}</span> and <span class="math">A\\in\\mathcal{AEM}_{n\\times n}(\\mathbb{F}_{2})</span> such that <span class="math">B^{\\prime}=AC^{\\prime}</span>.</p>
+
+    <p class="text-gray-300">Now let us show some useful properties of the graph in Definition 2.</p>
+
+    <h6 id="sec-21" class="text-base font-medium mt-4">Theorem 3.</h6>
+
+    <p class="text-gray-300">Let <span class="math">G(n)=(V,E)</span> be the graph described in Definition 2 and <span class="math">[B]_{RP}</span> be a vertex of <span class="math">G(n)</span>. Then <span class="math">G(n)</span> is an <span class="math">(n^{2}-n)</span>-regular graph, <span class="math">[A_{1}B]_{RP}\\neq[A_{2}B]_{RP}</span> for distinct <span class="math">A_{1},A_{2}\\in\\mathcal{AEM}_{n\\times n}(\\mathbb{F}_{2})</span>, and <span class="math">[AB]_{RP}</span> runs all the vertices adjacent to <span class="math">[B]_{RP}</span> when <span class="math">A</span> runs over <span class="math">\\mathcal{AEM}_{n\\times n}(\\mathbb{F}_{2})</span>.</p>
+
+    <h6 id="sec-22" class="text-base font-medium mt-4">Proof.</h6>
+
+    <p class="text-gray-300">If <span class="math">[A_{1}B]_{RP}=[A_{2}B]_{RP}</span>, then <span class="math">A_{1}B=PA_{2}B</span> for some <span class="math">P\\in\\mathcal{PM}_{n\\times n}(\\mathbb{F}_{2})</span>. Consequently, we get <span class="math">A_{1}=PA_{2}</span> by right-multiplying two sides of <span class="math">A_{1}B=PA_{2}B</span> by <span class="math">B^{-1}</span>. We assert that <span class="math">P</span> must be <span class="math">I_{n}</span>. Otherwise, some entries on the diagonal of <span class="math">PA_{2}</span> would be 0 and <span class="math">PA_{2}</span> cannot be equal to <span class="math">A_{1}</span>. Then <span class="math">A_{1}=A_{2}</span>. So, <span class="math">[A_{1}B]_{RP}\\neq[A_{2}B]_{RP}</span> for distinct <span class="math">A_{1},A_{2}\\in\\mathcal{AEM}_{n\\times n}(\\mathbb{F}_{2})</span>.</p>
+
+    <p class="text-gray-300">On the other hand, if a vertex <span class="math">[C]_{RP}</span> is adjacent to <span class="math">[B]_{RP}</span>, there exists <span class="math">B^{\\prime}\\in[B]_{RP}</span>, <span class="math">C^{\\prime}\\in[C]_{RP}</span> and <span class="math">A\\in\\mathcal{AEM}_{n\\times n}(\\mathbb{F}_{2})</span> such that <span class="math">B^{\\prime}=AC^{\\prime}</span>. Then <span class="math">AB^{\\prime}=C^{\\prime}</span> since <span class="math">A^{-1}=A</span>.</p>
+
+    <p class="text-gray-300">Consequently, there exists <span class="math">P_{2}\\in\\mathcal{PM}_{n\\times n}(\\mathbb{F}_{2})</span> and <span class="math">A^{\\prime}\\in\\mathcal{AEM}_{n\\times n}(\\mathbb{F}_{2})</span> such that <span class="math">C^{\\prime}=AB^{\\prime}=AP_{1}B=P_{2}A^{\\prime}B</span> according to Lemma 2. So, <span class="math">[C]_{RP}=[C^{\\prime}]_{RP}=[P_{2}A^{\\prime}B]_{RP}=[A^{\\prime}B]_{RP}</span>. That shows <span class="math">[AB]_{RP}</span> runs all the vertices adjacent to <span class="math">[B]_{RP}</span> when <span class="math">A</span> runs over <span class="math">\\mathcal{AEM}_{n\\times n}(\\mathbb{F}_{2})</span>.</p>
+
+    <p class="text-gray-300">In summary of two preceding paragraphs, the degree of every vertex of <span class="math">G(n)</span> is the cardinality of <span class="math">\\mathcal{AEM}_{n\\times n}(\\mathbb{F}_{2})</span>, namely, <span class="math">n^{2}-n</span>. ∎</p>
+
+    <p class="text-gray-300">Finally, we present a significant theorem that explains why we set up the graph-theoretical model.</p>
+
+    <h6 id="sec-23" class="text-base font-medium mt-4">Theorem 4.</h6>
+
+    <p class="text-gray-300">Let <span class="math">G(n)=(V,E)</span> be the graph described in Definition 2 and <span class="math">L\\in\\mathcal{IM}_{n\\times n}(\\mathbb{F}_{2})</span>. Then the minimum XOR-count of <span class="math">L</span> is equal to the distance between vertices <span class="math">[L]_{RP}</span> and <span class="math">[I_{n}]_{RP}</span> in <span class="math">G(n)</span>.</p>
+
+    <h6 id="sec-24" class="text-base font-medium mt-4">Proof.</h6>
+
+    <p class="text-gray-300">For every factorization of <span class="math">L</span> with the form <span class="math">P_{1}A_{1}P_{2}A_{2}\\cdots P_{s}A_{s}P_{s+1}</span>, where every <span class="math">P_{i}\\in\\mathcal{PM}_{n\\times n}(\\mathbb{F}_{2})</span> and every <span class="math">A_{j}\\in\\mathcal{AEM}_{n\\times n}(\\mathbb{F}_{2})</span>, there exists a path</p>
+
+    <p class="text-gray-300"><span class="math">[L]_{RP}=[P_{1}A_{1}P_{2}A_{2}\\cdots P_{s}A_{s}P_{s+1}]_{RP}-[P_{2}A_{2}\\cdots P_{s}A_{s}P_{s+1}]_{RP}</span> <span class="math">-\\cdots-[P_{s}A_{s}P_{s+1}]_{RP}-[P_{s+1}]_{RP}=[I_{n}]_{RP}</span></p>
+
+    <p class="text-gray-300">between <span class="math">[L]_{RP}</span> and <span class="math">[I_{n}]_{RP}</span> of length <span class="math">s</span>.</p>
+
+    <p class="text-gray-300">On the other hand, for every path</p>
+
+    <p class="text-gray-300"><span class="math">[L]_{RP}-[L_{r-1}]_{RP}-\\cdots-[L_{2}]_{RP}-[L_{1}]_{RP}-[I_{n}]_{RP}</span></p>
+
+    <p class="text-gray-300">of length <span class="math">r</span>, according to Theorem 3, there must be <span class="math">L=Q_{r-1}A_{r-1}L_{r-1}</span>, <span class="math">L_{j}=Q_{j-1}A_{j-1}L_{j-1}</span> for <span class="math">j=2,\\cdots,r-1</span>, and <span class="math">L_{1}=Q_{0}A_{0}I_{n}</span> for some <span class="math">Q_{i}\\in\\mathcal{PM}_{n\\times n}(\\mathbb{F}_{2})</span> and <span class="math">A_{i}\\in\\mathcal{AEM}_{n\\times n}(\\mathbb{F}_{2})</span> for <span class="math">i=0,1,\\cdots,r</span>. Consequently, <span class="math">L=Q_{r-1}A_{r-1}\\cdots Q_{1}A_{1}Q_{0}A_{0}I_{n}</span> which is a factorization of <span class="math">L</span> with the form in Lemma 1.</p>
+
+    <p class="text-gray-300">Therefore, the minimum XOR-count of <span class="math">L</span> is equal to the minimum length of paths between <span class="math">[L]_{RP}</span> and <span class="math">[I_{n}]_{RP}</span>, namely, their distance. ∎</p>
+
+    <p class="text-gray-300">From the proof of Theorem 4, we can easily see that a shortest path between <span class="math">[L]_{RP}</span> and <span class="math">[I_{n}]_{RP}</span> indicates a minimum-XOR-implementation of <span class="math">L</span>.</p>
+
+    <h2 id="sec-25" class="text-2xl font-bold">5 Searching for Optimal Implementations of Invertible Linear Layers</h2>
+
+    <p class="text-gray-300">In this section, we talk about how to get a minimum-XOR-implementation of a given linear layer <span class="math">L\\in\\mathcal{IM}_{n\\times n}(\\mathbb{F}_{2})</span>. In accordance with the preceding section, this question is equivalent to finding a shortest path between <span class="math">[L]_{RP}</span> and <span class="math">[I_{n}]_{RP}</span>.</p>
+
+    <p class="text-gray-300">Let us sketch our strategy firstly. Suppose <span class="math">G(V,E)</span> is a connected graph, <span class="math">a,b\\in V</span>. To find a shortest path between <span class="math">a</span> and <span class="math">b</span>, we let <span class="math">\\mathcal{A}_{0}=\\{a\\}</span>, <span class="math">\\mathcal{B}_{0}=\\{b\\}</span> and check whether <span class="math">a=b</span>. If <span class="math">a=b</span>, we do not have to do anything. If <span class="math">a\\neq b</span>, we construct a set <span class="math">\\mathcal{A}_{1}</span> consisting of the vertices of <span class="math">G</span> that are adjacent to <span class="math">a</span>. In other words, <span class="math">\\mathcal{A}_{1}</span> consists of the vertices having distance <span class="math">1</span> from <span class="math">a</span>. Then we check whether there exists <span class="math">x\\in\\mathcal{A}_{1}</span> such that <span class="math">x=b</span>. If there is, we get a shortest path <span class="math">a-b</span> between <span class="math">a</span> and <span class="math">b</span>. If there is not, we construct a set <span class="math">\\mathcal{B}_{1}</span> consisting of the vertices of <span class="math">G</span> that are adjacent to <span class="math">b</span>. In other words, <span class="math">\\mathcal{B}_{1}</span> consists of the vertices having distance <span class="math">1</span> from <span class="math">b</span>. Then we check whether there exists <span class="math">x\\in\\mathcal{A}_{1}</span> and <span class="math">y\\in\\mathcal{B}_{1}</span> such that <span class="math">x=y</span>. If there is, we get a shortest path <span class="math">a-a_{1}^{<em>}-b</span> between <span class="math">a</span> and <span class="math">b</span> where <span class="math">a_{1}^{</em>}\\in\\mathcal{A}_{1}</span>. If there is not, we proceed the procedure above: check and move forwards one step from <span class="math">\\mathcal{A}_{i}</span>, then check and move forwards one step from <span class="math">\\mathcal{B}_{i}</span>. Finally, we will find</p>
+
+    <p class="text-gray-300">Ruoxin Zhao, Baofeng Wu, Rui Zhang and Qian Zhang</p>
+
+    <p class="text-gray-300"><span class="math">x \\in \\mathcal{A}_{k+1}</span>  and  <span class="math">y \\in \\mathcal{B}_{k+1}</span>  (or  <span class="math">y \\in \\mathcal{B}_k</span> ) for some  <span class="math">k</span>  such that  <span class="math">x = y</span> . As a result, we find a shortest path</p>
+
+    <div class="my-4 text-center"><span class="math-block">a - a _ {1} ^ {*} - \\dots - a _ {k} ^ {*} - a _ {k + 1} ^ {*} - b _ {k} ^ {*} - \\dots - b _ {1} ^ {*} - b (o r a - a _ {1} ^ {*} - \\dots - a _ {k} ^ {*} - b _ {k} ^ {*} - \\dots - b _ {1} ^ {*} - b)</span></div>
+
+    <p class="text-gray-300">between  <span class="math">a</span>  and  <span class="math">b</span> , where  <span class="math">a_{i}^{<em>}\\in \\mathcal{A}_{i}</span> ,  <span class="math">b_{i}^{</em>}\\in \\mathcal{B}_{i}</span> , every pair  <span class="math">a_{i}^{<em>},a_{i + 1}^{</em>}</span>  and every pair  <span class="math">b_{j}^{<em>},b_{j + 1}^{</em>}</span>  are adjacent. We formally describe the above procedures in Algorithm 1 with pseudocode.</p>
+
+    <p class="text-gray-300">Algorithm 1 Double-Direction Search for a Shortest Path Require: a graph  <span class="math">G = (V,E)</span> <span class="math">a,b\\in V</span> Ensure: a shortest path between  <span class="math">a</span>  and  <span class="math">b</span> <span class="math">\\mathcal{A}_0\\gets \\{a\\}</span> <span class="math">\\mathcal{B}_0\\gets \\{b\\}</span> <span class="math">i\\gets 0</span> <span class="math">j\\gets 0</span>  link  <span class="math">\\leftarrow 0</span> while link  <span class="math">= 0</span>  do if there exists  <span class="math">a_i^<em>\\in \\mathcal{A}_i</span>  and  <span class="math">b_{j}^{</em>}\\in \\mathcal{B}_{j}</span>  such that  <span class="math">a_{i}^{<em>} = b_{j}^{</em>}</span>  then link  <span class="math">\\leftarrow 1</span>  continue; else  <span class="math">i\\gets i + 1</span>  construct a set  <span class="math">\\mathcal{A}_i</span>  consisting of the vertices adjacent to some vertex in  <span class="math">\\mathcal{A}_{i - 1}</span>  and not in  <span class="math">\\bigcup_{k = 0}^{i - 1}\\mathcal{A}_k</span>  end if if there exists  <span class="math">a_i^<em>\\in \\mathcal{A}_i</span>  and  <span class="math">b_{j}^{</em>}\\in \\mathcal{B}_{j}</span>  such that  <span class="math">a_{i}^{<em>} = b_{j}^{</em>}</span>  then link  <span class="math">\\leftarrow 1</span>  continue; else  <span class="math">j\\gets j + 1</span>  construct a set  <span class="math">\\mathcal{B}_j</span>  consisting of the vertices adjacent to some vertex in  <span class="math">\\mathcal{B}_{j - 1}</span>  and not in  <span class="math">\\bigcup_{k = 0}^{j - 1}\\mathcal{B}_k</span>  end if end while return the path  <span class="math">a_0^<em> -\\dots -a_i^</em> -b_{j - 1}^<em> -\\dots -b_0^</em></span>  such that every pair  <span class="math">a_k^<em>,a_{k + 1}</span>  and every pair  <span class="math">b_{i}^{</em>},b_{i + 1}^{*}</span>  are adjacent;</p>
+
+    <p class="text-gray-300">Lemma 4. Suppose  <span class="math">G = (V, E)</span>  is a graph,  <span class="math">a, b \\in V</span> . Then we get a shortest path between  <span class="math">a</span>  and  <span class="math">b</span>  with Algorithm 1.</p>
+
+    <p class="text-gray-300">Proof. Assume there is a path  <span class="math">a - c_1 - \\dots - c_{r-1} - b</span>  shorter than the output of Algorithm 1. Then  <span class="math">c_k \\in \\mathcal{A}_k</span>  for  <span class="math">k = 1, \\dots, \\lceil \\frac{r-1}{2} \\rceil</span> , and  <span class="math">c_{r-l} \\in \\mathcal{B}_l</span>  for  <span class="math">l = 1, \\dots, \\lfloor \\frac{r-1}{2} \\rfloor</span> . Consequently, there exists  <span class="math">a_k^<em> \\in \\mathcal{A}_k</span> ,  <span class="math">b_l^</em> \\in \\mathcal{B}_l</span>  such that  <span class="math">a_k^<em> = b_l^</em></span>  for some  <span class="math">k &amp;lt; i</span>  or some  <span class="math">l &amp;lt; j</span>  which contradicts Algorithms 1.</p>
+
+    <p class="text-gray-300">Algorithm 1 is a generic method for any graph. Now we use it to handle our main target: a minimum-XOR-implementation of a given linear layer  <span class="math">L \\in \\mathcal{IM}_{n \\times n}(\\mathbb{F}_2)</span> . For this target, we present Algorithm 2 and omit the proof of its correctness because it directly comes from Algorithm 1. Here, we just give an explanation of Algorithm 2 as follows.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>We choose an element in every equivalence class to represent it. For example,  <span class="math">L_{i}^{<em>}</span>  represents the class  <span class="math">[L_i^</em> ]_{RP}</span> . Hence, we determine  <span class="math">[L_i]_{RP} = [B_j]_{RP}</span>  by checking  <span class="math">L_{i}\\sim_{RP}B_{j}</span> .</li>
+
+      <li>When we need to determine whether two invertible matrices  <span class="math">L_{i}</span>  and  <span class="math">B_{j}</span>  are row-permutation-equivalent, we check the Hamming weight of  <span class="math">L_{i}B_{j}^{-1}</span>  since  <span class="math">L_{i}\\sim_{RP}B_{j}</span>  if and only if  <span class="math">W_{H}(L_{i}B_{j}^{-1}) = n</span> . This method can be implemented easily when  <span class="math">B</span>  is a product of some additive elementary matrices. More explicitly, if  <span class="math">B = A_{1}\\dots A_{s}</span> ,  <span class="math">B^{-1} = A_{s}\\dots A_{1}</span> .</li>
+
+    </ul>
+
+    <p class="text-gray-300">For a given graph and two vertices of it, there has already been algorithms in literature for finding the shortest path of them. For example, the famous Dijkstra's algorithm ([3], Chapter 11, page 443). Certainly, we can adopt it to solve the main problem in this paper. Essentially, Dijkstra's algorithm is a single-direction search, while our algorithms are</p>
+
+    <p class="text-gray-300">Designing Optimal Implementations of Linear Layers (Full Version)</p>
+
+    <p class="text-gray-300">|  Algorithm 2 Finding a Minimum-XOR-Implementation of an Invertible Linear Layer  |   |</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">---</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">---</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">|  Require: a positive integer n, a matrix L ∈ I M n×n (F2).  |   |</p>
+
+    <p class="text-gray-300">|  Ensure: a minimum-XOR-implementation of L.  |   |</p>
+
+    <p class="text-gray-300">|  L0←{L}, B0←{In}, i←0, j←0, link←0;  |   |</p>
+
+    <p class="text-gray-300">|  while link=0 do  |   |</p>
+
+    <p class="text-gray-300">|  if there exists L<em> ∈ L i and B</em> ∈ Bj such that L<em> ~RP B</em> then  |   |</p>
+
+    <p class="text-gray-300">|  link←1;  |   |</p>
+
+    <p class="text-gray-300">|  continue;  |   |</p>
+
+    <p class="text-gray-300">|  else  |   |</p>
+
+    <p class="text-gray-300">|  i←i+1;  |   |</p>
+
+    <p class="text-gray-300">|  construct a set L i consisting of the matrices having the form Ar,sLi-1 and not row-permutation-equivalent to any matrix in ∪k=0i-1Lk, where Ar,s runs over AEMn×n(F2) and Li-1 runs over L i-1;  |   |</p>
+
+    <p class="text-gray-300">|  end if  |   |</p>
+
+    <p class="text-gray-300">|  if there exists L<em> ∈ L i and B</em> ∈ Bj such that L<em> ~RP B</em> then  |   |</p>
+
+    <p class="text-gray-300">|  link←1;  |   |</p>
+
+    <p class="text-gray-300">|  continue;  |   |</p>
+
+    <p class="text-gray-300">|  else  |   |</p>
+
+    <p class="text-gray-300">|  j←j+1;  |   |</p>
+
+    <p class="text-gray-300">|  construct a set Bj consisting of the matrices having the form Ar,sBj-1 and not row-permutation-equivalent to any matrix in ∪k=0i-1Bk, where Ar,s runs over AEMn×n(F2) and Bj-1 runs over B i-1;  |   |</p>
+
+    <p class="text-gray-300">|  end if  |   |</p>
+
+    <p class="text-gray-300">|  end while  |   |</p>
+
+    <p class="text-gray-300">|  return the path L0<em> -··· - L</em> - B<em> - - ··· - B0</em> such that every pair L<em> , Lk+1 and every pair B</em>, B* are adjacent;  |   |</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">double-direction search. Let us show what will happen if we handle our main problem with Dijkstra's algorithm. We use the same notations as that in Algorithm 1. We start from vertex  <span class="math">a</span>  to find a shortest path between  <span class="math">a</span>  and  <span class="math">b</span> . By means of Dijkstra's algorithm, we need to construct a series of sets  <span class="math">\\mathcal{A}_i</span>  consisting of vertices whose distance to  <span class="math">a</span>  is  <span class="math">i</span>  for  <span class="math">i = 1,2,\\dots</span> . According to Theorem 3,  $</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mathcal{A}_1</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">= n^2 -n<span class="math"> , and  </span></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mathcal{A}_i</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">= (n^2 -n)(n^2 -n - 1)^{i - 1}<span class="math">  for  </span>i\\geq 2<span class="math">  in the worst case. If the distance between  </span>a<span class="math">  and  </span>b<span class="math">  is  </span>s\\geq 2<span class="math"> , the algorithm will not terminate until  </span>\\mathcal{A}_s<span class="math">  is constructed. We see the cardinality of  </span>\\mathcal{A}_i<span class="math"> s increase too fast and will occupy too much space. Actually, that is the reason why we abandon single-direction strategies and adopt a double-direction strategy – moving forwards step by step from  </span>a<span class="math">  and  </span>b<span class="math">  alternately. With a double-direction strategy, we can save a lot of memory space and modify the search for the shortest path. For instance, suppose the distance between  </span>a<span class="math">  and  </span>b<span class="math">  is  </span>s = 2t<span class="math"> . If we use our method, then we need to construct  </span>\\mathcal{A}_i,\\mathcal{B}_i<span class="math">  for  </span>i = 1,\\dots ,t<span class="math"> , where  </span></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mathcal{A}_1</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">=</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mathcal{B}_1</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">= n^2 -n<span class="math"> ,  </span></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mathcal{A}_2</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">=</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mathcal{B}_2</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">= (n^2 -n)(n^2 -n - 1),\\dots ,</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mathcal{A}_t</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">=</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mathcal{B}_t</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">= (n^2 -n)(n^2 -n - 1)^{t - 1}<span class="math">  in the worst case. However, if we use a single-direction strategy, we have to construct  </span>\\mathcal{A}_i<span class="math">  for  </span>i = 1,\\dots ,2t<span class="math"> , where  </span></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mathcal{A}_1</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">= n^2 -n<span class="math"> ,  </span></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mathcal{A}_2</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">= (n^2 -n)(n^2 -n - 1),\\dots ,</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mathcal{A}_t</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">= (n^2 -n)(n^2 -n - 1)^{t - 1},</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mathcal{A}_{t + 1}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">= (n^2 -n)(n^2 -n - 1)^t,\\dots ,</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mathcal{A}_{2t}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">= (n^2 -n)(n^2 -n - 1)^{2t - 1}$ .</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">We search the minimum XOR implementations of many linear layers and list some of them in Appendix A. The optimal implementation procedure of each one is like what we show in Example 1. Meanwhile, we list the minimum XOR count and the difference between Hamming weight and the order of the linear layers in Table 1, where the former indicates implementation cost of our strategy and the latter indicates the cost of computing co-ordinates of output independently.  <span class="math">L_{1}, \\dots, L_{10}</span>  in Table 1 are matrices in  <span class="math">\\mathcal{M}_{5 \\times 5}(\\mathbb{F}_2)</span> , and  <span class="math">L_{11}, \\dots, L_{20}</span>  are matrices in  <span class="math">\\mathcal{M}_{6 \\times 6}(\\mathbb{F}_2)</span> . We do not choose  <span class="math">(6 \\times 6)</span>  matrices with large Hamming weights because of hardware limitation of the PC we use. According to the experimental results, we save approximately  <span class="math">55.2\\%</span>  XORs of implementing  <span class="math">L_{1}, \\dots, L_{10}</span>  in average, in comparison with the previous method (computing the co-ordinates of outputs</p>
+
+    <p class="text-gray-300">Ruoxin Zhao, Baofeng Wu, Rui Zhang and Qian Zhang</p>
+
+    <p class="text-gray-300">Table 1: Implementation Cost of Linear Layers</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Linear Layer</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">L1</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">L2</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">L3</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">L4</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">L5</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">L6</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">L7</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">L8</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">L9</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">L10</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Min-XOR-Count</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">6</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">7</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">6</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">5</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">6</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">6</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">6</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">6</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">6</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">6</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">WH(Li)-n</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">14</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">14</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">14</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">13</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">13</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">14</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">13</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">13</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">13</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">13</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Linear Layer</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">L11</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">L12</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">L13</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">L14</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">L15</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">L16</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">L17</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">L18</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">L19</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">L20</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Min-XOR-Count</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">6</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">6</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">6</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">5</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">6</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">7</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">6</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">7</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">6</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">6</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">WH(Li)-n</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">8</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">7</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">8</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">7</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">7</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">8</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">8</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">8</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">8</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">8</td>
+
+          </tr>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">independently). And the corresponding percentage for implementing  <span class="math">L_{11},\\dots ,L_{20}</span>  is  <span class="math">20.8\\%</span> .</p>
+
+    <p class="text-gray-300">Although we present an algorithm to search for an optimal implementation of a given linear layer, its space/time complexity skyrockets along with the increase of order and minimum XOR count of the given linear layer. For example, in the case when a linear layer  <span class="math">L</span>  is in  <span class="math">\\mathcal{IM}_{8\\times 8}(\\mathbb{F}_2)</span> , the time complexity of Algorithm 2 is  <span class="math">56^r</span> , where  <span class="math">r = Min - XOR - Count(L)</span> . If  <span class="math">r = 15</span>  (not very large), then the time complexity of searching for the minimum XOR implementation of  <span class="math">L</span>  will be  <span class="math">56^{15} \\approx 2^{87}</span> .</p>
+
+    <p class="text-gray-300">In this section, to avoid high computational complexity of searching for optimal implementations of linear layers, we switch to other efficient implementations of them. Our aim is still looking for a P-AE factorization of a given linear layer, but it is not necessarily a minimum XOR implementation of it.</p>
+
+    <p class="text-gray-300">As we know, every matrix  <span class="math">M \\in \\mathcal{IM}_{n \\times n}(\\mathbb{F}_2)</span>  can be transformed to a diagonal matrix with the same rank as  <span class="math">M</span>  via a series of row/column exchanging and row/column addition. This diagonal matrix must be  <span class="math">I_n</span>  because  <span class="math">M</span> 's rank is  <span class="math">n</span> . According to Lemma 2,  <span class="math">M</span>  can be transformed to a permutation matrix  <span class="math">P \\in \\mathcal{PM}_{n \\times n}(\\mathbb{F}_2)</span>  via a series of row/column addition. In a form of matrix, there exists a series of additive elementary matrices  <span class="math">R_1, \\dots, R_r</span>  and  <span class="math">C_1, \\dots, C_s</span>  such that  <span class="math">R_r \\cdots R_1 MC_1 \\cdots C_s = P</span> . Consequently, we get a P-AE factorization  <span class="math">M = R_1 \\cdots R_r PC_s \\cdots C_1</span> . That indicates left-multiplying an input column  <span class="math">X \\in \\mathbb{F}_2^n</span>  by  <span class="math">M</span>  with this P-AE factorization uses  <span class="math">r + s</span>  XORs. If each row/column addition reduces the Hamming weight of the matrix by 1, the implementation cost of this MIOSS procedure will be equal to that of computing co-ordinates of output of  <span class="math">M</span>  independently, namely,  <span class="math">W_H(M) - n</span> . Therefore, if we want an MIOSS procedure better than computing co-ordinates of output of  <span class="math">M</span>  independently, the guideline is trying to reduce the Hamming weight of the given linear layer as much as possible by each additive row/column elementary operation in  <span class="math">R_r \\cdots R_1 MC_1 \\cdots C_s = P</span> . To attain this goal, we present Algorithm 3.</p>
+
+    <p class="text-gray-300">In Algorithm 3,  <span class="math">r</span>  is a variable recording the number of additive elementary operations, and  <span class="math">RUB</span>  is assigned the difference between the Hamming weight of origin matrix  <span class="math">M</span>  and its order  <span class="math">n</span> . If  <span class="math">r</span>  exceeds  <span class="math">RUB</span> , it is unnecessary to let the program proceed because its output MIOSS procedure will not be better than computing co-ordinates of output of the linear layer independently. In each while loop, Algorithm 3 looks for an additive elementary operation that can reduce the Hamming weight of  <span class="math">M</span>  most among all additive row and column elementary operations and operate  <span class="math">M</span>  by it. If the algorithm finally displays "Success", then we will get a series of additive elementary operations and a permutation matrix. In form of matrix multiplication, we will get  <span class="math">R_{r} \\cdots R_{1} MC_{1} \\cdots C_{s} = P</span> , where each  <span class="math">R_{i}</span>  and each  <span class="math">C_{j}</span>  are additive elementary matrices and  <span class="math">P</span>  is a permutation matrix. Consequently, we will obtain a P-AE factorization  <span class="math">M = R_{1} \\cdots R_{r} PC_{s} \\cdots C_{1}</span> .</p>
+
+    <p class="text-gray-300">Algorithm 3 Finding an Efficient Implementation of an Invertible Linear Layer 0: a positive integer <span class="math">n</span>, a matrix <span class="math">M\\in\\mathcal{IM}_{n\\times n}(\\mathbb{F}_{2})</span>; 0: <span class="math">r\\leftarrow 0</span>, <span class="math">RUB\\leftarrow W_{H}(M)-n</span>; while <span class="math">W_{H}(M)&gt;n</span> and <span class="math">r\\leq RUB</span> do let <span class="math">\\alpha_{i}</span> denote the <span class="math">i</span>-th row of <span class="math">M</span> and <span class="math">\\beta_{i}</span> denote the <span class="math">i</span>-th column of <span class="math">M</span> for <span class="math">i=1,\\cdots,n</span>, <span class="math">weightdecrease\\leftarrow W_{H}(\\alpha_{1})-W_{H}(\\alpha_{1}+\\alpha_{2})</span>, <span class="math">AE\\leftarrow(R,2,1)</span>; for <span class="math">1\\leq i&lt;j\\leq n</span> do compute <span class="math">\\alpha_{i}+\\alpha_{j}</span>; if <span class="math">W_{H}(\\alpha_{i})-W_{H}(\\alpha_{i}+\\alpha_{j})&gt;weightdecrease</span> then <span class="math">weightdecrease\\leftarrow W_{H}(\\alpha_{i})-W_{H}(\\alpha_{i}+\\alpha_{j})</span>, <span class="math">AE\\leftarrow(R,j,i)</span>; end if if <span class="math">W_{H}(\\alpha_{j})-W_{H}(\\alpha_{i}+\\alpha_{j})&gt;weightdecrease</span> then <span class="math">weightdecrease\\leftarrow W_{H}(\\alpha_{j})-W_{H}(\\alpha_{i}+\\alpha_{j})</span>, <span class="math">AE\\leftarrow(R,i,j)</span>; end if end for for <span class="math">1\\leq i&lt;j\\leq n</span> do compute <span class="math">\\beta_{i}+\\beta_{j}</span>; if <span class="math">W_{H}(\\beta_{i})-W_{H}(\\beta_{i}+\\beta_{j})&gt;weightdecrease</span> then <span class="math">weightdecrease\\leftarrow W_{H}(\\beta_{i})-W_{H}(\\beta_{i}+\\beta_{j})</span>, <span class="math">AE\\leftarrow(C,j,i)</span>; end if if <span class="math">W_{H}(\\beta_{j})-W_{H}(\\beta_{i}+\\beta_{j})&gt;weightdecrease</span> then <span class="math">weightdecrease\\leftarrow W_{H}(\\beta_{j})-W_{H}(\\beta_{i}+\\beta_{j})</span>, <span class="math">AE\\leftarrow(C,i,j)</span>; end if end for if <span class="math">AE=(R,i,j)</span> then add <span class="math">\\alpha_{i}</span> to <span class="math">\\alpha_{j}</span>, output <span class="math">AE</span>, <span class="math">r\\leftarrow r+1</span>; else add <span class="math">\\beta_{i}</span> to <span class="math">\\beta_{j}</span>, output <span class="math">AE</span>, <span class="math">r\\leftarrow r+1</span>; end if end while if <span class="math">W_{H}(M)&gt;n</span> then print “Fail.”; else print “Success via <span class="math">r</span> steps.”, output <span class="math">M</span>; end if</p>
+
+    <p class="text-gray-300">One important advantage of Algorithm 3 is that its time/space complexity is much lower than that of Algorithm 2. For a linear layer <span class="math">M\\in\\mathcal{IM}_{n\\times n}(\\mathbb{F}_{2})</span>, if Algorithm 3 runs <span class="math">k</span> while loops, then the time complexity of it is <span class="math">k(n^{2}-n)</span>. It is a piece of cake in comparison with <span class="math">(n^{2}-n)^{k}</span> – the time complexity of Algorithm 2 with the same number of loops. Therefore, Algorithm 3 is substantially more practical than Algorithm 2 is. Nevertheless, we have to admit that Algorithm 3 does not necessarily give us an optimal implementation of the input linear layer even though it succeeds.</p>
+
+    <p class="text-gray-300">It is well known that implementation costs of the inverses of many linear layers are higher than that of themselves (the linear layer of AES, for example). As we mentioned before, besides using fewer XORs, another advantage of MIOSS is implementing every invertible linear layer and its inverse with the same cost. This advantage is also valid to the contents of this section. More specifically, if we get an efficient implementation <span class="math">M=R_{1}\\cdots R_{r}PC_{s}\\cdots C_{1}</span> of a given linear layer <span class="math">M\\in\\mathcal{IM}_{n\\times n}(\\mathbb{F}_{2})</span> by Algorithm 3, then we immediately obtain an implementation of <span class="math">M^{-1}</span>: <span class="math">M^{-1}=C_{1}\\cdots C_{s}P^{-1}R_{r}\\cdots R_{1}</span>. Obviously, <span class="math">M^{-1}</span> has the same implementation cost as <span class="math">M</span> does. In fact, we recommend a better strategy – for a given linear layer <span class="math">M</span>, one can conduct Algorithm 3 to both <span class="math">M</span> and <span class="math">M^{-1}</span>, then choose a better (with a fewer number of additive elementary matrices) one from two implementations as the final option.</p>
+
+    <p class="text-gray-300">Ruoxin Zhao, Baofeng Wu, Rui Zhang and Qian Zhang</p>
+
+    <p class="text-gray-300">As an application of Algorithm 3, we investigate the linear layers of AES. The linear layer of AES consists of two phases: ShiftRows and MixColumns. We care nothing about ShiftRows since it is just a permutation over co-ordinates of input vectors. MixColumn is the one we really concern about. The Hamming weights of the matrices of encryption MixColumns and decryption MixColumns are 184 and 472, respectively. So, if we implement them by computing co-ordinates of output independently, they will cost 152 XORs and 440 XORs, respectively. However, with Algorithm 3, we get an efficient implementation of encryption MixColumns with 132 XORs and an efficient implementation of decryption MixColumns with 228 XORs. In other words, we can save  <span class="math">13.16\\%</span>  XORs of computing co-ordinates of output of MixColumns independently and  <span class="math">48.18\\%</span>  XORs of computing co-ordinates of output of the inverse MixColumns independently. We would like to show the design of these efficient implementations below.</p>
+
+    <p class="text-gray-300">Let  <span class="math">MC</span>  denote the matrix of encryption MixColumns of AES. Then</p>
+
+    <div class="my-4 text-center"><span class="math-block">M C = \\left( \\begin{array}{c c c c c} M (0 x 0 2) &amp;amp; M (O x 0 3) &amp;amp; M (O x 0 1) &amp;amp; M (O x 0 1) \\\\ M (0 x 0 1) &amp;amp; M (0 x 0 2) &amp;amp; M (0 x 0 3) &amp;amp; M (0 x 0 1) \\\\ M (0 x 0 1) &amp;amp; M (0 x 0 1) &amp;amp; M (0 x 0 2) &amp;amp; M (0 x 0 3) \\\\ M (0 x 0 3) &amp;amp; M (0 x 0 1) &amp;amp; M (0 x 0 1) &amp;amp; M (0 x 0 2) \\end{array} \\right)</span></div>
+
+    <p class="text-gray-300">is a matrix in  <span class="math">\\mathcal{M}_{32\\times 32}(\\mathbb{F}_2)</span> , where</p>
+
+    <div class="my-4 text-center"><span class="math-block">M (0 x 0 2) = \\left( \\begin{array}{c c c c c c c c} 0 &amp;amp; 1 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 \\\\ 0 &amp;amp; 0 &amp;amp; 1 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 \\\\ 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 1 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 \\\\ 1 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 1 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 \\\\ 1 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 1 &amp;amp; 0 &amp;amp; 0 \\\\ 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 1 &amp;amp; 0 \\\\ 1 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 1 \\\\ 1 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 \\end{array} \\right),</span></div>
+
+    <div class="my-4 text-center"><span class="math-block">M (O x 0 3) = \\left( \\begin{array}{c c c c c c c c} 1 &amp;amp; 1 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 \\\\ 0 &amp;amp; 1 &amp;amp; 1 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 \\\\ 0 &amp;amp; 0 &amp;amp; 1 &amp;amp; 1 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 \\\\ 1 &amp;amp; 0 &amp;amp; 0 &amp;amp; 1 &amp;amp; 1 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 \\\\ 1 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 1 &amp;amp; 1 &amp;amp; 0 &amp;amp; 0 \\\\ 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 1 &amp;amp; 1 &amp;amp; 0 \\\\ 1 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 1 &amp;amp; 1 \\\\ 1 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 1 \\end{array} \\right),</span></div>
+
+    <div class="my-4 text-center"><span class="math-block">M (0 x 0 1) = \\left( \\begin{array}{c c c c c c c c} 1 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 \\\\ 0 &amp;amp; 1 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 \\\\ 0 &amp;amp; 0 &amp;amp; 1 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 \\\\ 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 1 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 \\\\ 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 1 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 \\\\ 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 1 &amp;amp; 0 &amp;amp; 0 \\\\ 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 1 &amp;amp; 0 \\\\ 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 1 \\end{array} \\right).</span></div>
+
+    <p class="text-gray-300">Meanwhile, the matrix of decryption MixColumns of AES is</p>
+
+    <div class="my-4 text-center"><span class="math-block">\\begin{array}{l} M C ^ {- 1} = \\left( \\begin{array}{c c c c c} M (0 x 0 e) &amp;amp; M (0 x 0 b) &amp;amp; M (0 x 0 d) &amp;amp; M (0 x 0 9) \\\\ M (0 x 0 9) &amp;amp; M (0 x 0 e) &amp;amp; M (0 x 0 b) &amp;amp; M (0 x 0 d) \\\\ M (0 x 0 d) &amp;amp; M (0 x 0 9) &amp;amp; M (0 x 0 e) &amp;amp; M (0 x 0 b) \\\\ M (0 x 0 b) &amp;amp; M (0 x 0 d) &amp;amp; M (0 x 0 9) &amp;amp; M (0 x 0 e) \\end{array} \\right) \\\\ \\in \\mathcal {M} _ {3 2 \\times 3 2} (\\mathbb {F} _ {2}), \\\\ \\end{array}</span></div>
+
+    <p class="text-gray-300">Designing Optimal Implementations of Linear Layers (Full Version)</p>
+
+    <p class="text-gray-300">where</p>
+
+    <div class="my-4 text-center"><span class="math-block">M (0 x 0 e) = \\left( \\begin{array}{c c c c c c c c} 0 &amp;amp; 1 &amp;amp; 1 &amp;amp; 1 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 \\\\ 1 &amp;amp; 0 &amp;amp; 1 &amp;amp; 1 &amp;amp; 1 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 \\\\ 0 &amp;amp; 1 &amp;amp; 0 &amp;amp; 1 &amp;amp; 1 &amp;amp; 1 &amp;amp; 0 &amp;amp; 0 \\\\ 0 &amp;amp; 0 &amp;amp; 1 &amp;amp; 0 &amp;amp; 1 &amp;amp; 1 &amp;amp; 1 &amp;amp; 0 \\\\ 0 &amp;amp; 1 &amp;amp; 1 &amp;amp; 0 &amp;amp; 0 &amp;amp; 1 &amp;amp; 1 &amp;amp; 1 \\\\ 0 &amp;amp; 1 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 1 &amp;amp; 1 \\\\ 0 &amp;amp; 0 &amp;amp; 1 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 1 \\\\ 1 &amp;amp; 1 &amp;amp; 1 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 \\end{array} \\right),</span></div>
+
+    <div class="my-4 text-center"><span class="math-block">M (0 x 0 b) = \\left( \\begin{array}{c c c c c c c c} 1 &amp;amp; 1 &amp;amp; 0 &amp;amp; 1 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 \\\\ 1 &amp;amp; 1 &amp;amp; 1 &amp;amp; 0 &amp;amp; 1 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 \\\\ 1 &amp;amp; 1 &amp;amp; 1 &amp;amp; 1 &amp;amp; 0 &amp;amp; 1 &amp;amp; 0 &amp;amp; 0 \\\\ 1 &amp;amp; 1 &amp;amp; 1 &amp;amp; 1 &amp;amp; 1 &amp;amp; 0 &amp;amp; 1 &amp;amp; 0 \\\\ 0 &amp;amp; 0 &amp;amp; 1 &amp;amp; 0 &amp;amp; 1 &amp;amp; 1 &amp;amp; 0 &amp;amp; 1 \\\\ 1 &amp;amp; 1 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 1 &amp;amp; 1 &amp;amp; 0 \\\\ 1 &amp;amp; 1 &amp;amp; 1 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 1 &amp;amp; 1 \\\\ 1 &amp;amp; 0 &amp;amp; 1 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 1 \\end{array} \\right),</span></div>
+
+    <div class="my-4 text-center"><span class="math-block">M (0 x 0 d) = \\left( \\begin{array}{c c c c c c c c} 1 &amp;amp; 0 &amp;amp; 1 &amp;amp; 1 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 \\\\ 1 &amp;amp; 1 &amp;amp; 0 &amp;amp; 1 &amp;amp; 1 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 \\\\ 0 &amp;amp; 1 &amp;amp; 1 &amp;amp; 0 &amp;amp; 1 &amp;amp; 1 &amp;amp; 0 &amp;amp; 0 \\\\ 1 &amp;amp; 0 &amp;amp; 1 &amp;amp; 1 &amp;amp; 0 &amp;amp; 1 &amp;amp; 1 &amp;amp; 0 \\\\ 1 &amp;amp; 1 &amp;amp; 1 &amp;amp; 0 &amp;amp; 1 &amp;amp; 0 &amp;amp; 1 &amp;amp; 1 \\\\ 0 &amp;amp; 1 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 1 &amp;amp; 0 &amp;amp; 1 \\\\ 1 &amp;amp; 0 &amp;amp; 1 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 1 &amp;amp; 0 \\\\ 0 &amp;amp; 1 &amp;amp; 1 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 1 \\end{array} \\right),</span></div>
+
+    <div class="my-4 text-center"><span class="math-block">M (0 x 0 9) = \\left( \\begin{array}{c c c c c c c c} 1 &amp;amp; 0 &amp;amp; 0 &amp;amp; 1 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 \\\\ 1 &amp;amp; 1 &amp;amp; 0 &amp;amp; 0 &amp;amp; 1 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 \\\\ 1 &amp;amp; 1 &amp;amp; 1 &amp;amp; 0 &amp;amp; 0 &amp;amp; 1 &amp;amp; 0 &amp;amp; 0 \\\\ 0 &amp;amp; 1 &amp;amp; 1 &amp;amp; 1 &amp;amp; 0 &amp;amp; 0 &amp;amp; 1 &amp;amp; 0 \\\\ 1 &amp;amp; 0 &amp;amp; 1 &amp;amp; 0 &amp;amp; 1 &amp;amp; 0 &amp;amp; 0 &amp;amp; 1 \\\\ 1 &amp;amp; 1 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 1 &amp;amp; 0 &amp;amp; 0 \\\\ 0 &amp;amp; 1 &amp;amp; 1 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 1 &amp;amp; 0 \\\\ 0 &amp;amp; 0 &amp;amp; 1 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 1 \\end{array} \\right).</span></div>
+
+    <p class="text-gray-300">We have  <span class="math">W_{H}(MC) = 184</span>  and  <span class="math">W_{H}(MC^{-1}) = 472</span> .</p>
+
+    <p class="text-gray-300">We conduct Algorithm 3 to  <span class="math">MC</span>  and  <span class="math">MC^{-1}</span>  but get nothing useful. Therefore, we perform some tricks on them: divide and conquer.</p>
+
+    <p class="text-gray-300">Firstly, let us consider  <span class="math">MC</span> . We divide  <span class="math">MC</span>  to 4 blocks:</p>
+
+    <div class="my-4 text-center"><span class="math-block">M C = \\left( \\begin{array}{c c} M 1 &amp;amp; M 2 \\\\ M 2 &amp;amp; M 1 \\end{array} \\right),</span></div>
+
+    <p class="text-gray-300">where</p>
+
+    <div class="my-4 text-center"><span class="math-block">M 1 = \\left( \\begin{array}{c c} M (0 x 0 2) &amp;amp; M (0 x 0 3) \\\\ M (0 x 0 1) &amp;amp; M (0 x 0 2) \\end{array} \\right),</span></div>
+
+    <p class="text-gray-300">and</p>
+
+    <div class="my-4 text-center"><span class="math-block">M 2 = \\left( \\begin{array}{c c} M (0 x 0 1) &amp;amp; M (0 x 0 1) \\\\ M (0 x 0 3) &amp;amp; M (0 x 0 1) \\end{array} \\right).</span></div>
+
+    <p class="text-gray-300">We easily get  <span class="math">W_{H}(M1) = 49</span>  and  <span class="math">W_{H}(M2) = 43</span> . Meanwhile, we let the input vector  <span class="math">X = (X_{1},X_{2},X_{3},X_{4})^{T}</span> , where each  <span class="math">X_{i}\\in \\mathbb{F}_{2}^{8}</span> . Hereby, the output vector can be computed</p>
+
+    <p class="text-gray-300">as</p>
+
+    <p class="text-gray-300">\\[ \\begin{array}[]{ll}M{C}\\cdot X&=\\left(\\begin{array}[]{cc}M1&M2\\\\ M2&M1\\end{array}\\right)(X_{1},X_{2},X_{3},X_{4})^{T}\\\\ &\\\\ =\\left(\\begin{array}[]{cc}M1(X_{1},X_{2})^{T}+M2(X_{3},X_{4})^{T}\\\\ M2(X_{1},X_{2})^{T}+M1(X_{3},X_{4})^{T}\\end{array}\\right).\\end{array} \\] (1)</p>
+
+    <p class="text-gray-300">Then the implementation cost of <span class="math">M{C}</span> is the sum of twice of that of <span class="math">M1</span> and twice of that of <span class="math">M2</span> plus 32. We conduct Algorithm 3 to <span class="math">M1</span> and <span class="math">M1^{-1}</span> and obtain an MIOSS implementation of <span class="math">M1</span> with 46 XORs. But <span class="math">W_{H}(M1)=49</span> for which we can compute co-ordinates of <span class="math">M1(X_{1},X_{2})^{T}</span> independently with <span class="math">49-16=33</span> XORs. So, such an MIOSS implementation of <span class="math">M1</span> is not a good option. However, we may use divide and conquer once again to <span class="math">M1</span>. We conduct Algorithm 3 to <span class="math">M(0x02)</span> and <span class="math">M(0x02)^{-1}</span> and obtain an MIOSS implementation of <span class="math">M(0x02)</span> with 3 XORs. This MIOSS implementation of <span class="math">M(0x02)</span> costs the same number of XORs as computing co-ordinates of output vector independently does. So we implement <span class="math">M(0x02)</span> by computing co-ordinates of output vector independently. Next, we conduct Algorithm 3 to <span class="math">M(0x03)</span> and <span class="math">M(0x03)^{-1}</span> and obtain an MIOSS implementation of <span class="math">M(0x03)</span> with 9 XORs as follows.</p>
+
+    <p class="text-gray-300">\\[ \\begin{array}[]{ll}M(0x03)=&A_{7,8}A_{6,7}A_{5,6}A_{4,5}A_{3,4}\\\\ &A_{2,3}A_{1,2}A_{8,1}P_{0x03}A_{5,1},\\end{array} \\] (2)</p>
+
+    <p class="text-gray-300">where each <span class="math">A_{i,j}=E_{i,j}+I_{8}</span> and <span class="math">P_{0x03}=I_{8}</span>. This MIOSS implementation uses less XORs than computing co-ordinates of output of <span class="math">M(0x03)</span> independently does because the latter uses 11 XORs. Implementing <span class="math">M(0x02)</span> by computing co-ordinates of output independently and implementing <span class="math">M(0x03)</span> by the MIOSS method in Equation (2), we can implement <span class="math">M1</span> by divide and conquer with <span class="math">3\\times 2+9+16=31</span> XORs. It is less than 33 XORs of implementing <span class="math">M1</span> by computing co-ordinates of output independently. So, we choose divide and conquer to implement <span class="math">M1</span> as follows:</p>
+
+    <p class="text-gray-300">\\[ M1(X_{1},X_{2})^{T}=\\left(\\begin{array}[]{cc}M(0x02)X_{1}^{T}+M(0x03)X_{2}^{T}\\\\ M(0x01)X_{1}^{T}+M(0x02)X_{2}^{T}\\end{array}\\right), \\] (3)</p>
+
+    <p class="text-gray-300">where left-multiplying <span class="math">M(0x02)</span> is implemented by computing co-ordinates of output independently, and left-multiplying <span class="math">M(0x03)</span> is implemented by MIOSS method in Equation 2. Similarly, we investigate the costs of different implementation methods of <span class="math">M2</span>. We conduct Algorithm 3 to <span class="math">M2</span> and <span class="math">M2^{-1}</span> and obtain an MIOSS implementation of <span class="math">M2</span> with 19 XORs as follows.</p>
+
+    <p class="text-gray-300">\\[ \\begin{array}[]{ll}M2=&A_{9,1}A_{10,2}A_{11,3}A_{12,4}A_{13,5}A_{14,6}A_{15,7}\\\\ &A_{16,8}A_{1,16}A_{2,9}A_{3,10}A_{4,11}A_{7,14}A_{12,16}\\\\ &A_{5,12}A_{13,16}A_{6,13}A_{15,16}A_{8,15}P_{M2},\\end{array} \\] (4)</p>
+
+    <p class="text-gray-300">where each <span class="math">A_{i,j}=E_{i,j}+I_{16}</span> and <span class="math">P_{M2}</span> is described in Table 2. This MIOSS implementation of <span class="math">M2</span> is better than computing co-ordinates of output of <span class="math">M2</span> independently because the latter costs <span class="math">43-16=27</span> XORs. In addition, implementing <span class="math">M2</span> by divide and conquer costs <span class="math">9+16=25</span> XORs which is larger than 19 too. So, we choose the MIOSS procedure in Equation (4) to implement <span class="math">M2</span>. In summary of this paragraph, we choose the divide and conquer procedure in Equation (1) to implement <span class="math">M{C}</span>, choose the divide and conquer procedure in Equation (3) to implement <span class="math">M1</span>, choose the MIOSS procedure in Equation (2) to implement <span class="math">M(0x03)</span>, choose the MIOSS procedure in Equation (4) to implement <span class="math">M2</span>, and finally obtain an efficient implementation of <span class="math">M{C}</span> with <span class="math">31\\times 2+19\\times 2+32=132</span> XORs. It saves 13.16% XORs of computing co-ordinates of output of <span class="math">M{C}</span> independently.</p>
+
+    <p class="text-gray-300">Secondly, let us consider <span class="math">M{C}^{-1}</span>. Similar to the case of <span class="math">M{C}</span>, we divide <span class="math">M{C}^{-1}</span> to 4 blocks:</p>
+
+    <p class="text-gray-300">\\[ M{C}^{-1}=\\left(\\begin{array}[]{cc}M3&M4\\\\ M4&M3\\end{array}\\right), \\]</p>
+
+    <p class="text-gray-300">Designing Optimal Implementations of Linear Layers (Full Version)</p>
+
+    <p class="text-gray-300">Table 2: The Permutation Matrix  <span class="math">{P}_{M2}</span>  in the MIOSS Implementation of  <span class="math">{M2}</span></p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">i</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">1</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">2</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">3</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">4</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">5</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">6</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">7</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">8</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">ρM2(i)</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">9</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">10</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">11</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">12</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">13</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">14</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">15</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">16</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">i</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">9</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">10</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">11</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">12</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">13</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">14</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">15</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">16</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">ρM2(i)</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">2</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">3</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">4</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">5</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">6</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">7</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">8</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1</td>
+
+          </tr>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li><span class="math">\\rho_{M2}(i)</span>  is the column index of the nonzero entry in  <span class="math">i</span> -th row of  <span class="math">P_{M2}</span> .</li>
+
+    </ul>
+
+    <p class="text-gray-300">where</p>
+
+    <div class="my-4 text-center"><span class="math-block">M 3 = \\left( \\begin{array}{c c} M (0 x 0 e) &amp;amp; M (0 x 0 b) \\\\ M (0 x 0 9) &amp;amp; M (0 x 0 e) \\end{array} \\right),</span></div>
+
+    <p class="text-gray-300">and</p>
+
+    <div class="my-4 text-center"><span class="math-block">M 4 = \\left( \\begin{array}{c c} M (0 x 0 d) &amp;amp; M (0 x 0 9) \\\\ M (0 x 0 b) &amp;amp; M (0 x 0 d) \\end{array} \\right).</span></div>
+
+    <p class="text-gray-300">We easily get  <span class="math">W_{H}(M3) = 115</span>  and  <span class="math">W_{H}(M4) = 121</span> . Meanwhile, we let the input vector  <span class="math">Y = (Y_{1},Y_{2},Y_{3},Y_{4})^{T}</span> , where each  <span class="math">Y_{i}\\in \\mathbb{F}_{2}^{6}</span> . Hereby, the output vector can be computed as</p>
+
+    <div class="my-4 text-center"><span class="math-block">\\begin{array}{l} M C ^ {- 1} \\cdot Y = \\left( \\begin{array}{l l} M 3 &amp;amp; M 4 \\\\ M 4 &amp;amp; M 3 \\end{array} \\right) \\left(Y _ {1}, Y _ {2}, Y _ {3}, Y _ {4}\\right) ^ {T} \\tag {5} \\\\ = \\left( \\begin{array}{l} M 3 (Y _ {1}, Y _ {2}) ^ {T} + M 4 (Y _ {3}, Y _ {4}) ^ {T} \\\\ M 4 (Y _ {1}, Y _ {2}) ^ {T} + M 3 (Y _ {3}, Y _ {4}) ^ {T} \\end{array} \\right). \\\\ \\end{array}</span></div>
+
+    <p class="text-gray-300">Then the implementation cost of  <span class="math">MC^{-1}</span>  is the sum of twice of that of  <span class="math">M3</span>  and twice of that of  <span class="math">M4</span>  plus 32. For convenience of later investigation, let us consider the implementation costs of  <span class="math">M(0x0e)</span> ,  <span class="math">M(0x0b)</span> ,  <span class="math">M(0x0d)</span> , and  <span class="math">M(0x09)</span>  first. We conduct Algorithm 3 to  <span class="math">M(0x0e)</span>  and  <span class="math">M(0x0e)^{-1}</span>  and obtain an MIOSS implementation of  <span class="math">M(0x0e)</span>  with 15 XORs. This MIOSS implementation of  <span class="math">M(0x0e)</span>  uses less XORs than computing co-ordinates of output of  <span class="math">M(0x0e)</span>  independently does because the latter uses  <span class="math">28 - 8 = 20</span>  XORs. Thus, we choose the MIOSS procedure to implement  <span class="math">M(0x0e)</span> . Likewise, we choose an MIOSS procedure with 15 XORs to implement  <span class="math">M(0x0b)</span> , choose an MIOSS procedure with 15 XORs to implement  <span class="math">M(0x0d)</span> , and choose an MIOSS procedure with 11 XORs to implement  <span class="math">M(0x09)</span> . Then, we conduct Algorithm 3 to  <span class="math">M3</span>  and  <span class="math">M3^{-1}</span>  and obtain an MIOSS implementation of  <span class="math">M3</span>  with 52 XORs as follows.</p>
+
+    <div class="my-4 text-center"><span class="math-block">\\begin{array}{l} M 3 = A _ {3, 1} A _ {5, 1 5} A _ {1 3, 7} A _ {7, 1 6} A _ {4, 2} A _ {2, 1} A _ {1 0, 2} \\\\ A _ {1 1, 2} A _ {1 1, 3} A _ {1, 9} A _ {8, 1} A _ {6, 1 6} A _ {1 2, 6} A _ {6, 1 5} \\\\ A _ {6, 7} A _ {1 4, 7} A _ {1, 1 0} A _ {1 5, 1} A _ {3, 6} A _ {5, 6} A _ {1 3, 6} \\\\ A _ {7, 8} A _ {4, 7} A _ {1 5, 8} A _ {4, 1 5} A _ {9, 1 1} A _ {1 3, 1 0} \\tag {6} \\\\ A _ {1 6, 1 0} A _ {1 4, 1 1} A _ {1 6, 1 1} A _ {2, 1} A _ {2, 3} A _ {2, 5} \\\\ A _ {3, 1} A _ {3, 1 4} A _ {1 3, 3} A _ {9, 1 3} A _ {1, 1 4} A _ {5, 1} A _ {5, 1 6} \\\\ A _ {1 2, 5} A _ {9, 1 2} A _ {2, 9} A _ {1 6, 2} A _ {1, 1 6} P _ {M 3} A _ {2, 6} \\\\ A _ {1 2, 6} A _ {1 2, 4} A _ {7, 1} A _ {2, 1} A _ {1 1, 1 2} A _ {3, 1 1}, \\\\ \\end{array}</span></div>
+
+    <p class="text-gray-300">where each  <span class="math">A_{i,j} = E_{i,j} + I_{16}</span>  and  <span class="math">P_{M3}</span>  is described in Table 3. This MIOSS implementation of  <span class="math">M3</span>  is better than computing co-ordinates of output of  <span class="math">M3</span>  independently because the latter costs  <span class="math">115 - 16 = 99</span>  XORs. In addition, implementing  <span class="math">M3</span>  by divide and conquer costs  <span class="math">15 \\times 2 + 15 + 11 + 16 = 72</span>  XORs which is larger than 52 too. So, we choose the MIOSS procedure in Equation (6) to implement  <span class="math">M3</span> . Next, we conduct Algorithm 3 to</p>
+
+    <p class="text-gray-300">Ruoxin Zhao, Baofeng Wu, Rui Zhang and Qian Zhang</p>
+
+    <p class="text-gray-300">Table 3: The Permutation Matrix  <span class="math">{P}_{M3}</span>  in the MIOSS Implementation of  <span class="math">{M3}</span></p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">i</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">1</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">2</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">3</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">4</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">5</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">6</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">7</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">8</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">ρM3(i)</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">6</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">8</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">5</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">12</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">13</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">14</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">15</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">16</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">i</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">9</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">10</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">11</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">12</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">13</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">14</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">15</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">16</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">ρM3(i)</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">11</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">9</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">10</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">4</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">2</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">7</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">3</td>
+
+          </tr>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li><span class="math">\\rho_{M3}(i)</span>  is the column index of the nonzero entry in  <span class="math">i</span> -th row of  <span class="math">P_{M3}</span> .</li>
+
+    </ul>
+
+    <p class="text-gray-300">Table 4: The Permutation Matrix  <span class="math">{P}_{M4}</span>  in the MIOSS Implementation of  <span class="math">{M4}</span></p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">i</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">1</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">2</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">3</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">4</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">5</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">6</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">7</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">8</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">ρM4(i)</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">9</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">10</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">11</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">12</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">13</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">14</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">15</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">i</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">9</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">10</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">11</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">12</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">13</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">14</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">15</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">16</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">ρM4(i)</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">8</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">3</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">4</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">5</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">6</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">7</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">16</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">2</td>
+
+          </tr>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li><span class="math">\\rho_{M4}(i)</span>  is the column index of the nonzero entry in  <span class="math">i</span> -th row of  <span class="math">P_{M4}</span> .</li>
+
+    </ul>
+
+    <p class="text-gray-300"><span class="math">M4</span>  and  <span class="math">M4^{-1}</span>  and obtain an MIOSS implementation of  <span class="math">M4</span>  with 46 XORs as follows.</p>
+
+    <p class="text-gray-300"><span class="math">M4 = A_{10,2}A_{5,9}A_{13,1}A_{14,10}A_{11,3}A_{13,5}A_{3,12}</span> <span class="math">A_{12,4}A_{5,14}A_{14,6}A_{2,11}A_{11,5}A_{5,7}A_{5,12}</span> <span class="math">A_{5,15}A_{11,6}A_{12,6}A_{6,13}A_{6,15}A_{15,9}A_{9,8}</span> <span class="math">A_{8,16}P_{M4}A_{12,6}A_{11,6}A_{6,15}A_{15,2}A_{2,12}</span> <span class="math">A_{2,11}A_{2,1}A_{8,9}A_{7,9}A_{16,15}A_{15,7}A_{7,8}</span> <span class="math">A_{16,3}A_{11,3}A_{9,3}A_{2,8}A_{3,12}A_{13,1}A_{1,10}</span> <span class="math">A_{12,4}A_{8,16}A_{10,2}A_{9,1}A_{5,8},</span></p>
+
+    <p class="text-gray-300">where each  <span class="math">A_{i,j} = E_{i,j} + I_{16}</span>  and  <span class="math">P_{M4}</span>  is described in Table 4. This MIOSS implementation of  <span class="math">M4</span>  is better than computing co-ordinates of output of  <span class="math">M4</span>  independently because the latter costs  <span class="math">121 - 16 = 105</span>  XORs. In addition, implementing  <span class="math">M4</span>  by divide and conquer costs  <span class="math">15 \\times 2 + 15 + 11 + 16 = 72</span>  XORs which is larger than 46 too. So, we choose the MIOSS procedure in Equation (7) to implement  <span class="math">M4</span> . In summary of this paragraph, we choose the divide and conquer procedure in Equation (5) to implement  <span class="math">MC^{-1}</span> , choose the MIOSS procedure in Equation (6) to implement  <span class="math">M3</span> , choose the MIOSS procedure in Equation (7) to implement  <span class="math">M4</span> , and finally obtain an efficient implementation of  <span class="math">MC^{-1}</span>  with  <span class="math">52 \\times 2 + 46 \\times 2 + 32 = 228</span>  XORs. It saves  <span class="math">48.18\\%</span>  XORs of computing co-ordinates of output of  <span class="math">MC^{-1}</span>  independently.</p>
+
+    <p class="text-gray-300">In above sections, we talked about minimum-XOR-implementations and efficient implementations of invertible linear layers. However, we are confronted with singular (even not square) matrices sometimes. So, let us pay attention to singular linear layers in this section. Actually, we can find efficient implementations of singular linear layers with a method similar to that we used to find efficient implementations of invertible linear layers.</p>
+
+    <p class="text-gray-300">As we know, every matrix  <span class="math">M \\in \\mathcal{M}_{m \\times n}(\\mathbb{F}_2)</span>  can be transformed to a rectangular diagonal matrix with the same rank as  <span class="math">M</span>  via a series of row/column exchanging and row/column addition.  <span class="math">\\text{rank}(M)</span>  entries on the diagonal of this rectangular diagonal matrix are 1, and other entries are all 0. According to Lemma 2,  <span class="math">M</span>  can be transformed to a matrix  <span class="math">B \\in \\mathcal{M}_{m \\times n}(\\mathbb{F}_2)</span>  via a series of row/column addition, where all but  <span class="math">\\text{rank}(M)</span>  entries of  <span class="math">B</span>  are 0, each row of  <span class="math">B</span>  contains one 1 and so does each column of it. In a form of matrix,</p>
+
+    <p class="text-gray-300">Designing Optimal Implementations of Linear Layers (Full Version)</p>
+
+    <p class="text-gray-300">there exists a series of additive elementary matrices  <span class="math">R_{1},\\dots ,R_{r}</span>  in  <span class="math">\\mathcal{A}\\mathcal{E}\\mathcal{M}_{m\\times m}(\\mathbb{F}_2)</span>  and a series of  <span class="math">C_1,\\dots ,C_s</span>  in  <span class="math">\\mathcal{A}\\mathcal{E}\\mathcal{M}_{n\\times n}(\\mathbb{F}_2)</span>  such that  <span class="math">R_{r}\\cdot \\cdot \\cdot R_{1}MC_{1}\\cdot \\cdot \\cdot C_{s} = B</span> . Consequently, we get a factorization  <span class="math">M = R_{1}\\cdot \\cdot \\cdot R_{r}BC_{s}\\cdot \\cdot \\cdot C_{1}</span> . Note that left-multiplying a column  <span class="math">X\\in \\mathbb{F}_2^n</span>  by  <span class="math">B</span>  results in a column in  <span class="math">\\mathbb{F}_2^m</span>  by using no XOR. For example,</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">0</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">1</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">0</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">0</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">0</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">0</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">0</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">0</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">0</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">0</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">0</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">1</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">0</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">0</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">0</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">0</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">0</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">0</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">0</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">0</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">0</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">0</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1</td>
+
+          </tr>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">That indicates left-multiplying an input column  <span class="math">X \\in \\mathbb{F}_2^n</span>  by  <span class="math">M</span>  with this factorization uses  <span class="math">r + s</span>  XORs. If each row/column addition reduces the Hamming weight of the matrix by 1, the implementation cost of this MIOSS procedure will be  <span class="math">W_{H}(M) - \\text{rank}(M)</span> . It is probably greater than the implementation cost  <span class="math">W_{H}(M) - m</span>  of computing co-ordinates of output of  <span class="math">M</span>  independently. Therefore, if we want an MIOSS procedure better than computing co-ordinates of output of  <span class="math">M</span>  independently, the guideline is trying to reduce the Hamming weight of the given linear layer as much as possible by an additive row/column elementary operation on each step. To attain this goal, we present Algorithm 4.</p>
+
+    <p class="text-gray-300">Algorithm 4 Finding an Efficient Implementation of a Linear Layer Require: a matrix  <span class="math">M\\in \\mathcal{M}_{m\\times n}(\\mathbb{F}_2)</span>  rank(M); Ensure: a series of additive elementary operations and a matrix in  <span class="math">\\mathcal{M}_{m\\times n}(\\mathbb{F}_2)</span> <span class="math">r\\gets 0</span>  , RUB  <span class="math">\\leftarrow W_H(M) - \\mathrm{rank}(M)</span> while  <span class="math">W_{H}(M) &amp;gt; \\mathrm{rank}(M)</span>  and  <span class="math">r\\leq RUB</span>  do let  <span class="math">\\alpha_{i}</span>  denote the  <span class="math">i</span>  -th row of  <span class="math">M</span>  for  <span class="math">i = 1,\\dots ,m</span>  and  <span class="math">\\beta_{j}</span>  denote the  <span class="math">j</span>  -th column of  <span class="math">M</span>  for  <span class="math">j = 1,\\dots ,n</span>  weightdecrease  <span class="math">\\leftarrow W_H(\\alpha_1) - W_H(\\alpha_1 + \\alpha_2)</span> <span class="math">AE\\gets (R,2,1)</span>  . for  <span class="math">1\\leq i &amp;lt;   j\\leq m</span>  do compute  <span class="math">\\alpha_{i} + \\alpha_{j}</span>  . if  <span class="math">W_{H}(\\alpha_{i}) - W_{H}(\\alpha_{i} + \\alpha_{j}) &amp;gt;</span>  weightdecrease then weightdecrease  <span class="math">\\leftarrow W_H(\\alpha_i) - W_H(\\alpha_i + \\alpha_j)</span> <span class="math">AE\\gets (R,j,i)</span>  end if if  <span class="math">W_{H}(\\alpha_{j}) - W_{H}(\\alpha_{i} + \\alpha_{j}) &amp;gt;</span>  weightdecrease then weightdecrease  <span class="math">\\leftarrow W_H(\\alpha_j) - W_H(\\alpha_i + \\alpha_j)</span> <span class="math">AE\\gets (R,i,j)</span>  end if end for for  <span class="math">1\\leq i &amp;lt;   j\\leq n</span>  do compute  <span class="math">\\beta_{i} + \\beta_{j}</span>  . if  <span class="math">W_{H}(\\beta_{i}) - W_{H}(\\beta_{i} + \\beta_{j}) &amp;gt;</span>  weightdecrease then weightdecrease  <span class="math">\\leftarrow W_H(\\beta_i) - W_H(\\beta_i + \\beta_j)</span> <span class="math">AE\\gets (C,j,i)</span>  end if if  <span class="math">W_{H}(\\beta_{j}) - W_{H}(\\beta_{i} + \\beta_{j}) &amp;gt;</span>  weightdecrease then weightdecrease  <span class="math">\\leftarrow W_H(\\beta_j) - W_H(\\beta_i + \\beta_j)</span> <span class="math">AE\\gets (C,i,j)</span>  end if end for if  <span class="math">AE = (R,i,j)</span>  then add  <span class="math">\\alpha_{i}</span>  to  <span class="math">\\alpha_{j}</span>  output  <span class="math">AE</span> <span class="math">r\\gets r + 1</span>  . end if if  <span class="math">AE = (C,i,j)</span>  then add  <span class="math">\\beta_{i}</span>  to  <span class="math">\\beta_{j}</span>  output  <span class="math">AE</span> <span class="math">r\\gets r + 1</span>  . end if end while if  <span class="math">W_{H}(M) &amp;gt; \\mathrm{rank}(M)</span>  then print "Fail"; else print "Success via r steps.", output M; end if</p>
+
+    <p class="text-gray-300">8 Conclusion</p>
+
+    <p class="text-gray-300">In this paper, we first investigate the effect of two implementation methods on implementation costs of linear layers: computing the co-ordinates of outputs independently and modifying input vectors to outputs step by step. We focus on the latter because it preforms better than the former. Then, we clarify the measurement of implementation cost and optimal implementation procedures of linear layers. Next, to find an optimal implementation procedure of a given linear layer, we construct a graph-theoretical model and transfer the problem to the shortest path problem in graph theory. Then, we adopt a “double-direction” algorithm that uses less storage space and makes the search for a shortest path more efficient in our regular graph. After that, we construct another algorithm for finding efficient implementations of linear layers. The advantages of this algorithm are its low complexity and high practicality. We conduct it to the linear layers of AES and obtain highly efficient implementations of them. To handle more general linear layers, we finally present a practical algorithm for finding efficient implementations of singular linear layers. We wish our work would be beneficial to the design of implementation of linear layers.</p>
+
+    <p class="text-gray-300">Acknowledgements. Ruoxin Zhao would like to thank Dr. Meicheng Liu and Dr. Yongqiang Li for sincere discussion and constructive suggestion.</p>
+
+    <h2 id="sec-30" class="text-2xl font-bold">References</h2>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>[1] Christof Beierle, Thorsten Kranz, and Gregor Leander. Lightweight multiplication in <span class="math">GF(2^{n})</span> with applications to MDS matrices. In Advances in Cryptology - CRYPTO 2016 - 36th Annual International Cryptology Conference, Santa Barbara, CA, USA, August 14-18, 2016, Proceedings, Part I, pages 625–653, 2016.</li>
+
+      <li>[2] Béla Bollobás. Modern Graph Theory, volume 184 of Graduate Texts in Mathematics. Springer Science+Business Media, New York City, USA, 1998.</li>
+
+      <li>[3] Richard A. Brualdi. Introductory Combinatorics. Pearson Education, New York City, USA, 5th edition, 2009.</li>
+
+      <li>[4] Joan Daemen and Vincent Rijmen. The Design of Rijndael: AES - The Advanced Encryption Standard. Information Security and Cryptography. Springer, 2002.</li>
+
+      <li>[5] John M. Harris, Jeffry L. Hirst, and Michael J. Mossinghoff. Combinatorics and Graph Theory. Undergraduate Texts in Mathematics. Springer Science+Business Media, New York City, USA, 2nd edition, 2008.</li>
+
+      <li>[6] Kenneth Hoffman. Linear Algebra. Prentice-Hall, Englewood Cliffs, USA, 2nd edition, 1971.</li>
+
+      <li>[7] Jérémy Jean, Thomas Peyrin, and Siang Meng Sim. Minimal implementations of linear and non-linear lightweight building blocks. Personal communication, 2015.</li>
+
+      <li>[8] Yongqiang Li and Mingsheng Wang. On the construction of lightweight circulant involutory MDS matrices. In Fast Software Encryption - 23rd International Conference, FSE 2016, Bochum, Germany, March 20-23, 2016, Revised Selected Papers, pages 121–139, 2016.</li>
+
+      <li>[9] Meicheng Liu and Siang Meng Sim. Lightweight MDS generalized circulant matrices. In Fast Software Encryption - 23rd International Conference, FSE 2016, Bochum, Germany, March 20-23, 2016, Revised Selected Papers, pages 101–120, 2016.</li>
+
+    </ul>
+
+    <p class="text-gray-300">-</p>
+
+    <p class="text-gray-300">Designing Optimal Implementations of Linear Layers (Full Version)</p>
+
+    <p class="text-gray-300">[10] Mahdi Sajadieh, Mohammad Dakhilalian, Hamid Mala, and Pouyan Sepehrdad. Recursive diffusion layers for block ciphers and hash functions. In Fast Software Encryption - 19th International Workshop, FSE 2012, Washington, DC, USA, March 19-21, 2012. Revised Selected Papers, pages 385-401, 2012. [11] Sumanta Sarkar and Siang Meng Sim. A deeper understanding of the XOR count distribution in the context of lightweight cryptography. In Progress in Cryptology - AFRICACRyPT 2016 - 8th International Conference on Cryptology in Africa, Fes, Morocco, April 13-15, 2016, Proceedings, pages 167-182, 2016. [12] Siang Meng Sim, Khoongming Khoo, Frédérique E. Oggier, and Thomas Peyrin. Lightweight MDS involution matrices. In Fast Software Encryption - 22nd International Workshop, FSE 2015, Istanbul, Turkey, March 8-11, 2015, Revised Selected Papers, pages 471-493, 2015. [13] Shengbao Wu, Mingsheng Wang, and Wenling Wu. Recursive diffusion layers for (lightweight) block ciphers and hash functions. In Selected Areas in Cryptography, 19th International Conference, SAC 2012, Windsor, ON, Canada, August 15-16, 2012, Revised Selected Papers, pages 355-371, 2012.</p>
+
+    <p class="text-gray-300">In this appendix, every  <span class="math">A_{i,j}</span>  denotes  <span class="math">I_n + E_{i,j}</span>  with a proper order  <span class="math">n</span> .</p>
+
+    <div class="my-4 text-center"><span class="math-block">L _ {1} = \\left( \\begin{array}{c c c c c} 1 &amp;amp; 0 &amp;amp; 1 &amp;amp; 1 &amp;amp; 1 \\\\ 1 &amp;amp; 1 &amp;amp; 0 &amp;amp; 1 &amp;amp; 1 \\\\ 0 &amp;amp; 1 &amp;amp; 1 &amp;amp; 0 &amp;amp; 1 \\\\ 1 &amp;amp; 1 &amp;amp; 1 &amp;amp; 1 &amp;amp; 1 \\\\ 1 &amp;amp; 1 &amp;amp; 0 &amp;amp; 0 &amp;amp; 1 \\end{array} \\right) = A _ {1, 4} A _ {4, 2} A _ {3, 4} \\left( \\begin{array}{c c c c c} 0 &amp;amp; 1 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 \\\\ 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 1 &amp;amp; 0 \\\\ 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 1 \\\\ 0 &amp;amp; 0 &amp;amp; 1 &amp;amp; 0 &amp;amp; 0 \\\\ 1 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 \\end{array} \\right) A _ {4, 1} A _ {1, 5} A _ {5, 2}.</span></div>
+
+    <div class="my-4 text-center"><span class="math-block">L _ {2} = \\left( \\begin{array}{c c c c c} 1 &amp;amp; 1 &amp;amp; 1 &amp;amp; 0 &amp;amp; 1 \\\\ 0 &amp;amp; 1 &amp;amp; 1 &amp;amp; 0 &amp;amp; 1 \\\\ 0 &amp;amp; 1 &amp;amp; 1 &amp;amp; 1 &amp;amp; 1 \\\\ 1 &amp;amp; 1 &amp;amp; 0 &amp;amp; 1 &amp;amp; 1 \\\\ 1 &amp;amp; 0 &amp;amp; 1 &amp;amp; 1 &amp;amp; 1 \\end{array} \\right) = A _ {4, 1} A _ {1, 2} A _ {5, 1} A _ {2, 3} \\left( \\begin{array}{c c c c c} 1 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 \\\\ 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 1 &amp;amp; 0 \\\\ 0 &amp;amp; 1 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 \\\\ 0 &amp;amp; 0 &amp;amp; 1 &amp;amp; 0 &amp;amp; 0 \\\\ 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 1 \\end{array} \\right) A _ {2, 5} A _ {5, 3} A _ {3, 5}.</span></div>
+
+    <div class="my-4 text-center"><span class="math-block">L _ {3} = \\left( \\begin{array}{c c c c c} 1 &amp;amp; 1 &amp;amp; 0 &amp;amp; 0 &amp;amp; 1 \\\\ 0 &amp;amp; 1 &amp;amp; 1 &amp;amp; 0 &amp;amp; 1 \\\\ 1 &amp;amp; 0 &amp;amp; 1 &amp;amp; 1 &amp;amp; 1 \\\\ 1 &amp;amp; 1 &amp;amp; 0 &amp;amp; 1 &amp;amp; 1 \\\\ 1 &amp;amp; 1 &amp;amp; 1 &amp;amp; 1 &amp;amp; 1 \\end{array} \\right) = A _ {3, 5} A _ {5, 3} A _ {2, 5} \\left( \\begin{array}{c c c c c} 1 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 \\\\ 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 1 \\\\ 0 &amp;amp; 1 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 \\\\ 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 1 &amp;amp; 0 \\\\ 0 &amp;amp; 0 &amp;amp; 1 &amp;amp; 0 &amp;amp; 0 \\end{array} \\right) A _ {4, 1} A _ {1, 5} A _ {5, 2}.</span></div>
+
+    <div class="my-4 text-center"><span class="math-block">L _ {4} = \\left( \\begin{array}{c c c c c} 1 &amp;amp; 1 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 \\\\ 1 &amp;amp; 1 &amp;amp; 1 &amp;amp; 1 &amp;amp; 1 \\\\ 1 &amp;amp; 1 &amp;amp; 0 &amp;amp; 1 &amp;amp; 0 \\\\ 0 &amp;amp; 1 &amp;amp; 1 &amp;amp; 1 &amp;amp; 1 \\\\ 1 &amp;amp; 1 &amp;amp; 0 &amp;amp; 1 &amp;amp; 1 \\end{array} \\right) = A _ {4, 2} A _ {2, 5} A _ {5, 3} \\left( \\begin{array}{c c c c c} 0 &amp;amp; 1 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 \\\\ 0 &amp;amp; 0 &amp;amp; 1 &amp;amp; 0 &amp;amp; 0 \\\\ 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 1 &amp;amp; 0 \\\\ 1 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 \\\\ 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 1 \\end{array} \\right) A _ {4, 2} A _ {2, 1}.</span></div>
+
+    <div class="my-4 text-center"><span class="math-block">L _ {5} = \\left( \\begin{array}{c c c c c} 1 &amp;amp; 1 &amp;amp; 1 &amp;amp; 1 &amp;amp; 0 \\\\ 1 &amp;amp; 1 &amp;amp; 1 &amp;amp; 0 &amp;amp; 1 \\\\ 1 &amp;amp; 0 &amp;amp; 1 &amp;amp; 1 &amp;amp; 0 \\\\ 0 &amp;amp; 1 &amp;amp; 1 &amp;amp; 1 &amp;amp; 1 \\\\ 0 &amp;amp; 1 &amp;amp; 1 &amp;amp; 1 &amp;amp; 0 \\end{array} \\right) = A _ {2, 4} A _ {4, 5} A _ {5, 1} \\left( \\begin{array}{c c c c c} 0 &amp;amp; 1 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 \\\\ 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 1 &amp;amp; 0 \\\\ 0 &amp;amp; 0 &amp;amp; 1 &amp;amp; 0 &amp;amp; 0 \\\\ 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 1 \\\\ 1 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 \\end{array} \\right) A _ {2, 3} A _ {3, 4} A _ {4, 1}.</span></div>
+
+    <p class="text-gray-300">Ruoxin Zhao, Baofeng Wu, Rui Zhang and Qian Zhang</p>
+
+    <p class="text-gray-300">!<a href="img-3.jpeg">img-3.jpeg</a></p>
+
+    <p class="text-gray-300">Designing Optimal Implementations of Linear Layers (Full Version)</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">L15 =</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">0 1 1 0 1 0 1 0 1 0 1 1 0 0 1 0 0 0 0 0 0 1 0 0 0 1 1 0 0 0 0 0 0 0 1</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">L16 =</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">0 0 1 1 0 1 0 1 1 0 0 1 1 1 1 0 0 0 0 0 0 1 0 0 0 0 0 1 1 1 0 0 0 0 0 1</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">L17 =</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">0 1 1 0 1 0 1 1 1 0 0 0 0 1 0 1 0 0 1 0 0 0 0 0 0 1 0 0 0 1 0 0 0 1 1 0</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">L18 =</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">0 0 1 1 0 0 0 0 1 1 0 0 1 1 1 0 0 0 0 1 1 1 1 0 1 0 1 0 0 1 1 0 0 0 0 0</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">L19 =</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">0 0 1 1 0 1 1 0 0 1 0 0 0 1 1 0 0 0 0 0 0 1 0 0 0 0 1 1 0 0</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">L20 =</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">0 1 1 1 0 0 0 0 1 0 0 0 0 0 1 0 1 1 0 0 1 1 0 1 0 1 0 0 0 0</td>
+
+          </tr>
+
+        </tbody>
+
+      </table>
+
+    </div>`;
+---
+
+<BaseLayout title="Designing Optimal Implementations of Linear Layers (Full Ver... (2016/1118)">
+  <article class="max-w-4xl mx-auto article-prose">
+    <nav class="mb-8">
+      <a href="/papers" class="text-blue-400 hover:text-blue-300">
+        &larr; Back to Papers
+      </a>
+    </nav>
+
+    <header class="mb-12">
+      <h1 class="text-3xl font-bold mb-4"
+        set:html={TITLE_HTML} />
+      <p class="text-gray-400 mb-2"
+        set:html={AUTHORS_HTML} />
+      <p class="text-gray-500 text-sm mb-4">
+        2016 &middot; eprint 2016/1118
+      </p>
+      <div class="flex gap-4 text-sm">
+        <a
+          href={EPRINT_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          class="text-blue-400 hover:text-blue-300"
+        >
+          Paper (eprint) &rarr;
+        </a>
+      </div>
+      <p class="mt-4 text-xs text-gray-500">
+        All content below belongs to the original authors. This page
+        reproduces the paper for educational purposes. Always
+        <a
+          href={EPRINT_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          class="text-blue-400 hover:text-blue-300"
+        >cite the original</a>.
+      </p>
+      <p class="mt-1 text-xs text-gray-600">
+        Converted with: {CRAWLER} &middot; {CONVERTED_DATE}
+      </p>
+    </header>
+
+    <Fragment set:html={CONTENT} />
+
+  </article>
+</BaseLayout>

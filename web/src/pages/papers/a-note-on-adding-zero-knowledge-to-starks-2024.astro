@@ -1,0 +1,2805 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+
+const EPRINT_URL = 'https://eprint.iacr.org/2024/1037';
+const CRAWLER = 'mistral';
+const CONVERTED_DATE = '2026-02-16';
+const TITLE_HTML = 'A  note on adding zero-knowledge to STARKs';
+const AUTHORS_HTML = 'Ulrich Haböck, Al Kindi';
+
+const CONTENT = `    <p class="text-gray-300">Ulrich Haböck* and Al Kindi ulrich@starkware.co, al-kindi@polygon.technology</p>
+
+    <h6 id="sec-2" class="text-base font-medium mt-4">Abstract</h6>
+
+    <p class="text-gray-300">We discuss zero-knowledge in the context of univariate argument systems which use the FRI proximity test for Reed-Solomon codes <em>[x1]</em> as polynomial commitment scheme. We confine ourselves to small-field STARK, i.e. arguments with an arithmetization over a small finite field (the basefield), and we dwell on two techniques widely used in practice: Randomization by polynomials over the basefield, and decomposing the overall quotient into polynomials of smaller degree. In particular the latter is a source for mistakes, both in literature as well as in software implementations. The current, updated version further includes a separate discussion on perfect zero-knowledge in permutation arguments.</p>
+
+    <h2 id="sec-3" class="text-2xl font-bold">1 Introduction</h2>
+
+    <p class="text-gray-300">Adding zero-knowledge to a STARK(for Scalable and Transparent ARgument of Knowledge) is a subject that is somewhat neglected in the field of applied cryptography. Most papers focus solely on the soundness of the underlying interactive oracle proof (IOP), and leave its modification for zero-knowledge to the reader, referring to <em>[BSCR^{+}19]</em> as one of the few examples which treats the issue in full depth. One reason for this might be that STARK are built from polynomial IOPs, and it does not seem a subtle task to randomize polynomials properly, so that their queried values reveal nothing about the witness. However, appearances may be deceptive. We found gaps in the treatment of zero-knowledge in the codebases of Plonky2 <em>[x17]</em>, Risc-Zero <em>[x20]</em>, Triton <em>[x21]</em>, not to forget the learning resource <em>[x14]</em> on FRI. (In the meantime, the gaps have been patched, and the summary on FRI has been updated.) These gaps were in the protocol design, exposing misinterpretations in the measures necessary for</p>
+
+    <p class="text-gray-300">achieving perfect zero-knowledge. They where either due to an oversimplified analysis of the underlying polynomial IOP, or an underestimated impact of FRI queries on the composite protocol, or both.</p>
+
+    <p class="text-gray-300">This note is devoted to the subtleties of turning STARK into zero-knowledge. We review the <em>[BSCR^{+}19]</em> construction and clarify the importance of its masking step, which was fundamentally misinterpreted in a previous version of <em>[x11]</em>, and we discuss two techniques widely used in practice: First (1), the randomization of witness polynomials over the base field (while the protocol challenges are from an extension field), and second (2), the decomposition of the overall quotient into polynomials of smaller degree. The first issue is not too tricky; however, we did not find a formal treatment in literature. On the contrary, the quotient decomposition is a source of pitfalls, with an earlier version of Plonk <em>[x10]</em> as an prominent example. We pay particular attention to the FFT-type decomposition of the quotient,</p>
+
+    <p class="text-gray-300"><span class="math">q(x)=q_{0}(x^{d})+x^{2}\\cdot q_{1}(x^{d})+\\ldots+x^{d-1}\\cdot q_{d-1}(x^{d}),</span></p>
+
+    <p class="text-gray-300">which is prevalent in the context of STARK. Unlike the monomial decomposition, which splits the quotient into polynomials of consecutive powers of <span class="math">x</span>, or the more efficient decomposition by value (dubbed Lagrange decomposition in <em>[x12]</em>), the FFT-type decomposition is not amenable for randomization of its component polynomials, and its simulator analysis is particularly delicate: Our transcript simulator relies on the explicit construction of the splitting field for</p>
+
+    <p class="text-gray-300"><span class="math">v_{D}(x^{d})=x^{n\\cdot d}-a^{n},</span></p>
+
+    <p class="text-gray-300">where <span class="math">v_{D}(x)=x^{n}-a^{n}</span> is the vanishing polynomial of the evaluation domain of the Reed-Solomon code, and its runtime analysis is closely related to that of polynomial factorization over an cyclotomic extension. It is an open question whether one can avoid such an explicit construction, without imposing additional constraints on the field and the evaluation domain (which we find artificial for the mere purpose of the proof).</p>
+
+    <p class="text-gray-300">This revision includes the discussion of another issue, which came up during closing the gap in the plonky2 code base, namely (3) perfect zero-knowledge in permutation arguments. In the fully private case (Plonk’s wiring argument, or a permutation argument in a memory consistency proof) the incompleteness of the grand product argument leaks information about the witness, and obtaining perfect zero-knowledge is more subtle than proposed in the Halo2 book <em>[BLH^{+}, Section 4]</em>.</p>
+
+    <p class="text-gray-300">The document is arranged as follows. In Section 2 we review the <em>[BSCR^{+}19]</em> construction in the context of FRI as a “small field polynomial commitment scheme”, where the randomized witness polynomials are over a small prime field, but the queries are from an extension field. In Section 3, we describe how</p>
+
+    <p class="text-gray-300">to add zero-knowledge to a STARK of a simple algebraic intermediate representation (AIR) with transitional constraints, which uses the above mentioned FFT decomposition of the quotient. This restrictive example is for demonstration purposes; yet it is general enough to carve out the main difficulties. The remaining sections are of supplementary character: In Section 4 we quickly sketch the randomization of other types of quotient decomposition, and Section 5 concludes with few remarks on the computational overhead introduced by zero-knowledge. In particular, we argue that in many applications a greedy choice of randomization parameters causes negligible extra costs for the prover. Appendix A briefly covers perfect zero-knowledge in permutation arguments.</p>
+
+    <p class="text-gray-300">Disclaimer. We assume that the reader is familiar with the formal notions of zero-knowledge, hence we skip their explicit definitions. However, even without explicit definitions we do not lack rigor.</p>
+
+    <p class="text-gray-300">Acknowledgements. The first author likes to thank Ariel Gabizon for pointing out a misinterpretation of the role of the masking polynomial in <em>[x11]</em>. This motivated us to take a closer look into the technical subtleties of zero-knowledge.</p>
+
+    <h2 id="sec-4" class="text-2xl font-bold">2 BSCR randomization and extension fields</h2>
+
+    <p class="text-gray-300">Formally, the <em>[BSCR^{+}19]</em> construction turns any Reed-Solomon encoded interactive oracle proof, which makes use of the FRI low-degree test, into a (straight-line simulable and perfect) zero-knowledge proof (under the honest-verifier assumption, which is sufficient for final non-interactive proof). In simple words, it describes the randomization steps needed to turn FRI into a perfectly hiding polynomial commitment scheme. In the context of the composite protocol, the queried polynomials are randomized outside the trace domain, but one needs to carefully take into account the oracle queries beyond the main protocol, i.e. the queries within FRI. For simplicity we review the <em>[BSCR^{+}19]</em> construction in the context of the following toy protocol, Protocol 1, a minimal environment with all the constraint enforcement logic of a STARK removed. Yet, it reflects the situation of a small-field STARK, in which the verifier queries are sampled from an extension field.</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Here and in the sequel, <span class="math">\\mathbb{F}_{p}</span> is a prime field, and <span class="math">H\\subset\\mathbb{F}_{p}</span> denotes a multiplicative subgroup of smooth order $</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">=2^{n}<span class="math"> (the trace domain), </span>n\\geq 0<span class="math">. The set </span>D\\subset\\mathbb{F}_{p}<span class="math">, a disjoint union of cosets of </span>H$, is the evaluation domain for the committed words from the Reed-Solomon code words. We assume that</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300"><span class="math">D\\cap H=\\varnothing.</span></p>
+
+    <p class="text-gray-300">(This is default in many FRI implementations, even when zero-knowledge is not targeted.)</p>
+
+    <h6 id="sec-5" class="text-base font-medium mt-4">Protocol 1 (Toy IOP using FRI).</h6>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Let <span class="math">F</span> be an extension field of <span class="math">\\mathbb{F}_{p}</span>, of degree <span class="math">e=[F:\\mathbb{F}_{p}]</span>, and take $h\\leq</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">$ satisfying</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300"><span class="math">e\\cdot n_{F}+n_{D}\\leq h,</span> (1)</p>
+
+    <p class="text-gray-300">where <span class="math">n_{F},n_{D}\\geq 1</span> are the number of DEEP queries and FRI queries, respectively, as used below. The oracles are the values of the respective polynomials over <span class="math">D</span>.</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">1. Given polynomials $w_{1}(X),\\ldots,w_{M}(X)\\in\\mathbb{F}_{p}[X]^{<</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">}<span class="math">, the prover samples </span>r_{i}(X)\\leftarrow\\<span class="math"> </span>\\mathbb{F}_{p}[X]^{<h}<span class="math">, </span>i=1,\\ldots,M$, and sends the oracles for</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300"><span class="math">\\hat{w}_{i}(X)=w_{i}(X)+v_{H}(X)\\cdot r_{i}(X),</span></p>
+
+    <p class="text-gray-300"><span class="math">i=1,\\ldots,M</span>, to the verifier.</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>The verifier samples <span class="math">n_{F}\\geq 1</span> queries <span class="math">z_{1},\\ldots z_{n_{F}}\\leftarrow\\</span> <span class="math">F\\setminus(D\\cup H)</span> and sends them to prover, which responds with the values</li>
+
+    </ol>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">$\\vec{v}_{i,F}=\\hat{w}_{i}(z)</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">_{z\\in Q_{F}}\\in F^{Q_{F}}$</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">for every <span class="math">i=1,\\ldots,M</span>, where <span class="math">Q_{F}=\\{z_{1},\\ldots,z_{n_{F}}\\}</span>.</p>
+
+    <p class="text-gray-300">Then, both prover run Protocol 2 with <span class="math">n_{D}</span> query rounds on the DEEP quotients of <span class="math">\\hat{w}_{1}(X),\\ldots,\\hat{w}_{M}(X)</span> with respect to the claims <span class="math">\\vec{v}_{i,F}</span>.</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">We adapt FRI to handle polynomials of non-twoadic degree $</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">+h$ as efficient as possible, assuming that</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">$h\\ll</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">,$</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">which is the case in most applications. That is, we do not choose a different evaluation domain as in the non-zk setting, and prove the non-twoadic degree bound by a simple decomposition into polynomials of twoadic degree. Without going into details, we note that this utilization of FRI does not have any negative impact to soundness.</p>
+
+    <h6 id="sec-6" class="text-base font-medium mt-4">Protocol 2 (FRI batch evaluation proof with zk <em>[BSCR^{+}19]</em>).</h6>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Given oracles $\\hat{w}_{1}(X),\\ldots,\\hat{w}_{M}(X)\\in\\mathbb{F}_{p}[X]^{<</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">+h}<span class="math"> and evaluation claims </span>\\vec{v}_{i,F}=\\hat{w}_{i}(z)</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">_{z\\in Q_{F}}<span class="math"> over a set </span>Q_{F}=\\{z_{1},\\ldots,z_{</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Q_{F}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">}\\}\\subset F\\setminus(D\\cup H)<span class="math"> of size </span></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Q_{F}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\leq n_{F}$.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">1. The prover samples a mask polynomial <span class="math">R(X)\\leftarrow\\</span> $F[X]^{<</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">+h-1}<span class="math"> and sends its oracle to the verifier, which responds with a batching randomness </span>\\lambda\\leftarrow\\<span class="math"> </span>F$.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">##</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">2. The prover provides $h_0(X), h_1(X) \\in F[X]^{&lt;</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">}$ subject to</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">$$ \\begin{aligned} h(X) &amp;= h_0(X) + X^{h-1} \\cdot h_1(X) \\\\</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">&amp;= R(X) + \\sum_{i=1}^{M} \\lambda^{</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Q_F</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\cdot (i-1)} \\cdot \\sum_{j=1}^{</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Q_F</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">} \\lambda^j \\cdot \\frac{\\hat{w}_i(X) - v_i(z_j)}{X - z_j},</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">\\end{aligned} \\tag{2} $$</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">and both prover and verifier run FRI on <span class="math">h_0(X), h_1(X)</span> for $\\mathsf{RS}[F, D,</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">]<span class="math"> with </span>n_D$ query rounds.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"><strong>Remark 1.</strong> The decomposition into <span class="math">h_0(X)</span> and <span class="math">h_1(X)</span> is not unique, due to the overlap of monomial powers in $F[X]^{&lt;</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">}<span class="math"> and </span>X^{h-1} \\cdot F[X]^{&lt;</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">}<span class="math">. In practice, the prover chooses </span>h_0(X)<span class="math"> corresponding to </span>1, X, \\ldots, X^{</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">-1}<span class="math"> in </span>h(X)<span class="math">, and </span>h_1(X)<span class="math"> corresponding to the remaining powers </span>X^{</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">}, \\ldots, X^{</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">+h-1}$, but any other way is admissible.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Let us discuss why the mask polynomial <span class="math">R(X)</span> is crucial for zero-knowledge. Each round of FRI not only folds the witness polynomials <span class="math">w_i(X)</span>, but also their randomizer polynomials <span class="math">r_i(X) \\cdot v_H(X)</span>, halving security against evaluations with each step. To see this, let us assume for simplicity that $h =</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"><span class="math">, and we therefore run FRI on the twoadic degree bound </span>2 \\cdot</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"><span class="math">. (This is a common choice in many implementations. The argument however generalizes to arbitrary choices of </span>h<span class="math">, and the decomposition as in Protocol 2.) Since </span>v_H(X)$ is an even function,</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="my-4 text-center"><span class="math-block">\\begin{aligned} v_H(X) \\cdot r_i(X) &amp;amp;= v_{H^2}(X^2) \\cdot \\left(r_{i,0}(X^2) + X \\cdot r_{i,1}(X^2)\\right) \\\\ &amp;amp;= v_{H^2}(X^2) \\cdot r_{i,0}(X^2) + X \\cdot v_{H^2}(X^2) \\cdot r_{i,1}(X^2), \\end{aligned}</span></div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">with <span class="math">r_i(X) = r_{i,0}(X^2) + X \\cdot r_{i,1}(X^2)</span> being the decomposition of <span class="math">r_i(X)</span>. Thus during a FRI folding step, the space $v_H(X) \\cdot F[X]^{&lt;</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">}<span class="math"> is folded into </span>v_{H^2}(X) \\cdot F[X]^{&lt;</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">/2}$ of the half dimension. Applying the same argument to the other folding steps, we see that the foldings of the randomizer polynomials are within the chain of subspaces</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">v_H(X) \\cdot F[X]^{&lt;</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">} \\longrightarrow v_{H^2}(X) \\cdot F[X]^{&lt;</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">/2} \\longrightarrow \\ldots \\longrightarrow v_{H^{2^r}}(X) \\cdot F[X]^{&lt;</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">/2^r},</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <p class="text-gray-300">whereas the foldings of the witness polynomials <span class="math">w_i(X)</span> are within</p>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">F[X]^{&lt;</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">} \\longrightarrow F[X]^{&lt;</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">/2} \\longrightarrow \\ldots \\longrightarrow F[X]^{&lt;</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">/2^r}.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">By the size of the folded domain, $</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">D^{2^r}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">=</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">D</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">/2^r &gt; 2 \\cdot</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">/2^r$, we are not able to reveal the folded oracle in the last step, without telling the folding of the witness polynomials itself.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">3For this argument, the group structure of the randomization domain is essential. The same entropy-loss does not occur with on-domain randomization, which uses intervals of consecutive points for the randomness. This suggests that in this case, the openings of the FRI foldings could be secured even without mask polynomial <span class="math">R(X)</span>. However, we did not succeed in proving this approach zero-knowledge.</p>
+
+    <p class="text-gray-300">We split the proof of zero-knowledge for Protocol 1 into two lemmas, Lemma 1 and Lemma 2 below. The first lemma one confirms the intuition behind the bound in Equality (1), namely that each extension field query amounts to <span class="math">e</span> base field queries, where <span class="math">e</span> is the degree of the extension.</p>
+
+    <h6 id="sec-7" class="text-base font-medium mt-4">Lemma 1 (Extension field evaluation).</h6>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Fix the query sets <span class="math">Q_{F}\\subset F\\setminus H</span> and <span class="math">Q_{D}\\subseteq D</span> of size $</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Q_{F}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\leq n_{F}<span class="math"> and </span></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Q_{D}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\leq n_{D}<span class="math">. Then the joint distribution of </span>\\vec{v}_{i}=\\hat{w_{i}}(z)</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">_{z\\in Q_{F}\\cup Q_{D}}<span class="math">, where </span>i=1,\\ldots,M<span class="math">, is independent from the (non-randomized) witness polynomials </span>w_{1}(X),\\ldots,w_{M}(X)$.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <h6 id="sec-8" class="text-base font-medium mt-4">Proof.</h6>
+
+    <p class="text-gray-300">We assume that the reader is familiar with basic Galois theory of finite fields. To study the distribution of the evaluations over the query set <span class="math">Q=Q_{F}\\cup Q_{D}</span>, we consider its closure under the action of the Galois group <span class="math">\\mathsf{Gal}(F/\\mathbb{F}_{p})</span> of the extension <span class="math">F</span>, that is the set</p>
+
+    <p class="text-gray-300"><span class="math">\\bar{Q}=\\bigcup_{\\phi\\in\\mathsf{Gal}(F/\\mathbb{F}_{p})}\\phi^{k}(Q_{F})\\cup Q_{D}.</span></p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">The set <span class="math">\\bar{Q}</span> is invariant under <span class="math">\\mathsf{Gal}(F/\\mathbb{F}_{p})</span>, and so is its vanishing polynomial <span class="math">v(X)=\\prod_{z\\in\\bar{Q}}(X-z)</span>, showing that <span class="math">v(X)</span> is actually from <span class="math">\\mathbb{F}_{p}[X]</span>. Since $</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mathsf{Gal}(F/\\mathbb{F}_{p})</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">=e$, we have</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">$\\deg v(X)=</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\bar{Q}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\leq e\\cdot n_{F}+n_{D}.$</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">The evaluation mapping <span class="math">E:\\mathbb{F}_{p}[X]\\longrightarrow F^{\\bar{Q}}</span>, which sends a polynomial <span class="math">p(X)</span> over <span class="math">\\mathbb{F}_{p}</span> to $p(\\gamma)</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">_{\\gamma\\in\\bar{Q}}$, is linear and has the kernel</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300"><span class="math">\\ker(E)=(v(X))=v(X)\\cdot\\mathbb{F}_{p}[X].</span></p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">The range of <span class="math">E</span> is isomorphic to <span class="math">\\mathbb{F}_{p}[X]/(v(X))</span>, which is a $</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\bar{Q}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"><span class="math">-dimensional </span>\\mathbb{F}_{p}<span class="math">-linear subspace of </span>F^{\\bar{Q}}$.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">Let us now investigate the image of the randomizer space <span class="math">v_{H}(X)\\cdot\\mathbb{F}_{p}[X]^{&lt;h}</span> under <span class="math">E</span>. Since <span class="math">\\bar{Q}</span> is disjoint to <span class="math">H</span>, the vanishing polynomials <span class="math">v_{H}(X)</span> and <span class="math">v(X)</span> are coprime, and</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">$\\ker(E)\\cap v_{H}(X)\\cdot\\mathbb{F}_{p}[X]^{<h}=v_{H}(X)\\cdot v(X)\\cdot\\mathbb{F}_{p}[X]^{<h-</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\bar{Q}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">}.$</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">(In the edge case $h=</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\bar{Q}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"><span class="math">, the set </span>\\mathbb{F}_{p}[X]^{<h-</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\bar{Q}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">}<span class="math"> is the empty set.) Again, the dimension of </span>E\\left(v_{H}(X)\\cdot\\mathbb{F}_{p}[X]^{<h}\\right)<span class="math"> is equal to </span></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\bar{Q}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">$, and we conclude the equality of the spaces</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">$E(v_{H}(X)\\cdot\\mathbb{F}_{p}[X]^{<h})=E(\\mathbb{F}_{p}[X]^{<</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">+h})=E(\\mathbb{F}_{p}[X]).$</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">From this and the linearity of <span class="math">E</span>, it follows that by drawing <span class="math">r_{i}(X)</span> independently and uniformly from <span class="math">\\mathbb{F}_{p}[X]^{&lt;h}</span> the values of <span class="math">\\hat{w}_{i}(X)=w_{i}(X)+v_{H}(X)\\cdot r_{i}(X)</span> over <span class="math">\\bar{Q}</span>, <span class="math">i=1,\\ldots,M</span>, are uniformly distributed over <span class="math">E(\\mathbb{F}_{p}[X])^{M}</span>, regardless of the concrete choice of witness polynomials <span class="math">w_{i}(X)</span>. Restricting <span class="math">F^{\\bar{Q}}</span> to <span class="math">F^{Q}</span> yields the claim of the lemma. ∎</p>
+
+    <p class="text-gray-300">##</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Remark 2. The proof of the lemma shows that the distribution of the queried values is uniform over the range of the evaluation map <span class="math">E: \\mathbb{F}_p[X] \\longrightarrow F^Q</span> over the set <span class="math">Q = Q_F \\cup Q_D</span>, and it can be efficiently simulated for example by sampling uniformly from $\\mathbb{F}_p[X]^{&lt;</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">+ h}<span class="math"> and applying </span>E<span class="math">. In the terminology of [BSCR+19] the lemma states that Protocol 1 is perfect honest-verifier zero-knowledge against query bound </span>n_D<span class="math">, meaning that it is zero-knowledge even under further (at most) </span>n_D$ queries beyond the protocol execution.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">The second lemma demonstrates that the mask polynomial <span class="math">R(X)</span> in Protocol 2 acts as a perfect isolator in the information theoretic sense. It statistically separates the transcript following the commitment of <span class="math">R(X)</span> from everything that has happened before.</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Lemma 2 (Decoupling Lemma). Fix <span class="math">Q_F</span> and <span class="math">Q_D</span> as in Lemma 1, and fix <span class="math">\\lambda \\in F</span> in Protocol 2. Given the values $\\hat{w}_i(z)</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">_{z \\in Q_F \\cup Q_D}<span class="math">, </span>i = 1, \\ldots, M<span class="math">, the joint distribution of </span>R(z)</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">_{z \\in Q_D}<span class="math"> and the batch polynomial </span>h(X)<span class="math"> is independent of </span>\\hat{w}_1(X), \\ldots, \\hat{w}_M(X)$.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">Remark 3. With <span class="math">h(X)</span> being independent of <span class="math">\\hat{w}_1(X), \\ldots, \\hat{w}_M(X)</span>, so is the distribution of the component polynomials <span class="math">h_0(X)</span> and <span class="math">h_1(X)</span>, as well as the entire further transcript of FRI is also independent.</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Proof. Given the values $\\vec{v}_i = \\hat{w}_i(z)</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">_{z\\in Q_F\\cup Q_D}<span class="math">, </span>i = 1,\\dots ,M<span class="math">, and </span>\\vec{r} = R(z)</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">_{z\\in Q_D}<span class="math">, we claim that the batch polynomial </span>h(X)$ is uniformly distributed over the affine subspace</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">L _ {\\vec {v} _ {1}, \\dots , \\vec {v} _ {M}, \\vec {r}} = \\left\\{h (X) \\in F [ X ] ^ {&lt;</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">+ h - 1}: h (X) \\text {satisfies (2) at all} z \\in Q _ {D} \\right\\}.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Take any subset <span class="math">Q&#x27; \\subset D</span> disjoint to <span class="math">Q = Q_D</span> and so that $</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Q \\cup Q'</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">=</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">+ h - 1<span class="math">. Since we draw </span>R(X)<span class="math"> uniformly from </span>F[X]^{&lt;</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">+ h - 1}<span class="math">, the distribution of </span>\\vec{r}' = R(z)</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">_{z \\in Q'}<span class="math"> conditional to </span>\\vec{r} = R(z)</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">_{z \\in Q}<span class="math"> is uniform over </span>F^{Q'}<span class="math">, and so are the values of </span>h(X)<span class="math"> over </span>Q'<span class="math">, independent of the polynomials </span>\\hat{w}_1(X), \\ldots, \\hat{w}_M(X)<span class="math">. Since the evaluation map </span>E: L_{\\vec{v}_1, \\ldots, \\vec{v}_M, \\vec{r}} \\longrightarrow F^{Q'}<span class="math">, </span>h(X) \\mapsto h(z)</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">_{z \\in Q'}<span class="math"> is bijective, we obtain uniform distribution of </span>h(X)<span class="math"> over </span>L_{\\vec{v}_1, \\ldots, \\vec{v}_M, \\vec{r}}$.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">The claim of the lemma now follows from that the distribution of $\\vec{r} = R(z)</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">_{z\\in Q_D}<span class="math"> is independent of the concrete choice of </span>\\hat{w}_1(X),\\ldots ,\\hat{w}_M(X)$.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">With the two lemmas in place, zero-knowledge of the toy protocol is an immediate consequence.</p>
+
+    <p class="text-gray-300">Theorem 4. The IOP from Protocol 1 is perfect honest-verifier zero-knowledge.</p>
+
+    <p class="text-gray-300">Proof. Although the statement of the theorem is essentially covered by the preceding discussion, let us explicitly describe the simulator. It first samples the</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">query points <span class="math">z_{1},\\ldots,z_{n_{F}}\\leftrightarrows F\\setminus(D\\cup H)</span>, <span class="math">x_{1},\\ldots,x_{n_{D}}\\leftrightarrows D</span> uniformly from the respective sets, and draws $\\hat{w}_{i}(X)\\leftrightarrows\\mathbb{F}_{p}[X]^{<</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">+h}<span class="math"> uniformly at random, so that their values over </span>Q=Q_{F}\\cup Q_{D}<span class="math"> (comprised of the previously sampled points) are distributed as in an honest prover-verifier interaction (cf. Lemma 1 and Remark 2). With their oracles in place, the simulator runs Protocol 2, except that it uses the pre-sampled </span>x_{1},\\ldots,x_{n_{D}}<span class="math"> from above for the query phase. By Lemma 2 together with Remark 3, the distribution of the transcript is identical to that of an honest prover-verifier interaction. </span>\\square$</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <h2 id="sec-9" class="text-2xl font-bold">3 Zero-knowledge for a simple AIR</h2>
+
+    <p class="text-gray-300">Let us extend our discussion to a more meaningful example, a STARK for a simple, yet representative algebraic intermediate representation.</p>
+
+    <p class="text-gray-300">Consider a trace composed of <span class="math">M&gt;0</span> witness columns <span class="math">w_{i}</span>, <span class="math">i=1,\\ldots,M</span>, where <span class="math">w_{i}:H\\longrightarrow\\mathbb{F}_{p}</span> and <span class="math">H</span> is, again, the trace domain i.e., a smooth multiplicative subgroup with generator <span class="math">g</span>. We can view this trace as sequence of rows <span class="math">(w_{1}(x),\\cdots,w_{M}(x))</span> for <span class="math">x\\in H</span>. An algebraic intermediate representation (AIR) <em>[x1, x2]</em> is a collection of algebraic constraints of the form</p>
+
+    <p class="text-gray-300"><span class="math">P_{i}\\left(s_{i}(x),w_{1}(x),\\cdots,w_{M}(x),w_{1}(g\\cdot x),\\cdots,w_{M}(g\\cdot x)\\right)=0,</span></p>
+
+    <p class="text-gray-300">for all <span class="math">x\\in H</span>. Here, <span class="math">s_{i}(x)</span> is the selector polynomial of the enforcement domain <span class="math">H_{i}</span> of <span class="math">P_{i}</span>, i.e. a coset of a subgroup of <span class="math">H</span>, and</p>
+
+    <p class="text-gray-300"><span class="math">P_{1},\\cdots,P_{C}\\in\\mathbb{F}_{p}[X,X_{1},\\cdots X_{M},Y_{1},\\cdots Y_{M}],</span></p>
+
+    <p class="text-gray-300">where the degree in the selector variable is <span class="math">\\deg_{X}P_{i}\\leq 1</span>. The degree of the AIR is the maximum total degree of its constraints,</p>
+
+    <p class="text-gray-300"><span class="math">d_{\\text{AIR}}=\\max_{i}\\deg P_{i}.</span></p>
+
+    <p class="text-gray-300">Note that we use a simplified notation of an AIR, working with constraints between neighbouring rows only. For notational convenience we will rather work with the reduced degree <span class="math">d:=d_{\\text{AIR}}-1</span> (which in many cases matches the “actual” degree of the constraint system, with selectors not taken into account).</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">In terms of the low-degree extensions $w_{1}(X),\\ldots,w_{M}(X)\\in\\mathbb{F}_{p}[X]^{<</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">}<span class="math"> of the trace columns, satisfiability of the AIR constraints over </span>H<span class="math"> is then equivalent to that, with noticable probability, any random linear combination of the constraints is divisible by the vanishing polynomial </span>Z_{H}(X)=X^{</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">}-1<span class="math"> of </span>H$. This yields the overall identity</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">\\[ \\sum_{i=1}^{C}\\lambda^{i}\\cdot P_{i}\\left(s_{i}(X),w_{1}(X),\\cdots,w_{M}(X),w_{1}(g\\cdot X),\\cdots,w_{M}(g\\cdot X)\\right)\\\\ =q(X)\\cdot Z_{H}(X), \\]</p>
+
+    <p class="text-gray-300">where <span class="math">\\lambda</span> is drawn from the extension field <span class="math">F</span>, and <span class="math">q(X) \\in F[X]</span> is a low-degree polynomial of degree</p>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\deg q(X) = d_{\\mathrm{AIR}} \\cdot (</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">- 1) -</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">&lt; d \\cdot</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">,</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <p class="text-gray-300">except the pointless use case <span class="math">d_{\\mathrm{AIR}} = 0</span>.</p>
+
+    <p class="text-gray-300">In our interactive oracle proof, Protocol 3, the prover decomposes the overall quotient into polynomials <span class="math">q_{1}(X), \\ldots, q_{d}(X)</span> of smaller degree, using the FFT-type decomposition</p>
+
+    <div class="my-4 text-center"><span class="math-block">q(X) = q_{1}(X^{d}) + X \\cdot q_{2}(X^{d}) + \\ldots + X^{d-1} \\cdot q_{d}(X^{d}),</span></div>
+
+    <p class="text-gray-300">where <span class="math">d</span> is the reduced degree of the AIR, as above. The verifier gets oracle access to <span class="math">q_{1}(X), \\ldots, q_{d}(X)</span>, and the overall identity is then tested at one (or more) random points <span class="math">z_{i}</span>, <span class="math">i = 1, \\ldots, n_{F}</span>, from the extension field <span class="math">F</span>. The evaluation claims for the polynomials are then proven as in our toy protocol from Section 2, by showing the single-point quotients at <span class="math">z_{i}</span> and <span class="math">g \\cdot z_{i}</span> are low-degree, using FRI over a sufficiently large evaluation domain <span class="math">D</span>.</p>
+
+    <p class="text-gray-300">For zero-knowledge, the prover randomizes the witness polynomials outside the trace domain <span class="math">H</span>,</p>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\tilde{w}_{i}(X) := w_{i}(X) + v_{H}(X) \\cdot r_{i}(X) \\in \\mathbb{F}_{p}[X]^{&lt;</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">+ h},</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <p class="text-gray-300">with <span class="math">r_i(X) \\gets \\mathbb{F}_p[X]^{&amp;lt;h}</span>, <span class="math">i = 1, \\ldots, M</span>, where the degree of freedom <span class="math">h</span> is chosen so that</p>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">2 \\cdot d \\cdot (e \\cdot n_{F} + n_{D}) + n_{D} \\leq h \\leq</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">, \\tag{3}</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <p class="text-gray-300">where <span class="math">e = [F : \\mathbb{F}_p]</span> is the degree of the extension <span class="math">F</span>, <span class="math">n_F \\geq 1</span> is the number of out-of-domain queries (without counting their translates by <span class="math">g</span>), and <span class="math">n_D \\geq 1</span> is the number of FRI query rounds. We discuss the rationale behind that bound below. As before, the evaluation domain <span class="math">D \\subset \\mathbb{F}_p</span> for the Reed-Solomon code words is a disjoint union of cosets of <span class="math">H</span>, and <span class="math">D \\cap H = \\varnothing</span>.</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"><strong>Protocol 3 (IOP for AIR using DEEP-ALI).</strong> Let <span class="math">\\mathbb{F}_p</span>, <span class="math">H</span>, <span class="math">D</span>, and <span class="math">F</span> as above and let $\\hat{w}_1(X), \\dots, \\hat{w}_M(X) \\in \\mathbb{F}_p[X]^{&lt;</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">+ h}<span class="math"> be the randomized witness polynomials, satisfying the AIR constraints specified by </span>s_i<span class="math"> and </span>P_i<span class="math">, </span>i = 1, \\ldots, C<span class="math"> over </span>H<span class="math">. The verifier is given oracle access to </span>[\\hat{w}_i]<span class="math">, i.e. the values </span>\\hat{w}_i(X)<span class="math"> over </span>D<span class="math">, for each </span>i = 1, \\ldots, M$.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>The verifier challenges the prover with a random value <span class="math">\\lambda \\gets \\# F</span>, for which</li>
+
+    </ol>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">the prover computes $q(X)\\in F[X]^{<d\\cdot</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">+(d+1)\\cdot h}$ such that</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300"><span class="math">\\sum_{i=1}^{C}\\lambda^{i-1}\\cdot P_{i}\\left(s_{i}(X),\\hat{w}_{1}(X),\\cdots,\\hat{w}_{M}(X),\\hat{w}_{1}(g\\cdot X),\\cdots,\\hat{w}_{M}(g\\cdot X)\\right)</span> <span class="math">\\qquad\\qquad\\qquad\\qquad\\qquad\\qquad\\qquad\\qquad\\qquad\\qquad\\qquad\\qquad\\qquad\\qquad=Z_{H}(X)\\cdot q(X).</span> (4)</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">It splits it into the unique polynomials <span class="math">q_{j}(X)\\in F[X]^{&lt;\\hat{k}}</span>, <span class="math">j=1,\\ldots,d</span>, with $\\hat{k}=</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">+\\left\\lceil\\frac{d+1}{d}\\cdot h\\right\\rceil$, subject to</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300"><span class="math">q(X)=\\sum_{j=1}^{d}X^{(j-1)}\\cdot q_{j}(X^{d}),</span> (5)</p>
+
+    <p class="text-gray-300">and provides the verifier oracle access to their values over <span class="math">D</span>.</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>The verifier sends the prover random DEEP queries <span class="math">z_{j}\\leftarrow\\sharp F\\setminus\\left(\\bar{D}\\cup H\\right)</span>, <span class="math">j=1,\\ldots,n_{F}</span>, where <span class="math">\\bar{D}:=\\{y\\in F:y^{d}\\in D\\}</span>, on which the prover responds with evaluation claims</li>
+
+    </ol>
+
+    <p class="text-gray-300"><span class="math">\\left(v_{i,j,1},v_{i,j,2}\\right)=\\left(\\hat{w}_{i}(z_{j}),\\hat{w}_{i}(g\\cdot z_{j})\\right),</span></p>
+
+    <p class="text-gray-300"><span class="math">i=1,\\ldots,M</span> and <span class="math">v_{i}=q_{i}(z_{j}^{d})</span>, <span class="math">i=1,\\ldots,d</span>, for each <span class="math">j</span>.</p>
+
+    <p class="text-gray-300">Both prover and verifier then run batch FRI on the DEEP quotients corresponding to the evaluation claims, i.e. Protocol 2, with <span class="math">h</span> replaced by <span class="math">\\lceil(d+1)/d\\cdot h\\rceil</span>, and using <span class="math">n_{D}</span> query rounds. The verifier accepts if Protocol 2 passes and if the evaluation claims satisfy the overall identity (4) at each <span class="math">X=z_{j}</span>, <span class="math">j=1,\\ldots,n_{F}</span>.</p>
+
+    <p class="text-gray-300">Let us explain the intuition behind the degree bound in</p>
+
+    <p class="text-gray-300"><span class="math">2\\cdot d\\cdot\\left(e\\cdot n_{F}+n_{D}\\right)+n_{D}\\leq h.</span></p>
+
+    <p class="text-gray-300">First, each query on a polynomial <span class="math">\\hat{w}_{i}(z)</span> reveals either <span class="math">e</span>, or a single field element, depending on whether it is from <span class="math">F</span>, or from <span class="math">D</span> (cf. Lemma 1). Since the value of the quotient <span class="math">q(X)</span> at a point <span class="math">z</span> is uniquely determined from the values <span class="math">\\hat{w}_{i}(z)</span> and <span class="math">\\hat{w}_{i}(g\\cdot z)</span> via the overall constraint (4), it would be sufficient to randomize the witness polynomials against</p>
+
+    <p class="text-gray-300"><span class="math">2\\cdot\\left(e\\cdot n_{F}+n_{D}\\right)</span></p>
+
+    <p class="text-gray-300">queries, assuming that the prover would work with the non-split <span class="math">q(X)</span>. (The factor <span class="math">2</span> is due to tranlates by <span class="math">g</span>.) To take into account the additional information revealed by the component polynomials <span class="math">q_{1}(X),\\ldots,q_{d}(X)</span>, recall that</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">$(q_{1}(z^{d}),\\ldots,q_{d}(z^{d}))=\\mathsf{FFT}(q(X)</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">_{z\\cdot U}),$ (6)</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">where <span class="math">U</span> is the subgroup of the <span class="math">d</span>-th roots of unity. Hence each query of the component polynomials is covered by the values of <span class="math">q(X)</span> over $</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">U</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">=d$ times</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">as many points, which explains the factor <span class="math">d</span> in our bound. (We refer to these points as the implicit queries.) The additional <span class="math">n_{D}</span> is due to fact, that in general the FRI queries on <span class="math">\\hat{w}_{i}(X)</span> do not overlap with the implicit queries.</p>
+
+    <p class="text-gray-300">Our proof of zero-knowledge is based on the following adaption of Lemma 1 to the current, more complex environment. Again, since the out-of-domain samples are from the extension field <span class="math">F</span>, its proof uses basic Galois theory. However, to make use of Formula (6), the setup of a suitable environment for studying the distribution of the queried values is significantly more complicated. It relies on the splitting field of <span class="math">v_{D}(X^{d})</span>, a polynomial which is not guaranteed to fully factorize over <span class="math">\\mathbb{F}_{p}</span> or <span class="math">F</span>. (Here, and in the sequel, <span class="math">v_{D}(X)</span> is the vanishing polynomial of <span class="math">D</span>.)</p>
+
+    <h6 id="sec-10" class="text-base font-medium mt-4">Lemma 3 (Quotient components).</h6>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Fix <span class="math">\\lambda\\in F</span> and query sets <span class="math">Q_{F}</span> and <span class="math">Q_{D}</span> of size $</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Q_{F}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\leq n_{F}<span class="math"> and </span></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Q_{D}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\leq n_{D}$ such that inequality (3) holds. Then the joint distribution of</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">$(\\hat{w}_{1}(z),\\hat{w}_{1}(g\\cdot z),\\ldots,\\hat{w}_{M}(z),\\hat{w}_{M}(g\\cdot z),q_{1}(z^{d}),\\ldots,q_{d}(z^{d}))</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">_{z\\in Q_{F}},$</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">is independent of the (non-randomized) witness polynomials <span class="math">(w_{1}(X),\\ldots,w_{M}(X))</span>.</p>
+
+    <h6 id="sec-11" class="text-base font-medium mt-4">Proof.</h6>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">The proof is similar to that of Lemma 1, yet with a more careful choice of the evaluation environment, as <span class="math">F</span> might not support all the roots we need for the distribution analysis of the quotient component values. (Note that the domain <span class="math">D</span> might contain elements which do not have <span class="math">d</span>-th roots in <span class="math">F</span>. This may happen even when <span class="math">\\mathbb{F}_{q}</span> contains all $(d\\cdot</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">)<span class="math">-th roots of unity.) For this reason, we take </span>K<span class="math"> an extension of </span>F<span class="math"> over which </span>v_{D}(X^{d})<span class="math"> entirely splits into linear factors (higher multiplicities are possible). Such an extension comes with all the roots necessary for our analysis: It contains (1) the subgroup </span>U<span class="math"> of all </span>d<span class="math">-th roots of unity, and moreover (2) all </span>d<span class="math">-th roots of elements in </span>D$.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">Consider the polynomial</p>
+
+    <p class="text-gray-300"><span class="math">p(X)=\\prod_{w\\in Q_{1}}(X^{d}-w^{d})\\cdot\\prod_{x\\in Q_{2}}(X^{d}-x)\\cdot\\prod_{x\\in Q_{3}}(X-x),</span></p>
+
+    <p class="text-gray-300">where <span class="math">Q_{1}=\\bigcup_{\\phi\\in\\mathsf{Gal}(F/\\mathbb{F}_{p})}\\phi\\left(Q_{F}\\cup g\\cdot Q_{F}\\right)</span>, <span class="math">Q_{2}=Q_{D}\\cup g^{d}\\cdot Q_{D}</span>, and <span class="math">Q_{3}=Q_{D}</span>. The polynomial belongs to <span class="math">\\mathbb{F}_{p}[X]</span>, since it is a polynomial from <span class="math">F[X]</span> which is invariant under <span class="math">\\mathsf{Gal}(F/\\mathbb{F}_{p})</span>, and it splits over <span class="math">K</span>. We denote by <span class="math">\\bar{Q}</span> its set of roots in <span class="math">K</span>. Let us explain its components:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>The roots of the first product cover the cosets <span class="math">z\\cdot U</span> for the Galois conjugates of every out-of-domain query, and their translates by <span class="math">g</span>. This is the set of points over which the values of <span class="math">\\hat{w}_{1},\\ldots,\\hat{w}_{M}</span> determine the values of the <span class="math">q_{j}</span> over the Galois closure of each DEEP query.</li>
+
+    </ul>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>the second product is for all <span class="math">d</span>-th roots of a FRI query, and their <span class="math">g</span>-translates. This is the set of points over which the values of <span class="math">\\hat{w}_{1},\\ldots,\\hat{w}_{M}</span> determine the values of the <span class="math">q_{j}</span> at each FRI query.</li>
+
+      <li>The third product is simply for the FRI queries themselves.</li>
+
+    </ul>
+
+    <p class="text-gray-300">We note that there might be overlaps between the roots of these products, and for this reason we consider <span class="math">v(X)</span> the vanishing polynomial of <span class="math">\\bar{Q}</span>. By the invariance of <span class="math">\\bar{Q}</span> under <span class="math">\\mathsf{Gal}(F/\\mathbb{F}_{p})</span>, the vanishing polynomial is again from <span class="math">\\mathbb{F}_{p}[X]</span>, and its degree is</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">$\\deg v(X)=</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\bar{Q}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\leq 2\\cdot d\\cdot(e\\cdot n_{F}+n_{D})+n_{D}\\leq h.$</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">By the assumption on the out-of-domain queries and <span class="math">D</span>, none of the roots from <span class="math">\\bar{Q}</span> are contained in <span class="math">H</span>.</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">The rest of the proof is as in Lemma 1. The kernel of the evaluation map <span class="math">E:\\mathbb{F}_{p}[X]\\longrightarrow K^{\\bar{Q}}</span> is the ideal generated by <span class="math">v(X)</span> of degree $</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\bar{Q}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"><span class="math">, and hence its image is a </span>\\mathbb{F}_{p}<span class="math">-linear subspace of </span>K^{\\bar{Q}}<span class="math"> with </span>\\dim E(\\mathbb{F}_{p}[X])=</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\bar{Q}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"><span class="math">. Likewise, since </span>v_{H}(X)<span class="math"> and </span>v(X)<span class="math"> are coprime, the kernel within the randomizer space </span>v_{H}(X)\\cdot\\mathbb{F}_{p}[X]^{<h}$ is</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">$v_{H}(X)\\cdot\\mathbb{F}_{p}[X]^{<h}\\,\\cap\\,\\ker E=v_{H}(X)\\cdot v(X)\\cdot\\mathbb{F}_{p}[X]^{<h-</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\bar{Q}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">},$</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">including the edge case $h-</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\bar{Q}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">=0<span class="math">, in which the intersection is empty. This shows that the image of </span>v_{H}(X)\\cdot\\mathbb{F}_{p}[X]^{<h}<span class="math"> under </span>E<span class="math"> is of dimension </span></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\bar{Q}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">$, yielding the equality of the spaces</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">$E\\left(v_{H}(X)\\cdot\\mathbb{F}_{p}[X]^{<h}\\right)=E\\left(\\mathbb{F}_{p}[X]^{<</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">+h}\\right)=E\\left(\\mathbb{F}_{p}[X]\\right).$</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">From the latter equality, and the linearity of <span class="math">E</span>, we conclude that the distribution of <span class="math">M</span>-fold evaluation map <span class="math">E^{M}</span>, which evaluates each <span class="math">\\hat{w}_{1}(X),\\ldots,\\hat{w}_{M}(X)</span> over <span class="math">\\bar{Q}</span>, is uniform over <span class="math">E(\\mathbb{F}_{p}[X])^{M}</span> and independent of the non-randomized witness polynomials <span class="math">w_{1}(X),\\ldots,w_{M}(X)</span>.</p>
+
+    <p class="text-gray-300">Since the values of <span class="math">q_{1}(X),\\ldots,q_{d}(X)</span> at the requested queries are uniquely determined from those of <span class="math">\\hat{w}_{1}(X),\\ldots,\\hat{w}_{M}(X)</span> over <span class="math">\\bar{Q}</span> via the overall constraint of the AIR, together with Formula (6), their distribution is also independent from the witness polynomials. Finally, restricting our view to the query points of the protocol yields the claim of the lemma. ∎</p>
+
+    <h6 id="sec-12" class="text-base font-medium mt-4">Remark 5.</h6>
+
+    <p class="text-gray-300">The usage of splitting fields in the proof of Lemma 3 raises another interesting aspect, namely the running time for simulating the distribution of the queried values. This can be efficiently done by means of the evaluation map <span class="math">E</span> over <span class="math">\\bar{Q}</span>, but for that one has to explicitly construct the set of roots <span class="math">\\bar{Q}</span>. The splitting field <span class="math">K</span> of <span class="math">v_{D}(X^{d})</span> can be generated in probabilistic polynomial time:</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">1. Construct a cyclotomic extension <span class="math">K^{\\prime}</span> of <span class="math">F</span>, which contains all $(d\\cdot</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">D</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">)<span class="math">-th roots of unity. For this, determine the extension degree </span>n=[K^{\\prime}:F]<span class="math"> as the smallest </span>n<span class="math">, </span>1\\leq n\\leq d<span class="math">, so that </span>d\\cdot</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">D</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"><span class="math"> divides </span></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">F</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">^{n}-1<span class="math">, and sample a monic random polynomial of degree </span>n<span class="math">, and check it on irreducibility using Rabin’s test. (By the Moreau necklace counting function, the probability of a random polynomial being irreducible is </span>>1-1/</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">F</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">^{1/2}$.)</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Build an extension <span class="math">K</span> of <span class="math">K^{\\prime}</span> which contains a <span class="math">d</span>-root of any <span class="math">a\\in D</span>. For this factorize <span class="math">X^{d}-a</span> into irreducibles, choose the one of lowest degree for defining <span class="math">K^{\\prime}</span>.</li>
+
+    </ol>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">To obtain all roots from <span class="math">\\bar{Q}=Q_{1}\\cup Q_{2}\\cup Q_{D}</span>, determine the subgroup <span class="math">U</span> of all $(d\\cdot</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">D</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">)<span class="math">-th roots of unity in </span>K<span class="math">. (This is done in probabilistic polynomial time.) Compute the complete preimage of </span>D<span class="math"> under the </span>d<span class="math">-th power map by multiplying the defining element of </span>K/K^{\\prime}<span class="math"> with all elements of </span>U<span class="math">. The requested evaluation set </span>Q_{1}<span class="math"> for each out-of-domain query is computed by means of </span>U<span class="math">. With the preimage of </span>D<span class="math">, the requested evaluation set </span>Q_{2}$ is easily derived, and we are finished. All of the above steps run in probabilistic polynomial time, with respect to the size of the AIR and the security parameter.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <h6 id="sec-13" class="text-base font-medium mt-4">Theorem 6.</h6>
+
+    <p class="text-gray-300">The IOP from Protocol 3 is perfect honest-verifier zero-knowledge.</p>
+
+    <h6 id="sec-14" class="text-base font-medium mt-4">Proof.</h6>
+
+    <p class="text-gray-300">The simulator samples the verifier challenges <span class="math">\\lambda\\leftarrow\\!\\!\\!sF</span>, <span class="math">z_{F}\\leftarrow\\!\\!\\!sF\\backslash\\big{(}\\bar{D}\\cup H\\big{)}</span>, where <span class="math">\\bar{D}:=\\{y\\in F:y^{d}\\in D\\}</span>, and <span class="math">x_{1},\\ldots,x_{n_{D}}\\leftarrow\\!\\!\\!sD</span>.</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Then, it constructs the splitting field of <span class="math">v_{D}(X^{d})</span> and the evaluation set <span class="math">\\bar{Q}</span> as in Remark 5. It samples polynomials $\\hat{w}_{i}(X)\\leftarrow\\!\\!\\!s\\mathbb{F}_{p}[X]^{<</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">+h}<span class="math"> at random, and computes their values over </span>\\bar{Q}<span class="math">. From these values it determines the values of the decomposition polynomials at the protocol queries, using the overall constraint (4) and Formula (6), and interpolates them by arbitrary polynomials </span>q_{1}(X),\\ldots,q_{d}(X)<span class="math"> from </span>F[X]^{<\\hat{k}}<span class="math">, with </span>\\hat{k}$ as above. The resulting distribution is that of an honest prover-verifier interaction as stated in Lemma 3.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">The remaining transcript of Protocol 2 on the DEEP evaluation claims for <span class="math">\\hat{w}_{1}(X),\\ldots,\\hat{w}_{M}(X)</span> and <span class="math">q_{1}(X),\\ldots q_{d}(X)</span> is produced as in the proof of Theorem 4: The simulator runs the commit phase of the protocol, but uses the <span class="math">x_{1},\\ldots,x_{n_{D}}</span> sampled beforehand in the query phase of FRI. Again, by Lemma 2 and Remark 3, the resulting transcript has the same distribution as that of an honest prover-verifier interaction. ∎</p>
+
+    <p class="text-gray-300">##</p>
+
+    <p class="text-gray-300">4 Other types of quotient decompositions</p>
+
+    <p class="text-gray-300">In this section, we briefly sketch how to tackle other commonly used decompositions for the overall quotient of a STARK, namely, the canonical decomposition based on monomials, and the decomposition by value, based on the Lagrange basis of the evaluation domain.</p>
+
+    <h3 id="sec-15" class="text-xl font-semibold mt-8">4.1 Canonical decomposition</h3>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Let $q(X)\\in F[X]^{<d\\cdot</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">+(d+1)\\cdot h}<span class="math"> be the quotient polynomial as it appears in Equation 4 in Protocol 3 with </span>h$, the degree of freedom of the witness randomizer, to be specified later. By the canonical decomposition, we mean</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300"><span class="math">q(X)=\\sum_{i=1}^{d}X^{\\hat{k}\\cdot(i-1)}\\cdot q_{i}(X),</span> (7)</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">where each <span class="math">q_{i}(X)\\in F[X]^{&lt;\\hat{k}}</span> with $\\hat{k}=</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">+\\lceil(d+1)/d\\cdot h\\rceil$. Contrary to the FFT decomposition, the decomposition in (7) can be randomized, using a technique from <em>[x13]</em>: In order to maintain the identity</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300"><span class="math">q(X)=\\sum_{i=1}^{d}X^{\\hat{k}\\cdot(i-1)}\\cdot\\hat{q}_{i}(X),</span> (8)</p>
+
+    <p class="text-gray-300">on draws <span class="math">t_{i}(X)\\leftarrow\\</span> <span class="math">F[X]^{&lt;h_{p}}</span>, <span class="math">i=1,\\ldots,d-1</span>, independently and according to the uniform distribution, and sets</p>
+
+    <p class="text-gray-300"><span class="math">\\hat{q}_{1}(X)</span> <span class="math">=q_{1}(X)+X^{\\hat{k}}\\cdot t_{1}(X),</span> <span class="math">\\hat{q}_{2}(X)</span> <span class="math">=q_{2}(X)+X^{\\hat{k}}\\cdot t_{2}(X)-t_{1}(X),</span> <span class="math">\\vdots</span> <span class="math">\\hat{q}_{d-1}(X)</span> <span class="math">=q_{d-1}(X)+X^{\\hat{k}}\\cdot t_{d-1}(X)-t_{d-2}(X),</span></p>
+
+    <p class="text-gray-300">and eventually</p>
+
+    <p class="text-gray-300"><span class="math">\\hat{q}_{d}(X)=q_{d}(X)-t_{d-1}(X).</span></p>
+
+    <p class="text-gray-300">The degree of freedom <span class="math">h_{p}</span> is chosen such that</p>
+
+    <p class="text-gray-300"><span class="math">n_{F}+n_{D}\\leq h_{p}.</span> (9)</p>
+
+    <p class="text-gray-300">With the above modification, Protocol 3 goes through unchanged except for Equation (3) which becomes</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">$2\\cdot(e\\cdot n_{F}+n_{D})\\leq h\\leq</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">,$ (10)</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">and the common degree bound for the batch opening proof, which is adapted accordingly.</p>
+
+    <h6 id="sec-16" class="text-base font-medium mt-4">Lemma 4.</h6>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Fix <span class="math">\\lambda\\in F</span> and query sets <span class="math">Q_{F}</span> and <span class="math">Q_{D}</span> of size $</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Q_{F}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\leq n_{F}<span class="math"> and </span></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Q_{D}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\leq n_{D}$ such that Equations (9) and (10) hold. Then the joint distribution of</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">$(\\hat{w}_{1}(z),\\hat{w}_{1}(g\\cdot z),\\ldots,\\hat{w}_{M}(z),\\hat{w}_{M}(g\\cdot z),\\hat{q}_{1}(z),\\ldots,\\hat{q}_{d}(z))</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">_{z\\in Q_{F}},$</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">is independent of the witness polynomials <span class="math">(w_{1}(X),\\ldots,w_{M}(X))</span>.</p>
+
+    <h6 id="sec-17" class="text-base font-medium mt-4">Proof sketch.</h6>
+
+    <p class="text-gray-300">Using the same approach as in the proof of Lemma 1 we have that the evaluations of the randomized witness polynomials at the queried points is independent of the witness polynomials. Now, since the randomizer polynomials <span class="math">t_{i}(X)</span>, <span class="math">i=1,\\ldots,d-1</span>, are independently and uniformly drawn from <span class="math">F[X]^{&lt;h_{p}}</span>, the queried values of <span class="math">\\hat{q}_{i}(X)</span>, <span class="math">i=1,\\ldots,d-1</span>, are uniformly distributed, independent of the witness polynomials. Since the values of the last component polynomial <span class="math">\\hat{q}_{d}(X)</span> are fully determined from the values of the randomized witness polynomials in addition to those of <span class="math">\\hat{q}_{i}(X)</span>, <span class="math">i=1,\\ldots,d-1</span>, we get the claim. ∎</p>
+
+    <h6 id="sec-18" class="text-base font-medium mt-4">Theorem 7.</h6>
+
+    <p class="text-gray-300">The IOP from Protocol 3, with quotient decomposition 8 instead of 5, is perfect honest-verifier zero-knowledge.</p>
+
+    <h6 id="sec-19" class="text-base font-medium mt-4">Proof.</h6>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">The simulator samples the verifier challenges <span class="math">\\lambda\\leftarrow\\</span> <span class="math">F</span>, <span class="math">z_{1},\\ldots,z_{n_{F}}\\leftarrow\\</span> <span class="math">F\\setminus(D\\cup H)</span>, and <span class="math">x_{1},\\ldots,x_{n_{D}}\\leftarrow\\</span> <span class="math">D</span>. It then samples <span class="math">\\hat{w}_{i}(X)\\leftarrow\\</span> $\\mathbb{F}_{p}[X]^{<</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">+h}<span class="math"> and </span>\\hat{q}_{i}(X)\\leftarrow\\<span class="math"> </span>F[X]^{<\\hat{k}+h_{p}}<span class="math">, </span>i=1,\\ldots,d-1<span class="math">, uniformly at random, and computes their values over </span>Q=Q_{F}\\cup Q_{D}<span class="math">. Given these values, it takes any </span>\\hat{q}_{d}(X)\\in F[X]^{<</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">+h_{p}}<span class="math"> satisfying the overall constraint (4) and the decomposition identity (8) at the points from </span>Q$. Inspecting the proof of Lemma 4, we see that the distribution of the transcript is identical to that of an honest prover-verifier interaction.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">The remaining transcript for the batch opening proof Protocol 2 is simulated as previously. ∎</p>
+
+    <h3 id="sec-20" class="text-xl font-semibold mt-8">4.2 Lagrange decomposition</h3>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">The <em>Lagrange decomposition</em> of a polynomial $q(X)\\in F[X]^{<d\\cdot</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">}<span class="math"> over </span>\\bar{H}=\\bigcup_{i=1}^{d}H_{i}<span class="math"> a union of disjoint cosets of </span>H$, is the unique decomposition</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300"><span class="math">q(X)=\\sum_{i=1}^{d}L_{H_{i}}(X)\\cdot q_{i}(X),</span> (11)</p>
+
+    <p class="text-gray-300">where</p>
+
+    <p class="text-gray-300"><span class="math">L_{H_{i}}(X)=c_{i}\\cdot\\prod_{j\\neq i}v_{H_{j}}(X)</span> (12)</p>
+
+    <p class="text-gray-300">is</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">is the selector polynomial of the coset <span class="math">H_{i}</span> (normalized so that <span class="math">L_{H_{i}}(x)=1</span> over <span class="math">H_{i}</span>), and every $q_{i}(X)\\in F[X]^{<</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">}<span class="math">. Each </span>q_{i}(X)<span class="math"> is directly obtained from the values of </span>q(X)<span class="math"> over </span>H_{i}<span class="math"> via an FFT of witness domain size </span></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"><span class="math">. Besides that the Lagrange decomposition is more efficient than the other two discussed in this document, we stress the fact that its main advantage is its flexibility: It does not demand the evaluation domain </span>\\bar{H}$ to be (the coset of) a group again, and hence supports non-two-adic blow-up factors, which is useful in certain applications.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">In the zero-knowledge setting, the quotient $q(X)\\in F[X]^{<d\\cdot</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">+(d+1)\\cdot h}$ can be still decomposed as in (11), allowing the last component polynomial</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">$q_{d}(X)\\in F[X]^{<</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">+(d+1)\\cdot h}.$</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Demanding $q_{i}(X)\\in F[X]^{<</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">}<span class="math"> for </span>i=1,\\ldots,d-1<span class="math">, the decomposition is still unique, and can be randomized as follows: For </span>i=1,\\ldots,d-1$, the prover takes</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">$\\hat{q}_{i}(X)=q_{i}(X)+v_{H_{i}}(X)\\cdot t_{i}(X)\\in F[X]^{<</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">+h_{p}},$ (13)</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">with <span class="math">t_{i}(X)\\leftarrow\\!\\!\\!\\!\\ast F[X]^{&lt;h_{p}}</span> and <span class="math">h_{p}</span> as specified below, and</p>
+
+    <p class="text-gray-300"><span class="math">\\hat{q}_{d}(X)=q_{d}(X)-v_{H_{d}}(X)\\cdot\\sum_{k=1}^{d-1}c_{d}^{-1}\\cdot c_{i}\\cdot t_{i}(X),</span> (14)</p>
+
+    <p class="text-gray-300">with the normalizing coefficients <span class="math">c_{i}</span> and <span class="math">c_{d}</span> from (12). This choice still satisfies</p>
+
+    <p class="text-gray-300"><span class="math">q(X)=\\sum_{i=1}^{d}L_{H_{i}}(X)\\cdot\\hat{q}_{i}(X).</span> (15)</p>
+
+    <p class="text-gray-300">The degrees of freedom <span class="math">h</span> and <span class="math">h_{d}</span> are as for the canonical decomposition, with</p>
+
+    <p class="text-gray-300"><span class="math">n_{F}+n_{D}\\leq h_{p},</span> (16)</p>
+
+    <p class="text-gray-300">and</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">$2\\cdot(e\\cdot n_{F}+n_{D})\\leq h\\leq</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">.$ (17)</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">The statement of Lemma 4 again holds, with its proof carried over verbatim.</p>
+
+    <h6 id="sec-21" class="text-base font-medium mt-4">Lemma 5.</h6>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Fix <span class="math">\\lambda\\in F</span> and query sets <span class="math">Q_{F}</span> and <span class="math">Q_{D}</span> of size $</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Q_{F}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\leq n_{F}<span class="math"> and </span></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Q_{D}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\leq n_{D}$ such that Equations (16) and (17) hold. Then the joint distribution of</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">$(\\hat{w}_{1}(z),\\hat{w}_{1}(g\\cdot z),\\ldots,\\hat{w}_{M}(z),\\hat{w}_{M}(g\\cdot z),\\hat{q}_{1}(z),\\ldots,\\hat{q}_{d}(z))</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">_{z\\in Q_{F}},$</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">is independent of the witness polynomials <span class="math">(w_{1}(X),\\ldots,w_{M}(X))</span>.</p>
+
+    <p class="text-gray-300">The distribution in the lemma can be efficiently simulated, yielding zero-knowledge in the honest-verifier setting.</p>
+
+    <h6 id="sec-22" class="text-base font-medium mt-4">Theorem 8.</h6>
+
+    <p class="text-gray-300">The IOP from Protocol 3, with quotient decomposition 15 instead of 5, is perfect honest-verifier zero-knowledge.</p>
+
+    <h6 id="sec-23" class="text-base font-medium mt-4">Proof.</h6>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Almost verbatim to that of Theorem 7, with only a slight change of degree bounds: The simulator samples $\\hat{w}_{i}(X)\\leftarrow\\S\\E_{p}[X]^{<</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">+h}<span class="math"> and </span>\\hat{q}_{i}(X)\\leftarrow\\S F[X]^{<</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">+h_{p}}<span class="math">, </span>i=1,\\ldots,d-1<span class="math">, and takes any </span>\\hat{q}_{d}(X)\\in F[X]<span class="math"> of degree less than </span></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">+\\max\\{(d+1)\\cdot h,h_{p}\\}<span class="math"> satisfying the overall constraint (4) and the decomposition identity (8) at the points of the query set </span>Q$. ∎</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <h2 id="sec-24" class="text-2xl font-bold">5 Practical considerations</h2>
+
+    <p class="text-gray-300">Let us quickly review the computational overhead when adding zero-knowledge with the most greedy parameters, where the randomization degree is taken as small as possible. We again restrict to the FFT decomposition from Section 3; the decompositions from Section 4 are treated similarly.</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Let <span class="math">h</span> taken as the smallest possible value in (3). We assume that $h\\ll</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">$, which is met under moderate FRI parameters and not too short traces.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">The size of the evaluation domain <span class="math">D</span> can be kept, at the cost of only a single additional commitment in the batching step of FRI. (Recall that using <span class="math">\\mathsf{RS}[F,D,\\hat{k}]</span> with $\\hat{k}=</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">+\\lceil(d+1)/d\\cdot h\\rceil<span class="math"> in the batching step of FRI does not have significant impact on the overall sampling parameter </span>n_{D}$.) Therefore, in the wide trace regime with many column polynomials to be commitment, the hashing costs remain essentially the same.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">For evaluating the FFT costs, we assume that the proof system, before introducing zero-knowledge, is optimized for constraint evaluation, by choosing</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">$d\\cdot</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">=</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">D</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">.$</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Using oversized FFTs to handle the slight increase in the degree of the polynomials, the overall cost per witness column increases from $(B+1)\\cdot\\mathsf{FFT}(</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">)$ to</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">$\\mathsf{FFT}(</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">)+\\frac{B}{2}\\cdot\\mathsf{FFT}(2\\cdot</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">)+\\mathsf{Eval}_{</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">+h}((d+1)\\cdot h)+O(h),$</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">where $B=</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">D</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">/</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\geq 2<span class="math"> is the blowup factor, </span>\\mathsf{Eval}_{</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">+h}((d+1)\\cdot h)<span class="math"> denotes the cost for evaluating a polynomial from </span>\\E_{p}[X]^{<</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">+h}<span class="math"> over a set of size </span>(d+1)\\cdot h<span class="math">, and the </span>O(h)<span class="math"> term covers the cost of adding </span>r_{i}(X)\\cdot(X^{</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">}-1)<span class="math"> to the Fourier transform </span>w_{i}(X)<span class="math"> of the witness column. (There are more efficient ways to compute the values of the randomized polynomial. We shall not dwell on such, since the impact to our estimates is negligible.) Under the simplifying assumption that the target set of </span>\\mathsf{Eval}_{</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">+h}((d+1)\\cdot h)<span class="math"> is a coset of a subgroup of size </span>(d+1)\\cdot h$,</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">the evaluation cost amounts to $</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">+h<span class="math"> multiplications and additions for the reduction modulo the coset vanishing polynomial, plus an FFT of size </span>h\\cdot(d+1)<span class="math">. We approximate the former cost by two layers of an </span>\\mathsf{FFT}(</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">)$, yielding</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">$\\mathsf{FFT}(</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">)+\\frac{B}{2}\\cdot\\mathsf{FFT}(2\\cdot</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">)<span class="math"> </span>+\\frac{2}{\\log</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">}\\cdot\\mathsf{FFT}(</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">)+O(h\\cdot\\log h)$</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">where in the latter we have used the rough rule of thumb, that $\\mathsf{FFT}(2\\cdot</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">)=\\left(1+\\frac{1}{\\log</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">}\\right)\\cdot 2\\cdot\\mathsf{FFT}(</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">)$. Hence the overall increase of the arithmetic cost per witness column is expected to be roughly</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">$C_{\\text{zk}}/C_{\\text{non-zk}}\\approx\\left(1+\\frac{4}{3\\cdot\\log</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">}\\right),$</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">neglecting the <span class="math">O(h\\cdot\\log h)</span> term. In configurations where $d\\cdot</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"><</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">D</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"><span class="math">, </span>\\mathsf{Eval}(</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">+h,h)$ can be dropped and we obtain the estimate</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">$C_{\\text{zk}}/C_{\\text{non-zk}}\\approx\\left(1+\\frac{1}{\\log</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">}\\right),$</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">neglecting an <span class="math">O(h)</span> term. In wide trace AIRs, these two ratios are expected to be an upper bound for the overhead.</p>
+
+    <h2 id="sec-25" class="text-2xl font-bold">References</h2>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>[BBHR18] Eli Ben-Sasson, Iddo Bentov, Yinon Horesh, and Michael Riabzev. Fast Reed-Solomon interactive oracle proofs of proximity. In ICALP 2018, 2018. Full paper: https://eccc.weizmann.ac.il/report/2017/134/.</li>
+
+      <li>[BLH^{+}] Sean Bowe, Ying Tong Lai, Daira Hopwood, Jack Grigg, and Steven Smith. The halo2 book. https://zcash.github.io/halo2.</li>
+
+      <li>[BSBHR18] Eli Ben-Sasson, Iddo Bentov, Yinon Horesh, and Michael Riabzev. Scalable, transparent, and post-quantum secure computational integrity. In IACR ePrint Archive 2018/046, 2018. https://eprint.iacr.org/2018/046.</li>
+
+      <li>[BSCR^{+}19] Eli Ben-Sasson, Alessandro Chiesa, Michael Riabzev, Nicholas Spooner, Madars Virza, and Nicholas P. Ward. Aurora: Transparent succinct arguments for R1CS. In Y. Ishai and Vincent Rijmen, editors, EUROCRYPT 2019, volume 11476 of LNCS. Springer, 2019.</li>
+
+    </ul>
+
+    <p class="text-gray-300">-</p>
+
+    <p class="text-gray-300">[BSGKS20] Eli Ben-Sasson, Lior Goldberg, Swastik Kopparty, and Shubhangi Saraf. DEEP-FRI: Sampling outside the box improves soundness. In ITCS 2020, 2020. Full paper: https://eprint.iacr.org/2019/336.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>[GWC19] Ariel Gabizon, Zachary J. Williamson, and Oana Ciobotaru. PLONK: Permutations over Lagrange-bases for oecumenical non-interactive arguments of knowledge. In IACR ePrint Archive 2019/953, 2019. https://eprint.iacr.org/2019/953.</li>
+
+      <li>[Hab22] Ulrich Haböck. A summary on the FRI low-degree test. In IACR ePrint Archive 2022/1216, 2022. https://eprint.iacr.org/2022/1216.</li>
+
+      <li>[HLP24] Ulrich Haböck, David Levit, and Shahar Papini. Circle STARKs. In IACR preprint archive, 2024. https://eprint.iacr.org/2024/278.</li>
+
+      <li>[Plo] Plonky2 codebase. https://github.com/0xPolygonZero/plonky2.</li>
+
+      <li>[Pol] Polygon Labs / Polygon Zero. Plonky2: Fast recursive arguments with PLONK and FRI. https://github.com/mir-protocol/plonky2/blob/main/plonky2/plonky2.pdf.</li>
+
+      <li>[Ris] RISC Zero: a zero-knowledge verifiable general computing platform based on zk-starks and the risc-v microarchitecture. https://github.com/risc0/risc0.</li>
+
+      <li>[Tri] Triton VM. https://github.com/TritonVM/triton-vm.</li>
+
+    </ul>
+
+    <h2 id="sec-26" class="text-2xl font-bold">Appendix A Permutation arguments</h2>
+
+    <p class="text-gray-300">Permutation arguments are a special case in the treatment of zero-knowledge. Unlike other components of a STARK, the used protocols are not complete, and a single successful run reveals information on the witness data. In most cases, the amount of revealed data is not an obstacle for statistical zero-knowledge. (We found only one exception.) However, perfect zero-knowledge requires careful modifications, which override incompleteness while not harming soundness.</p>
+
+    <p class="text-gray-300">For simplicity, we restrict ourselves to the case of two columns <span class="math">(w_{1}(x))_{x\\in H}</span> and <span class="math">(w_{2}(x))_{x\\in H}</span>, which we wish to prove a permutation of one another. (The general case of several columns, or a permutation invariance argument as in Plonk, is treated similarly.) The target is to prove the polynomial identity</p>
+
+    <p class="text-gray-300"><span class="math">\\prod_{x\\in H}(Y-w_{1}(x))=\\prod_{x\\in H}(Y-w_{2}(x)),</span></p>
+
+    <p class="text-gray-300">which is reduced to the equality at a random challenge <span class="math">\\alpha\\leftarrow\\!\\!\\!s\\,F</span>, paraphrased as</p>
+
+    <p class="text-gray-300"><span class="math">\\prod_{x\\in H}\\frac{\\alpha-w_{1}(x)}{\\alpha-w_{2}(x)}=1.</span> (18)</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">This product is shown by a single “grand product argument” in the style of <em>[x10]</em>. The prover commits the running product column <span class="math">(Z(x))_{x\\in H}</span>, which is initialized with <span class="math">Z(1)=1</span>, and recursively determined at the other points $g,g^{2},\\ldots,g^{</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">-1}$ of the domain, via</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300"><span class="math">Z(g\\cdot x)=Z(x)\\cdot\\frac{\\alpha-w_{1}(x)}{\\alpha-w_{2}(x)},</span></p>
+
+    <p class="text-gray-300">where, since the overall product is equal to one, the incremental equation holds also at the last point of the domain. (As before, <span class="math">g</span> is the generator of the witness domain <span class="math">H</span>.) The constraints imposed on <span class="math">Z(X)</span> are the domain identities</p>
+
+    <p class="text-gray-300"><span class="math">(Z(x)-1)\\cdot L_{1}(x)=0,</span> (19) <span class="math">Z(g\\cdot x)\\cdot(\\alpha-w_{2}(x))=Z(x)\\cdot(\\alpha-w_{1}(x)),</span> (20)</p>
+
+    <p class="text-gray-300">for all <span class="math">x\\in H</span>, which together overwhelmingly prove the product (18).</p>
+
+    <p class="text-gray-300">However, the prover is not able to succeed whenever the random point <span class="math">\\alpha</span> falls into the range</p>
+
+    <p class="text-gray-300"><span class="math">R=\\{w_{1}(x):x\\in H\\}=\\{w_{2}(x):x\\in H\\},</span></p>
+
+    <p class="text-gray-300">as it runs into a quotient <span class="math">(\\alpha-w_{1}(x))/(\\alpha-w_{2}(x))</span> which is undefined (division by zero), or the final running product must be zero, conflicting the transitional constraint 20 at the last point of the domain. Thus with each successful run of the protocol, the verifier learns that <span class="math">\\alpha</span> is not any of the witness values – a fact that does not change when moving to randomized polynomials.</p>
+
+    <p class="text-gray-300">One may attempt to modify how the prover crafts a polynomial <span class="math">Z(X)</span> compliant with the constraints (19) and (20), but this still would not meet the target, since the constraint system itself is not satisfiable in all cases. Lets call <span class="math">x\\in H</span> a <em>critical point</em> if <span class="math">\\alpha\\in\\{w_{1}(x),w_{2}(x)\\}</span>, i.e. either <span class="math">\\alpha-w_{1}(x)=0</span> or <span class="math">\\alpha-w_{2}(x)=0</span>. We point out two types of critical points:</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>If <span class="math">\\alpha-w_{1}(x)=0</span>, but <span class="math">\\alpha-w_{2}(x_{0})\\neq 0</span>, then the transitional constraint (20) enforces that <span class="math">Z(g\\cdot x)=0</span>. The same constraint enforces the forward</li>
+
+    </ol>
+
+    <p class="text-gray-300">propagation of zero, at least up to the next critical point. We therefore call <span class="math">x</span> a forward propagation point.</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>If <span class="math">\\alpha-w_{2}(x)=0</span>, but <span class="math">\\alpha-w_{1}(x)\\neq 0</span>, then the incremental constraint (20) enforces that <span class="math">Z(x)=0</span>, and the same constraint backward propagates the zero, at least down to the next critical point. Thus we call <span class="math">x</span> a backward propagation point.</li>
+
+    </ol>
+
+    <p class="text-gray-300">(The third type, when both <span class="math">\\alpha-w_{1}(x)=0</span> and <span class="math">\\alpha-w_{2}(x)=0</span>, does not enforce anything on <span class="math">Z(x)</span> and <span class="math">Z(g\\cdot x)</span>.) It now depends on the position of forward and backward propagation points (if present), whether the constraint system is satisfiable.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>If the first critical point on <span class="math">H</span> is a backward propagation point, including the case <span class="math">x=1</span>, then this contradicts the initial boundary condition imposed by (19). Likewise, if the last critical point of the domain is a forward propagation point.</li>
+
+      <li>If both first and last critical points are of the respective other types, then the prover may choose <span class="math">Z</span> throughout zero between these points. On the remaining interval around <span class="math">x=1</span> the values of <span class="math">Z</span> are uniquely determined from (19) together with (20), and the resulting <span class="math">Z(X)</span> satisfies the constraints over the entire domain <span class="math">H</span>.</li>
+
+    </ul>
+
+    <p class="text-gray-300">To mitigate the propagation of zeros, both forward and backward, we mute the transitional constraint (20) if one of the two, either <span class="math">\\alpha-w_{1}(x)</span> or <span class="math">\\alpha-w_{2}(x)</span>, are zero. This leads to the following weakened, but complete system of constraints:</p>
+
+    <p class="text-gray-300"><span class="math">L_{1}(x)\\cdot(Z(x)-1)=0,</span> <span class="math">(\\alpha-w_{1}(x))\\cdot(\\alpha-w_{2}(x))\\cdot\\big{(}Z(g\\cdot x)\\cdot(\\alpha-w_{2}(x))-Z(x)\\cdot(\\alpha-w_{1}(x))\\big{)}=0,</span></p>
+
+    <p class="text-gray-300">for all <span class="math">x\\in H</span>. We note that soundness is essentially not affected. Whenever <span class="math">\\alpha</span> is not in the range <span class="math">R</span>, the modified constraints imply the same domain product as then incomplete system. In this case, the “regular case”, the prover computes the polynomial <span class="math">Z(X)</span> as before. In the presence of critical points, the prover may craft a satisfying polynomial <span class="math">Z(X)</span> as indicated above in the second case.</p>
+
+    <p class="text-gray-300">In certain applications (e.g. zero-knowledge virtual machines) permutation arguments are combined with lookup arguments into an overall argument based on fractional decompositions. For these combined arguments perfect zero-knowledge is often too costly, and we suggest to keep with statistical zero-knowledge.</p>
+
+    <p class="text-gray-300">##</p>`;
+---
+
+<BaseLayout title="A  note on adding zero-knowledge to STARKs (2024/1037)">
+  <article class="max-w-4xl mx-auto article-prose">
+    <nav class="mb-8">
+      <a href="/papers" class="text-blue-400 hover:text-blue-300">
+        &larr; Back to Papers
+      </a>
+    </nav>
+
+    <header class="mb-12">
+      <h1 class="text-3xl font-bold mb-4"
+        set:html={TITLE_HTML} />
+      <p class="text-gray-400 mb-2"
+        set:html={AUTHORS_HTML} />
+      <p class="text-gray-500 text-sm mb-4">
+        2024 &middot; eprint 2024/1037
+      </p>
+      <div class="flex gap-4 text-sm">
+        <a
+          href={EPRINT_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          class="text-blue-400 hover:text-blue-300"
+        >
+          Paper (eprint) &rarr;
+        </a>
+      </div>
+      <p class="mt-4 text-xs text-gray-500">
+        All content below belongs to the original authors. This page
+        reproduces the paper for educational purposes. Always
+        <a
+          href={EPRINT_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          class="text-blue-400 hover:text-blue-300"
+        >cite the original</a>.
+      </p>
+      <p class="mt-1 text-xs text-gray-600">
+        Converted with: {CRAWLER} &middot; {CONVERTED_DATE}
+      </p>
+    </header>
+
+    <Fragment set:html={CONTENT} />
+
+  </article>
+</BaseLayout>

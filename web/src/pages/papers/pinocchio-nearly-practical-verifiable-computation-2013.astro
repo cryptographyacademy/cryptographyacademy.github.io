@@ -1,0 +1,1717 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+
+const EPRINT_URL = 'https://eprint.iacr.org/2013/279';
+const CRAWLER = 'mistral';
+const CONVERTED_DATE = '2026-02-16';
+const TITLE_HTML = 'Pinocchio: Nearly Practical Verifiable Computation';
+const AUTHORS_HTML = 'Bryan Parno, Craig Gentry, Jon Howell, Mariana Raykova';
+
+const CONTENT = `    <p class="text-gray-300">Bryan Parno Jon Howell Microsoft Research Craig Gentry Mariana Raykova IBM Research</p>
+
+    <h6 id="sec-2" class="text-base font-medium mt-4">Abstract</h6>
+
+    <p class="text-gray-300">To instill greater confidence in computations outsourced to the cloud, clients should be able to verify the correctness of the results returned. To this end, we introduce Pinocchio, a built system for efficiently verifying general computations while relying only on cryptographic assumptions. With Pinocchio, the client creates a public evaluation key to describe her computation; this setup is proportional to evaluating the computation once. The worker then evaluates the computation on a particular input and uses the evaluation key to produce a proof of correctness. The proof is only 288 bytes, regardless of the computation performed or the size of the inputs and outputs. Anyone can use a public verification key to check the proof.</p>
+
+    <p class="text-gray-300">Crucially, our evaluation on seven applications demonstrates that Pinocchio is efficient in practice too. Pinocchio’s verification time is typically 10ms: 5-7 orders of magnitude less than previous work; indeed Pinocchio is the first general-purpose system to demonstrate verification cheaper than native execution (for some apps). Pinocchio also reduces the worker’s proof effort by an additional 19-60<span class="math">\\times</span>. As an additional feature, Pinocchio generalizes to zero-knowledge proofs at a negligible cost over the base protocol. Finally, to aid development, Pinocchio provides an end-to-end toolchain that compiles a subset of C into programs that implement the verifiable computation protocol.</p>
+
+    <h2 id="sec-3" class="text-2xl font-bold">1 Introduction</h2>
+
+    <p class="text-gray-300">Since computational power is often asymmetric (particularly for mobile devices), a relatively weak client may wish to outsource computation to one or more powerful workers. Common examples include cloud or grid computing, as well as volunteer distributed computing <em>[1]</em>. In all of these settings, the client should be able to verify the results returned, to guard against malicious or malfunctioning workers. Even from a legitimate worker’s perspective, verifiable results are beneficial, since they are likely to command a higher price. They also allow the worker to shed liability: any undesired outputs are provably the result of data the client supplied.</p>
+
+    <p class="text-gray-300">Considerable systems and theory research has looked at the problem of verifying computation (§6). However, most of this work has either been function specific, relied on assumptions we prefer to avoid, or simply failed to pass basic practicality requirements. Function specific solutions <em>[2, 3, 4, 5, 6]</em> are often efficient, but only for a narrow class of computations. More general solutions often rely on assumptions that may not apply. For example, systems based on replication <em>[1, 7, 8]</em> assume uncorrelated failures, while those based on Trusted Computing <em>[9, 10, 11]</em> or other secure hardware <em>[12, 13, 14, 15]</em> assume that physical protections cannot be defeated. Finally, the theory community has produced a number of beautiful, general-purpose protocols <em>[16, 17, 18, 19, 20, 21, 22, 23]</em> that offer compelling asymptotics. In practice however, because they rely on complex Probabilistically Checkable Proofs (PCPs) <em>[17]</em> or fully-homomorphic encryption (FHE) <em>[24]</em>, the performance is unacceptable – verifying small instances would take hundreds to trillions of years (§5.2). Very recent work <em>[25, 26, 27, 28]</em> has improved these protocols considerably, but efficiency is still problematic, and the protocols lack features like public verification.</p>
+
+    <p class="text-gray-300">In contrast, we describe Pinocchio, a concrete system for efficiently verifying general computations while making only cryptographic assumptions. In particular, Pinocchio supports public verifiable computation <em>[22, 29]</em>, which allows an untrusted worker to produce signatures of computation. Initially, the client chooses a function and generates a public evaluation key and a (small) public verification key. Given the evaluation key, a worker can choose an input (or verifiably use one provided by the client), compute the function, and produce a proof (or signature) to accompany the result. Anyone (not just the client) can then use the verification key to check the correctness of the worker’s result for the specific input used. As an additional feature, Pinocchio supports zero-knowledge verifiable computation, in which the worker convinces the client that it knows an input with a particular property, without revealing any information about the input.</p>
+
+    <p class="text-gray-300">Pinocchio’s asymptotics are excellent: key setup and proof generation require cryptographic effort linear in the size of the original computation, and verification requires time linear in the size of the inputs and outputs. Even more surprising, Pinocchio’s proof is constant sized, regardless of the computation performed. Crucially, our evaluation (§5) demonstrates that these asymptotics come with small constants, making Pinocchio close to practical for a variety of applications.</p>
+
+    <p class="text-gray-300">Compared with previous work, Pinocchio improves verification time by 5-7 orders of magnitude and requires less than 10ms in most configurations, enabling it to beat native C execution for some apps. We also improve the worker’s proof efforts by 19-60<span class="math">\\times</span> relative to prior work. The resulting proof is tiny, 288 bytes (only slightly more than an RSA-2048 signature), regardless of the computation. Making a proof zero-knowledge is also cheap, adding negligible overhead (213<span class="math">\\mu</span>s to key generation and 0.1% to proof generation).</p>
+
+    <p class="text-gray-300">While these improvements are promising, additional progress is likely needed before the overhead reaches true practicality. However, even now, this overhead may be acceptable in scenarios that require high assurance, or that need the zero-knowledge properties Pinocchio supports.</p>
+
+    <p class="text-gray-300">!<a href="img-0.jpeg">img-0.jpeg</a> Figure 1: Overview of Pinocchio's Toolchain. Pinocchio takes a high-level  <span class="math">C</span>  program all the way through to a distributed set of executables that run the program in a verified fashion. It supports both arithmetic circuits, via Quadratic Arithmetic Programs (§2.2.1), and Boolean circuits via Quadratic Span Programs (§2.2.2).</p>
+
+    <p class="text-gray-300">To achieve efficient verifiable computation, Pinocchio combines quadratic programs, a computational model introduced by Gennaro et al. [30], with a series of theoretical refinements and systems engineering to produce an end-to-end toolchain for verifying computations. Specifically, via an improved protocol and proof technique, we slash the cost of key generation by  <span class="math">61\\%</span> , and the cost of producing a proof by  <span class="math">64\\%</span> . From a developer's perspective, Pinocchio provides a compiler that transforms C code into a circuit representation (we support both Boolean and arithmetic), converts the circuit into a quadratic program, and then generates programs to execute the cryptographic protocol (Fig. 1).</p>
+
+    <p class="text-gray-300">Pinocchio's end-to-end toolchain, plus its support for both Boolean and arithmetic circuits, allows us to implement real applications that benefit from verification. In particular, we implement two forms of matrix multiplication, multivariate polynomial evaluation, image matching, all-pairs shortest paths, a lattice-gas scientific simulator, and SHA-1. We find (§5) that the first three apps translate efficiently into arithmetic circuits, and hence Pinocchio can verify their results faster than native execution of the same program. The latter four apps translate less efficiently, due to their reliance on inequality comparisons and bitwise operations, and yet they may still be useful for zero-knowledge applications.</p>
+
+    <p class="text-gray-300">Contributions. In summary, this paper contributes:</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>An end-to-end system for efficiently verifying computation performed by one or more untrusted workers. This includes a compiler that converts C code into a format suitable for verification, as well as a suite of tools for running the actual protocol.</li>
+
+      <li>Theoretical and systems-level improvements that bring performance down by 5-7 orders of magnitude, and hence into the realm of plausibility.</li>
+
+      <li>An evaluation on seven real C applications, showing verification faster than 32-bit native integer execution for some apps.</li>
+
+    </ol>
+
+    <p class="text-gray-300">A public verifiable computation (VC) scheme allows a computationally limited client to outsource to a worker the evaluation of a function  <span class="math">F</span>  on input  <span class="math">u</span> . The client can then verify</p>
+
+    <p class="text-gray-300">the correctness of the returned result  <span class="math">F(u)</span>  while performing less work than required for the function evaluation.</p>
+
+    <p class="text-gray-300">More formally, we define public VC as follows, generalizing previous definitions [22, 29, 30].</p>
+
+    <p class="text-gray-300">Definition 1 (Public Verifiable Computation) A public verifiable computation scheme  <span class="math">\\mathcal{VC}</span>  consists of a set of three polynomial-time algorithms (KeyGen, Compute, Verify) defined as follows.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li><span class="math">(EK_{F}, VK_{F}) \\gets \\text{KeyGen}(F, 1^{\\lambda})</span> : The randomized key generation algorithm takes the function  <span class="math">F</span>  to be outsourced and security parameter  <span class="math">\\lambda</span> ; it outputs a public evaluation key  <span class="math">EK_{F}</span> , and a public verification key  <span class="math">VK_{F}</span> .</li>
+
+      <li><span class="math">(y, \\pi_y) \\gets \\text{Compute}(EK_F, u)</span> : The deterministic worker algorithm uses the public evaluation key  <span class="math">EK_F</span>  and input  <span class="math">u</span> . It outputs  <span class="math">y \\gets F(u)</span>  and a proof  <span class="math">\\pi_y</span>  of  <span class="math">y</span> 's correctness.</li>
+
+      <li><span class="math">\\{0,1\\} \\gets \\operatorname{Verify}(VK_F,u,y,\\pi_y)</span> : Given the verification key  <span class="math">VK_{F}</span> , the deterministic verification algorithm outputs 1 if  <span class="math">F(u) = y</span> , and 0 otherwise.</li>
+
+    </ul>
+
+    <p class="text-gray-300">Prior work gives formal definitions for correctness, security, and efficiency [30], so we merely summarize:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Correctness For any function  <span class="math">F</span> , and any input  <span class="math">u</span>  to  <span class="math">F</span> , if we run  <span class="math">(EK_{F}, VK_{F}) \\gets \\text{KeyGen}(F, 1^{\\lambda})</span>  and  <span class="math">(y, \\pi_{y}) \\gets \\text{Compute}(EK_{F}, u)</span> , then we always get  <span class="math">1 = \\text{Verify}(VK_{F}, u, y, \\pi_{y})</span> .</li>
+
+      <li>Security For any function  <span class="math">F</span>  and any probabilistic polynomial-time adversary  <span class="math">\\mathcal{A}</span> ,  <span class="math">\\operatorname*{Pr}[(\\hat{u},\\hat{y},\\hat{\\pi}_y)\\gets \\mathcal{A}(EK_F,VK_F):F(\\hat{u})\\neq \\hat{y}</span>  and  <span class="math">1 = \\operatorname{Verify}(VK_{F},\\hat{u},\\hat{y},\\hat{\\pi}_{y})]\\leq \\mathrm{neg1}(\\lambda)</span> .</li>
+
+      <li>Efficiency KeyGen is assumed to be a one-time operation whose cost is amortized over many calculations, but we require that Verify is cheaper than evaluating  <span class="math">F</span> .</li>
+
+    </ul>
+
+    <p class="text-gray-300">Several previous VC schemes [22, 23] were not public, but rather designated verifier, meaning that the verification key  <span class="math">VK_{F}</span>  must be kept secret. Indeed, in these schemes, even revealing the output of the verification function (i.e., whether or not the worker had been caught cheating) could lead to attacks on the system. A public VC scheme avoids such issues.</p>
+
+    <p class="text-gray-300">Zero-Knowledge Verifiable Computation. We also consider an extended setting where the outsourced computation is a function,  <span class="math">F(u,w)</span> , of two inputs: the client's input  <span class="math">u</span>  and an auxiliary input  <span class="math">w</span>  from the worker. A VC scheme is zero-knowledge if the client learns nothing about the worker's input beyond the output of the computation. <span class="math">^1</span></p>
+
+    <p class="text-gray-300">Zero knowledge is relevant to practical scenarios where the worker's input is private. For example, to anonymously authenticate, the worker's input  <span class="math">w</span>  might be a signature from a third party; the client's input  <span class="math">u</span>  is the third party's public key, and the function  <span class="math">F(u, w)</span>  validates the signature. The client learns that the worker holds a valid credential, but learns nothing about the credential itself. Another potential application is for privately aggregating sensitive data, for example, in the</p>
+
+    <p class="text-gray-300">!<a href="img-1.jpeg">img-1.jpeg</a> Figure 2: Arithmetic Circuit and Equivalent QAP. Each wire value comes from, and all operations are performed over, a field  <span class="math">\\mathbb{F}</span> . The polynomials in the QAP are defined in terms of their evaluations at the two roots,  <span class="math">r_5</span>  and  <span class="math">r_6</span> . See text for details.</p>
+
+    <p class="text-gray-300">context of smart-meter billing [32], where individual meter readings should be private to the client, but the utility needs to authenticate the aggregate amount owed.</p>
+
+    <p class="text-gray-300">Gennaro, Gentry, Parno, and Raykova (GGPR) recently showed how to compactly encode computations as quadratic programs [30], so as to obtain efficient VC and zero-knowledge VC schemes. Specifically, they show how to convert any arithmetic circuit into a comparably sized Quadratic Arithmetic Program (QAP), and any Boolean circuit into a comparably sized Quadratic Span Program (QSP). We summarize these transformations.</p>
+
+    <p class="text-gray-300">Standard results show that polynomially-sized circuits are equivalent (up to a logarithmic factor) to Turing machines that run in polynomial time [33], though of course the actual efficiency of computing via circuits versus on native hardware depends heavily on the application (e.g., an arithmetic circuit for matrix multiplication adds essentially no overhead, whereas a Boolean circuit for integer multiplication is less efficient than executing a single 32-bit assembly instruction).</p>
+
+    <p class="text-gray-300">An arithmetic circuit consists of wires that carry values from a field  <span class="math">\\mathbb{F}</span>  and connect to addition and multiplication gates - see Figure 2 for an example. We define a QAP, an encoding of such a circuit, as follows.</p>
+
+    <p class="text-gray-300">A QAP  <span class="math">Q</span>  over field  <span class="math">\\mathbb{F}</span>  contains three sets of  <span class="math">m + 1</span>  polynomials  <span class="math">\\mathcal{V} = \\{\\nu_k(x)\\}</span> ,  <span class="math">\\mathcal{W} = \\{w_k(x)\\}, \\mathcal{Y} = \\{y_k(x)\\}</span> , for  <span class="math">k \\in \\{0 \\dots m\\}</span> , and a target polynomial  <span class="math">t(x)</span> . Suppose  <span class="math">F</span>  is a function that takes as input  <span class="math">n</span>  elements of  <span class="math">\\mathbb{F}</span>  and outputs  <span class="math">n&#x27;</span>  elements, for a total of  <span class="math">N = n + n&#x27;</span>  I/O elements. Then we say that  <span class="math">Q</span>  computes  <span class="math">F</span>  if:  <span class="math">(c_1, \\ldots, c_N) \\in \\mathbb{F}^N</span>  is a valid assignment of  <span class="math">F</span> 's inputs and outputs, if and only if there exist coefficients  <span class="math">(c_{N+1}, \\ldots, c_m)</span>  such that  <span class="math">t(x)</span>  divides  <span class="math">p(x)</span> , where:</p>
+
+    <div class="my-4 text-center"><span class="math-block">\\begin{array}{l} p (x) = \\left(\\nu_ {0} (x) + \\sum_ {k = 1} ^ {m} c _ {k} \\cdot \\nu_ {k} (x)\\right) \\cdot \\left(w _ {0} (x) + \\sum_ {k = 1} ^ {m} c _ {k} \\cdot w _ {k} (x)\\right) \\\\ - \\left(y _ {0} (x) + \\sum_ {k = 1} ^ {m} c _ {k} \\cdot y _ {k} (x)\\right). \\\\ \\end{array}</span></div>
+
+    <p class="text-gray-300">In other words, there must exist some polynomial  <span class="math">h(x)</span>  such that  <span class="math">h(x) \\cdot t(x) = p(x)</span> . The size of  <span class="math">Q</span>  is  <span class="math">m</span> , and the degree is the degree of  <span class="math">t(x)</span> .</p>
+
+    <p class="text-gray-300">Building a QAP  <span class="math">Q</span>  for an arithmetic circuit  <span class="math">C</span>  is fairly straightforward. We pick an arbitrary root  <span class="math">r_g \\in \\mathbb{F}</span>  for each multiplication gate  <span class="math">g</span>  in  <span class="math">C</span>  and define the target polynomial to be  <span class="math">t(x) = \\prod_{g} (x - r_g)</span> . We associate an index  <span class="math">k \\in [m] = \\{1 \\dots m\\}</span>  to each input of the circuit and to each output from a multiplication gate (the addition gates will be compressed into their contributions to the multiplication gates). Finally, we define the polynomials in  <span class="math">\\mathcal{V}</span> ,  <span class="math">\\mathcal{W}</span> , and  <span class="math">\\mathcal{Y}</span>  by letting the polynomials in  <span class="math">\\mathcal{V}</span>  encode the left input into each gate, the  <span class="math">\\mathcal{W}</span>  encode the right input into each gate, and the  <span class="math">\\mathcal{Y}</span>  encode the outputs. For example,  <span class="math">\\nu_k(r_g) = 1</span>  if the  <span class="math">k</span> -th wire is a left input to gate  <span class="math">g</span> , and  <span class="math">\\nu_k(r_g) = 0</span>  otherwise. Similarly,  <span class="math">y_k(r_g) = 1</span>  if the  <span class="math">k</span> -th wire is the output of gate  <span class="math">g</span> , and  <span class="math">y_k(r_g) = 0</span>  otherwise. Thus, if we consider a particular gate  <span class="math">g</span>  and its root  <span class="math">r_g</span> , Equation 1 simplifies to:  <span class="math">(\\sum_{k=1}^{m} c_k \\cdot \\nu_k(r_g)) \\cdot (\\sum_{k=1}^{m} c_k \\cdot w_k(r_g)) = (\\sum_{k \\in I_{left}} c_k) \\cdot (\\sum_{k \\in I_{right}} c_k) = c_g y_k(r_g) = c_g</span> , which just says that the output value of the gate is equal to the product of its inputs, the very definition of a multiplication gate.</p>
+
+    <p class="text-gray-300">In short, the divisibility check that  <span class="math">t(x)</span>  divides  <span class="math">p(x)</span>  decomposes into  <span class="math">\\deg(t(x))</span>  separate checks, one for each gate  <span class="math">g</span>  and root  <span class="math">r_g</span>  of  <span class="math">t(x)</span> , that  <span class="math">p(r_g) = 0</span> .</p>
+
+    <p class="text-gray-300">Taking the circuit in Figure 2 as a concrete example, we build the equivalent QAP as follows. First, we select two roots,  <span class="math">r_5, r_6 \\in \\mathbb{F}</span>  to represent the two multiplication gates. Hence the QAP's degree is 2. We define six polynomials for each set  <span class="math">\\mathcal{V}, \\mathcal{W}</span> , and  <span class="math">\\mathcal{Y}</span> , four for the input wires, and two for the outputs from the multiplication gates. Thus, the QAP's size is 6. We define these polynomials based on each wire's contributions to the multiplication gates. Specifically all of the  <span class="math">\\nu_k(r_5) = 0</span> , except  <span class="math">\\nu_3(r_5) = 1</span> , since the third input wire contributes to the left input of  <span class="math">c_5</span> 's multiplication gate. Similarly,  <span class="math">\\nu_k(r_6) = 0</span> , except for  <span class="math">\\nu_1(r_6) = \\nu_2(r_6) = 1</span> , since the first two inputs both contribute to the left input of  <span class="math">c_6</span> 's gate. For  <span class="math">\\mathcal{W}</span> , we look at right inputs. Finally,  <span class="math">\\mathcal{Y}</span>  represents outputs; none of the input wires is an output, so  <span class="math">y_k(r_5) = y_k(r_6) = 0</span>  for  <span class="math">k \\in \\{1, \\dots, 4\\}</span> , and  <span class="math">y_5(r_5) = y_6(r_6) = 1</span> .</p>
+
+    <p class="text-gray-300">Note the extreme sparsity of the polynomials in the example (in terms of evaluations of the polynomials). The VC protocol (§2.3) exploits this sparseness to achieve efficiency.</p>
+
+    <p class="text-gray-300">The actual construction [30] is a bit more complex, as it handles addition and multiplication by constants. Nonetheless, GGPR show that for any arithmetic circuit with  <span class="math">d</span>  multiplication gates and  <span class="math">N</span>  I/O elements, one can construct an equivalent QAP with degree (the number of roots  <span class="math">r_g</span> )  <span class="math">d</span>  and size (number of polynomials in each set)  <span class="math">d + N</span> . Note that addition gates and multiplication-by-constant gates do not contribute to the size or degree of the QAP. Thus, these gates are essentially "free" in QAP-based VC schemes.</p>
+
+    <p class="text-gray-300">Strong QAPs. In their QAP-based VC scheme, described below, GGPR unfortunately require a strong property from the QAP. Note that Definition 2 only considers the case where the</p>
+
+    <p class="text-gray-300">same set of coefficients <span class="math">c_{i}</span> are applied to all three sets of polynomials. GGPR additionally require the if-and-only-if condition in Definition 2 to hold even when different coefficients <span class="math">a_{i}</span>, <span class="math">b_{i}</span>, <span class="math">c_{i}</span> are applied – i.e., when <span class="math">p(x)=(\\sum_{k=1}^{m}c_{k}\\cdot v_{k}(x))\\cdot(\\sum_{k=1}^{m}b_{k}\\cdot w_{k}(x))-(\\sum_{k=1}^{m}a_{k}\\cdot y_{k}(x))</span>. They show how to convert any QAP into a <em>strong QAP</em> that satisfies this stronger condition. Unfortunately, this strengthening step increases the QAP’s degree to <span class="math">3d+2N</span>, more than <em>tripling</em> it. This in turn, more than triples the cost of key generation, the size of the evaluation key, and the worker’s effort to produce a proof.</p>
+
+    <h4 id="sec-9" class="text-lg font-semibold mt-6">2.2.2 Boolean Circuits and QSPs</h4>
+
+    <p class="text-gray-300">Boolean circuits operate over bits, with bitwise gates for AND, OR, XOR, etc. GGPR propose Quadratic Span Programs (QSPs) as a custom encoding for Boolean circuits <em>[30]</em>. QSPs are superficially similar to QAPs, but because they only support Boolean wire values, they use only two sets of polynomials <span class="math">\\mathcal{V}</span> and <span class="math">\\mathcal{W}</span>. The divisibility check is updated to consider <span class="math">p(x)=(v_{0}(x)+\\sum_{k=1}^{m}c_{k}\\cdot v_{k}(x))\\cdot(w_{0}(x)+\\sum_{k=1}^{m}c_{k}\\cdot w_{k}(x))</span>. Instead of the arithmetic circuit-based polynomial construction above, QSPs build a small set of polynomials for each Boolean gate. Specifically, each gate adds 9 roots and 12 polynomials to the overall QSP. Like QAPs, the QSPs require a strengthening step.</p>
+
+    <h3 id="sec-10" class="text-xl font-semibold mt-8">2.3 Building VC from Quadratic Programs</h3>
+
+    <p class="text-gray-300">To construct a VC protocol from a quadratic program, the main idea is that each polynomial – e.g., <span class="math">v_{k}(x)\\in\\mathbb{F}</span> – of the quadratic program is mapped to an element <span class="math">g^{v_{k}(s)}</span> in a bilinear group, where <span class="math">s</span> is a secret value selected by the client, <span class="math">g</span> is a generator of the group, and <span class="math">\\mathbb{F}</span> is the field of discrete logarithms of <span class="math">g</span>. These group elements are given to the worker. For a given input, the worker evaluates the circuit directly to obtain the output and the values of the internal circuit wires. These values correspond to the coefficients <span class="math">c_{i}</span> of the quadratic program. Thus, the VC worker can evaluate <span class="math">v(s)=\\sum_{k\\in[m]}c_{k}\\cdot v_{k}(s)</span> “in the exponent” to get <span class="math">g^{v(s)}</span>; it computes <span class="math">w(s)</span> and <span class="math">y(s)</span>, in the exponent, similarly. Finally, the worker computes <span class="math">h(x)=p(x)/t(x)=\\sum_{i=0}^{d}h_{i}\\cdot x^{i}</span>, and then uses the <span class="math">h_{i}</span>, along with <span class="math">g^{i^{\\prime}}</span> terms in the evaluation key, to compute <span class="math">g^{h(s)}</span>. To oversimplify, the proof consists of <span class="math">(g^{v(s)},g^{w(s)},g^{y(s)},g^{h(s)})</span>. The verifier uses the bilinear map to check that <span class="math">p(s)=h(s)t(s)</span>. The actual protocol (Protocol 1) is a bit more complex, because additional machinery is needed to ensure that the worker incorporates the client’s input <span class="math">u</span> correctly, and that the worker indeed generates (say) <span class="math">v(s)</span> in the exponent as some linear function of the <span class="math">v_{k}(s)</span> values.</p>
+
+    <h6 id="sec-11" class="text-base font-medium mt-4">Protocol 1 (Verifiable Computation from strong QAPs)</h6>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li><span class="math">(EK_{F},VK_{F})\\leftarrow\\textsf{KeyGen}(F,1^{L})</span>: Let <span class="math">F</span> be a function with <span class="math">N</span> input/output values from <span class="math">\\mathbb{F}</span>. Convert <span class="math">F</span> into an arithmetic circuit <span class="math">C</span>; then build the corresponding QAP <span class="math">Q=(t(x),\\mathcal{V},\\mathcal{W},\\mathcal{Y})</span> of size <span class="math">m</span> and degree <span class="math">d</span>. Let <span class="math">I_{mid}=\\{N+1,...,m\\}</span>, i.e., the non-IO-related indices. Let <span class="math">e</span> be a non-trivial bilinear map <em>[34]</em> <span class="math">e:G\\times G\\rightarrow G_{T}</span>, and let <span class="math">g</span> be a generator of <span class="math">G</span>.</li>
+
+    </ul>
+
+    <p class="text-gray-300">Choose <span class="math">s,\\alpha,\\beta_{v},\\beta_{w},\\beta_{y},\\gamma\\stackrel{{\\scriptstyle B}}{{\\leftarrow}}\\mathbb{F}</span>.</p>
+
+    <p class="text-gray-300">Construct the public evaluation key <span class="math">EK_{F}</span> as:</p>
+
+    <p class="text-gray-300">\\[ \\begin{array}[]{lll}(\\&g^{v_{k}(s)}\\}_{k\\in I_{mid}},&\\{g^{w_{k}(s)}\\}_{k\\in[m],}&\\{g^{y_{k}(s)}\\}_{k\\in[m]},\\\\[5.69054pt] &\\{g^{\\alpha v_{k}(s)}\\}_{k\\in I_{mid}},&\\{g^{\\alpha w_{k}(s)}\\}_{k\\in[m],}&\\{g^{\\alpha y_{k}(s)}\\}_{k\\in[m]},\\\\[5.69054pt] &\\{g^{\\beta_{v}v_{k}(s)}\\}_{k\\in I_{mid}},&\\{g^{\\beta_{w}w_{k}(s)}\\}_{k\\in[m]},&\\{g^{\\beta_{y}y_{k}(s)}\\}_{k\\in[m]}\\\\[5.69054pt] &\\{g^{x^{i}}\\}_{i\\in[d]},&\\{g^{\\alpha y^{i}}\\}_{i\\in[d]}\\end{array} \\]).</p>
+
+    <p class="text-gray-300">The public verification key is: <span class="math">VK_{F}=(g^{1},</span> <span class="math">g^{\\alpha},</span> <span class="math">g^{\\gamma},</span> <span class="math">g^{\\beta_{x}\\gamma},</span> <span class="math">g^{\\beta_{w}\\gamma},</span> <span class="math">g^{\\beta_{y}\\gamma},</span> <span class="math">g^{t(s)},</span> <span class="math">\\{g^{v_{k}(s)}\\}_{k\\in[N]},</span> <span class="math">g^{v_{0}(s)},</span> <span class="math">g^{w_{0}(s)},</span> <span class="math">g^{y_{0}(s)})</span>.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li><span class="math">(y,\\pi_{y})\\leftarrow\\textsf{Compute}(EK_{F},u)</span>: On input <span class="math">u</span>, the worker evaluates the circuit for <span class="math">F</span> to obtain <span class="math">y\\leftarrow F(u)</span>. As a result of the evaluation, he knows the values <span class="math">\\{c_{i}\\}_{i\\in[m]}</span> of the circuit’s wires.</li>
+
+    </ul>
+
+    <p class="text-gray-300">He solves for <span class="math">h(x)</span> (the polynomial such that <span class="math">p(x)=h(x)\\cdot t(x)</span>), and computes the proof <span class="math">\\pi_{y}</span> as:</p>
+
+    <p class="text-gray-300">\\[ \\begin{array}[]{lll}(\\&g^{v_{mid}(s)},&g^{w(s)},&g^{y(s)},&g^{h(s)},\\\\[5.69054pt] &g^{\\alpha v_{mid}(s)},&g^{\\alpha w(s)},&g^{\\alpha y(s)},&g^{\\alpha h(s)},\\\\[5.69054pt] &g^{\\beta_{x}v(s)+\\beta_{w}w(s)+\\beta_{y}y(s)}\\end{array} \\]),</p>
+
+    <p class="text-gray-300">where <span class="math">v_{mid}(x)=\\sum_{k\\in I_{mid}}c_{k}\\cdot v_{k}(x)</span>, <span class="math">v(x)=\\sum_{k\\in[m]}c_{k}\\cdot v_{k}(x)</span>, <span class="math">w(x)=\\sum_{k\\in[m]}c_{k}\\cdot w_{k}(x)</span>, and <span class="math">y(x)=\\sum_{k\\in[m]}c_{k}\\cdot y_{k}(x)</span>. Since these are linear equations, he can compute them “in the exponent” using the material in the evaluation key, e.g., <span class="math">g^{v(s)}=g^{v_{0}(s)}\\cdot\\prod_{k\\in[m]}\\left(g^{v_{k}(s)}\\right)^{c_{k}}</span>.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li><span class="math">\\{0,1\\}\\leftarrow\\textsf{Verify}(VK_{F},u,y,\\pi_{y})</span>: To verify a proof, anyone with access to the verification key <span class="math">VK_{F}</span> can use the pairing function <span class="math">e</span> to check that the <span class="math">\\alpha</span> and <span class="math">\\beta</span> proof terms are correct (e.g., check that <span class="math">e(g^{v_{mid}(s)},g^{\\alpha})=e(g^{\\alpha v_{mid}(s)},g)</span>). This requires 8 pairings for the <span class="math">\\alpha</span> terms, and 3 for the <span class="math">\\beta</span> term.</li>
+
+    </ul>
+
+    <p class="text-gray-300">Finally, the verifier can compute a term representing the I/O, <span class="math">u</span> and <span class="math">y</span>, by representing them as coefficients <span class="math">c_{1},\\ldots,c_{N}\\in\\mathbb{F}</span> and computing, using elements from <span class="math">VK_{F}</span>, <span class="math">g^{v_{io}(s)}=\\prod_{k\\in[N]}\\left(g^{v_{k}(s)}\\right)^{c_{k}}</span>.</p>
+
+    <p class="text-gray-300">A final check (with 3 pairings) verifies the divisibility requirement, i.e., that <span class="math">e(g^{v_{0}(s)}\\cdot g^{v_{io}}\\cdot g^{v(s)},g^{w_{0}(s)}\\cdot g^{w(s)})/e(g^{y_{0}(s)}\\cdot g^{y(s)},g)=e(g^{h(s)},g^{t(s)})</span>.</p>
+
+    <p class="text-gray-300">In a designated verifier setting (where the verifier knows <span class="math">s</span>, <span class="math">\\alpha</span>, etc.), pairings are only needed for this last check, and the I/O term can be computed directly over <span class="math">\\mathbb{F}</span>, rather than “in the exponent”.</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Regarding efficiency, GGPR <em>[30]</em> show that the one-time setup of <span class="math">\\textsf{KeyGen}</span> runs in time linear in the original circuit size, $O(</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">C</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">)<span class="math">. The worker performs </span>O(</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">C</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">)<span class="math"> cryptographic work, but he must also perform </span>O(</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">C</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\log^{2}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">C</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">)<span class="math"> non-cryptographic work to calculate </span>h(x)<span class="math">. To achieve this performance, the worker exploits the fact that the evaluation vectors </span>(v_{k}(r_{1}),\\ldots,v_{k}(r_{d}))<span class="math"> are all very sparse (also for the </span>w<span class="math"> and </span>y<span class="math"> polynomials). The proof itself is constant size, with only 7 group elements for QSPs and 9 for QAPs, though the verifier’s work is still linear, </span>O(N)$, in the size of the inputs and outputs of the function.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">In terms of security, GGPR <em>[30]</em> show this VC scheme is sound under the <span class="math">d</span>-PKE and <span class="math">q</span>-PDH assumptions (see Appendix A), which are weak versions of assumptions in prior work <em>[21, 35, 36]</em>. The <span class="math">q</span>-PDH assumption belongs to a class</p>
+
+    <p class="text-gray-300">of cryptographic assumptions that do not lend themselves to efficient falsification [37], though some members have indeed been proven false [38]. Gentry and Wichs recently showed that assumptions from this class are likely to be inherent for efficient, non-interactive arguments for NP relations [39].</p>
+
+    <p class="text-gray-300">Zero Knowledge. Making the VC scheme zero-knowledge is remarkably simple. One simply includes the target polynomial  <span class="math">t(x)</span>  itself in the polynomial sets  <span class="math">\\mathcal{V}</span> ,  <span class="math">\\mathcal{W}</span> , and  <span class="math">\\mathcal{Y}</span> . This allows the worker to "randomize" its proof by adding  <span class="math">\\delta_{\\nu}t(s)</span>  in the exponent to  <span class="math">\\nu_{mid}(s)</span> ,  <span class="math">\\delta_{w}t(s)</span>  to  <span class="math">w(s)</span> , and  <span class="math">\\delta_{y}t(s)</span>  to  <span class="math">y(s)</span>  for random  <span class="math">\\delta_{\\nu}, \\delta_{w}, \\delta_{y}</span> , and modifying the other elements of the proof accordingly. The modified value of  <span class="math">p(x)</span>  remains divisible by  <span class="math">t(x)</span> , but the randomization makes the scheme statistically zero-knowledge [30].</p>
+
+    <p class="text-gray-300">In this section, we improve Protocol 1 to significantly reduce key generation time, evaluation key size, and worker effort. We analyze our improvements empirically in §5.4.</p>
+
+    <p class="text-gray-300">Our main optimization is that we construct a VC scheme that uses a regular QAP (as in Definition 2), rather than a strong QAP. Recall that GGPR show how to transform a regular QAP into a strong QAP, but the transformation more than triples the degree of the QAP. Consequently, when they plug their strong QAP into their VC construction, the strengthening step more than triples the key generation time, evaluation key size, and worker computation. We take a different approach that uses a regular QAP, and hence we do not need a strengthening step at all. Instead, we embed additional structure into our new VC proof that ensures that the worker uses the same linear combination to construct the  <span class="math">\\nu</span> ,  <span class="math">w</span> , and  <span class="math">y</span>  terms of its proof. Surprisingly, this additional structure comes at no cost, and our VC scheme is actually less complicated than GGPR's! For example, we manage to shave the proof down from nine group elements to eight. Experiments (§5.4) show that these improvements indeed give substantial savings.</p>
+
+    <p class="text-gray-300">We also remove the need for the worker to compute  <span class="math">g^{\\alpha h(s)}</span> , and hence the  <span class="math">g_{i\\in [d]}^{\\alpha y^i}</span>  terms from  <span class="math">EK</span> . Finally, we expand the expressivity and efficiency of the functions QAPs can compute by designing a number of custom circuit gates for specialized functions.</p>
+
+    <p class="text-gray-300">Next we describe our more efficient VC scheme, with some remarks afterwards on some its properties.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li><span class="math">(EK_{F}, VK_{F}) \\gets \\text{KeyGen}(F, 1^{\\lambda})</span> : Let  <span class="math">F</span>  be a function with  <span class="math">N</span>  input/output values from  <span class="math">\\mathbb{F}</span> . Convert  <span class="math">F</span>  into an arithmetic circuit  <span class="math">C</span> ; then build the corresponding</li>
+
+    </ul>
+
+    <p class="text-gray-300"><span class="math">QAP</span> <span class="math">Q = (t(x),\\mathcal{V},\\mathcal{W},\\mathcal{Y})</span>  of size  <span class="math">m</span>  and degree  <span class="math">d</span> . Let  <span class="math">I_{mid} = \\{N + 1,\\dots,m\\}</span> , i.e., the non-IO-related indices.</p>
+
+    <p class="text-gray-300">Let  <span class="math">e</span>  be a non-trivial bilinear map [34]  <span class="math">e:\\mathbb{G}\\times \\mathbb{G}\\to \\mathbb{G}_T</span>  and let  <span class="math">g</span>  be a generator of  <span class="math">G</span> .</p>
+
+    <p class="text-gray-300">Choose  <span class="math">r_v, r_w, s, \\alpha_v, \\alpha_w, \\alpha_y, \\beta, \\gamma \\stackrel{p}{\\leftarrow} \\mathbb{F}</span>  and set  <span class="math">r_y = r_v \\cdot r_w</span> ,  <span class="math">g_v = g^{r_v}</span> ,  <span class="math">g_w = g^{r_w}</span>  and  <span class="math">g_y = g^{r_y}</span> .</p>
+
+    <p class="text-gray-300">Construct the public evaluation key  <span class="math">EK_{F}</span>  as:</p>
+
+    <p class="text-gray-300"><span class="math">\\begin{array}{rl} &amp;amp; {\\left\\{g_{v}^{v_{k}(s)}\\right\\}_{k\\in I_{mid}},\\qquad \\left\\{g_{w}^{w_{k}(s)}\\right\\}_{k\\in I_{mid}},\\qquad \\left\\{g_{y}^{v_{k}(s)}\\right\\}_{k\\in I_{mid}},\\\\ &amp;amp; {\\left\\{g_{v}^{v_{k}(s)}\\right\\}_{k\\in I_{mid}},\\qquad \\left\\{g_{w}^{w_{k}(s)}\\right\\}_{k\\in I_{mid}},\\qquad \\left\\{g_{y}^{v_{k}(s)}\\right\\}_{k\\in I_{mid}},\\\\ &amp;amp; {\\left\\{g^{y^{\\prime}}\\right\\}_{i\\in [d]},\\qquad \\left\\{g_{v}^{\\beta v_{k}(s)}g_{w}^{\\beta v_{k}(s)}g_{y}^{\\beta v_{k}(s)}\\right\\}_{k\\in I_{mid}}\\end{array}</span>  ),$</p>
+
+    <p class="text-gray-300">and the public verification key as:  <span class="math">VK_{F} = (g^{1}, g^{\\alpha_{v}}, g^{\\alpha_{w}}, g^{\\alpha_{v}}, g^{\\gamma}, g^{\\beta_{\\gamma}}, g^{t(s)}, \\{g_{v}^{v_{k}(s)}, g_{w}^{w_{k}(s)}, g_{y}^{v_{k}(s)}\\}_{k \\in \\{0\\} \\cup [N]}</span> .</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li><span class="math">(y, \\pi_y) \\gets \\text{Compute}(EK_F, u)</span> : On input  <span class="math">u</span> , the worker evaluates the circuit for  <span class="math">F</span>  to obtain  <span class="math">y \\gets F(u)</span> ; he also learns the values  <span class="math">\\{c_i\\}_{i \\in [m]}</span>  of the circuit's wires.</li>
+
+    </ul>
+
+    <p class="text-gray-300">He solves for  <span class="math">h(x)</span>  (the polynomial such that  <span class="math">p(x) = h(x) \\cdot t(x)</span> ), and computes the proof  <span class="math">\\pi_y</span>  as:</p>
+
+    <p class="text-gray-300"><span class="math">\\begin{array}{rl} &amp;amp; {(g_{v}^{v_{mid}(s)},\\qquad g_{w}^{w_{mid}(s)},\\qquad g_{y}^{v_{mid}(s)},\\qquad g^{h(s)},}\\\\ &amp;amp; {\\qquad g_{v}^{v_{mid}(s)},\\qquad g_{w}^{v_{mid}(s)},\\qquad g_{y}^{v_{mid}(s)}}\\\\ &amp;amp; {\\qquad g_{v}^{\\beta v_{mid}(s)}g_{w}^{\\beta v_{mid}(s)}g_{y}^{\\beta v_{mid}(s)}}\\end{array}</span>  ,</p>
+
+    <p class="text-gray-300">where  <span class="math">v_{mid}(x) = \\sum_{k \\in I_{mid}} c_k \\cdot v_k(x)</span> , and similarly for  <span class="math">w_{mid}(s)</span>  and  <span class="math">y_{mid}(s)</span> .</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li><span class="math">\\{0,1\\} \\gets \\text{Verify}(VK_F,u,y,\\pi_y)</span> : The verification of an alleged proof with elements  <span class="math">g^{V_{mid}}</span> ,  <span class="math">g^{W_{mid}}</span> ,  <span class="math">g^{Y_{mid}}</span> ,  <span class="math">g^H</span> ,  <span class="math">g^{V_{mid}&#x27;}</span> ,  <span class="math">g^{W_{mid}&#x27;}</span> ,  <span class="math">g^{Y_{mid}&#x27;}</span> , and  <span class="math">g^Z</span>  uses the public verification key  <span class="math">VK_F</span>  and the pairing function  <span class="math">e</span>  for the following checks.</li>
+
+    </ul>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Divisibility check for the QAP: using elements from  <span class="math">VK_{F}</span>  compute  <span class="math">g_{v}^{v_{in}(s)} = \\prod_{k\\in [N]}\\left(g_{v}^{v_{k}(s)}\\right)^{c_{k}}</span>  (and similarly for  <span class="math">g_{w}^{w_{in}(s)}</span>  and  <span class="math">g_{y}^{v_{in}(s)}</span> ), and check:</li>
+
+    </ul>
+
+    <div class="my-4 text-center"><span class="math-block">e \\left(g _ {v} ^ {v _ {0} (s)} g _ {v} ^ {v _ {i n} (s)} g _ {v} ^ {V _ {m i d}}, g _ {w} ^ {w _ {0} (s)}, g _ {w} ^ {w _ {i n} (s)} g _ {w} ^ {W _ {m i d}}\\right) = \\tag {1}</span></div>
+
+    <div class="my-4 text-center"><span class="math-block">e \\left(g _ {y} ^ {t (s)}, g ^ {H}\\right) e \\left(g _ {y} ^ {v _ {0} (s)} g _ {y} ^ {v _ {i n} (s)} g _ {y} ^ {Y _ {m i d}}, g\\right). \\tag {2}</span></div>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Check that the linear combinations computed over  <span class="math">\\mathcal{V}</span> ,  <span class="math">\\mathcal{W}</span>  and  <span class="math">\\mathcal{Y}</span>  are in their appropriate spans:</li>
+
+    </ul>
+
+    <div class="my-4 text-center"><span class="math-block">e \\left(g _ {v} ^ {V _ {m i d} ^ {\\prime}}, g\\right) = e \\left(g _ {v} ^ {V _ {m i d}}, g ^ {\\alpha_ {v}}\\right), \\quad e \\left(g _ {w} ^ {W _ {m i d} ^ {\\prime}}, g\\right) = e \\left(g _ {w} ^ {W _ {m i d}}, g ^ {\\alpha_ {w}}\\right),</span></div>
+
+    <div class="my-4 text-center"><span class="math-block">e \\left(g _ {y} ^ {Y _ {m i d} ^ {\\prime}}, g\\right) = e \\left(g _ {y} ^ {Y _ {m i d}}, g ^ {\\alpha_ {y}}\\right).</span></div>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Check that the same coefficients were used in each of the linear combinations over  <span class="math">\\mathcal{V}</span> ,  <span class="math">\\mathcal{W}</span>  and  <span class="math">\\mathcal{Y}</span> :</li>
+
+    </ul>
+
+    <div class="my-4 text-center"><span class="math-block">e \\left(g ^ {Z}, g ^ {\\gamma}\\right) = e \\left(g _ {v} ^ {V _ {m i d}} g _ {w} ^ {W _ {m i d}} g _ {y} ^ {Y _ {m i d}}, g ^ {\\beta \\gamma}\\right).</span></div>
+
+    <p class="text-gray-300">The correctness of the VC scheme follows from the properties of the QAP. Regarding security, we have the following:</p>
+
+    <p class="text-gray-300">Theorem 1 Let  <span class="math">d</span>  be an upper bound on the degree of the QAP used in the VC scheme, and let  <span class="math">q = 4d + 4</span> . The VC scheme is sound under the  <span class="math">d</span> -PKE,  <span class="math">q</span> -PDH and  <span class="math">2q</span> -SDH assumptions (see Appendix A).</p>
+
+    <p class="text-gray-300">The proof of Theorem 1 is in Appendix B.</p>
+
+    <p class="text-gray-300">Security Intuition. As intuition for why the VC scheme is sound, note that it seems hard for an adversary who does not know <span class="math">\\alpha</span> to construct <em>any</em> pair of group elements <span class="math">h,h^{\\alpha}</span> <em>except</em> in the obvious way: by taking pairs <span class="math">(g_{1},g_{1}^{\\alpha}),(g_{2},g_{2}^{\\alpha}),\\ldots</span> that he is given, and applying the same linear combination (in the exponent) to the left and right elements of the pairs. This hardness is formalized in the <span class="math">d</span>-PKE assumption, a sort of “knowledge-of-exponent” assumption <em>[40]</em>, that says that the adversary must “know” such a linear combination, in the sense that this linear combination can be extracted from him. Roughly, this means that, in the security proof, we can extract polynomials <span class="math">V_{mid}(x)</span>, <span class="math">W_{mid}(x)</span>, <span class="math">Y_{mid}(x)</span> such that <span class="math">V_{mid}</span> (from the proof) equals <span class="math">V_{mid}(s)</span>, <span class="math">W_{mid}=W_{mid}(s)</span> and <span class="math">Y_{mid}=Y_{mid}(s)</span>, and that moreover these polynomials are in the linear spans of the <span class="math">v_{k}(x)</span>’s, <span class="math">w_{k}(x)</span>’s, and <span class="math">y_{k}(x)</span>’s respectively. If the adversary manages to provide a proof of a false statement that verifies, then these polynomials must not actually correspond to a QAP solution. So, either <span class="math">p(x)</span> is not actually divisible by <span class="math">t(x)</span> (in this case we break <span class="math">2q</span>-SDH) or <span class="math">V(x)=v_{io}(x)+V_{mid}(x)</span>, <span class="math">W(x)</span> and <span class="math">Y(x)</span> do not use the same linear combination (in this case we break <span class="math">q</span>-PDH because in the proof we choose <span class="math">\\beta</span> in a clever way).</p>
+
+    <p class="text-gray-300">Zero Knowledge. We can apply GGPR’s rerandomization technique <em>[30]</em> (§2.3) to provide zero-knowledge for our new verifiable computation construction. The worker chooses <span class="math">\\delta_{v},\\delta_{w},\\delta_{y}\\overset{p}{\\leftarrow}\\mathbb{F}</span> and in his proof, instead of the polynomials <span class="math">v_{mid}(x)</span>, <span class="math">v(x)</span>, <span class="math">w(x)</span> and <span class="math">y(x)</span>, he uses the following randomized versions <span class="math">v_{mid}(x)+\\delta_{v}t(x)</span>, <span class="math">v(x)+\\delta_{v}t(x)</span>, <span class="math">w(x)+\\delta_{w}t(x)</span> and <span class="math">y(x)+\\delta_{y}t(x)</span>. In order to facilitate the randomization of the proof we add the following terms to the evaluation key: <span class="math">g_{v}^{\\alpha_{v}t(s)},\\underset{w}{\\alpha_{v}t(s)},\\underset{y}{\\alpha_{v}t(s)},\\underset{y}{\\alpha_{v}t(s)},\\underset{v}{\\beta_{t}(s)},\\underset{w}{\\beta_{t}(s)},\\underset{y}{\\beta_{t}(s)}</span>.</p>
+
+    <p class="text-gray-300">Performance. Our main improvement is that our VC scheme only requires a regular QAP, rather than a strong QAP, which improves performance by more than a factor of 3. Moreover, the scheme itself is simpler, leading to fewer group elements in the keys and proof, fewer bilinear maps for Verify, etc.</p>
+
+    <p class="text-gray-300">The scheme above assumes a symmetric bilinear map. In practice, for performance reasons, we use an asymmetric bilinear map <span class="math">e:\\mathbb{G}_{1}\\times\\mathbb{G}_{2}\\to\\mathbb{G}_{T}</span> where <span class="math">\\mathbb{G}_{1}</span> is an elliptic curve group called the “base” curve, and <span class="math">\\mathbb{G}_{2}</span> is the “twist” curve. Operations over the base curve are about 3 times faster than over the twist curve (§5.1). Due to our optimizations, while the worker must compute the <span class="math">g_{w}^{w(s)}</span> term over the twist curve, all of the other proof terms can be over the base curve.</p>
+
+    <h3 id="sec-15" class="text-xl font-semibold mt-8">3.2 Expressive Circuit Constructions</h3>
+
+    <p class="text-gray-300">The QAP that we use in our VC scheme is defined over <span class="math">\\mathbb{F}_{p}</span>, where <span class="math">p</span> is a large prime. We can, as explained above, derive a QAP over <span class="math">\\mathbb{F}_{p}</span> that efficiently computes any function <span class="math">F</span> that can be expressed in terms of addition and multiplication modulo <span class="math">p</span>. This provides no obvious way to express some operations, such as <span class="math">a\\geq b</span> using mod-<span class="math">p</span> arithmetic. On the other hand, given <span class="math">a</span> and <span class="math">b</span> as bits, comparison is easy. Hence, one might infer that Boolean circuits are more general and thus QSPs superior to QAPs.</p>
+
+    <p class="text-gray-300">However, we design an arithmetic <em>split gate</em> to translate an arithmetic wire <span class="math">a\\in\\mathbb{F}_{p}</span>, known to be in <span class="math">[0,2^{k}-1]</span>, into <span class="math">k</span> binary output wires. Given such binary values, we can compute Boolean functions using arithmetic gates: <span class="math">\\mathrm{NAND}(a,b)=1-ab,\\mathrm{AND}(a,b)=ab,\\mathrm{OR}(a,b)=1-(1-a)(1-b)</span>. Each embedded Boolean gate costs only one multiply.</p>
+
+    <p class="text-gray-300">Surprisingly, even though QSPs are “designed for” Boolean circuits, the arithmetic embedding gives a more efficient VC scheme. With a QSP, each gate increases the degree of <span class="math">t(x)</span> by 9 and the QSP size by 12. Embedding introduces an expensive initial gate that constrains each input to <span class="math">\\{0,1\\}</span>, but henceforth, each embedded gate preserves the <span class="math">\\{0,1\\}</span> invariant, adding only 1 to the degree and size of the QAP.</p>
+
+    <p class="text-gray-300">Furthermore, the expression <span class="math">\\sum_{i=1}^{k}2^{i-1}a_{i}</span> combines a bitwise representation of <span class="math">a</span> back into a single wire. Because the sum consists of additions and multiplications by constants, recombination is free; it doesn’t increase the size of the QAP.</p>
+
+    <p class="text-gray-300">Below, we define <em>split</em> and other useful new gates as standalone QAPs which can be composed <em>[30, Thm.11]</em> with other gates.</p>
+
+    <p class="text-gray-300">Split Gate. Given input <span class="math">a\\in\\mathbb{F}_{p}</span> known to be in <span class="math">[0,2^{k}-1]</span>, the split gate outputs <span class="math">k</span> wires holding the binary digits <span class="math">a_{1},\\ldots,a_{k}</span> of <span class="math">a</span>. Thus, the QAP ensures that <span class="math">\\sum_{i=1}^{k}2^{i-1}a_{i}=a</span>, and that each <span class="math">a_{i}</span> is either 0 or 1. For convenience, we number the output wires <span class="math">1,\\ldots,k</span> and the input wire <span class="math">k+1</span>.</p>
+
+    <p class="text-gray-300">In our mini-QAP, let <span class="math">t(x)=(x-r)\\prod_{i=1}^{k}(x-r_{i})</span> where <span class="math">r,r_{1},\\ldots,r_{k}</span> are distinct roots. We set:</p>
+
+    <p class="text-gray-300"><span class="math">v_{0}(r)=0,\\quad v_{i}(r)=2^{i-1}\\quad\\text{for }1\\leq i\\leq k,\\ \\ v_{k+1}(r)=0,</span> <span class="math">w_{0}(r)=1,\\ \\ w_{i}(r)=0\\qquad\\text{for }1\\leq i\\leq k,\\ \\ w_{k+1}(r)=0,</span> <span class="math">y_{0}(r)=0,\\quad y_{i}(r)=0\\qquad\\text{for }1\\leq i\\leq k,\\ \\ y_{k+1}(r)=1;</span> For <span class="math">1\\leq j\\leq k</span>: <span class="math">v_{j}(r_{j})=1</span>, <span class="math">v_{i}(r_{j})=0</span> for all <span class="math">i\\neq j</span>, <span class="math">w_{0}(r_{j})=1</span>, <span class="math">w_{j}(r_{j})=-1</span>, <span class="math">w_{i}(r_{j})=0</span> for all <span class="math">i\\neq 0,j</span>, and <span class="math">y_{i}(r_{j})=0</span> for all <span class="math">i</span>.</p>
+
+    <p class="text-gray-300">If <span class="math">(v_{0}(x)+\\sum_{k=1}^{m}a_{k}\\cdot v_{k}(x))\\cdot(w_{0}(x)+\\sum_{k=1}^{m}a_{k}\\cdot w_{k}(x))-(y_{0}(x)+\\sum_{k=1}^{m}a_{k}\\cdot y_{k}(x))</span> is divisible by <span class="math">t(x)</span>, it must evaluate to 0 at <span class="math">r</span>, and therefore the first set of equations guarantee that <span class="math">\\sum_{i=1}^{k}2^{i-1}a_{i}-a=0</span>. This guarantees that if all <span class="math">a_{1},\\ldots,a_{k}</span> are binary, then they are the binary digits of <span class="math">a</span>. The second set of equations guarantees that each <span class="math">a_{i}</span> is either 0 or 1. In particular, for each <span class="math">1\\leq j\\leq k</span>, the above polynomial evaluates to 0 at <span class="math">r_{j}</span> if and only if <span class="math">a_{j}\\cdot(1-a_{j})=0</span>.</p>
+
+    <p class="text-gray-300">Equality-Assertion Gate. For some computations, we require the value on two circuit wires to be equal. For example, in many signature schemes, the verification function checks for equality between two values. Thus when we use signature verification as part of a larger computation, we want to guarantee that the computation succeeds only if the verification is successful.</p>
+
+    <p class="text-gray-300">For such cases, we augment the QAP such that it forces two wires, <span class="math">i_{1}</span> and <span class="math">i_{2}</span>, to have the same value. Let <span class="math">T(x)</span>,</p>
+
+    <p class="text-gray-300"><span class="math">\\{V_{i}(x)\\}_{i=1}^{k+1}</span>, <span class="math">\\{W_{i}(x)\\}_{i=1}^{k+1}</span>, <span class="math">\\{Y_{i}(x)\\}_{i=1}^{k+1}</span> be the polynomials from the construction of the initial QAP.</p>
+
+    <p class="text-gray-300">We construct an augmented QAP with polynomials <span class="math">t(x)</span>, <span class="math">\\{v_{i}(x)\\}_{i=1}^{k+1}</span>, <span class="math">\\{w_{i}(x)\\}_{i=1}^{k+1}</span>, <span class="math">\\{y_{i}(x)\\}_{i=1}^{k+1}</span> defined as follows. Set <span class="math">t(x)=T(x)(x-r)</span> where <span class="math">r</span> is different from the roots of <span class="math">T(x)</span>. For the rest of the polynomials we have:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Modulo <span class="math">T(x)</span>, the following hold for all <span class="math">0\\leq j\\leq k+1</span>:</li>
+
+    </ul>
+
+    <p class="text-gray-300"><span class="math">v_{j}(x)=V_{j}(x)</span>, <span class="math">w_{j}(x)=W_{j}(x)</span>, and <span class="math">y_{j}(x)=Y_{j}(x)</span>.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li><span class="math">v_{i_{1}}(r)=1</span>, <span class="math">v_{i_{2}}(r)=-1</span> , <span class="math">v_{j}(r)=0</span> for <span class="math">j\\neq i_{1},i_{2}</span>,</li>
+
+    </ul>
+
+    <p class="text-gray-300"><span class="math">w_{0}(r)=1</span>, <span class="math">w_{j}(r)=0</span> for all <span class="math">1\\leq j\\leq k+1</span>,</p>
+
+    <p class="text-gray-300"><span class="math">y_{j}(r)=0</span> for all <span class="math">0\\leq j\\leq k+1</span>.</p>
+
+    <p class="text-gray-300">By the first set of equations, our new QAP inherits all of the constraints of the initial QAP. The second set of equations ensures that the divisibility holds if and only if the values on wires <span class="math">i_{1}</span> and <span class="math">i_{2}</span> are equal.</p>
+
+    <p class="text-gray-300">Zero-Equality Gate. Another useful type of comparison functionality is checking whether a value is equal to zero, e.g., <span class="math">\\mathbf{Y}=(\\mathbf{X!}=\\mathbf{0})\\mathbf{?}\\mathbf{1}:\\mathbf{0}</span>. We use a prior observation <em>[28]</em> that this is equivalent to satisfying the following two constraints: <span class="math">X\\cdot M-Y=0</span> and <span class="math">(1-Y)\\cdot X=0</span> for some value <span class="math">M</span>. We construct the following QAP, which takes as input wire <span class="math">X</span> (an input from the client) and a wire <span class="math">M</span>, an input from the worker. The output wire will be <span class="math">Y</span>. For distinct roots <span class="math">r_{1},r_{2}</span>, the mini-QAP has a target polynomial <span class="math">t(x)=(x-r_{1})(x-r_{2})</span>, and the rest of the polynomials are defined as follows:</p>
+
+    <p class="text-gray-300"><span class="math">v_{0}(r_{1})=0,\\quad v_{1}(r_{1})=1,\\quad v_{2}(r_{1})=0,\\quad v_{3}(r_{1})=0;</span></p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li><span class="math">w_{0}(r_{1})=0,\\quad w_{1}(r_{1})=0,\\quad w_{2}(r_{1})=1,\\quad w_{3}(r_{1})=0</span>;</li>
+
+    </ul>
+
+    <p class="text-gray-300"><span class="math">y_{0}(r_{1})=0,\\quad y_{1}(r_{1})=0,\\quad y_{2}(r_{1})=0,\\quad y_{3}(r_{1})=1</span>;</p>
+
+    <p class="text-gray-300"><span class="math">v_{0}(r_{2})=1,\\quad v_{1}(r_{2})=0,\\quad v_{2}(r_{2})=0,\\quad v_{3}(r_{2})=-1</span>;</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li><span class="math">w_{0}(r_{2})=0,\\quad w_{1}(r_{2})=1,\\quad w_{2}(r_{2})=0,\\quad w_{3}(r_{2})=0</span>;</li>
+
+    </ul>
+
+    <p class="text-gray-300"><span class="math">y_{0}(r_{2})=0,\\quad y_{1}(r_{2})=0,\\quad y_{2}(r_{2})=0,\\quad y_{3}(r_{2})=0</span>.</p>
+
+    <p class="text-gray-300">The value <span class="math">X</span> will be applied to be polynomials with subscript <span class="math">1</span>, <span class="math">M</span> to subscript <span class="math">2</span>, and <span class="math">Y</span> to subscript <span class="math">3</span>. The first set of equations provides that if <span class="math">t(x)</span> divides <span class="math">(v_{0}(x)+\\sum_{k=1}^{m}a_{k}\\cdot v_{k}(x))\\cdot(w_{0}(x)+\\sum_{k=1}^{m}a_{k}\\cdot w_{k}(x))-(y_{0}(x)+\\sum_{k=1}^{m}a_{k}\\cdot y_{k}(x))</span>, then <span class="math">X\\cdot M-Y=0</span>, and the second set of equations guarantees that <span class="math">(1-Y)\\cdot X=0</span>.</p>
+
+    <h2 id="sec-16" class="text-2xl font-bold">4 Implementation</h2>
+
+    <p class="text-gray-300">We implemented a compiler that takes a subset of C to an equivalent arithmetic circuit (§4.1). Our verifiable computation suite then compiles the circuit representation to the equivalent QAP, and generates code to run the VC protocol, including key generation, proof computation, and proof verification (§4.2). The toolchain compiles a large collection of applications and runs them with verification (§4.3). Source code for the toolchain is available <em>[41]</em>.</p>
+
+    <h3 id="sec-17" class="text-xl font-semibold mt-8">4.1 Compiler Toolchain</h3>
+
+    <p class="text-gray-300">The applications described below (§4.3) and evaluated in §5 are each compiled using qcc, our C-to-arithmetic-expression compiler, a 3,525-line Python program <em>[42]</em>. They are also compiled with gcc to produce the Native timings in Figures 7 and 8. A unit test validates that the gcc and 32-bit qcc executables produce matching output on varying inputs.</p>
+
+    <p class="text-gray-300">⬇ int mat[SIZE*SIZE] = { 0x12, ... }; struct In { int vector[SIZE]; }; struct Out { int result[SIZE]; };</p>
+
+    <p class="text-gray-300">void compute(struct In <em>input, struct Out </em>output) { int i, j, k, t; for (i=0; i<SIZE; i+=1) { int t=0; for (k=0; k<SIZE; k+=1) { t = t + mat->[i<em>SIZE+k] </em> input->vector[k]; } output->result[i] = t; } } Figure 3: Fixed-Matrix Multiplication. The qcc compiler unrolls the loops and decodes the struct and array references to generate an arithmetic expression for Out in terms of In.</p>
+
+    <p class="text-gray-300">The compiler understands a substantial subset of C, including global, function and block-scoped variables; arrays, structs, and pointers; function calls, conditionals, loops; and static initializers (Fig. 3). It also understands arithmetic and bitwise Boolean operators and preprocessor syntax. The program’s entry point is a function</p>
+
+    <p class="text-gray-300">⬇ void compute(struct In <em>in, struct Out </em>out) whose parameters identify the set of input and output values.</p>
+
+    <p class="text-gray-300">Since the “target machine” (arithmetic circuits) supports only expressions, not mutable state and iteration, we restrict the C program’s semantics accordingly. For example, pointers and array dereferences must be compile-time constants; otherwise, each dynamic reference would produce conditional expressions of size proportional to the addressable memory. Function calls are inlined, while preserving C variable scope and pointer semantics.</p>
+
+    <p class="text-gray-300">Imperative conditionals compile to conditional expressions that encode the imperative side effects. Static conditions are collapsed at compile time. Similarly, loops with statically-evaluatable termination conditions are automatically unrolled completely. A loop with dynamic termination—depending on an input value—requires a pragma _unroll to inform the compiler how far it should unroll.</p>
+
+    <p class="text-gray-300">The only scalar type presently supported is int; a compiler flag selects the integer size. The compiler inserts masking expressions to ensure that a <span class="math">k</span>-bit int behaves exactly as the corresponding C type, including overflow. As described below, our arithmetic circuits operate over a 254-bit field; if the program’s computation is known not to overflow 254 bits, the programmer can disable masking with a compiler flag. We plan to extend our compiler to support floating point values via standard techniques <em>[28, 43]</em>.</p>
+
+    <p class="text-gray-300">These features (and limitations) are similar to a parallel effort <em>[44]</em> to compile C for the purposes of secure multiparty computation, though they compile only to Boolean circuits.</p>
+
+    <p class="text-gray-300">Details. The compiler front-end tracks scopes and variable values (as expressions), and unrolls imperative execution into a final program state that provides expressions for each output value. The intermediate language is a set of expressions of C-like operators, such as +, *, <=, ?:, &, and ^.</p>
+
+    <p class="text-gray-300">###</p>
+
+    <p class="text-gray-300">The compiler back-end expands each expression into the arithmetic gate language of mul, add, const-mul, wire-split, etc., eliminating common subexpressions. It carefully bounds the bit-width of each wire value:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>inputs have the compiler-specified int width;</li>
+
+      <li>each constant has a known width (e.g. <span class="math">13=1101_{2}</span> has bit width 4);</li>
+
+      <li>a bitwise op produces the max of its arguments’ widths;</li>
+
+      <li>add can produce max+1 bits (for a carry); and</li>
+
+      <li>mul can produce 2 · max bits.</li>
+
+    </ul>
+
+    <p class="text-gray-300">When the width nears the available bits in the crypto field (254), the compiler generates a split operation to truncate the value back to the specified int width. Tracking bit width minimizes the cost of split gates.</p>
+
+    <p class="text-gray-300">Signed numbers are handled just as they are in C: a 32-bit int is a twos-complement number with a sign bit at <span class="math">1&lt;&lt;31</span>. Each C expression value is treated either as an arithmetic scalar wire or a Boolean expansion, e.g. 32 wires in <span class="math">\\{0,1\\}</span> (§3.2). The format is translated only when values pass from one operator type to the other; for example, in (a^b^c) + z, the bitwise xor (^{∗}) operators manipulate bitwise Booleans, which are joined into a scalar for the addition <span class="math">+</span>.</p>
+
+    <h3 id="sec-18" class="text-xl font-semibold mt-8">4.2 Quadratic Programs and Cryptographic Protocol</h3>
+
+    <p class="text-gray-300">The next pipeline stage accepts a Boolean or arithmetic circuit and builds a QSP or QAP (§2). Then, per §3.1, it compiles the quadratic program into a set of cryptographic routines for the client (key generation and verification) and the worker (computation and proof generation). For comparison, we also implement the original GGPR <em>[30]</em>; §5.4 shows that Pinocchio’s enhancements reduce overhead by 18-64%.</p>
+
+    <p class="text-gray-300">The key-generation routine runs at the client, with selectable public verification and zero-knowledge features (§5.3). The code transmits the evaluation key over the network to the worker; to save bandwidth, the program transmits as C and the worker compiles it locally.</p>
+
+    <p class="text-gray-300">The computation routine runs at the server, collecting input from the client, using the evaluation key to produce the proof, and transmitting the proof back to the client (or, if desired, a different verifier). The verification routine uses the verification key and proof to determine if the worker cheated.</p>
+
+    <p class="text-gray-300">Our cryptographic code is single-threaded, but each stage is embarrassingly parallel. Prior work <em>[28]</em> shows that standard techniques can parallelize work across cores, machines, or GPUs. For the cryptographic code, we use a high-speed elliptic curve library <em>[45]</em> with a 256-bit BN-curve <em>[46]</em> that provides 128 bits of security. The quadratic-program-construction and protocol-execution code is 10,832 lines of C and C++ <em>[42]</em>.</p>
+
+    <h4 id="sec-19" class="text-lg font-semibold mt-6">4.2.1 Optimizing Operations</h4>
+
+    <p class="text-gray-300">We summarize some of the key optimizations we implemented, as well as lessons learned.</p>
+
+    <p class="text-gray-300">Faster Exponentiation. Generating the evaluation key <span class="math">EK</span> requires exponentiating the same base <span class="math">g</span> to many different powers. We optimize this operation by adapting Pippenger’s multi-exponentiation <em>[47]</em> algorithm for use with a single base. Essentially this means that we build a table of intermediate powers of <span class="math">g</span>, allowing us to compute any particular exponent with only a few multiplications.</p>
+
+    <p class="text-gray-300">In a similar vein, the worker’s largest source of overhead is applying the coefficients from the circuit “in the exponent” to compute <span class="math">g^{Y(s)}</span> etc. Here Pippenger’s algorithm is less directly useful, since the worker does a handful of such operations for a given work instance, but each operation involves hundreds of thousands of different bases, i.e., given <span class="math">g_{1},\\ldots,g_{m}</span>, <span class="math">e_{1},\\ldots,e_{m}</span>, for very large <span class="math">m</span>, the worker needs to compute <span class="math">\\prod_{i}g_{i}^{e_{i}}</span>. To optimize this operation, we use a sliding-window technique to build a small table of powers for each pair of bases. For example, for the first two bases, with a window of size 1, we compute <span class="math">\\{g_{1}^{0}g_{2}^{0},g_{1}^{0}g_{2}^{1},g_{1}^{1}g_{2}^{0},g_{1}^{1}g_{2}^{1}\\}</span>. In this case, the table only requires one multiply to build. We can then consider the high order bit of both <span class="math">e_{1}</span> and <span class="math">e_{2}</span>; together these bits select one of four values in our table; we multiply that value into our accumulator and proceed to the next pair of bases. After all bases have been considered, we square the accumulator (to “move” the portion of the exponent we’ve computed into the next higher “slot”), and then repeat. In practice, these tables can save 3-4x, even counting the time to build the tables in the first place.</p>
+
+    <p class="text-gray-300">Polynomial Asymptotics. To generate a proof, the worker must compute the polynomial <span class="math">h(x)</span> such that <span class="math">t(x)\\cdot h(x)=P(x)</span> (§2). Since we store <span class="math">P(x)</span> in terms of its evaluations at the roots of the quadratic program (recall Figure 2), the worker must first interpolate to find <span class="math">P(x)</span> and then perform a polynomial division to arrive at <span class="math">h(x)</span>.</p>
+
+    <p class="text-gray-300">Note that all of these computations take place in a normal field, whereas all of the worker’s other steps involve cryptographic operations, which §5.1 shows are about three orders of magnitude more expensive.</p>
+
+    <p class="text-gray-300">Thus, one might naïvely conclude, as we did, that simple polynomial algorithms, such as Lagrangian interpolation and “high-school” polynomial multiplication, suffice. However, we quickly discovered that the <span class="math">O(n^{2})</span> behavior of these algorithms, at the scale required for verifiable computing, dwarfed the linear number of cryptographic operations (§5.1). Hence we implemented an FFT-based <span class="math">O(n\\log n)</span> polynomial multiplication library and used a polynomial interpolation algorithm <em>[48]</em> that builds a binary tree of polynomials, giving total time <span class="math">O(n\\log^{2}n)</span>. Even so optimized, solving for <span class="math">h(x)</span> is the second largest source of worker overhead.</p>
+
+    <p class="text-gray-300">Preparing for the Future; Learning from the Past. In our implementation and evaluation, we assume a worst case scenario in which the client decides, without any warning, to outsource a new function, and similarly that the worker only ever computes a single instance for a given client. In practice, neither scenario is plausible. When the client first installs Pinocchio, the program, could, in theory, build the single base exponent table discussed above. Further, it can choose a random <span class="math">s</span> and begins computing powers of <span class="math">s</span> in the background, since these are entirely independent of the computation.</p>
+
+    <p class="text-gray-300">Similarly, if the worker performs more than a single computation for the client, he can hold onto the exponentiation tables he built for the first computation and save substantial time on subsequent computations. He can also save the polynomial tree used to accelerate the computation of  <span class="math">h(x)</span> . None of these values have any secret information, so workers could potentially even share this information amongst themselves.</p>
+
+    <p class="text-gray-300">Working With Elliptic Curves. Our BN curve is defined by the equation  <span class="math">y^{2} = x^{3} + b</span> , in that each group element  <span class="math">g_{i}</span>  is a point  <span class="math">(x,y)</span>  on the curve. To speed operations, while computing on elliptic curve points, we represent them in projective form, as three coordinates  <span class="math">(x,y,z)</span> , which corresponds to the affine point  <span class="math">(x/z^{2},y/z^{3})</span> . This is analogous to representing a rational number as an integral numerator and denominator. Projective coordinates reduce EC operation costs by  <span class="math">\\sim 60\\%</span> . We save space in the cryptographic keys and proof by converting points back to affine form before storing or transmitting them. Furthermore, rather than store  <span class="math">(x,y)</span> , we store  <span class="math">x</span>  and a bit indicating which square root of  <span class="math">x^{3} + b</span>  to use for  <span class="math">y</span> , reducing key and proof size by another  <span class="math">50\\%</span> .</p>
+
+    <p class="text-gray-300">Pinocchio runs several applications; each can be instantiated with some static parameters, and then each instance can be executed with dynamic inputs.</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Fixed Matrix multiplies an  <span class="math">n \\times n</span>  matrix parameter  <span class="math">M</span>  by an  <span class="math">n</span> -length input vector  <span class="math">A</span> , and outputs the resulting  <span class="math">n</span> -length vector  <span class="math">M \\cdot A</span> . We choose five parameter settings that range from  $</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">M</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">= 200 \\times 200<span class="math">  to  </span></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">M</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">= 1000 \\times 1000$ .</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Two Matrices has parameter  <span class="math">n</span> , takes as input two  <span class="math">n \\times n</span>  matrices  <span class="math">M_1</span>  and  <span class="math">M_2</span> , and outputs the  <span class="math">n \\times n</span>  matrix  <span class="math">M_1 \\cdot M_2</span> . Matrix operations are widely used, e.g., in collaborative filtering [49].  $(</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">M</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">= 30 \\times 30<span class="math">  to  </span></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">M</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">= 110 \\times 110)$</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">MultiVar Poly evaluates a  <span class="math">k</span> -variable,  <span class="math">m</span> -degree multivariate polynomial. The  <span class="math">(m + 1)^k</span>  coefficients are parameters, the  <span class="math">k</span>  variables  <span class="math">x_1, \\ldots, x_k</span>  are the inputs, and the polynomial's scalar value is the output. ( <span class="math">k = 5</span> ,  <span class="math">m = 6</span> , 16,807 coeff. to  <span class="math">k = 5</span> ,  <span class="math">m = 10</span> ; 644,170 coeff.)</p>
+
+    <p class="text-gray-300">Image Matching is parameterized by an  <span class="math">i_w \\times i_h</span>  rectangular image and parameters  <span class="math">k_w, k_h</span> . It takes as input a  <span class="math">k_w \\times k_h</span>  image kernel, and outputs the minimum difference and the point  <span class="math">(x,y)</span>  in the image where it occurs.  <span class="math">(i_w \\times i_h = 25, k_w \\times k_h = 9</span>  to  <span class="math">i_w \\times i_h = 2025, k_w \\times k_h = 9)</span></p>
+
+    <p class="text-gray-300">Shortest Paths implements the Floyd-Warshall  <span class="math">O(n^{3})</span>  graph algorithm, useful for network routing and matrix inversion. Its parameter  <span class="math">n</span>  specifies the number of vertices, its input is an  <span class="math">n \\times n</span>  edge matrix, and its output is an  <span class="math">n \\times n</span>  matrix of all-pairs shortest paths. ( <span class="math">n = 8</span> ,  <span class="math">e = 64</span>  to  <span class="math">n = 24</span> ,  <span class="math">e = 576</span> )</p>
+
+    <p class="text-gray-300">LGCA is a Lattice-Gas Cellular Automata implementation that converges to Navier-Stokes [50]. It has parameter  <span class="math">n</span> , the fluid lattice size, and  <span class="math">k</span> , the iteration count. It inputs one  <span class="math">n</span> -cell lattice and outputs another reflecting  <span class="math">k</span>  steps. ( <span class="math">n = 294</span> ,  <span class="math">k = 5</span>  to  <span class="math">n = 294</span> ,  <span class="math">k = 40</span> )</p>
+
+    <p class="text-gray-300">SHA-1 has no parameters. Its input is a 13-word (416-bit) input string, and it outputs its 5-word (160-bit) SHA-1 hash.</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Op</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Base Curve</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Twist Curve</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Fixed Base Exp (naive)</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">318.5μs</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1221.4μs</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Fixed Base Exp (opt)</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">38.2μs</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">118.3μs</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Multi Exp, 254-bit exp (naive)</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">318.5μs</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1221.5μs</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Multi Exp, 254-bit exp (opt)</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">104.5μs</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">401.0μs</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Multi Exp, 32-bit exp (opt)</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">14.9μs</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">56.8μs</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Multi Exp, 1-bit exp (opt)</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">9.5μs</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">36.4μs</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Compress</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">30.2μs</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">2160.9μs</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Decompress</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">27.0μs</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">2168.3μs</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Pairing</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">0.9ms</td>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Field Add</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">50.2ns</td>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Field Mul</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">361.1ns</td>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+          </tr>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">Figure 4: Microbenchmarks. Breakdown of the main sources of performance overhead in the larger protocol.  <span class="math">(N = 100, \\sigma \\leq 1\\%)</span> .</p>
+
+    <p class="text-gray-300">|   | Degree  |   |   |</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">---</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">---</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">---</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">---</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Poly Interp (naive)</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">0.5ms</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">238.3ms</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">202013.1ms</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Poly Interp (opt)</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1.1ms</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">21.1ms</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">331.1ms</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Poly Mul (naive)</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">0.1ms</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">8.6ms</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">799.7ms</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Poly Mul (opt)</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">0.1ms</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">0.4ms</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">4.1ms</td>
+
+          </tr>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">Figure 5: Cost of Polynomial Operations. Illustrates the importance of optimizing polynomial algorithms.  <span class="math">(N = 500, \\sigma \\leq 5\\%)</span> .</p>
+
+    <p class="text-gray-300">We experiment on a Lenovo X201 ThinkPad. We run on a single core of a 2.67 GHz Intel Core i7 with 8 GB of RAM. Pinocchio's results use QAPs, since theory (§3.2) and practice (§5.5) show they offer superior performance.</p>
+
+    <p class="text-gray-300">We performed a series of microbenchmarks to quantify the basic cost units of our protocol (Fig. 4). Field operations are about three orders of magnitude cheaper than cryptographic exponentiations or multiplications. As §3.1 explained, we use an asymmetric pairing function, meaning that some group elements live on a (relatively) cheap base curve, while others live on the "twist" curve. Operations on the latter are  <span class="math">3 - 4 \\times</span>  as expensive, reinforcing the importance of our optimizations to the VC protocol to move as many operations as possible to the base curve. Ultimately, Pinocchio's protocol requires only the  <span class="math">\\mathcal{W}</span>  polynomials to operate on the twist curve; all other operations take place on the base curve.</p>
+
+    <p class="text-gray-300">Figures 4 and 5 also show the impact of the exponentiation and polynomial optimizations described in §4.2.1, which reduce costs by two to three orders of magnitude for polynomial operations, and factors of 3-10 for exponentiations.</p>
+
+    <p class="text-gray-300">Figure 6 plots Pinocchio's performance against that of previous general-purpose systems. We use the multiplication of two matrices as our test application since it has appeared in several prior papers [25, 27], though simpler, non-cryptographic verification procedures exist [51, §7.1]. Since</p>
+
+    <p class="text-gray-300">!<a href="img-2.jpeg">img-2.jpeg</a> (a) Per-Instance Verification Latency</p>
+
+    <p class="text-gray-300">!<a href="img-3.jpeg">img-3.jpeg</a> (b) Worker Latency</p>
+
+    <p class="text-gray-300">all of these prior schemes are designated verifier, we measure against Pinocchio's designated verifier mode.</p>
+
+    <p class="text-gray-300">We compare against 1) a naive version of a PCP-based scheme [52]; 2) GGP [22], an early scheme that defined verifiable computation, but which relies on fully-homomorphic-encryption (FHE); 3) Pepper [27], an optimized refinement of (1); and 4) Ginger [28], a further refinement of Pepper. See Section 6 for more details on these schemes and the trade-offs between them. Since most of these schemes are ridiculously impractical, we model, rather than measure, their performance. For GGP, we built a model of its performance based on the latest performance results for FHE [53], while for the others, we used previously published models [27, 28]. For Pinocchio, however, we use real numbers from our implementation.</p>
+
+    <p class="text-gray-300">Figure 6 shows that Pinocchio continues the recent trend of reducing costs by orders of magnitude. Early PCP and FHE-based schemes are laughably impractical, taking hundreds to trillions of years to produce or verify a single proof. Pepper and Ginger have made huge improvements over prior work, but, as we discuss in more detail in §6, they do not offer public verification or zero knowledge.</p>
+
+    <p class="text-gray-300">In addition to offering new properties, Pinocchio significantly improves performance and security. The systems shown in Figure 6 amortize setup work across many work instances, but the characteristics of the amortization differ. To reach a break-even point, where the client does less work verifying than performing the work locally, Pepper and Ginger must batch work instances, whereas GGP and Pinocchio must perform enough instances to amortize key setup costs. These approaches have very different effects on latency. A client cannot benefit from Pepper or Ginger until it has accumulated an entire batch of instances. In Pinocchio, key setup can be precomputed, and henceforth every instance (including the first one) enjoys a better-than-break-even latency. Figure 6 shows the minimum latency achievable by each system.</p>
+
+    <p class="text-gray-300">!<a href="img-4.jpeg">img-4.jpeg</a> Figure 6: Performance Relative to Prior Schemes. Pinocchio reduces costs by orders of magnitude (note the log scale on the y-axis). We graph the time necessary to (a) verify and (b) produce a proof result for multiplying two NxN matrices. Figure 7: Cost of Verification Vs. Local. Verification must be cheaper than native execution for outsourcing to make sense, though for applications that want zero-knowledge, more expensive verification may be acceptable. All apps trend in the right direction, and three apps cross the plane where verification is cheaper than native. Error bars, often too small to see, represent  <span class="math">95\\%</span>  confidence intervals  <span class="math">(N = 50, \\sigma \\leq 2\\%)</span> .</p>
+
+    <p class="text-gray-300">Compared with Ginger, Pinocchio's verifier is  <span class="math">\\sim 120,000 \\times -17,000,000 \\times</span>  faster, and the worker is  <span class="math">19 - 60 \\times</span>  faster. To improve performance, Ginger's parameters are chosen such that the probability that the adversary can successfully cheat can be as high as  <span class="math">\\frac{1}{2^{20}}</span>  [28, Figure 2], while in Pinocchio, the probability is roughly  <span class="math">\\frac{1}{2^{128}}</span> .</p>
+
+    <p class="text-gray-300">We measure Pinocchio's performance for the applications and parameter settings described in Section 4.3. All applications are written in C and compile to both QAPs and to native executables. We measure performance using 32-bit input values, so we can compare against the native C version. This obviously makes things more challenging for Pinocchio, since Pinocchio operates over a 254-bit field using multi-precision integers, whereas the local execution uses the CPU's native 32-bit operations.</p>
+
+    <p class="text-gray-300">Figure 7 plots Pinocchio's verification time against the time to execute the same app natively; each line represents a parameterized app, and each point represents a particular parameter setting. Our key finding is that, for sufficiently large parameters, three apps cross the line where outsourcing makes sense; i.e., verifying the results of an outsourced computation is cheaper than local native execution. Note that the slope of each app's line is dictated by the size of the app parameters we experimented with (e.g., we reached larger parameters for fixed matrix than for two matrices).</p>
+
+    <p class="text-gray-300">On the downside, the other three apps, while trending in the right direction, fail to cross the outsourcing threshold. The difference is that these three apps perform large numbers of inequality comparisons and/or bitwise operations. This makes our circuit-based representation less efficient relative</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">IO</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Mult Gates</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">KeyGen Pub (s)</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Compute (s)</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Verify (ms) Pub</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Priv</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Circuit (ms)</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Native (ms)</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">EvalKey (MB)</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">VerKey (KB)</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Proof (B)</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Fixed Matrix, Medium</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1,201</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">600</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">0.7</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">0.4</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">39.5</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">10.0</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">123.7</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">4.3</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">0.3</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">37.9</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">288</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Fixed Matrix, Large</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">2,001</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1,000</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1.5</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">0.9</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">58.9</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">*10.1</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">337.4</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">12.4</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">0.5</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">62.9</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">288</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Two Matrices, Medium</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">14,701</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">347,900</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">79.8</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">269.4</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">340.7</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">12.1</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">124.9</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">4.0</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">97.9</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">459.8</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">288</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Two Matrices, Large</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">36,301</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1,343,100</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">299.3</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1127.8</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">882.2</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">*15.4</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">509.5</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">15.5</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">374.8</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1134.8</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">288</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">MultiVar Poly, Medium</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">7</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">203,428</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">41.9</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">246.1</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">11.6</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">10.0</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">93.1</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">4.5</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">55.9</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">0.6</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">288</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">MultiVar Poly, Large</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">7</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">571,046</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">127.1</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">711.6</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">*12.7</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">*11.1</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">267.2</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">12.9</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">156.8</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">0.6</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">288</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Image Matching, Medium</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">13</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">86,345</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">26.4</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">41.1</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">11.1</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">9.9</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">5.5</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">0.1</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">23.6</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">0.8</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">288</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Image Matching, Large</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">13</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">277,745</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">67.0</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">144.4</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">11.4</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">10.1</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">18.0</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">0.4</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">75.8</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">0.8</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">288</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Shortest Paths, Medium</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">513</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">366,089</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">85.4</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">198.0</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">25.5</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">10.0</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">18.7</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">0.1</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">99.6</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">16.4</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">288</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Shortest Paths, Large</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1,153</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1,400,493</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">317.5</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">850.2</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">48.9</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">10.8</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">69.5</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">0.3</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">381.4</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">36.4</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">288</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Lattice Gas Sim, Medium</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">21</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">144,063</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">38.2</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">76.4</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">10.9</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">9.9</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">91.4</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">0.2</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">39.6</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1.1</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">288</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Lattice Gas Sim, Large</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">21</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">283,023</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">75.6</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">165.8</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">10.9</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">9.8</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">176.6</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">0.4</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">77.7</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1.1</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">288</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">SHA-1</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">22</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">23,785</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">12.0</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">15.7</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">11.1</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">9.9</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">18.8</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">0.0</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">6.5</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1.1</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">288</td>
+
+          </tr>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">Figure 8: Application Performance. Pinocchio's performance for a sampling of the parameter settings (§4.3). All programs are compiled directly from C. Private KeyGen is always within  <span class="math">0.4\\%</span>  of public KeyGen, and so is omitted. Verification values in bold indicate verification is cheaper than computing the circuit locally; those with stars (*) indicate verification is cheaper than native execution.  <span class="math">(N = 50, \\sigma \\leq 2\\%)</span> .</p>
+
+    <p class="text-gray-300">to native, and hence on our current experimental platform, we cannot push the application parameter settings to the point where they would beat local execution. Nonetheless, these applications may still be useful in settings that require Pinocchio's zero-knowledge proofs.</p>
+
+    <p class="text-gray-300">Fortunately, additional experiments show that enabling zero-knowledge proofs adds a negligible, fixed cost to key generation  <span class="math">(213\\mu s)</span> , and re-randomizing a proof to make it zero-knowledge requires little effort (e.g., 300ms or  <span class="math">0.1\\%</span>  for the multivariate polynomial app).</p>
+
+    <p class="text-gray-300">Figure 8 provides more details of Pinocchio's performance. For KeyGen, our experiments conservatively assume that the client does no precomputation in anticipation of outsourcing a function, and for Compute, we assume that the worker only does a single work instance before throwing away all of its state. As discussed in §4.2.1, in practice, we would take advantage of both precomputation and caching of previous work, which on average saves at least  <span class="math">43\\%</span>  of the effort for KeyGen and  <span class="math">16\\%</span>  of the effort for Compute.</p>
+
+    <p class="text-gray-300">In Figure 8, we see again that three apps (starred) beat native execution, including one in the public verifier setting (which requires more expensive operations per IO). The data also reinforces the point that using a circuit representation imposes a significant cost on image matching, shortest paths, and the lattice gas sim relative to native, suggesting a target for optimization. Relative to the circuit representation, Pinocchio's verification is cheap: both the public and the designated verifier "win" most of the time when compared to the circuit execution. Specifically, the designated verifier wins in 12 of 13  <span class="math">(92\\%)</span>  application settings. Public verification is more expensive, particularly for large IO, but still wins in 9 of 13  <span class="math">(69\\%)</span>  settings.</p>
+
+    <p class="text-gray-300">Since Pinocchio offers public verification, some clients will benefit from the KeyGen work of others, and hence only care about the verification costs. For example, a cellphone carrier might perform the one-time KeyGen so that its customers can verify computations done by arbitrary workers.</p>
+
+    <p class="text-gray-300">However, in other settings, e.g., a company outsourcing work to the cloud, the key generator and verifier may be the same entity, and will wish to amortize the cost of key generation via the savings from verification. Figure 8 shows that most apps have a low "break even" point vs. circuit execution: the median for the designated verifier is 555 instances and for public verifier is 500 instances, both with a low of 5 instances for fixed matrix. Every instance afterwards is a net "win", even for the key generator. The median break-even points are higher (70K and 605K) when compared against native execution, since the outsourcing margin is relatively small for the current parameter settings. Larger parameter settings, improved verification techniques, or comparing against a big integer library instead of native execution [27, 28] would all bring these values down.</p>
+
+    <p class="text-gray-300">Figure 8 holds more good news for Pinocchio: the keys it generates are reasonably sized, with the evaluation key (which describes the entire computation) typically requiring 10s or 100s of MB. The weak verifier's key (which grows linearly with the I/O) is typically only a few KB, and even at its largest, for two-matrix multiplication, it requires only slightly more than 1 MB. This suggests that the keys are quite portable and will not require excessive bandwidth to transmit.</p>
+
+    <p class="text-gray-300">Finally, from the client's perspective, if the worker's efforts are free, then the worker's additional overhead of generating a proof is irrelevant, as long as it doesn't hurt response latency. Our results, combined with prior work on parallelization [28], suggest that latency can be brought down to reasonable levels, given enough hardware. And indeed in high-assurance scenarios, scenarios where the client is incapable of performing the calculation itself (e.g., a power-limited device), or scenarios where the worker's resources are otherwise idle, the client may very well view the worker as "free".</p>
+
+    <p class="text-gray-300">However, in other scenarios, such as cloud computing, the worker's efforts are not free. Even here, however, Chen and</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">GGPR [30]</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">This Paper</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Reduction</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">KeyGen</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">108.7s</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">41.9s</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">61%</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Build table</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">7.8s</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">7.9s</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">-2%</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Encode powers of s</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">28.4s</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">4.7s</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">83%</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Eval polys at s</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">5.0s</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1.7s</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">66%</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Encode polys</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">67.2s</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">27.4s</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">59%</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Compute</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">691.4s</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">246.1s</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">64%</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Solve for h(x)</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">252.3s</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">76.3s</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">70%</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Apply coefficients</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">391.1s</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">154.7s</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">60%</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Verify</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">15.2ms</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">11.6ms</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">24%</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Process I/O</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">456.5μs</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">901.8μs</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">-98%</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Crypto checks</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">14.8ms</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">10.7ms</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">28%</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Evaluation Key Size</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">105.5MB</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">55.9MB</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">47%</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Verification Key Size</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">640B</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">640B</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">0%</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Proof Size</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">352B</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">288B</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">18%</td>
+
+          </tr>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">Figure 9: Improving GGPR [30]. Performance for the multivariate polynomial application. Pinocchio's high-level operations are  <span class="math">2.6x</span> ,  <span class="math">2.8x</span> , and  <span class="math">1.3x</span>  faster than the original.  <span class="math">(N = 10, \\sigma \\leq 2\\%)</span> .</p>
+
+    <p class="text-gray-300">Sion estimate that the cost of cloud computing is about  <span class="math">60 \\times</span>  cheaper than local computing for a small enterprise [54]. This provides an approximate upper-bound for the amount of extra work we should be willing to add to the worker's overhead. While we do not yet achieve this bound, we make substantial progress on reducing the worker's overhead, and the progress shown in Figure 6(b) gives us hope.</p>
+
+    <p class="text-gray-300">In Figure 9, we break down Pinocchio's protocol overhead for the large multivariate polynomial example application, to better identify the major bottlenecks. For comparison, we also measure the performance of our implementation of GGPR's scheme [30], using the same underlying cryptographic and polynomial libraries.</p>
+
+    <p class="text-gray-300">The results indicate that our protocol improvements had a significant impact. KeyGen and Compute are more than twice as fast, and even verification is  <span class="math">24\\%</span>  faster. Of Pinocchio's remaining KeyGen overhead, the majority comes from encoding the evaluations of the QAP's polynomials in the generator's exponent. For Compute, the multi-exponentiation required to compute the QAP's polynomials in the exponent still dominate, but the overhead of solving for  <span class="math">h(x)</span>  is nontrivial as well.</p>
+
+    <p class="text-gray-300">Pinocchio also drastically reduces the size of the evaluation key and even manages to reduce the size of GGPR's already svelte 9 element proof to 8 elements.</p>
+
+    <p class="text-gray-300">Finally, to confirm our theoretical prediction that QAPs would outperform QSPs (§3.2), we compared the two on our SHA-1 application, which performs numerous bitwise operations, and hence should favor QSPs. The resulting QSP's size was  <span class="math">38.6 \\times</span>  that of the QAP, and the degree was  <span class="math">55.5 \\times</span>  as large. Not surprisingly, the QSP's KeyGen took  <span class="math">35.2 \\times</span>  and Compute took  <span class="math">55.4 \\times</span>  as long as those of the QAP; the verification times were comparable.</p>
+
+    <p class="text-gray-300">Much of the prior work in this area focuses on verifying specific functions via auditing or special properties of the functions [2-6]. Other systems rely on replication, and hence assume failures are uncorrelated [1, 7, 8, 55]. A large body of work verifies computation by assuming the worker employs secure hardware [9-15].</p>
+
+    <p class="text-gray-300">While the theory and cryptography community has long studied the problem of general-purpose proof systems [16-23], until recently, this work was largely regarded as highly impractical, to the point where no one bothered to implement it. Much of this work [16-20, 56] relied on Probabilistically Checkable Proofs (PCPs), which offer impressive theoretical performance, but which can take trillions of years to verify in practice [27]. Other work [22, 23] relies on fully-homomorphic encryption (FHE) [24], which, despite continuing advances [53], remains highly impractical.</p>
+
+    <p class="text-gray-300">Recently, security and systems researchers have started to develop techniques to make theoretical cryptographic protocols practical. Secure multiparty computation, for example, has seen tremendous progress [57-59]. However, since the primary focus is on secrecy, not outsourcing, both parties typically perform work equal to evaluating the function.</p>
+
+    <p class="text-gray-300">With regard to implementing verified computation, in the last year, two parallel efforts have emerged. One effort [25, 26] builds on the interactive proofs of Goldwasser et al. [20] (GKR), which draw on many techniques from the PCP literature. They target a streaming setting where the client cannot store all of the data it wishes to compute over; the system currently requires the function computed to be highly parallelizable. On the plus side, it does not require cryptography, and it is secure against computationally unbounded adversaries.</p>
+
+    <p class="text-gray-300">Setty et al. produced a line of PCP-based systems called Pepper [27] and Ginger [28]. They build on a particular type of PCP called a linear PCP [52], in which the proof can be represented as a linear function. This allows the worker to use a linearly-homomorphic encryption scheme to create a commitment to its proof while relying only on standard cryptographic assumptions. Through a combination of theoretical and systems-level improvements, this work made tremendous progress in making PCP-based systems practical. Indeed, for applications that can tolerate large batch sizes, the amortized costs of verification can be quite low.</p>
+
+    <p class="text-gray-300">A few downsides remain, however. Because the work builds on the Hadamard PCP [56], the setup time, network overhead, and the prover's work are quadratic in the size of the original computation, unless the protocol is hand-tailored. To achieve efficiency, the verifier must outsource computations in batches, which means it cannot verify the results until the full batch returns. The scheme is designated verifier, meaning that third parties cannot verify the results of outsourced computations without sharing the client's secret key, and hence opening the possibility for fraud. The scheme also does not support zero-knowledge proofs.</p>
+
+    <p class="text-gray-300">Concurrent work <em>[60]</em> also builds on the quadratic programs of Gennaro et al <em>[30]</em>. They observe that QAPs can be viewed as linear PCPs and hence can fit into Ginger’s cryptographic framework <em>[28]</em>. Their work shows worker computation improvements similar to those of Pinocchio. Additional concurrent work <em>[61]</em> adapts previous GKR-based protocols <em>[25, 26]</em> to the batching model and develops a compiler that chooses amongst three PCP-based backends. Both systems retain PCPs and Ginger’s cryptographic protocol, so they rely on simpler cryptographic assumptions than Pinocchio, but they must still batch computations to obtain an efficient verifier. They also remain designated verifier and do not support zero-knowledge proofs.</p>
+
+    <p class="text-gray-300">Previous systems either did not offer a compiler <em>[25, 26, 27]</em>, or compiled from a subset of an academic language, SFDL <em>[28, 60]</em>. In contrast, we compile from a subset of C, which should ease the development burden for verifying computation.</p>
+
+    <p class="text-gray-300">Several systems provide compilers for zero-knowledge (ZK) proofs <em>[62, 63, 64]</em>. Both the systems of Almeida et al. <em>[62]</em> and Meiklejohn et al. <em>[63]</em> adopt an approach based on <span class="math">\\Sigma</span>-protocols <em>[65]</em>. The former provides functionality for proving knowledge in arbitrary groups, AND and OR compositions, and linear relations. The latter focuses on functionalities for cryptographic protocols, e.g., e-cash, blind signatures, or verifiable encryption. The compiler of Backes et al. <em>[64]</em> uses Groth-Sahai ZK proofs <em>[66]</em> and handles logical formulas. Rial and Danezis <em>[32]</em> propose a system for privacy-preserving smart metering in which clients use a ZK protocol to prove correctness of the billing computation they perform on meter readings. In general, these systems are likely to exhibit better performance than Pinocchio for their particular subset of functionality, but they do not possess the same level of efficient generality.</p>
+
+    <h2 id="sec-28" class="text-2xl font-bold">7 Conclusion and Future Work</h2>
+
+    <p class="text-gray-300">We have presented Pinocchio, a system for public verifiable computing. Pinocchio uses quadratic programs, a new method for encoding computation, combined with a highly efficient cryptographic protocol to achieve both asymptotic and concrete efficiency. Pinocchio produces 288-byte proofs, regardless of the size of the computation, and the proofs can be verified rapidly, typically in tens of milliseconds, beating native execution in several cases. This represents five to seven <em>orders of magnitude</em> performance improvement over prior work. The worker also produces the proof 19-60<span class="math">\\times</span> faster. Pinocchio even slashes the cost of its underlying protocol, cutting the cost of both key and proof generation by more than 60%. The end result is a natural cryptographic protocol for efficiently signing computations. Combined with a compiler for real C programs, Pinocchio brings verifiable computation much closer to practicality.</p>
+
+    <p class="text-gray-300">Nonetheless gaps still remain. We hope that additional theoretic improvements, combined with efforts to expand our toolchain, e.g., to support floating point or parallel execution (via standard techniques <em>[25, 28, 43]</em>), will continue to advance us towards truly practical verifiable computing.</p>
+
+    <h2 id="sec-29" class="text-2xl font-bold">Acknowledgements</h2>
+
+    <p class="text-gray-300">The authors gratefully thank: Peter Montgomery, Michael Naehrig, and Patrick Longa for assisting us with the cryptographic library used by Pinocchio; Chris Hawblitzel for his sage guidance on compiler development; Rosario Gennaro for valuable discussions; and the anonymous reviewers for their helpful comments. Mariana Raykova was supported by NSF Grant No. 1017660.</p>
+
+    <h2 id="sec-30" class="text-2xl font-bold">References</h2>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>[1] D. P. Anderson, J. Cobb, E. Korpela, M. Lebofsky, and D. Werthimer, “SETI@Home: An experiment in public-resource computing,” <em>Communications of the ACM</em>, vol. 45, no. 11, 2002.</li>
+
+      <li>[2] F. Monrose, P. Wyckoff, and A. Rubin, “Distributed execution with remote audit,” in <em>Proc. of ISOC NDSS</em>, 1999.</li>
+
+      <li>[3] P. Golle and S. G. Stubblebine, “Secure distributed computing in a commercial environment,” in <em>Proc. of Financial Cryptography</em>, 2002.</li>
+
+      <li>[4] W. Du and M. T. Goodrich, “Searching for high-value rare events with uncheatable grid computing,” in <em>ACNS</em>, 2005.</li>
+
+      <li>[5] P. Golle and I. Mironov, “Uncheatable distributed computations,” in <em>Proc. of CT-RSA</em>, 2001.</li>
+
+      <li>[6] R. Sion, “Query execution assurance for outsourced databases,” in <em>The Very Large Databases Conference (VLDB)</em>, 2005.</li>
+
+      <li>[7] M. Castro and B. Liskov, “Practical Byzantine fault tolerance and proactive recovery,” <em>ACM Trans. on Comp. Sys.</em>, vol. 20, no. 4, 2002.</li>
+
+      <li>[8] B. Carbunar and R. Sion, “Uncheatable reputation for distributed computation markets,” in <em>Financial Cryptography</em>, 2006.</li>
+
+      <li>[9] R. Sailer, X. Zhang, T. Jaeger, and L. van Doorn, “Design and implementation of a TCG-based integrity measurement architecture,” in <em>Proc. of the USENIX Security</em>, 2004.</li>
+
+      <li>[10] L. Chen, R. Landfermann, H. Löhr, M. Rohe, A.-R. Sadeghi, and C. Stüble, “A protocol for property-based attestation,” in <em>Proc. of the ACM Workshop on Scalable Trusted Computing (STC)</em>, 2006.</li>
+
+      <li>[11] B. Parno, J. M. McCune, and A. Perrig, <em>Bootstrapping Trust in Modern Computers</em>. Springer, 2011.</li>
+
+      <li>[12] A. Seshadri, M. Luk, E. Shi, A. Perrig, L. VanDoorn, and P. Khosla, “Pioneer: Verifying integrity and guaranteeing execution of code on legacy platforms,” in <em>Proc. of the ACM SOSP</em>, 2005.</li>
+
+      <li>[13] R. B. Lee, P. Kwan, J. P. McGregor, J. Dwoskin, and Z. Wang, “Architecture for protecting critical secrets in microprocessors,” in <em>Proc. of the International Symposium on Computer Architecture (ISCA)</em>, 2005.</li>
+
+      <li>[14] D. Lie, C. A. Thekkath, M. Mitchell, P. Lincoln, D. Boneh, J. C. Mitchell, and M. Horowitz, “Architectural support for copy and tamper resistant software,” in <em>Proc. of the ACM ASPLOS</em>, 2000.</li>
+
+      <li>[15] A.-R. Sadeghi, T. Schneider, and M. Winandy, “Token-based cloud computing: secure outsourcing of data and arbitrary computations with lower latency,” in <em>TRUST</em>, 2010.</li>
+
+      <li>[16] S. Goldwasser, S. Micali, and C. Rackoff, “The knowledge complexity of interactive proof systems,” <em>SIAM J. Comput.</em>, vol. 18, no. 1, 1989.</li>
+
+      <li>[17] S. Arora and S. Safra, “Probabilistic checking of proofs: A new characterization of NP,” <em>J. ACM</em>, vol. 45, no. 1, pp. 70–122, 1998.</li>
+
+      <li>[18] J. Kilian, “A note on efficient zero-knowledge proofs and arguments (extended abstract),” in <em>STOC</em>, 1992.</li>
+
+      <li>[19] S. Micali, “Computationally sound proofs,” <em>SIAM J. Comput.</em>, vol. 30, no. 4, pp. 1253–1298, 2000. Extended abstract in FOCS ’94.</li>
+
+      <li>[20] S. Goldwasser, Y. T. Kalai, and G. N. Rothblum, “Delegating computation: Interactive proofs for muggles,” in <em>STOC</em>, 2008.</li>
+
+      <li>[21] J. Groth, “Short pairing-based non-interactive zero-knowledge arguments,” in <em>ASIACRYPT</em>, 2010.</li>
+
+      <li>[22] R. Gennaro, C. Gentry, and B. Parno, “Non-interactive verifiable computing: Outsourcing computation to untrusted workers,” 2010.</li>
+
+      <li>[23] K.-M. Chung, Y. T. Kalai, and S. P. Vadhan, “Improved delegation of computation using fully homomorphic encryption,” in <em>CRYPTO</em>, 2010.</li>
+
+      <li>[24] C. Gentry, <em>A fully homomorphic encryption scheme</em>. PhD thesis, Stanford University, 2009. crypto.stanford.edu/craig.</li>
+
+      <li>[25] J. Thaler, M. Roberts, M. Mitzenmacher, and H. Pfister, “Verifiable computation with massively parallel interactive proofs,” in <em>USENIX HotCloud Workshop</em>, 2012.</li>
+
+    </ul>
+
+    <p class="text-gray-300">[26] G. Cormode, M. Mitzenmacher, and J. Thaler, “Practical verified computation with streaming interactive proofs,” in <em>ITCS</em>, 2012.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>[27] S. Setty, R. McPherson, A. J. Blumberg, and M. Walfish, “Making argument systems for outsourced computation practical (sometimes),” in <em>Proceedings of the ISOC NDSS</em>, 2012.</li>
+
+      <li>[28] S. Setty, V. Vu, N. Panpalia, B. Braun, A. J. Blumberg, and M. Walfish, “Taking proof-based verified computation a few steps closer to practicality,” in <em>Proc. of USENIX Security</em>, 2012.</li>
+
+      <li>[29] B. Parno, M. Raykova, and V. Vaikuntanathan, “How to delegate and verify in public: Verifiable computation from attribute-based encryption,” in <em>IACR Theory of Cryptography Conference (TCC)</em>, 2012.</li>
+
+      <li>[30] R. Gennaro, C. Gentry, B. Parno, and M. Raykova, “Quadratic span programs and succinct NIZKs without PCPs,” in <em>EUROCRYPT</em>, 2013. Originally published as Cryptology ePrint Archive, Report 2012/215.</li>
+
+      <li>[31] M. Blum, A. D. Santis, S. Micali, and G. Persiano, “Noninteractive zero-knowledge,” <em>SIAM J. on Computing</em>, vol. 20, no. 6, 1991.</li>
+
+      <li>[32] A. Rial and G. Danezis, “Privacy-preserving smart metering,” in <em>Proc. of the ACM WPES</em>, 2011.</li>
+
+      <li>[33] N. Pippenger and M. J. Fischer, “Relations among complexity measures,” <em>J. ACM</em>, vol. 26, no. 2, 1979.</li>
+
+      <li>[34] D. Boneh and M. Franklin, “Identity-based encryption from the Weil pairing,” <em>Proceedings of IACR CRYPTO</em>, 2001.</li>
+
+      <li>[35] D. Boneh, X. Boyen, and E.-J. Goh, “Hierarchical identity based encryption with constant size ciphertext,” in <em>EUROCRYPT</em>, 2005.</li>
+
+      <li>[36] D. Boneh, C. Gentry, and B. Waters, “Collusion resistant broadcast encryption with short ciphertexts and private keys,” in <em>CRYPTO</em>, 2005.</li>
+
+      <li>[37] M. Naor, “On cryptographic assumptions and challenges,” in <em>Proceedings of IACR CRYPTO</em>, 2003.</li>
+
+      <li>[38] M. Bellare and A. Palacio, “The knowledge-of-exponent assumptions and 3-round zero-knowledge protocols,” in <em>CRYPTO</em>, 2004.</li>
+
+      <li>[39] C. Gentry and D. Wichs, “Separating succinct non-interactive arguments from all falsifiable assumptions,” in <em>STOC</em>, 2011.</li>
+
+      <li>[40] I. Damgård, “Towards practical public key systems secure against chosen ciphertext attacks,” in <em>IACR CRYPTO</em>, 1991.</li>
+
+      <li>[41] “Verifiable computation: Pinocchio.” http://research.microsoft.com/verifcomp/, Mar. 2013.</li>
+
+      <li>[42] D. A. Wheeler, “SLOCCount.” http://www.dwheeler.com/sloccount/.</li>
+
+      <li>[43] M. Aliasgari, M. Blanton, Y. Zhang, and A. Steele, “Secure computation on floating point numbers,” in <em>Proc. of ISOC NDSS</em>, 2013.</li>
+
+      <li>[44] A. Holzer, M. Franz, S. Katzenbeisser, and H. Veith, “Secure two-party computations in ANSI C,” in <em>Proc. of ACM CCS</em>, 2012.</li>
+
+      <li>[45] M. Naehrig, R. Niederhagen, and P. Schwabe, “New software speed records for cryptographic pairings,” in <em>Proc. of LATINCRYPT</em>, 2010.</li>
+
+      <li>[46] P. S. L. M. Barreto and M. Naehrig, “Pairing-friendly elliptic curves of prime order,” in <em>Selected Areas in Cryptography (SAC)</em>, 2006.</li>
+
+      <li>[47] N. Pippenger, “On the evaluation of powers and related problems (preliminary version),” in <em>Proc. of FOCS</em>, 1976.</li>
+
+      <li>[48] A. Aho, J. Hopcroft, and J. Ulman, <em>The Design and Analysis of Computer Algorithms</em>. Addison-Wesley, 1974.</li>
+
+      <li>[49] G. Adomavicius and A. Tuzhilin, “Toward the next generation of recommender systems: A survey of the state-of-the-art and possible extensions,” <em>Trans. Knowledge and Data Engineering</em>, vol. 17, no. 6, 2005.</li>
+
+      <li>[50] D. A. Wolf-Gladrow, <em>Lattice-Gas Cellular Automata and Lattice Boltzmann Models: An Introduction</em>. Springer, 2005.</li>
+
+      <li>[51] R. Motwani and P. Raghavan, <em>Randomized Algorithms</em>. Cambridge University Press, 1995.</li>
+
+      <li>[52] Y. Ishai, E. Kushilevitz, and R. Ostrovsky, “Efficient arguments without short PCPs,” in <em>IEEE Conference on Computational Complexity</em>, 2007.</li>
+
+      <li>[53] C. Gentry, S. Halevi, and N. Smart, “Homomorphic evaluation of the AES circuit,” in <em>Proceedings of CRYPTO</em>, 2012.</li>
+
+      <li>[54] Y. Chen and R. Sion, “To cloud or not to cloud? Musings on costs and viability,” in <em>Proc. of the ACM Symposium on Cloud Computing</em>, 2011.</li>
+
+      <li>[55] G. O. Karame, M. Strasser, and S. Capkun, “Secure remote execution of sequential computations,” in <em>Intl. Conf. on Information and Communications Security</em>, 2009.</li>
+
+      <li>[56] S. Arora, C. Lund, R. Motwani, M. Sudan, and M. Szegedy, “Proof verification and the hardness of approximation problems,” <em>J. ACM</em>, vol. 45, no. 3, 1998.</li>
+
+      <li>[57] D. Malkhi, N. Nisan, B. Pinkas, and Y. Sella, “Fairplay—a secure two-party computation system,” in <em>Proc. of USENIX Security</em>, 2004.</li>
+
+      <li>[58] Y. Huang, D. Evans, J. Katz, and L. Malka, “Faster secure two-party computation using garbled circuits,” in <em>USENIX Security</em>, 2011.</li>
+
+      <li>[59] B. Kreuter, abhi shelat, and C.-H. Shen, “Billion-gate secure computation with malicious adversaries,” in <em>Proc. of USENIX Security</em>, 2012.</li>
+
+      <li>[60] S. Setty, B. Braun, V. Vu, A. J. Blumberg, B. Parno, and M. Walfish, “Resolving the conflict between generality and plausibility in verified computation,” in <em>Proc. of the ACM European Conference on Computer Systems (EuroSys)</em>, Apr. 2013.</li>
+
+      <li>[61] V. Vu, S. Setty, A. J. Blumberg, and M. Walfish, “A hybrid architecture for interactive verifiable computation,” in <em>IEEE Symposium on Security and Privacy</em>, May 2013.</li>
+
+      <li>[62] J. B. Almeida, E. Bangerter, M. Barbosa, S. Krenn, A.-R. Sadeghi, and T. Schneider, “A certifying compiler for zero-knowledge proofs of knowledge based on <span class="math">\\sigma</span>-protocols,” in <em>Proc. of ESORICS</em>, 2010.</li>
+
+      <li>[63] S. Meiklejohn, C. C. Erway, A. Küpçü, T. Hinkle, and A. Lysyanskaya, “ZKPDL: A language-based system for efficient zero-knowledge proofs and electronic cash,” in <em>Proc. of USENIX</em>, 2010.</li>
+
+      <li>[64] M. Backes, M. Maffe, and K. Pecina, “Automated synthesis of privacy-preserving distributed applications,” in <em>Proc. of ISOC NDSS</em>, 2012.</li>
+
+      <li>[65] R. Cramer, I. Damgård, and B. Schoenmakers, “Proofs of partial knowledge and simplified design of witness hiding protocols,” in <em>Proc. of CRYPTO</em>, 1994.</li>
+
+      <li>[66] J. Groth and A. Sahai, “Efficient non-interactive proof systems for bilinear groups,” in <em>Proc. of EUROCRYPT</em>, 2008.</li>
+
+      <li>[67] D. Boneh and X. Boyen, “Short signatures without random oracles,” in <em>EUROCRYPT</em>, 2004.</li>
+
+      <li>[68] R. Gennaro, “Multi-trapdoor commitments and their applications to proofs of knowledge secure under concurrent man-in-the-middle attacks,” in <em>CRYPTO</em>, 2004.</li>
+
+    </ul>
+
+    <h2 id="sec-31" class="text-2xl font-bold">Appendix A Cryptographic Assumptions</h2>
+
+    <p class="text-gray-300">We define the hardness assumptions that we use in the security proof of our optimized VC construction from Section 3.1. Suppose <span class="math">(p,\\mathbb{G},\\mathbb{G}_{T},e)\\leftarrow\\mathcal{G}(1^{\\kappa})</span> outputs a description of a cyclic bilinear group <em>[34]</em> of order <span class="math">p</span>, a <span class="math">\\kappa</span>-bit prime, where <span class="math">e:\\mathbb{G}\\times\\mathbb{G}\\rightarrow\\mathbb{G}_{T}</span> is the usual pairing (bilinear map) function. Below, let <span class="math">\\kappa</span> be a security parameter, <span class="math">q=\\operatorname{poly}(\\kappa)</span>, and let <span class="math">\\mathcal{A}</span> be a non-uniform probabilistic polynomial time adversary.</p>
+
+    <h6 id="sec-32" class="text-base font-medium mt-4">Assumption 1 (<span class="math">q</span>-PDH <em>[21]</em>)</h6>
+
+    <p class="text-gray-300">The <span class="math">q</span>-power Diffie-Hellman (<span class="math">q</span>-PDH) assumption holds for <span class="math">\\mathcal{G}</span> if for all <span class="math">\\mathcal{A}</span> we have</p>
+
+    <p class="text-gray-300"><span class="math">Pr[</span> <span class="math">(p,\\mathbb{G},\\mathbb{G}_{T},e)\\leftarrow\\mathcal{G}(1^{\\kappa});\\,g\\leftarrow\\mathbb{G}\\backslash\\{1\\}\\,;\\,s\\leftarrow\\mathbb{Z}_{p}^{*}\\,;</span> <span class="math">\\sigma\\leftarrow(p,\\mathbb{G},\\mathbb{G}_{T},e,g,g^{s},\\ldots,g^{s^{q}},g^{s^{q+2}},\\ldots,g^{s^{2q}})\\,;</span> <span class="math">\\quad y\\leftarrow\\mathcal{A}(\\sigma)\\,:\\,y=g^{s^{q+1}}]=\\mathtt{negl}(\\kappa).</span></p>
+
+    <h6 id="sec-33" class="text-base font-medium mt-4">Assumption 2 (<span class="math">q</span>-PKE <em>[21]</em>)</h6>
+
+    <p class="text-gray-300">The <span class="math">q</span>-power knowledge of exponent assumption holds for <span class="math">\\mathcal{G}</span> if for all <span class="math">\\mathcal{A}</span> there exists a non-uniform probabilistic polynomial time extractor <span class="math">\\chi_{\\mathcal{A}}</span> such that</p>
+
+    <p class="text-gray-300"><span class="math">Pr[</span> <span class="math">(p,\\mathbb{G},\\mathbb{G}_{T},e)\\leftarrow\\mathcal{G}(1^{\\kappa});\\,g\\leftarrow\\mathbb{G}\\backslash\\{1\\}\\,;\\,\\alpha,s\\leftarrow\\mathbb{Z}_{p}^{*}\\,;</span> <span class="math">\\sigma\\leftarrow(p,\\mathbb{G},\\mathbb{G}_{T},e,g,g^{s},\\ldots,g^{s^{q}},g^{\\alpha},g^{\\alpha s},\\ldots,g^{\\alpha s^{q}})\\,;</span> <span class="math">\\quad(c,\\hat{c}\\,;\\,a_{0},\\ldots,a_{q})\\leftarrow(\\mathcal{A}\\parallel\\chi_{\\mathcal{A}})(\\sigma,z)\\,\\,:</span> <span class="math">\\quad\\hat{c}=c^{\\alpha}\\wedge c\\neq\\prod_{i=0}^{q}g^{a_{i}s^{i}}]=\\mathtt{negl}(\\kappa)</span></p>
+
+    <p class="text-gray-300">for any auxiliary information <span class="math">z\\in\\{0,1\\}^{\\operatorname{poly}(\\kappa)}</span> that is generated independently of <span class="math">\\alpha</span>. Note that <span class="math">(y;z)\\leftarrow(\\mathcal{A}\\parallel\\chi_{\\mathcal{A}})(x)</span> signifies that on input <span class="math">x</span>, <span class="math">\\mathcal{A}</span> outputs <span class="math">y</span>, and that <span class="math">\\chi_{\\mathcal{A}}</span>, given the same input <span class="math">x</span> and <span class="math">\\mathcal{A}</span>’s random tape, produces <span class="math">z</span>.</p>
+
+    <h6 id="sec-34" class="text-base font-medium mt-4">Assumption 3 (<span class="math">q</span>-SDH <em>[67, 68]</em>)</h6>
+
+    <p class="text-gray-300">The <span class="math">q</span>-strong <span class="math">Diffie</span>-Hellman (<span class="math">q</span>-SDH) assumption holds for <span class="math">\\mathcal{G}</span> if for all <span class="math">\\mathcal{A}</span>:</p>
+
+    <p class="text-gray-300"><span class="math">Pr[</span> <span class="math">(p,\\mathbb{G},\\mathbb{G}_{T},e)\\leftarrow\\mathcal{G}(1^{\\kappa})\\;;\\;g\\leftarrow\\mathbb{G}\\backslash\\{1\\}\\;;</span> <span class="math">s\\leftarrow\\mathbb{Z}_{p}^{<em>}\\;;</span> <span class="math">\\sigma\\leftarrow(p,\\mathbb{G},\\mathbb{G}_{T},e,g,g^{s},\\ldots,g^{s^{q}})\\;;</span> <span class="math">y\\leftarrow\\mathcal{A}(\\sigma)\\;:\\;y=e(g,g)^{\\frac{1}{2+\\epsilon}},c\\in\\mathbb{Z}_{p}^{</em>}]=\\mathtt{neg1}(\\kappa).</span></p>
+
+    <h2 id="sec-35" class="text-2xl font-bold">Appendix B Security Proof for Our VC Scheme</h2>
+
+    <p class="text-gray-300">To prove Theorem 1, we assume there exists an adversary <span class="math">\\mathcal{A}_{vc}</span> who returns a cheating proof, and we show how to construct an adversary <span class="math">\\mathcal{B}</span> that uses <span class="math">\\mathcal{A}_{vc}</span> and a <span class="math">d</span>-PKE assumption knowledge extractor <em>[21]</em> to break either the <span class="math">q</span>-PDH assumption <em>[21]</em> or the <span class="math">2q</span>-SDH assumption <em>[67, 68]</em>, where <span class="math">q=4d+4</span>. These assumptions are defined in Appendix A.</p>
+
+    <p class="text-gray-300">Let <span class="math">\\mathcal{B}</span> be given a challenge <span class="math">g,g^{s},\\ldots,g^{s^{q}},g^{s^{q+2}},\\ldots,g^{s^{2q}}</span>. (This challenge can be interpreted as either a <span class="math">q</span>-PDH instance, or a subset (missing <span class="math">g^{s^{q+1}}</span>) of a <span class="math">2q</span>-SDH instance.) <span class="math">\\mathcal{A}_{vc}</span> generates a function <span class="math">f</span> with <span class="math">N</span> input/output wires that has a QAP <span class="math">Q_{f}=(t(x),\\mathcal{V},\\mathcal{W},\\mathcal{Y})</span> of size <span class="math">m</span> and degree <span class="math">d</span>. (So that this proof covers the zero-knowledge variant of the VC scheme, we include <span class="math">t(x)</span> in each of the sets <span class="math">\\mathcal{V},\\mathcal{W},\\mathcal{Y}</span>.) Let <span class="math">I_{mid}=\\{N+1,...,m\\}</span>, i.e., the non-IO-related indices.</p>
+
+    <p class="text-gray-300"><span class="math">\\mathcal{B}</span> provides evaluation and verification keys to <span class="math">\\mathcal{A}_{vc}</span>, using the same structure as in Protocol 2:</p>
+
+    <p class="text-gray-300"><span class="math">EK=</span> <span class="math">(\\{g_{v}^{v_{k}(s)}\\}_{k\\in I_{mid}},\\quad\\{g_{w}^{w_{k}(s)}\\}_{k\\in I_{mid}},\\quad\\{g_{y}^{v_{k}(s)}\\}_{k\\in I_{mid}},</span> <span class="math">\\{g_{v}^{\\alpha_{v}k}(s)\\}_{k\\in I_{mid}},\\quad\\{g_{w}^{\\alpha_{w}w_{k}(s)}\\}_{k\\in I_{mid}},\\quad\\{g_{y}^{\\alpha_{y}\\gamma_{k}(s)}\\}_{k\\in I_{mid}},</span> <span class="math">\\{g^{s^{\\prime}}\\}_{i\\in[d]},\\quad\\{g_{v}^{\\beta v_{k}(s)}g_{w}^{\\beta w_{k}(s)}g_{y}^{\\beta\\gamma_{k}(s)})\\}_{k\\in I_{mid}}),</span></p>
+
+    <p class="text-gray-300"><span class="math">VK_{F}=</span> <span class="math">(g,g^{\\alpha_{v}},g^{\\alpha_{w}},g^{\\alpha_{y}},g^{\\gamma},g^{\\beta\\gamma},\\{g_{v}^{v_{k}(s)},g_{w}^{w_{k}(s)},g_{y}^{v_{k}(s)}\\}_{k\\in\\{0\\}\\cup I_{io}},</span> <span class="math">g_{y}^{t(s)})</span>,</p>
+
+    <p class="text-gray-300">where <span class="math">r_{v}^{\\prime}</span>, <span class="math">r_{w}^{\\prime}</span>, <span class="math">\\alpha_{v}</span>, <span class="math">\\alpha_{w}</span>, and <span class="math">\\alpha_{y}</span> are chosen uniformly at random, <span class="math">r_{y}^{\\prime}=r_{v}^{\\prime}r_{w}^{\\prime}</span>, <span class="math">g_{v}=g^{r_{v}^{\\prime}s^{d+1}}</span>, <span class="math">g_{w}=g^{r_{w}^{\\prime}s^{2(d+1)}}</span>, and <span class="math">g_{y}=g^{r_{y}^{\\prime}s^{3(d+1)}}</span>, and the values <span class="math">\\beta</span> and <span class="math">\\gamma</span> are set as described next.</p>
+
+    <p class="text-gray-300">Regarding <span class="math">\\beta</span>, write the final proof term with <span class="math">g</span> as the base:</p>
+
+    <p class="text-gray-300"><span class="math">g_{v}^{\\beta v(s)}g_{w}^{\\beta w(s)}g_{y}^{\\beta\\gamma(s)}=g^{\\beta(r_{v}^{\\prime}s^{d+1}v(s)+r_{w}^{\\prime}s^{2(d+1)}w(s)+r_{y}^{\\prime}s^{3(d+1)}y(s))}.</span> (3)</p>
+
+    <p class="text-gray-300">That is, in the exponent, <span class="math">\\beta</span> is multiplied with a certain polynomial that is evaluated at <span class="math">s</span>. <span class="math">\\mathcal{B}</span> also generates <span class="math">\\beta</span> as a polynomial evaluated at <span class="math">s</span>. In particular, it sets <span class="math">\\beta=s^{q-(4d+3)}\\beta_{poly}(s)</span>, where <span class="math">\\beta_{poly}(x)</span> is a polynomial of degree at most <span class="math">3d+3</span> sampled uniformly at random such that <span class="math">\\beta_{poly}(x)\\cdot(r_{v}^{\\prime}v_{k}(x)+r_{w}^{\\prime}x^{d+1}w_{k}(x)+r_{y}^{\\prime}x^{2(d+1)}y_{k}(x))</span> has a zero coefficient in front of <span class="math">x^{3d+3}</span> for all <span class="math">k</span>. We know that such a polynomial <span class="math">\\beta_{poly}(x)</span> exists by Lemma 10 of GGPR <em>[30]</em>, which says (roughly) that, given a set of polynomials <span class="math">\\{u_{k}(x)\\in\\mathbb{F}[x]\\}</span> of degree at most <span class="math">D</span>, then there exists a nonzero polynomial <span class="math">a(x)</span> of degree <span class="math">D+1</span> such that all of the polynomials <span class="math">a(x)u_{k}(x)</span> have a nonzero coefficient for <span class="math">x^{D+1}</span>, and moreover for any polynomial <span class="math">u(x)</span> not in the linear span of <span class="math">\\{u_{k}(x)\\}</span>, the coefficient of <span class="math">x^{D+1}</span> in <span class="math">a(x)u(x)</span> is uniformly random in <span class="math">\\mathbb{F}</span> (when sampling <span class="math">a(x)</span> uniformly subject to the above restriction). By inspection, when we now write out <span class="math">\\beta</span> in terms of <span class="math">s</span>, we see that the exponent in Equation 3 has a zero in front of <span class="math">s^{q+1}</span>, and also the powers of <span class="math">s</span> only go up to degree <span class="math">q+3d+3\\leq 2q</span>. Therefore, <span class="math">\\mathcal{B}</span> can efficiently generate the terms in the evaluation key that contain <span class="math">\\beta</span> using the elements given in his challenge.</p>
+
+    <p class="text-gray-300">Regarding <span class="math">\\gamma</span>, <span class="math">\\mathcal{B}</span> generates <span class="math">\\gamma^{\\prime}</span> uniformly at random from <span class="math">\\mathbb{F}</span> and sets <span class="math">\\gamma=\\gamma^{\\prime}s^{q+2}</span>. <span class="math">\\mathcal{B}</span> can generate <span class="math">g^{\\gamma}</span> efficiently from its challenge, since <span class="math">g^{s^{q+2}}</span> is given. Also, <span class="math">\\beta\\gamma=s^{q-(4d+3)}\\beta_{poly}(s)\\gamma^{\\prime}s^{q+2}</span> does not have a term <span class="math">s^{q+1}</span> and has degree at most <span class="math">q-(4d+3)+(3d+3)+(q+2)\\leq 2q</span>, and so <span class="math">\\mathcal{B}</span> can generate <span class="math">g^{\\beta\\gamma}</span> from the elements in its challenge.</p>
+
+    <p class="text-gray-300">Similarly none of the other elements in the CRS contains a term <span class="math">s^{q+1}</span> in the exponent, since all of the polynomials <span class="math">v_{k}(x)</span>, <span class="math">w_{k}(x)</span> and <span class="math">y_{k}(x)</span> are of degree <span class="math">d</span> and <span class="math">q\\geq 4d+4</span>. Hence, <span class="math">\\mathcal{B}</span> can generate them using the terms from its challenge.</p>
+
+    <p class="text-gray-300">Thus, the evaluation and verifications keys generated by <span class="math">\\mathcal{B}</span> have a distribution statistically identical to the real scheme.</p>
+
+    <p class="text-gray-300">Given <span class="math">EK_{F}</span> and <span class="math">VK_{F}</span>, <span class="math">\\mathcal{A}_{vc}</span> can run the Compute and Verify algorithms on its own. Let <span class="math">g_{v}^{V_{mid}}</span>, <span class="math">g_{w}^{W_{mid}}</span>, <span class="math">g_{y}^{Y_{mid}}</span>, <span class="math">g^{H}</span>, <span class="math">g_{v}^{V_{mid}^{\\prime}}</span>, <span class="math">g_{w}^{W_{mid}^{\\prime}}</span>, <span class="math">g_{y}^{Y_{mid}^{\\prime}}</span>, and <span class="math">g^{Z}</span> be a cheating proof that <span class="math">\\mathcal{A}_{vc}</span> provides for the result of the computation of <span class="math">f</span> with input and output <span class="math">\\{c_{k}\\}_{k\\in[N]}</span>.</p>
+
+    <p class="text-gray-300">Since the verification holds, we have that <span class="math">(g_{v}^{V_{mid}})^{\\alpha_{v}}=g^{V_{mid}^{\\prime}}</span>. We claim that <span class="math">\\mathcal{B}</span> can run the <span class="math">d</span>-PKE extractor <span class="math">\\chi_{\\mathcal{A}}</span> to recover a polynomial <span class="math">V_{mid}(x)</span> of degree at most <span class="math">d</span> such that <span class="math">V_{mid}=V_{mid}(s)</span>. Though it may not be immediately recognizable as such, the parameters received by <span class="math">\\mathcal{A}_{vc}</span> are a valid input <span class="math">(\\sigma,z)</span> for the <span class="math">d</span>-PKE assumption. In particular, a valid input consists of <span class="math">\\sigma=(\\{g_{v}^{s^{\\prime}}\\}_{i\\in[0,d]},\\{g_{v}^{\\alpha_{v}s^{\\prime}}\\}_{i\\in[0,d]})</span> and <span class="math">z</span>, where the auxiliary information <span class="math">z</span> is independent of <span class="math">\\alpha_{v}</span>, and the other terms in the CRS can be generated efficiently from <span class="math">(\\sigma,z)</span>. The terms <span class="math">\\{g_{v}^{v_{k}(s)}\\}</span> can indeed be efficiently generated from <span class="math">\\{g_{v}^{s^{\\prime}}\\}</span>, and the auxiliary information <span class="math">z</span> that <span class="math">\\mathcal{A}_{vc}</span> receives is indeed independent of <span class="math">\\alpha_{v}</span>. Therefore, <span class="math">\\mathcal{B}</span> can invoke the <span class="math">d</span>-PKE extractor <span class="math">\\chi_{\\mathcal{A}}</span> to recover <span class="math">V_{mid}(x)</span>, which must be a polynomial of degree at most <span class="math">d</span>. Similarly, <span class="math">\\mathcal{B}</span> recovers <span class="math">W_{mid}(x)</span> and <span class="math">Y_{mid}(x)</span> such that <span class="math">W_{mid}=W_{mid}(s)</span> and <span class="math">Y_{mid}=Y_{mid}(s)</span>. Then, it sets <span class="math">H(x)=((v_{0}(x)+V(x))(w_{0}(x)+W(x))-(y_{0}(x)+Y(x)))/t(x)</span>, where <span class="math">V(x)=\\sum_{k\\in[N]}c_{k}v_{k}(x)+V_{mid}(x)</span> (and similarly for <span class="math">W(x)</span> and <span class="math">Y(x)</span>).</p>
+
+    <p class="text-gray-300">Since the proof verifies, but the statement is false (and therefore the extracted polynomials cannot actually be a QAP solution), there are two possible cases: (1) <span class="math">H(x)</span> has a non-trivial denominator, or (2) The polynomial <span class="math">R(x)=r_{v}^{\\prime}x^{d+1}V_{mid}(x)+r_{w}^{\\prime}x^{2(d+1)}W_{mid}(x)+r_{y}^{\\prime}x^{3(d+1)}Y_{mid}(x)</span> is not in the linear subspace, <span class="math">S</span>, generated by the polynomials <span class="math">\\{r_{k}(x)=r_{v}^{\\prime}x^{d+1}v_{k}(x)+r_{w}^{\\prime}x^{2(d+1)}w_{k}(x)+r_{y}^{\\prime}x^{3(d+1)}y_{k}(x)\\}_{k\\in I_{mid}}</span>.</p>
+
+    <p class="text-gray-300">First, we show that these are the only two cases, if the proof verifies but the statement is false. We assume that neither case 1 nor case 2 holds; i.e., <span class="math">H(x)</span> has no non-trivial denominator, and <span class="math">R(x)</span> is in the linear subspace <span class="math">S</span>. We will show that <span class="math">V(x)</span>, <span class="math">W(x)</span>, and <span class="math">Y(x)</span> are a solution for the QAP; i.e., they can be written as linear combinations of <span class="math">\\{v_{k}(x)_{k\\in[m]}\\}</span>, <span class="math">\\{w_{k}(x)_{k\\in[m]}\\}</span> and <span class="math">\\{y_{k}(x)_{k\\in[m]}\\}</span> using the same coefficients, and <span class="math">(v_{0}(x)+V(x))(w_{0}(x)+W(x))-(y_{0}(x)+Y(x))</span> is divisible by <span class="math">t(x)</span>.</p>
+
+    <h2 id="sec-36" class="text-2xl font-bold">Appendix</h2>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Since <span class="math">R(x)</span> is in the subspace <span class="math">S</span>, there exists a linear combination <span class="math">\\{c_k\\}_{k \\in I_{mid}}</span> such that <span class="math">R(x) = \\sum_{k \\in I_{mid}} c_k r_k(x)</span>. Thus, we can write <span class="math">R(x)</span> as <span class="math">r&#x27;_v x^{d+1} V^\\dagger(x) + r&#x27;_w x^{2(d+1)} W^\\dagger(x) + r&#x27;_v x^{3(d+1)} Y^\\dagger(x)</span>, where <span class="math">V^\\dagger(x) = \\sum_{k \\in I_{mid}} c_k v_k(x)</span>, <span class="math">W^\\dagger(x) = \\sum_{k \\in I_{mid}} c_k w_k(x)</span>, and <span class="math">Y^\\dagger(x) = \\sum_{k \\in I_{mid}} c_k y_k(x)</span>. Each of the polynomials <span class="math">V^\\dagger(x), W^\\dagger(x), Y^\\dagger(x)</span> has degree at most <span class="math">d</span> because they are in the spans of <span class="math">\\{v_k(x)_{k \\in I_{mid}}\\}</span>, <span class="math">\\{w_k(x)_{k \\in I_{mid}}\\}</span> and <span class="math">\\{y_k(x)_{k \\in I_{mid}}\\}</span> respectively. Since <span class="math">V_{mid}(x), W_{mid}(x)</span> and <span class="math">Y_{mid}(x)</span> also have degree <span class="math">d</span>, and since the linear subspaces $\\{x^{d+1+i}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">i \\in [0,d]\\}<span class="math">, </span>\\{x^{2(d+1)+i}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">i \\in [0,d]\\}<span class="math">, and </span>\\{x^{3(d+1)+i}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">i \\in [0,d]\\}<span class="math"> are disjoint (except at the origin), we conclude from </span>R(x) = r'_v x^{d+1} V_{mid}(x) + r'_w x^{2(d+1)} W_{mid}(x) + r'_v x^{3(d+1)} Y_{mid}(x) = r'_v x^{d+1} V^\\dagger(x) + r'_w x^{2(d+1)} W^\\dagger(x) + r'_v x^{3(d+1)} Y^\\dagger(x)<span class="math"> that we can write </span>V_{mid}(x) = V^\\dagger(x) = \\sum_{k \\in I_{mid}} c_k v_k(x)<span class="math">, </span>W_{mid}(x) = W^\\dagger(x) = \\sum_{k \\in I_{mid}} c_k w_k(x)<span class="math">, </span>Y_{mid}(x) = Y^\\dagger(x) = \\sum_{k \\in I_{mid}} c_k y_k(x)<span class="math">. Therefore, </span>V(x) = \\sum_{k \\in [N]} c_k v_k(x) + \\sum_{k \\in I_{mid}} c_k v_k(x)<span class="math">, </span>W(x) = \\sum_{k \\in [N]} c_k w_k(x) + \\sum_{k \\in I_{mid}} w_k v_k(x)<span class="math"> and </span>Y(x) = \\sum_{k \\in [N]} c_k y_k(x) + \\sum_{k \\in I_{mid}} c_k y_k(x)<span class="math">. Now we have that </span>V(x), W(x),<span class="math"> and </span>Y(x)<span class="math"> indeed can be written as the same linear combination </span>\\{c_k\\}_{k \\in [m]}<span class="math"> of their polynomial sets, as required in a QAP. Since </span>H(x)<span class="math"> has no nontrivial denominator, it follows that </span>t(x)<span class="math"> evenly divides </span>(v_0(x) + V(x))(w_0(x) + W(x)) - (y_0(x) + Y(x))<span class="math">. Hence </span>V(x), W(x),<span class="math"> and </span>Y(x)<span class="math"> constitute a QAP solution associated to the input/output </span>\\{c_k\\}_{k \\in [N]}$, and hence to a true statement, contradicting our initial assumption.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">Next we address the two cases from above. In Case 1, <span class="math">t(x)</span> does not divide <span class="math">p(x) \\coloneqq (v_0(x) + V(x))(w_0(x) + W(x)) - (y_0(x) + Y(x))</span>. Let <span class="math">(x - r)</span> be a polynomial that divides <span class="math">t(x)</span> but not <span class="math">p(x)</span>, and let <span class="math">T(x) = t(x) / (x - r)</span>. Let <span class="math">d(x) = \\gcd(t(x), p(x))</span>. Since <span class="math">t(x)</span> and <span class="math">p(x)</span> have degrees at most <span class="math">d</span> and <span class="math">2d</span> respectively, <span class="math">\\mathcal{B}</span> can use the extended Euclidean algorithm for polynomials to find polynomials <span class="math">a(x)</span> and <span class="math">b(x)</span> of degrees <span class="math">2d - 1</span> and <span class="math">d - 1</span> respectively such that <span class="math">a(x)t(x) + b(x)p(x) = d(x)</span>. Set <span class="math">A(x) = a(x) \\cdot (T(x) / d(x))</span> and <span class="math">B(x) = b(x) \\cdot (T(x) / d(x))</span>; these polynomials have no denominator since <span class="math">d(x)</span> divides <span class="math">T(x)</span>. Then <span class="math">A(x)t(x) + B(x)p(x) = T(x)</span>. Dividing by <span class="math">t(x)</span>, we have <span class="math">A(x) + B(x)H(x) = 1 / (x - r)</span>. Since <span class="math">A(x)</span> and <span class="math">B(x)</span> have degree at most <span class="math">2d - 1 \\leq q</span>, <span class="math">\\mathcal{B}</span> can use the terms in its challenge to compute <span class="math">e(g^{A(x)}, g)e(g^{B(x)}, g^H) = e(g, g)^{1/(x - r)}</span>, and thus solve <span class="math">2q</span>-SDH.</p>
+
+    <p class="text-gray-300">In Case 2, there does not exist <span class="math">\\{c_k\\}_{k\\in I_{mid}}</span> such that <span class="math">V_{mid}(x) = \\sum_{k\\in I_{mid}}c_kv_k(x)</span>, <span class="math">W_{mid}(x) = \\sum_{k\\in I_{mid}}c_kw_k(x)</span> and <span class="math">Y_{mid}(x) = \\sum_{k\\in I_{mid}}c_ky_k(x)</span>. By Lemma 10 [30], we have that with high probability <span class="math">x^{q - (4d + 3)}\\beta_{poly}(x)\\cdot (r&#x27;_v x^{d + 1}v_k(x) + r&#x27;_w x^{2(d + 1)}w_k(x) + r&#x27;_v x^{3(d + 1)}y_k(x))</span> has a non-zero coefficient for the term <span class="math">x^{q + 1}</span>. Now <span class="math">\\mathcal{B}</span> can use <span class="math">g^{Z} = g^{x^{q - (4d + 3)}\\beta_{poly}(x)(x^{d + 1}V_{mid}(x) + x^{2(d + 1)}W_{mid}(x) + x^{3(d + 1)}Y_{mid}(x))}</span> to subtract off all elements of the form <span class="math">g^{x&#x27;}</span> where <span class="math">j\\neq q + 1</span> and to obtain <span class="math">g^{x^{q + 1}}</span>. This breaks the <span class="math">q</span>-PDH assumption.</p>
+
+    <p class="text-gray-300">16</p>`;
+---
+
+<BaseLayout title="Pinocchio: Nearly Practical Verifiable Computation (2013/279)">
+  <article class="max-w-4xl mx-auto article-prose">
+    <nav class="mb-8">
+      <a href="/papers" class="text-blue-400 hover:text-blue-300">
+        &larr; Back to Papers
+      </a>
+    </nav>
+
+    <header class="mb-12">
+      <h1 class="text-3xl font-bold mb-4"
+        set:html={TITLE_HTML} />
+      <p class="text-gray-400 mb-2"
+        set:html={AUTHORS_HTML} />
+      <p class="text-gray-500 text-sm mb-4">
+        2013 &middot; eprint 2013/279
+      </p>
+      <div class="flex gap-4 text-sm">
+        <a
+          href={EPRINT_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          class="text-blue-400 hover:text-blue-300"
+        >
+          Paper (eprint) &rarr;
+        </a>
+      </div>
+      <p class="mt-4 text-xs text-gray-500">
+        All content below belongs to the original authors. This page
+        reproduces the paper for educational purposes. Always
+        <a
+          href={EPRINT_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          class="text-blue-400 hover:text-blue-300"
+        >cite the original</a>.
+      </p>
+      <p class="mt-1 text-xs text-gray-600">
+        Converted with: {CRAWLER} &middot; {CONVERTED_DATE}
+      </p>
+    </header>
+
+    <Fragment set:html={CONTENT} />
+
+  </article>
+</BaseLayout>

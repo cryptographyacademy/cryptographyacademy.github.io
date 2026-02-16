@@ -1,0 +1,1489 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+
+const EPRINT_URL = 'https://eprint.iacr.org/2019/226';
+const CRAWLER = 'mistral';
+const CONVERTED_DATE = '2026-02-16';
+const TITLE_HTML = 'Flyclient: Super-Light Clients for Cryptocurrencies';
+const AUTHORS_HTML = 'Benedikt Bünz, Lucianna Kiffer, Loi Luu, Mahdi Zamani';
+
+const CONTENT = `    <p class="text-gray-300">Benedikt Bünz^{1}^{∗†}, Lucianna Kiffer^{2}^{∗†}, Loi Luu^{3∗}, and Mahdi Zamani^{4} ^{1}Stanford University, ^{2}Northeastern University, ^{3}Kyber Network, ^{4}Visa Research</p>
+
+    <h6 id="sec-2" class="text-base font-medium mt-4">Abstract</h6>
+
+    <p class="text-gray-300">To validate transactions, cryptocurrencies such as Bitcoin and Ethereum require nodes to verify that a blockchain is valid. This entails downloading and verifying all blocks, taking hours and requiring gigabytes of bandwidth and storage. Hence, clients with limited resources cannot verify transactions independently without trusting full nodes. Bitcoin and Ethereum offer light clients known as simplified payment verification (SPV) clients, that can verify the chain by downloading only the block headers. Unfortunately, the storage and bandwidth requirements of SPV clients still increase linearly with the chain length. For example, as of July 2019, an SPV client in Ethereum needs to download and store about 4 GB of data.</p>
+
+    <p class="text-gray-300">Recently, Kiayias et al. proposed a solution known as non-interactive proofs of proof-of-work (NIPoPoW) that allows a light client to download and store only a polylogarithmic number of block headers in expectation. Unfortunately, NIPoPoWs are succinct only as long as no adversary influences the honest chain, and can only be used in chains with fixed block difficulty, contrary to most cryptocurrencies which adjust block difficulty frequently according to the network hashrate.</p>
+
+    <p class="text-gray-300">We introduce FlyClient, a novel transaction verification light client for chains of variable difficulty. FlyClient is efficient both asymptotically and practically and requires downloading only a logarithmic number of block headers while storing only a single block header between executions. Using an optimal probabilistic block sampling protocol and Merkle Mountain Range (MMR) commitments, FlyClient overcomes the limitations of NIPoPoWs and generates shorter proofs over all measured parameters. In Ethereum, FlyClient achieves a synchronization proof size of less than 500 KB which is roughly 6,600x smaller than SPV proofs. We finally discuss how FlyClient can be deployed with minimal changes to the existing cryptocurrencies via an uncontentious velvet fork.</p>
+
+    <h2 id="sec-3" class="text-2xl font-bold">1 Introduction</h2>
+
+    <p class="text-gray-300">Today, many financial service providers can deliver digital payment services on low-capacity clients such as phones, wearable devices (e.g., smartwatches and fitness trackers), and Internet-of-things (IoT) devices for added convenience and security <em>[6, 5, 8]</em>. Such clients are characterized by their limited access to storage, bandwidth, and computation while still requiring instant confirmation latency.</p>
+
+    <p class="text-gray-300">While traditional financial services provide efficiency and strong security guarantees for mobile clients, they rely on centralized payment systems, and are generally inapplicable to decentralized cryptocurrency networks such as Bitcoin <em>[35]</em> and Ethereum <em>[15]</em>, where the security is enforced through cryptographic protocols and game theoretic incentives. On the other hand, current solutions for verifying transactions made over most cryptocurrency networks do not suit low-capacity devices. This is typically due to the large amounts of storage, computation, and bandwidth required by decentralized protocols to verify transactions on decentralized ledgers. These ledgers rely on state-machine replication across many untrusted nodes in the network. One option for low-capacity clients is to rely on a powerful trusted party who can verify payments on behalf of the client. The existence of such a trusted entity, however, greatly opposes the decentralized nature of cryptocurrency networks.</p>
+
+    <p class="text-gray-300">Mobile digital payments are becoming increasingly popular <em>[8]</em> and enable consumers to quickly transfer money to peers and efficiently pay for goods and services. In general these payments rely on centralized and trusted services. Decentralized cryptocurrencies such as Bitcoin <em>[35]</em> and Ethereum <em>[15]</em>, seem to provide an intriguing alternative to these services. Unfortunately, most current solutions for verifying cryptocurrency transactions do not suit low-capacity mobile devices such as phones or IoT-devices. Blockchain-based cryptocurrencies use state machine replication that requires nodes to verify every state transition and store the entire state. This is entirely unsuitable for battery, computation, and storage restricted devices. Current mobile solutions often employ a trusted wallet provider which negates much of the benefits of these decentralized ledgers.</p>
+
+    <p class="text-gray-300">Proof-of-Work Blockchains. Most cryptocurrencies, including Bitcoin and Ethereum, maintain an append-only ledger, known as a <em>blockchain</em>, which stores a sequence of blocks of transactions chained together via cryptographic hashes. These blocks are created and appended to the blockchain via a mining process, where the participating nodes, known as <em>miners</em>, compete to become the next block proposer, usually by solving a computationally-intensive puzzle, known as a <em>proof of work (PoW)</em> <em>[18]</em>, with sufficient difficulty. Through a gossip protocol initiated by the block proposer, every miner receives each block including a PoW solution and appends the block to their local copies of the blockchain if the solution is valid. Since this process is not coordinated by any central party (nor by any traditional consensus protocol), the blockchain may <em>fork</em> into multiple chains; <em>e.g.</em>, due to multiple solutions found for the same puzzle by different miners, or due to malicious behavior. To agree on the same chain consistently with other miners, each miner downloads and verifies all blocks in every chain and picks and follows the one with the largest total difficulty. Using this <em>most difficult chain principle</em>, it is shown that, in the long run, the network will agree on a single chain <em>[24, 37, 31]</em>, known as the <em>honest (valid) chain</em>. Each block in this chain contains a cryptographic proof ensuring that the block creator has spent a certain amount of resources uniquely for this block.</p>
+
+    <p class="text-gray-300">To verify that a blockchain is valid without participating in the mining process, a client may choose to download blocks from a miner or a <em>full node</em> who holds a copy of the entire chain. Currently, downloading and verifying all blocks in Bitcoin or Ethereum requires a node to download more than 200 GB of data, taking hours to synchronize the node’s local blockchain <em>[1]</em>. Such a requirement causes long delays for regular clients and makes it nearly impossible for storage-limited clients to quickly verify transactions.</p>
+
+    <p class="text-gray-300">Light Clients. The original Bitcoin design <em>[35]</em> describes a faster synchronization mechanism, known as <em>simplified payment verification</em> that allows lightweight verification of transactions on the blockchain by what is typically referred to as an SPV client (also known as a <em>light</em> client <em>[28]</em>).</p>
+
+    <p class="text-gray-300">Instead of downloading all blocks from a full node, an SPV client downloads only the <em>header</em> of each block that amounts to a much smaller synchronization overhead than the full blocks (80 bytes versus 1 MB per block in Bitcoin). The block headers are linked together through hashes and include the PoW solutions. This allows an SPV client to verify which chain has the most PoW solutions. Note that light clients neither know whether all transactions are valid nor all consensus rules are being followed. Light clients rather operate under the assumption that the chain with the most PoW solutions follows all rules of the network. This implies that all transactions in this chain are valid and the majority of computation power supports the same valid chain.</p>
+
+    <h6 id="sec-4" class="text-base font-medium mt-4">Assumption 1 (SPV assumption).</h6>
+
+    <p class="text-gray-300">The chain with the most PoW solutions follows the rules of the network and will eventually be accepted by the majority of miners.</p>
+
+    <p class="text-gray-300">Fortunately, prior work <em>[24, 37, 31, 23]</em> show that this assumption holds as long as an adversary holds only a minority share of the computation power.</p>
+
+    <p class="text-gray-300">Under the SPV assumption, light clients can verify the inclusion of specific transactions in the ledger. This is done by utilizing a Merkle tree commitment of the transactions of a block stored in the block header. A full node provides the light client with an <em>SPV proof</em> of the chain along with a Merkle path to the transaction in the tree committed to in the header.</p>
+
+    <p class="text-gray-300">Light clients also enable various applications to a broad class of users who need to verify a log of past events recorded on a blockchain. For example, SPV proofs can be used for efficient verification of cross-chain transactions that rely on funds or states recorded on another chain. Such transactions can happen when exchanging cryptocurrencies <em>[27, 2]</em>, transferring assets to sidechains <em>[12, 29, 30]</em>, or sharding blockchains <em>[43, 32]</em>. Blockchain-based notary services have been recently developed <em>[4, 7]</em> that allow lightweight verification</p>
+
+    <p class="text-gray-300">of the correctness and integrity of documents uploaded on a blockchain.</p>
+
+    <p class="text-gray-300">Although relying only on block headers reduces the verification overhead of SPV clients, it still incurs a large overhead on resource-limited clients, especially when considering the fact that this overhead increases linearly with the number of blocks. This has already become a major concern in Ethereum due to its significantly-shorter block interval than Bitcoin (<span class="math">\\sim</span>15 seconds vs <span class="math">\\sim</span>10 minutes) and significantly-larger block headers (508 bytes vs 80 bytes). Given that the Ethereum blockchain contains more than 8.2 million blocks (as of July 2019 <em>[10]</em>), an SPV client wishing to verify Ethereum transactions would have to download and store more than 3.9 GB of data. The client has to either download a fresh copy of the data every time it wants to verify a transaction or keep a local copy in its storage and only download the changes since the last synchronization. Either case puts a large burden on the client. The problem is further amplified for users that run clients for multiple blockchains or systems that use sidechains <em>[11]</em>.</p>
+
+    <p class="text-gray-300">Sublinear Light Clients. One may wonder if it is possible for a client to verify any event on a blockchain by downloading and/or storing only a sublinear (in the length of the chain) amount of information. In fact, such a performance gain comes with an important security challenge: Since such a client cannot verify every PoW solution in the received blockchain, it can be tricked into accepting an invalid chain by a malicious prover who can precompute a sufficiently-long chain using its limited computational power.</p>
+
+    <p class="text-gray-300">Proposals for sublinear light clients were initially discussed in Bitcoin forums and mailing lists as early as 2012 <em>[41, 21]</em>. Most of them relied on the notion of <em>superblocks</em>, blocks that solve a more difficult PoW puzzle than the current target puzzle. Since they appear randomly at a certain rate on an honest chain, the number of superblocks in a chain is a good indicator of the total number of valid blocks, if miners behave honestly. Kiayias <em>et al.</em> <em>[28]</em> introduced and formalized an interactive proof mechanism, known as <em>proofs of proof of work (PoPoW)</em> based on superblocks. PoPoWs allow a prover to convince a verifier with high probability in logarithmic time and communication that a chain contains a sufficient amount of work. In a later work <em>[29]</em>, Kiayias <em>et al.</em> provide an attack against the PoPoW protocol and propose a non-interactive and still logarithmic alternative solution known as <em>non-interactive PoPoW (NIPoPoW)</em>.</p>
+
+    <p class="text-gray-300">Current Challenges. The superblock-based PoPoW <em>[28]</em> and NIPoPoW <em>[29]</em> suffer from several drawbacks summarized as follows. Both solutions work only if a fixed PoW difficulty is assumed for all blocks. This is not a realistic assumption in practice due the variable combined hashing power of miners in most PoW-based cryptocurrency networks. For example, the block difficulty in Bitcoin has shown exponential growth over the network’s lifetime in the past decade <em>[9]</em>. It isn’t clear how to modify the super-block based protocols to handle the variable difficulties.</p>
+
+    <p class="text-gray-300">Additionally, the variable difficulty setting allows a malicious prover to arbitrarily manipulate block difficulties to perform what is known as a <em>difficulty raising attack</em> as described by Bahack <em>[13]</em>. In this attack, the adversary mines fewer but more difficult blocks such that the combined difficulty of the mined blocks exceeds that of honest miners. As a result, the prover can convince the verifier with a fake but seemingly valid chain (see Section 3.1 for more details). To prevent such an attack, the verifier can check that all difficulty transitions are valid, or at least that invalid transitions give no advantage to the prover. Adding these checks in superblock-based NIPoPoWs (such as that of <em>[29]</em>) is a non-obvious extension.</p>
+
+    <p class="text-gray-300">Moreover, the reliance on superblocks makes the protocol susceptible to <em>bribing</em> <em>[14]</em> and <em>selfish mining</em> <em>[19]</em> attacks. These attacks work by bribing miners to discard superblocks: rational miners accept this if they are paid more than the block reward as superblocks do not yield any extra block reward. The NIPoPoW protocol of <em>[29]</em> defends against this attack but only by reverting to the standard (and expensive) SPV protocol. The proofs are therefore only succinct if no adversarial influence exists. FlyClient, on the other hand, does not rely on superblocks and distinguishes blocks only by their position (or height) in the chain.</p>
+
+    <p class="text-gray-300">Finally, NIPoPoW’s transaction inclusion proofs are fairly large, even in the optimistic case. This is because such proofs consist of roughly an additional <span class="math">O(\\log(n))</span> block headers, where <span class="math">n</span> is the chain length. In some cryptocurrencies such as Ethereum, block headers are quite large, thus resulting in larger NIPoPoW transaction inclusion proofs, <em>e.g.</em>, roughly 15 KB in Ethereum.</p>
+
+    <p class="text-gray-300">Our Contribution. We propose FlyClient, a new blockchain verification protocol for light clients in cryptocurrencies such as Bitcoin and Ethereum. Unlike regular SPV clients that use a linear amount of bandwidth</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Block Height</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">10 K</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">100 K</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">1,000 K</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">7,000 K</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">SPV</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">4,961</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">49,609</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">496,094</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">3,472,656</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">FlyClient</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">161</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">277</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">416</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">524</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Improvement</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">31x</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">179x</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1,275x</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">6,627x</td>
+
+          </tr>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">Table 1: Proof sizes (in KB) for an SPV client and FlyClient in Ethereum at various block heights assuming an adversarial hash power of at most  <span class="math">c = 1/2</span>  of the honest hash power and failure probability  <span class="math">&amp;lt; 2^{-50}</span> .</p>
+
+    <p class="text-gray-300">and storage in the length of the chain, FlyClient requires downloading only a logarithmic number of block headers to verify the validity of the chain. Once the chain is verified, the client needs to store only a single block to efficiently verify the inclusion of any transaction on the chain. The FlyClient protocol is a non-interactive PoPoW but overcomes the limitations of the superblock-based NIPoPoW protocol of Ki-ayias et al. [29]. FlyClient is compatible with variable difficulty chains and provides asymptotically and practically-succinct proofs even in the presence of an adversary that can create a  <span class="math">c &amp;lt; 1</span>  fraction of the honest chain's work. Further, FlyClient requires short transaction-inclusion proofs that consist of only  <span class="math">O(\\log(n))</span>  hashes. In Ethereum, this results in transaction-inclusion proofs that are as small as 1.5 KB which is roughly 10x smaller than NIPoPoWs.</p>
+
+    <p class="text-gray-300">Our protocol is parameterized by  <span class="math">c \\in [0,1)</span>  and  <span class="math">\\lambda \\in \\mathbb{N}</span>  such that an adversary which can create forks (of some minimum length) with at most a  <span class="math">c</span>  fraction of the valid work of the honest chain, succeeds with probability negligible in  <span class="math">\\lambda</span> . This corresponds to a slightly stronger and parameterized version of the SPV assumption. The protocol's efficiency depends on both  <span class="math">c</span>  and  <span class="math">\\lambda</span> . We show in Section 7.1 that FlyClient is efficient even for high values of  <span class="math">c</span>  (e.g.,  <span class="math">c = 0.9</span> ). Finally, we demonstrate FlyClient's concrete efficiency on Ethereum (see Table 1).</p>
+
+    <p class="text-gray-300">FlyClient achieves these by employing the following techniques:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Probabilistic Sampling: We introduce a PoPoW protocol to randomly sample  <span class="math">O(\\log n)</span>  block headers from a remote blockchain with variable block difficulty. We formally prove the security of our protocol as long as the adversary can only create a  <span class="math">c</span>  fraction of the honest chain's PoW.</li>
+
+      <li>Efficient Chain Commitments: We formalize and use the notion of a Merkle mountain range (MMR) [42], an efficiently-updatable commitment mechanism that allows provers to commit to an entire blockchain with a small (constant-size) commitment while offering logarithmic block inclusion proofs with position binding guarantees.</li>
+
+      <li>Variable Difficulty MMR Checks: We extend MMRs to contain information about the difficulty and difficulty transitions. This information allows a verifier to efficiently check that the difficulty transitions follow the rules of the chain. Without these checks an adversary could create valid proofs with non-negligible probability by creating few but high difficulty blocks.</li>
+
+      <li>Non-Interactive and Transferable Proofs: We introduce a non-interactive variant of FlyClient using the Fiat-Shamir heuristic [20] that allows both the light client and the full node to forward the proof to other light clients without recalculating the proof.</li>
+
+    </ul>
+
+    <p class="text-gray-300">Consider a blockchain network that is growing a valid (or honest) chain  <span class="math">C</span>  based on the most difficult chain principle, and a client (or verifier) who wants to verify that a given transaction  <span class="math">tx</span>  is recorded on the chain. The valid chain is characterized as the chain with the highest cumulative computational difficulty created so far by the network. Any other chain is considered an invalid chain. The light client assumes that the valid chain follows all other rules of the network, such as containing only valid state transitions. For ease of explanation, we first assume that each block has the same level of difficulty. In this model, the valid chain</p>
+
+    <p class="text-gray-300">!<a href="img-0.jpeg">img-0.jpeg</a> Figure 1: MMR chain commitments</p>
+
+    <p class="text-gray-300">is the one with the highest length (i.e., number of blocks). We will later formalize the problem using the variable block difficulty model to be consistent with most cryptocurrencies, including Bitcoin and Ethereum.</p>
+
+    <p class="text-gray-300">The client is connected to a set of full nodes (or provers) at least one of which is honest (holds a copy of the valid chain), but the client does not know which one is honest. The provers participate in the FlyClient protocol to convince the client that some  <span class="math">tx</span>  is included in some valid block  <span class="math">B</span>  in the honest chain. As a first step all provers send the last block or the head of their chain to the client which includes a claim of how many blocks are included in the chain.</p>
+
+    <p class="text-gray-300">Two Provers and a Verifier. We consider the case where the client is connected to only two provers one of which is honest. Both provers claim the same length  <span class="math">n</span>  for their chains. If both provers present the same head of the chain and the same block  <span class="math">B</span> , then the client is convinced and this part of the protocol ends. Otherwise, one of the provers holds an invalid chain. In this case, the client challenges both provers with a probabilistic sampling protocol to find out which one holds the honest chain. Assuming that the combined hash power of all malicious miners is a  <span class="math">c &amp;lt; 1</span>  fraction of the honest miners, the probability that the adversary can mine the same number of blocks as the honest miners reduces exponentially as the honest chain grows. Thus, the adversary has to insert a sufficient number of invalid (aka, fake) blocks to make its chain as long, or more accurately, as difficult as the honest chain.</p>
+
+    <p class="text-gray-300">Probabilistic Sampling. Our probabilistic sampling protocol samples a logarithmic number of block headers from both chains using a probability density function  <span class="math">g(x)</span>  that specifies, for every height  <span class="math">x</span>  in each chain, the likelihood that the block located at position  <span class="math">x</span>  is sampled. Some blocks near the head of the chain are sampled with probability 1, i.e., are always part of the proof. Using differential analysis, we find the optimal  <span class="math">g(x)</span>  that maximizes the probability of catching the invalid chain given the adversary's optimal strategy. Therefore, we can give a minimum probability that the verifier catches the adversary with only a single query, independent of the adversary's forking strategy. This allows us to reduce the adversary's success probability to a negligible value by repeatedly sampling blocks according to  <span class="math">g(x)</span> .</p>
+
+    <p class="text-gray-300">Chain Commitments. So far, we still allow a malicious prover to deceive the verifier with an invalid chain. Namely, since the verifier downloads only a small number of block headers that are not necessarily chained together, the malicious prover can choose to only (or mostly) return correctly-mined blocks from arbitrary positions on the honest chain in response to the verifier's request. This significantly decreases the success probability of our probabilistic sampling protocol. One way to protect against such a strategy is to have the prover "commit" to its entire chain before the protocol starts, hence ensuring that it returns the blocks at the expected positions on the chain.</p>
+
+    <p class="text-gray-300">To commit to the entire chain of blocks, FlyClient requires the prover to maintain a Merkle tree variant known as a Merkle Mountain Range (MMR) over all blocks added to the blockchain so far. In addition to being a Merkle tree, an MMR allows efficient appends at the prover side and efficient block inclusion verifications at the verifier side. Further, it enables efficient subtree proofs, a proof that two MMRs agree on the first  <span class="math">k</span>  leaves. At every block height  <span class="math">i</span> , the prover appends the hash of the previous block,  <span class="math">B_{i-1}</span> , to the most recent MMR and records the new MMR root,  <span class="math">M_i</span> , in the header of  <span class="math">B_i</span>  (see Figure 1). As a result, each MMR root stored at every block height can be seen as a commitment to the entire blockchain up to</p>
+
+    <p class="text-gray-300">that height.</p>
+
+    <p class="text-gray-300">Putting Things Together. With MMR commitments in block headers, each prover begins by sending the header of the last block in its chain, the header of block <span class="math">B_{n}</span> that includes the MMR root <span class="math">M_{n}</span>. Next, the verifier samples a number of random blocks from the prover according to the probability distribution <span class="math">g(x)</span>. For every sampled block, the prover provides the corresponding block header and an <em>MMR proof</em> that the block is located at the correct height of the chain committed by <span class="math">B_{n}</span>. Additionally, the verifier checks that the MMR root stored in every sampled block commits to a subtree of <span class="math">M_{n}</span>. If the PoW solution or the MMR proofs of any of the sampled blocks is invalid, then the verifier rejects the proof. Otherwise, it accepts <span class="math">B_{n}</span> as the last block of the honest chain. Finally, to ensure that a <em>tx</em> is included in some block on the honest chain, the client first receives an MMR inclusion proof that <span class="math">B_{n}</span> commits to the block <span class="math">B</span>. The verifier checks this proof using <span class="math">M_{n}</span>. Then, just as for a regular SPV proof the prover provides a Merkle proof that <em>tx</em> occurred in <span class="math">B</span>. The verifier verifies the Merkle proof using the transaction commitment in <span class="math">B</span>’s header.</p>
+
+    <p class="text-gray-300">The Variable-Difficulty Model. To adapt FlyClient to the case where blocks have different difficulties, we use the same sampling distribution <span class="math">g(x)</span> but <span class="math">x</span> now denotes the relative aggregate difficulty. For example, <span class="math">x=1/2</span> refers to a point on the chain where half of the difficulty has been amassed, and <span class="math">g(1/2)</span> is the probability that the block at that point is sampled by FlyClient. To ensure that the full node returns the correct blocks according to the difficulty distribution, we modify the MMR commitments such that each node in the Merkle tree now additionally contains the aggregate difficulty of all nodes below it. This means that each block header is now committing to not only the sequence of all blocks up to the given block but also to the total difficulty amassed by the network up to that block. Therefore, a Merkle inclusion proof, which is generated in a way similar to a standard Merkle tree proof, allows the client to verify that the provided block is indeed located at the <span class="math">x</span>-th percentile of the total difficulty.</p>
+
+    <p class="text-gray-300">Additionally the new MMR proofs ensure that the difficulty transitions are done correctly. This is done by storing more information such as total time in each internal MMR node. The information suffices to check that invalid difficulty transitions do not give the adversary an advantage. Failing to do so could lead to devastating difficulty raising attacks <em>[13]</em>.</p>
+
+    <p class="text-gray-300">Non-Interactive and Transferable FlyClient. To make our probabilistic sampling protocol non-interactive, we apply the Fiat-Shamir heuristic <em>[20]</em> to the protocol described so far. The randomness is generated from the hash of the head of the chain. The verifier now simply checks that the proof is correct and that the randomness was derived correctly. The non-interactiveness makes FlyClient more practical since (1) the full nodes can send the same proof to many light clients without any recalculation; and (2) the client can forward the proof to other new light clients who can safely verify the correctness of the proof. This reduces both the computation and the bandwidth overheads for both the provers and the verifier.</p>
+
+    <h2 id="sec-6" class="text-2xl font-bold">3 Model and Problem Definition</h2>
+
+    <p class="text-gray-300">We frame FlyClient in the context of the Bitcoin backbone model for chains of variable difficulty <em>[23]</em> which extends the standard backbone protocol used in the analysis of NIPoPoW <em>[29]</em>.</p>
+
+    <h3 id="sec-7" class="text-xl font-semibold mt-8">3.1 Bitcoin Backbone Model</h3>
+
+    <p class="text-gray-300">Players in the backbone protocol are <em>full nodes</em> who maintain a complete copy of the blockchain and participate in the block creation protocol. The backbone protocol proceeds in rounds and communication between players is modeled as a broadcast where each message is delivered in the next round but the adversary is able to reorder the delivery of messages arbitrarily. Block creation is captured in the random oracle model as in <em>[22]</em>, where in each round each player makes <span class="math">q</span> sequential queries to a random oracle function <span class="math">H(\\cdot)</span>. This function takes an input <span class="math">x</span>. If <span class="math">x</span> has not been sampled before, it returns a value <span class="math">y</span> sampled uniformly from <span class="math">\\{0,1\\}^{\\lambda}</span>, where <span class="math">\\lambda</span> is the security parameter, and stores the pair <span class="math">(x,y)</span> in the table of <span class="math">H(\\cdot)</span>. Otherwise, it returns the corresponding saved <span class="math">y</span> value for <span class="math">x</span> in the table. Each block, <span class="math">B</span>, has a difficulty target <span class="math">T</span>. For the block to be valid it must hold that <span class="math">H(B)&lt;T</span>. This difficulty target, <span class="math">T</span>, is set so that <span class="math">m</span> blocks are produced every <span class="math">f</span> rounds in expectation. We abstract the information of a block <span class="math">B</span> to contain a <em>header</em> for the block with relevant block information including the difficulty target.</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">In order to handle variable block difficulty, Garay et al. <em>[23]</em> introduce the notion of active players from a universe <span class="math">U</span> of all players. At any round <span class="math">r</span>, <span class="math">n_{r}</span> represents the number of honest active players for that round and <span class="math">t_{r}</span> the number of active adversarial players. In a round <span class="math">r</span>, an adversary can thus make <span class="math">t_{r}q</span> queries to the oracle <span class="math">H(\\cdot)</span>. The sequences <span class="math">n=\\{n_{r}\\}</span> and <span class="math">t=\\{t_{r}\\}</span> represent how the mining power can fluctuate in the network and Garay et al. prove their security properties for the backbone protocol assuming the sequence <span class="math">n</span> has the property that it is <span class="math">(\\gamma,s)</span>-respecting, meaning that in any <span class="math">S</span> rounds with $</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">S</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"><s<span class="math">, the maximal honest power in any round is no more than a </span>\\gamma$ factor greater than the minimal honest mining power. We adopt this same assumption to bound how much fluctuation is observed in the honest mining behavior.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">In order to maintain a target block rate with fluctuations in mining power in the Bitcoin protocol Garay et al. formalize a general target recalculation function. This function operates in epochs of <span class="math">m</span> blocks where the target difficulty remains fixed and then is recalculated for the next epoch. To give meaning to a target rate, blocks contain information on the round which they were mined. At the end of an epoch with the difficulty target <span class="math">T_{0}</span> for a chain <span class="math">C</span> where the last <span class="math">m</span> blocks were mined in <span class="math">\\Delta</span> rounds, the difficulty adjustment function approximates the number of players that were active in order to produce blocks at that rate, as <span class="math">n(T,\\Delta)=2^{n}m/(qT\\Delta)</span>, where <span class="math">T/2^{n}</span> is the probability a single player produces a block in a single query. Recall that the target rate of honest block production is <span class="math">m/f</span> so the recalculated difficulty for the next epoch becomes <span class="math">T^{\\prime}=T\\Delta f/m</span>. This, however, is not enough to thwart an adversarial strategy of artificially increasing the difficulty parameter by lying about the round at which the block was mined, and being able to produce a chain with more difficulty than the honest chain <em>[13]</em>. Thus, they bound how much the difficulty may change by a factor of <span class="math">\\tau</span>, called the dampening filter. The final difficulty adjustment function is the following.</p>
+
+    <h6 id="sec-8" class="text-base font-medium mt-4">Definition 1 (Target Difficulty – Definition 2 from <em>[23]</em>).</h6>
+
+    <p class="text-gray-300">For fixed constants <span class="math">\\lambda,\\tau,m,n_{0},T_{0}</span>, where <span class="math">n_{0}</span> is the estimated number of active players in the previous epoch and <span class="math">T_{0}</span> is the target difficulty from the previous epoch, the target difficulty for the next epoch, i.e., the next <span class="math">m</span> blocks, is</p>
+
+    <p class="text-gray-300">\\[ D(n_{0},T_{0})=\\left\\{\\begin{array}[]{ll}\\frac{1}{\\tau}T,&if\\frac{n_{0}}{n(T,\\Delta)}T_{0}<\\frac{1}{\\tau}T\\\\ \\tau T,&if\\frac{n_{0}}{n(T,\\Delta)}T_{0}>\\tau T\\\\ \\frac{n_{0}}{n(T,\\Delta)}T_{0},&otherwise,\\end{array}\\right. \\]</p>
+
+    <p class="text-gray-300">where <span class="math">n(T,\\Delta)=\\frac{2^{n}m}{qT\\Delta}</span> with <span class="math">\\Delta</span> being the time it took to mine the last <span class="math">m</span> blocks.</p>
+
+    <p class="text-gray-300">The main theorem of Garay et al. <em>[22]</em> states that given sufficiently constraint parameters, a blockchain is secure, i.e., satisfies the persistence and liveness properties (see Theorem 26 and 27 of <em>[22]</em>). The proof relies on sufficiently large epochs <span class="math">m</span> and a properly selected dampening factor <span class="math">\\tau</span>. For FlyClient, we adopt parameters such that the blockchain satisfies liveness and persistence. This guarantees that there exists a single chain adopted by all honest full nodes, otherwise there would exist contradicting proofs for separate valid chains.</p>
+
+    <p class="text-gray-300">Attacks Using Variable Difficulty. As first shown by Bahack <em>[13]</em>, there are attacks on PoW blockchains that take advantage of the variable difficulty model. The main intuition for these attacks is that an adversary can mine fewer but higher difficulty weight blocks such that, because of the increased variance, they can get lucky and exceed the more powerful honest miners. Assume that an adversary who controls a third of the honest parties mining power could mine a single block of arbitrary high difficulty. The probability that the adversary can mine a single high difficulty block with more weight than the expected weight of the honest chain is roughly 28%. This is clearly not negligible. Bitcoin prevents these attacks by slowly adjusting the difficulty and using a dampening filter as explained in Section 3.1. Garay et al. <em>[23]</em> show that Bitcoin’s difficulty recalculation rule suffices to defend against these attacks. For a super-light client that only checks a small subset of the blocks, it is important that all difficulty transitions are valid, e.g., that they adhere to the dampening filter. Otherwise, these difficulty raising attacks would allow even a bounded adversary to succeed.</p>
+
+    <p class="text-gray-300">Other Difficulty Transitions. We note that the FlyClient protocol does depend on the specific difficulty transition rules. Bitcoin’s transition rule can be expressed as a parameterization of the variable difficulty</p>
+
+    <p class="text-gray-300">model. However, other blockchains such as Ethereum use a different type of transition rule, where the next block’s difficulty is a moving average of the previous blocks. It remains an open problem to show that Ethereum as a whole is secure using this rule. Similarly, our security proof only applies to the variable difficulty model described above, and therefore, does not cover Ethereum. One can still use an adapted version of FlyClient on Ethereum but only with heuristic security guarantees.</p>
+
+    <h3 id="sec-9" class="text-xl font-semibold mt-8">3.2 Adversarial Model</h3>
+
+    <p class="text-gray-300">The Bitcoin backbone analysis considers a rushing adversary who can reorder the delivery of all messages in a round, and can make <span class="math">t_{r}\\cdot q</span> queries to the oracle function <span class="math">H(\\cdot)</span> in each round where <span class="math">t_{r}&lt;\\mu\\cdot n_{r}</span>. For the NIPoPoW model with variable difficulty, the adversary’s goal is to present the light client with a proof for a chain with at least the same difficulty as the honest chain. The only knowledge of the honest chain that the verifier has is the contents of the genesis block, thus the adversary can choose to create a proof for a chain entirely separate from the honest chain, except for the genesis, or the adversary can choose to incorporate a subsection of the honest chain into their chain. Since the adversary has less computing power than the honest chain, the adversary may put in invalid blocks without correct PoW into their chain in order to fake the total difficulty, with the knowledge that if the prover samples these blocks, the proof will be rejected.</p>
+
+    <p class="text-gray-300">As discussed in section 5.1, the adversary cannot incorporate any honest-chain blocks after the fork point. We also show that any work the adversary did prior to the fork point (blocks mined) cannot be included after the fork point in the same chain. This is because the MMR construction enforces that each block can only be constructed after every block that comes before it in the chain and that this can be checked concisely using the MMR proof of inclusion introduced in the next section. Thus, we are able to only consider the adversarial mining power which is at most a fraction of the honest mining power strictly after the fork point.</p>
+
+    <p class="text-gray-300">In our analysis of FlyClient, we assume that, for all fork points <span class="math">a</span>, the adversary can at most create a fork of length <span class="math">L</span> or longer with a <span class="math">c</span> fraction of the honest forks weight. We formulate this below.</p>
+
+    <h6 id="sec-10" class="text-base font-medium mt-4">Assumption 2 (<span class="math">(c,L)</span>-Adversary).</h6>
+
+    <p class="text-gray-300">There exists no adversary in the variable-difficulty model that respects the target recalculation function from Definition 1 and can, with non-negligible probability, produce a fork that contains more than <span class="math">L</span> blocks such that a <span class="math">c</span> fraction of the difficulty weight in these blocks is honest.</p>
+
+    <p class="text-gray-300">This assumption is stronger than the SPV assumption (Assumption 1). It implies that no adversary exists with a constant fraction of the honest chain’s mining power. The stronger assumption enables FlyClient’s succinct proofs as it ensures that any fork created by the adversary will have significantly less cumulative difficulty than an honest chain.</p>
+
+    <p class="text-gray-300">Relation to the Variable Difficulty Model. Ideally, the security of FlyClient would be directly parameterized by <span class="math">\\mu</span>, the adversary’s mining power, as well as the other parameters of the backbone model. We conjecture that for any set of backbone parameters one can directly derive what <span class="math">(c,L)</span>-adversary can exist. Unfortunately, connecting these two assumptions is not trivial and out of the scope of this paper. We leave it future work to fully establish this connection. We can, however, already make multiple important observations. For sufficiently small <span class="math">L</span>, i.e., short forks, there always exists an adversary that succeeds with high probability. This is because short forks have high variance and even an adversary that controls only a small fraction of the mining power will with non-negligible probability be able to create a heavier short fork.</p>
+
+    <p class="text-gray-300">As discussed in Section 3.1, it is vital that an adversary cannot arbitrarily set/change the difficulty of his forks. Otherwise, the difficulty raising attack <em>[13]</em> would allow the adversary to create heavy chains with significant probability.</p>
+
+    <p class="text-gray-300">Finally, in the non-variable difficulty setting, it is simple to derive the parameters <span class="math">c</span> for a given <span class="math">\\mu</span> (the adversary’s mining power) and <span class="math">L</span>. We show that a limited adversary will not outperform its expected number of mined blocks by too much. That is, for sufficiently large <span class="math">L</span> and an adversary who can produce <span class="math">L\\cdot\\mu</span> honest blocks, the probability that it produces <span class="math">L\\cdot c</span>, for some <span class="math">c&gt;\\mu</span>, is negligible. This can be done either numerically or using a simple Chernoff bound.</p>
+
+    <h6 id="sec-11" class="text-base font-medium mt-4">Lemma 1.</h6>
+
+    <p class="text-gray-300">In the constant difficulty backbone setting, let <span class="math">X</span> be a random variable denoting the number of blocks mined by any adversary while the honest chain adopts <span class="math">L</span> blocks. Further, assume that the adversary finds blocks at a rate which is bounded by <span class="math">\\mu</span> of the rate at which the honest chain adopts blocks. The probability that <span class="math">X\\geq c\\cdot L</span> for <span class="math">c&gt;\\mu</span> is bounded by <span class="math">e^{L(c-\\mu)}\\frac{c}{\\mu}^{-c\\cdot L}</span>, where <span class="math">e</span> is Euler’s number.</p>
+
+    <h6 id="sec-12" class="text-base font-medium mt-4">Proof.</h6>
+
+    <h6 id="sec-13" class="text-base font-medium mt-4">Proof.</h6>
+
+    <p class="text-gray-300">Note that an upper bound <span class="math">X</span> can be accurately modeled by a Poisson variable <span class="math">Y</span> with parameter <span class="math">(1-\\delta)n</span> as it is the sum of many low probability Bernoulli variables. We now bound the probability that <span class="math">X\\geq c\\cdot n</span> by finding a bound on <span class="math">P(Y\\geq c\\cdot n)</span>. We can bound this probability using a Chernoff style bound. <span class="math">P(Y\\geq c\\cdot L)=P(e^{t\\cdot Y}\\geq e^{t\\cdot c\\cdot L})\\leq\\frac{E[e^{t\\cdot Y}]}{e^{t\\cdot c\\cdot L}}</span>. The Markov bound holds for all <span class="math">t&gt;0</span>. Using the fact that the moment generating function for a Poisson variable <span class="math">Y</span> is <span class="math">e^{E<a href="e^{t}-1">Y</a>}</span> we get <span class="math">P(Y\\geq c\\cdot L)\\leq e^{(1-\\delta)\\cdot L\\cdot(e^{t}-1)-c\\cdot L\\cdot t}</span>. This is minimal for <span class="math">t=\\log(\\frac{c}{1-\\delta})</span> which gives us the bound <span class="math">P(Y\\geq c\\cdot L)\\leq e^{L(c+\\delta-c\\log(\\frac{c}{1-\\delta})-1)}</span> ∎</p>
+
+    <h6 id="sec-14" class="text-base font-medium mt-4">Corollary 1.</h6>
+
+    <p class="text-gray-300">For <span class="math">n=\\Theta(\\lambda)</span> and for every <span class="math">\\mu</span>, there exists a <span class="math">c&lt;1</span> such that the <span class="math">(c,n)</span>-adversary assumption holds in the constant difficulty backbone.</p>
+
+    <h6 id="sec-15" class="text-base font-medium mt-4">Proof.</h6>
+
+    <p class="text-gray-300">Set <span class="math">L</span> and <span class="math">c</span> such that <span class="math">e^{L(c+\\delta-c\\log(\\frac{c}{1-\\delta})-1)}=2^{-\\lambda}</span>. In the constant difficulty backbone setting a chain of length <span class="math">L</span> with a <span class="math">c</span> fraction of the blocks honest must contain at least <span class="math">c\\cdot L</span> blocks with valid PoW. Lemma 1 implies that the probability of any adversary producing a fork with <span class="math">c\\cdot L</span> valid blocks while the honest chain adopts <span class="math">L</span> blocks is negligible. ∎</p>
+
+    <h3 id="sec-16" class="text-xl font-semibold mt-8">3.3 NIPoPoWs for Variable Difficulty Chains</h3>
+
+    <p class="text-gray-300">FlyClient works similarly to the prover-verifier model of NIPoPoWs, where the prover wants to convince the verifier that some predicate over the honest chain is true. For simplicity, in FlyClient we consider the predicate to be that the prover knows a blockchain at round <span class="math">r</span> that ends with block <span class="math">B_{n}</span> and has cumulative difficulty <span class="math">D</span>. In the SPV model, this proof would consist of all block headers of the chain, <em>i.e.</em>, enough information for the verifier to check all PoWs. We refer to this as the SPV predicate.</p>
+
+    <h6 id="sec-17" class="text-base font-medium mt-4">Definition 2 (SPV Predicate).</h6>
+
+    <p class="text-gray-300">The SPV predicate for a chain <span class="math">C</span> ending with block <span class="math">B_{n}</span> is 1 if all blocks in <span class="math">C</span> contain correct PoW which follow the difficulty adjustment function and the hash of each block is contained in the header of the block directly succeeding it.</p>
+
+    <p class="text-gray-300">From this and given the FlyClient use of MMR in the next section, a prover can with little (<em>i.e.</em>, logarithmic in the length of the chain) overhead, prove further properties of the chain including that any particular block is included in the chain since <span class="math">B_{n}</span> commits to all previous blocks before it. We note that since persistence cannot be guaranteed for the last <span class="math">k</span> blocks of the chain, no predicates should be considered for the last <span class="math">k</span> blocks. Thus, the verifier treats all valid proofs for chains differing in at most the last <span class="math">k</span> blocks to be proofs for the same chain and takes the one with the highest difficulty as the representative proof.</p>
+
+    <p class="text-gray-300">Similar to the NIPoPoW model, the verifier is a light client with less storage/computation capacity than a full node and who can therefore not store the entire blockchain. The only a priori information the verifier has is the genesis block and access to the oracle function <span class="math">H(\\cdot)</span> to be able to verify PoWs. A verifier receives a set of proofs <span class="math">P</span> from multiple provers, with the assumption that at least one proof came from an honest prover, and accepts the SPV predicate for the proof of a block <span class="math">B_{n}</span> with most cumulative difficulty. Our assumption that the client is connected to at least one honest node implies that the client is not vulnerable to eclipse attacks <em>[26]</em>. Defending against such attacks is orthogonal to our work and has been addressed by recent work <em>[26, 25]</em>.</p>
+
+    <p class="text-gray-300">In the following, we adapt the NIPoPoW security definition for our SPV predicate for chains of variable difficulty.</p>
+
+    <h6 id="sec-18" class="text-base font-medium mt-4">Definition 3 (Security).</h6>
+
+    <p class="text-gray-300">A blockchain proof protocol <span class="math">(P,\\mathcal{V})</span> for the SPV predicate is secure if for all environments, for any PPT adversary and for all rounds <span class="math">r</span>, if <span class="math">\\mathcal{V}</span> receives a set of proofs <span class="math">P</span> at the beginning of round <span class="math">r</span>, at least one of which has been generated by an honest prover, then</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li><span class="math">\\mathcal{V}</span> outputs the SPV predicate with the highest difficulty at the end of round <span class="math">r</span> for some block <span class="math">B</span>, and;</li>
+
+      <li>All honest full nodes at time <span class="math">r</span> hold a chain with the common prefix of the chain committed by <span class="math">B_{n}</span> except for up to the last <span class="math">k</span> blocks.</li>
+
+    </ol>
+
+    <p class="text-gray-300">We use a slightly-different version of the succinctness definition as follows.</p>
+
+    <h6 id="sec-19" class="text-base font-medium mt-4">Definition 4 (Succinctness – Definition 4 from <em>[29]</em>).</h6>
+
+    <p class="text-gray-300">A blockchain proof protocol <span class="math">(P,\\mathcal{V})</span> for a predicate <span class="math">Q</span> is succinct if for any PPT prover <span class="math">A</span>, any proof <span class="math">\\pi</span> produced by <span class="math">A</span> at some round <span class="math">r</span>, is of size <span class="math">O(\\mathsf{polylog}(N))</span>, where <span class="math">N</span> is the number of blocks in the honest chain.</p>
+
+    <p class="text-gray-300">Following the above two definitions and for the adversarial model described in the previous subsection, we present the main theorem of our work.</p>
+
+    <h6 id="sec-20" class="text-base font-medium mt-4">Theorem 1 (FlyClient).</h6>
+
+    <p class="text-gray-300">Assuming a variable difficulty backbone protocol such that all adversaries are limited to be <span class="math">(c,L)</span>-adversaries as per Assumption 2 and assuming a collision-resistant hash function <span class="math">\\mathsf{H}</span> (Definition 8), the FlyClient protocol is a secure NIPoPoW protocol in the random oracle model as per Definition 3 with all but negligible probability. The protocol is succinct with proof size <span class="math">O(L+\\lambda\\cdot\\log_{1/c}(n)\\cdot\\log_{2}(n))</span>.</p>
+
+    <h2 id="sec-21" class="text-2xl font-bold">4 FlyClient Design</h2>
+
+    <p class="text-gray-300">In PoW cryptocurrencies the valid chain is the one with the highest cumulative proof of work, <em>i.e.</em>, the most difficult one to create. For simplicity, in this section we assume blocks have the same difficulty and thus the valid chain is the longest one. Later in Section 6, we extend our protocol to handle the more realistic scenario where blocks have variable difficulty throughout the chain.</p>
+
+    <h3 id="sec-22" class="text-xl font-semibold mt-8">4.1 Design Components</h3>
+
+    <p class="text-gray-300">FlyClient consists of three main building blocks. First, we leverage the MMR construction (see Appendix C) to allow for verification of any previous block header with only the latest block header. Each MMR commits to previous blocks efficiently using a single hash value written in every block header. The MMR leaves are the block headers of all previous blocks and each block’s MMR is built from the previous MMR. This construction ensures that the <span class="math">i</span>-th block header, contains the root of the <span class="math">(i-1)</span>-th MMR. This allows an efficient update process resulting in only a small overhead for full nodes when adding new blocks to the chain. Once a block is verified, we can then verify any transaction included in that block with simple SPV Merkle proofs.</p>
+
+    <p class="text-gray-300">Second, to reduce the number of block headers that light clients need to download to verify the latest block header, FlyClient employs a probabilistic verification mechanism by which it randomly samples only a logarithmic number of block headers; if these block headers are valid, then we show that the latest block belongs to the longest chain with overwhelming probability. Which block headers to sample are chosen by the light clients to prevent the adversary from avoiding sampling fake blocks. If an adversarial prover is trying to convince the verifier that they know a chain that is the same length as the honest chain, there is a maximal number of blocks in the adversary’s chain which are valid (have a valid PoW) since the adversary has limited computing power. Our probabilistic verification guarantees that after randomly sampling an <em>enough</em> number of blocks, we can detect at least one invalid block in the adversary’s chain with overwhelming probability. We present our sampling protocol and it’s optimization in Section 5. We outline our interactive protocol in Protocol 1.</p>
+
+    <p class="text-gray-300">Our third building block is the application of the Fiat-Shamir heuristic to remove the interaction between the light client and the full nodes. Instead of having the randomness be provided by the verifier, the random blocks will be determined from the hash of the latest block. This allows a full node to figure out on its own which random blocks it should send to the clients for the verification without any initial randomness from the light client, yet the light client can verify the correctness of the proof and is guaranteed that the full node is not cheating. We discuss in detail how to make FlyClient non-interactive in Section 6.2.</p>
+
+    <h3 id="sec-23" class="text-xl font-semibold mt-8">4.2 Block Inclusion Verification</h3>
+
+    <p class="text-gray-300">As discussed before, the need to download all block headers is in part due to the need for verifying transactions/ events in previous blocks. Assuming the longest chain has been verified and accepted with only some of the block headers downloaded, <em>i.e.</em>, the verifier knows some <span class="math">B_{n}</span> is the last block header in the longest chain, verification of a transaction in some previous block requires checking if the block actually belongs to a chain ending in <span class="math">B_{n}</span>. The naive approach is to download all intermediate block headers from the block to <span class="math">B_{n}</span>, which inherently requires downloading a linear number of block headers from the chain. Once the block is verified to belong to the chain, the verifier needs only an SPV Merkle proof that a transaction is in that block.</p>
+
+    <p class="text-gray-300">Algorithm 1 FlyClient Protocol</p>
+
+    <p class="text-gray-300">A client (the verifier) performs the following steps speaking with two provers who want to convince the client that they hold a valid chain of length <span class="math">n+1</span>. At least one of the provers is honest. (If the provers claim different lengths for their chains then the longer chain is checked first. This is described in the generic verifier for NIPoPoW <em>[29]</em>.)</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>The provers send to the client the last block header in their chains. Each header includes the root of an MMR created over the first <span class="math">n</span> blocks of the corresponding chain.</li>
+
+      <li>The verifier queries <span class="math">k</span> random block headers from each prover based on the probabilistic sampling algorithm described in Section 5.</li>
+
+      <li>For each queried block, <span class="math">B_{i}</span>, the prover sends the header of <span class="math">B_{i}</span> along with an MMR proof <span class="math">\\Pi_{B_{i}\\in C}</span> that <span class="math">B_{i}</span> is the <span class="math">i</span>-th block in <span class="math">C</span>.</li>
+
+      <li>The client performs the following checks for each block <span class="math">B_{i}</span> according to Algorithm 2.</li>
+
+      <li>If any checks fail, the client rejects the chain.</li>
+
+      <li>Otherwise, the client accepts <span class="math">C</span> as the valid chain.</li>
+
+    </ol>
+
+    <p class="text-gray-300">Algorithm 2 Prover/Verifier Protocol For a Single Query</p>
+
+    <p class="text-gray-300">The verifier queries the prover for the header and MMR proof for a single block <span class="math">k</span> in the prover’s chain of <span class="math">n+1</span> blocks.</p>
+
+    <p class="text-gray-300">Verifier</p>
+
+    <p class="text-gray-300">1:Has the root of the MMR of <span class="math">n</span> blocks stored in the <span class="math">n+1</span> block’s header 2:Queries prover for the header of block <span class="math">k</span> and for <span class="math">\\Pi_{k\\in n}</span> 3:Verifies the hashes of <span class="math">\\Pi_{k\\in n}</span> hash up to the root of <span class="math">\\text{MMR}_{n}</span> 4:Calculates the root of the MMR of <span class="math">k-1</span> blocks from <span class="math">\\Pi_{k\\in n}</span> by calling Get_Root( <span class="math">\\Pi_{k\\in n}</span>, <span class="math">n</span>, <span class="math">k</span>) 5:Compares the calculated root with the root in the header of block <span class="math">k</span> 6:If everything checks out, accepts the block proof</p>
+
+    <p class="text-gray-300">Prover</p>
+
+    <p class="text-gray-300">1:Has chain of <span class="math">n+1</span> blocks and the MMR of the first <span class="math">n</span> blocks 2:Receives query for block <span class="math">k</span> from verifier 3:Calculates <span class="math">\\Pi_{k\\in n}</span> from <span class="math">\\text{MMR}_{n}</span> by calling MMR_Proof( <span class="math">\\text{MMR}_{n}</span>, <span class="math">n</span>, <span class="math">k</span>) 4:Sends header of <span class="math">k</span> and <span class="math">\\Pi_{k\\in n}</span> to verifier</p>
+
+    <p class="text-gray-300">Our goal is verify that any block belongs in the chain with only the latest block header of the chain. We leverage the MMR construction again for this. The full node can prove that a transaction was included in the longest chain by just providing an MMR proof (to prove that a block belongs to the longest chain) in addition to the current transaction proof (which shows that the transaction is included in the block). Algorithm 2 describes how a verifier can query a prover for the validity of a single block.</p>
+
+    <h6 id="sec-24" class="text-base font-medium mt-4">Definition 5 (Valid Block).</h6>
+
+    <p class="text-gray-300">A valid block <span class="math">B_{x}</span> for a chain ending in block <span class="math">B_{n}</span> with MMR root <span class="math">M_{n-1}</span> is a header with PoW and for which a <span class="math">\\Pi_{x\\in M_{n-1}}</span> exists.</p>
+
+    <h6 id="sec-25" class="text-base font-medium mt-4">Definition 6 (Honest Chain).</h6>
+
+    <p class="text-gray-300">An honest chain <span class="math">B_{0},B_{1},...,B_{n}</span> of length <span class="math">n</span> is an ordered list such that each <span class="math">B_{i}</span> is valid with respect to <span class="math">B_{n}</span>.</p>
+
+    <p class="text-gray-300">Unstable Blocks. PoW blockchains guarantee that honest nodes will <em>eventually</em> reach consensus. This, however, does not prevent recent blocks to be unstable, <em>i.e.</em>, potentially get removed from the eventual chain. In particular the most recent block or head of the chain will often be replaced by other blocks. Despite this, it is still possible to use the MMR root from this most recent block to perform the FlyClient protocol and refer to old stable blocks and transactions. This is because the FlyClient protocol inherently checks that all randomly sampled blocks have MMRs that are consistent with the head’s MMR. Even if the head is maliciously created, its MMR cannot contain invalid blocks and it must contain all stable blocks of the valid longest chain. It is still helpful for a client to store a recent, stable block to aid future synchronization</p>
+
+    <p class="text-gray-300">proofs.</p>
+
+    <p class="text-gray-300">New Block Header. Our new block header now contains one extra field namely the MMR root of the tree that commits the headers of all previous blocks. The MMR root can replace the previous block hash and thus not increase the block headers size. This requires a minimal change to the current block structure of Bitcoin and Ethereum, and can be implemented as a soft fork. We discuss this in more detail in Section 8.3. A full node, upon receiving a new block, will conduct only one additional check on the validity of the MMR root.</p>
+
+    <h2 id="sec-26" class="text-2xl font-bold">5 Block Sampling Strategies</h2>
+
+    <p class="text-gray-300">Our goal is to have a protocol that allows an honest prover to convince the verifier of the validity of its chain while a malicious prover cannot convince the verifier of a dishonest chain. In the previous section, we outlined the basic FlyClient protocol, what is left to be determined is how the verifier samples blocks from the prover. In this section we describe the information theoretic component of FlyClient: A block sampling protocol which ensures that the verifier will sample an invalid block from the adversary, no matter what the adversary’s forking strategy is. We describe the strategies in terms of the longest chain rule, i.e., assuming that all blocks have the same difficulty. The strategies directly translate to the variable difficulty setting as described in Section 6. The key difference is that the sampling will be over the difficulty space instead of the block space. We begin by describing some straw-man approaches for our sampling protocol and build up the properties we wish to satisfy. We start with a simple sampling protocol which gives us the desired properties and show how to optimize our protocol to achieve smaller proof sizes.</p>
+
+    <h3 id="sec-27" class="text-xl font-semibold mt-8">5.1 Naive Approach</h3>
+
+    <p class="text-gray-300">One approach is for the verifier to request a uniformly-random set of multiple blocks from each prover. Since the malicious prover has only a limited computation power, it can at best correctly mine a small subset of all the blocks. Thus, the verifier needs to sample enough blocks to ensure that at least one of them is invalid, i.e., an incorrectly-mined block. The protocol begins with each prover giving the verifier the header of the last block in its chain, where this header contains the root of an MMR tree built over all blocks in the chain. Whenever the verifier requests a block from each prover, the prover must also provide a Merkle proof that the block is a leaf in the MMR of the last block. From the MMR inclusion proof, the verifier can recreate the MMR root for that block and verify that it is the same root in the header of the block (therefore included in the proof of work for the block).</p>
+
+    <p class="text-gray-300">As shown in Corollary 4, once a malicious prover forks off from the honest chain, it cannot include any of the later honest blocks in its chain because the MMR root in those blocks would not match the chain. With this setup, if the verifier makes enough queries, it will eventually ask the malicious prover for a block it has not mined (i.e., an invalid block).</p>
+
+    <p class="text-gray-300">To determine how many blocks the verifier must query to achieve a desired probability of success in catching a malicious prover, we bound the malicious computing power using the <span class="math">(c,L)</span>-adversary assumption. After the adversary forks from the honest chain, it can correctly mine up to only a <span class="math">c</span> fraction of the blocks in the rest of the chain. So, if we know that the adversary forked at some block <span class="math">B_{a}</span>, then for each random block the verifier requests after <span class="math">B_{a}</span>, there is a probability of <span class="math">(1-c)</span> that the sampled block is invalid (i.e., incorrectly mined) as the adversary has to “lengthen” its fork to have a chain of equal length to the honest chain. Thus, with <span class="math">k</span> queries after the fork point, the verifier has a success probability of <span class="math">1-c^{k}</span> in catching the malicious prover. Unfortunately, the verifier neither knows the location of the fork point nor the value of <span class="math">k</span> or the success probability.</p>
+
+    <p class="text-gray-300">Solution Limitation. Since the verifier does not know where in the chain the adversary started the fork, the verifier has to sample a large number of blocks to increase its chance of catching the malicious prover, especially if the fork point is located near the end of the chain (i.e., the fork is short).</p>
+
+    <p class="text-gray-300">5.2 Binary Search Approach</p>
+
+    <p class="text-gray-300">Since the verifier knows at least one of the provers is honest, it can <em>search</em> for the fork point by querying both provers at the same time to find the first block at which they disagree. The verifier can do this by performing a binary search over the entire chain as follows. The verifier starts by asking each of the two provers to send the block in the middle of its chain. If the two middle blocks are the same, then the verifier recurses on the second half (<em>i.e.</em>, the one with higher block numbers), otherwise it recurses on the first half. This is repeated until the verifier finds the fork point which is the smallest block number where the two provers disagree. Once the verifier finds the fork point, it samples blocks randomly from both provers after the fork point, with each sample having a probability of <span class="math">(1-c)</span> in catching the dishonest prover in a lie. Thus, the verifier must sample <span class="math">\\log n</span> blocks to find the fork point (<span class="math">n</span> being the chain length) plus <span class="math">k</span> blocks from each prover to have a probability of <span class="math">1-c^{k}</span> in determining which of the two provers is dishonest, if one is.</p>
+
+    <p class="text-gray-300">Solution Limitation. This approach is inherently interactive as it requires multiple rounds of communication between the verifier and the provers, resulting in higher verification latencies.</p>
+
+    <h3 id="sec-28" class="text-xl font-semibold mt-8">5.3 Bounding the Fork Point</h3>
+
+    <p class="text-gray-300">Finding the exact location of the fork point by sampling a small number of blocks in only one shot is challenging. We instead relax this requirement and allow the verifier to only “bound” where the fork point is located while still sampling in one shot. Our goal is to ensure that the verifier makes sufficient queries after the fork point. Instead of searching for the fork point, the verifier can iterate through intervals from which it samples blocks. If in at least one of the intervals the verifier has a sufficiently-high probability of catching the malicious prover, then the verifier succeeds with high probability in the whole protocol.</p>
+
+    <p class="text-gray-300">The new sampling protocol first samples <span class="math">k</span> random blocks from the entire chain. Then, it successively splits the chain (or the current interval) in half and queries another random <span class="math">k</span> blocks from the last half, <em>i.e.</em>, the interval always ends with the tip of the chain. More precisely, for every integer <span class="math">j\\in[0,\\log n)</span>, the verifier queries <span class="math">k</span> blocks from the last <span class="math">n/2^{j}</span> blocks of the chain. This is repeated until the size of the interval is at most <span class="math">\\min(L,k)</span>, and all last <span class="math">\\min(L,k)</span> blocks are sampled.</p>
+
+    <p class="text-gray-300">We now show that the above strategy catches a cheating adversary with overwhelming probability. To do this, we calculate the probability that the verifier samples at least one invalid block from the malicious prover, based on the observation that the adversary has to insert a sufficient number of invalid blocks into its fork to obtain an overall chain of equal length to the honest chain.</p>
+
+    <h6 id="sec-29" class="text-base font-medium mt-4">Lemma 2.</h6>
+
+    <p class="text-gray-300">With <span class="math">k\\log n</span> samples, the probability the verifier fails to sample any invalid block is <span class="math">\\leq\\left(\\frac{1+c}{2}\\right)^{k}</span>.</p>
+
+    <h6 id="sec-30" class="text-base font-medium mt-4">Proof.</h6>
+
+    <p class="text-gray-300">Let <span class="math">n</span> denote the length of the chain (not counting block <span class="math">n+1</span> which the verifier has already sampled) and <span class="math">c</span> denote the fraction of the adversary’s computing power relative to the honest computing power. At any interval <span class="math">j</span>, the verifier samples from the interval between block <span class="math">\\frac{(2^{j}-1)n}{2^{j}}</span> and <span class="math">n</span>. Let <span class="math">h_{j}</span> denote the number of invalid blocks the adversary has inserted in the <span class="math">j</span>-th interval. The probability the verifier fails to sample an invalid block in this interval is</p>
+
+    <p class="text-gray-300"><span class="math">P_{j}=\\left(\\frac{\\frac{n}{2^{j}}-h_{j}}{\\frac{n}{2^{j}}}\\right)^{k}=\\left(\\frac{n-2^{j}h_{j}}{n}\\right)^{k}.</span></p>
+
+    <p class="text-gray-300">Thus, the probability that the verifier fails is <span class="math">\\prod_{j=0}^{\\log n}P_{j}</span>. Since <span class="math">P_{j}\\leq 1</span>, if one <span class="math">P_{j}</span> is sufficiently small, then the total probability of failure is also sufficiently small.</p>
+
+    <p class="text-gray-300">Letting <span class="math">a</span> denote the forking point, there is some integer <span class="math">j</span> such that <span class="math">\\frac{(2^{j}-1)n}{2^{j}}\\leq a&lt;\\frac{(2^{j+1}-1)n}{2^{j+1}}</span>. In other words, there is some sampled interval of size <span class="math">n^{\\prime}=n/2^{j}</span> in the protocol where the fork point lies between the start and the middle of the interval. Let <span class="math">l</span> denote the length from <span class="math">a</span> till <span class="math">n</span>, <em>i.e.</em>, the length of the fork, <span class="math">l&gt;\\frac{n^{\\prime}}{2}</span>. The number of invalid blocks in the interval is <span class="math">h_{j}=(1-c)l\\geq(1-c)\\frac{n^{\\prime}}{2}</span>. Thus, the probability the verifier fails to catch the invalid chain is at most equal to the probability the verifier fails at step <span class="math">j</span>, or</p>
+
+    <p class="text-gray-300"><span class="math">\\Pr[\\text{fail}]\\leq\\Pr[\\text{fail at }j]\\leq\\left(\\frac{n^{\\prime}-(1-c)\\frac{n^{\\prime}}{2}}{n^{\\prime}}\\right)^{k}=\\left(\\frac{1+c}{2}\\right)^{k}.</span></p>
+
+    <p class="text-gray-300">Note that if <span class="math">l\\leq k</span>, the verifier will sample all of the adversary’s invalid blocks and <span class="math">\\Pr[\\text{fail}]=0</span>. ∎</p>
+
+    <h5 id="sec-31" class="text-base font-semibold mt-4">Solution Limitation.</h5>
+
+    <p class="text-gray-300">In our analysis, we calculate the probability of success based on the likelihood of success in at least one of the <span class="math">\\log n</span> intervals. However, our protocol samples other blocks that we do not consider in our analysis, but that could increase the verifier’s success probability. Can we achieve a better bound by further taking these blocks into account?</p>
+
+    <h3 id="sec-32" class="text-xl font-semibold mt-8">5.4 The FlyClient Sampling Protocol</h3>
+
+    <p class="text-gray-300">While we presented the protocol of Section 5.3 as an iterative protocol, it is important to note that all of its steps are independent. That is, the verifier’s samples do not depend on the prover’s responses to previous queries. This implies that the order of samples can be altered to create an isomorphic protocol with the same security and efficiency properties. We can further use this to examine the probability that a given block is sampled.</p>
+
+    <p class="text-gray-300">The protocol of Section 5.3 samples later blocks with higher probability, i.e., the sampling probability grows inversely with the relative distance of a block to the end of the chain (the most recent block). We can use this property to find a probability distribution (as depicted in Figure 2 as <span class="math">s(x)</span>) that the verifier picks one of the intervals uniformly at random (from the protocol presented in Section 5.3) and samples a block uniformly at random from this interval.</p>
+
+    <p class="text-gray-300">Consider a protocol that simply repeats the sampling steps <span class="math">q</span> times. If the adversary is caught with probability at least <span class="math">p</span> given one sample, then they will be caught with probability at least <span class="math">1-(1-p)^{q}</span> after <span class="math">q</span> independently and identically-distributed samples. This distributional approach enables a simple analysis of the protocol as we only need to bound the success probability of a single query. Furthermore, it allows us to optimize the protocol by finding a query distribution that maximizes <span class="math">p</span>. As shown in Figure 2, the distribution introduced by the protocol from Section 5.3 is not smooth. In the following, we show that a different and smoother distribution performs better.</p>
+
+    <h5 id="sec-33" class="text-base font-semibold mt-4">Optimizing the Sampling Distribution.</h5>
+
+    <p class="text-gray-300">We now find the optimal sampling distribution, that is the sampling distribution over the blocks which maximizes the probability of catching the adversary given that it chooses the optimal strategy. We do this by finding the sampling distribution that maximizes the probability of catching the adversary with only a single query. Given this probability, we can directly bound the adversary’s success probability after <span class="math">q</span> queries. As a simplifying assumption, we treat the number of blocks as a continuous space between <span class="math">0</span> and <span class="math">1</span>. That is, the block header is at <span class="math">1</span> and the genesis block is at <span class="math">0</span>. We later show that this simplified analysis still produces a good distribution for the discrete case.</p>
+
+    <p class="text-gray-300">As a first step, we show that the probability density function (PDF) of the optimal sampling distribution must be increasing. A PDF <span class="math">f</span> defined over the continuous range <span class="math">[0,1]</span> is increasing if, for all <span class="math">a,b\\in[0,1]</span>, <span class="math">b&gt;a\\implies f(b)\\geq f(a)</span>. For any distribution defined by a PDF that is not increasing, there exists a distribution that results in an equal or greater probability of catching the adversary.</p>
+
+    <h6 id="sec-34" class="text-base font-medium mt-4">Lemma 3 (Non-Increasing Sampling Distribution).</h6>
+
+    <p class="text-gray-300">A sampling distribution over the blocks defined by a non-increasing PDF <span class="math">f</span> is not uniquely optimal, i.e., there exists another distribution with equal or higher probability of catching the adversary.</p>
+
+    <h6 id="sec-35" class="text-base font-medium mt-4">Proof.</h6>
+
+    <p class="text-gray-300">We prove the statement by contradiction. We show that given <span class="math">f</span>, there exists another pdf <span class="math">f^{\\prime}</span> that with a single query succeeds in catching the adversary with slightly higher probability.</p>
+
+    <p class="text-gray-300">Given that <span class="math">f</span> is non-increasing, there exist numbers <span class="math">x_{1},x_{2},d\\in[0,1]</span> and intervals <span class="math">I_{1}=[x_{1},x_{1}+d]</span> and <span class="math">I_{2}=[x_{2},x_{2}+d]</span> such that <span class="math">x_{1}+d\\leq x_{2}\\leq 1-d</span> and <span class="math">f(x)&gt;f(x^{\\prime})</span>, for all <span class="math">x\\in I_{1}\\wedge x^{\\prime}\\in I_{2}</span>. Any adversarial strategy can be defined by a fork point <span class="math">a\\in[0,1]</span> and by the ranges of blocks which are invalid after <span class="math">a</span>. Note that given a fork point, the adversary can freely decide which blocks, i.e., which intervals, to make invalid and which ones to honestly mine. For any strategy which produces an invalid block in <span class="math">I_{1}</span> but valid blocks in <span class="math">I_{2}</span> there exists a strategy which creates an additional invalid block in <span class="math">I_{2}</span> and one more valid block in <span class="math">I_{1}</span> without changing any other part of the strategy. Note that the converse is not true. If the fork point <span class="math">a</span> is <span class="math">&gt;x_{1}</span> then it may not be possible to move invalid blocks to the first interval. Given that the querying probability of any point in <span class="math">I_{2}</span> is lower than the probability of any point in <span class="math">I_{1}</span> the adversary is always better off by moving all possible invalid blocks to <span class="math">I_{2}</span>. <span class="math">I_{2}</span> must therefore contain no less invalid blocks than <span class="math">I_{1}</span> in any strategy which is optimal for the adversary.</p>
+
+    <p class="text-gray-300">!<a href="img-1.jpeg">img-1.jpeg</a> Figure 2:  <span class="math">s(x)</span>  defines the probability density function (PDF) for the protocol from Section 5.3.  <span class="math">g(x) = \\frac{1}{(x - 1)\\ln(\\delta)}</span>  is the optimized PDF. The integral  <span class="math">\\int_{a}^{1 + ac - c}g(x)dx</span>  for  <span class="math">c = 1 / 2</span> ,  <span class="math">\\delta = 2^{-10}</span> ,  <span class="math">a = 0</span>  and  <span class="math">a = 0.8</span>  respectively is displayed.</p>
+
+    <p class="text-gray-300">!<a href="img-2.jpeg">img-2.jpeg</a> Figure 3: Distributional View Argument</p>
+
+    <p class="text-gray-300">Consider the probability distribution  <span class="math">f&#x27;</span>  which is equal to  <span class="math">f</span>  on all points but  <span class="math">x \\in I_1 \\cup I_2</span> . There exists an  <span class="math">\\epsilon &amp;gt; 0</span>  such that for any point  <span class="math">x \\in I_2</span> ,  <span class="math">f&#x27;(x) = f(x) + \\epsilon</span>  and for any point in  <span class="math">I_1</span> ,  <span class="math">f&#x27;(x) = f(x) - \\epsilon</span>  and the following condition holds: For all adversaries, a single query drawn from the distribution defined by  <span class="math">f&#x27;</span>  has a slightly higher probability of querying an invalid block than a single query drawn from the distribution defined by  <span class="math">f</span> . This is because  <span class="math">f&#x27;</span>  queries with higher probability in  <span class="math">I_2</span>  which must contain no less invalid blocks than  <span class="math">I_1</span>  for any optimal adversary.</p>
+
+    <p class="text-gray-300">Since all non-increasing distributions yield a non-unique optimal sampling distribution, we can focus our search on sampling distributions defined by increasing pdfs that sample later blocks with higher probability than earlier blocks. For such distributions, if the adversary forks off from the main chain at some point  <span class="math">0 \\leq a &amp;lt; 1</span> , the adversary's best strategy is to put all of its correctly-mined (i.e., valid) blocks at the end of its chain so they are the most likely to be sampled. If the adversary has a  <span class="math">c</span>  fraction of the honest mining power, and  <span class="math">1 - a</span>  is the length of the adversary's fork, then the adversary can mine a  <span class="math">(1 - a)c</span>  fraction of the chain. Thus, in its best strategy, the section of the adversary's chain from  <span class="math">a</span>  to  <span class="math">1 - (1 - a)c</span>  does not contain valid blocks.</p>
+
+    <p class="text-gray-300">To catch the malicious prover, we must sample a block in this interval. Hence, the probability that we catch an adversary who forks at some point  <span class="math">a</span>  with one sample is</p>
+
+    <div class="my-4 text-center"><span class="math-block">\\frac {\\int_ {a} ^ {1 + a c - c} f (x) d x}{\\int_ {0} ^ {1} f (x) d x},</span></div>
+
+    <p class="text-gray-300">where  <span class="math">f(x)</span>  is proportional to the probability density function of the sampling distribution. Considering all</p>
+
+    <p class="text-gray-300">points where the adversary could fork from, the probability of success with a single sample is</p>
+
+    <p class="text-gray-300"><span class="math">p=\\min_{0\\leq a&lt;1}\\frac{\\int_{a}^{1+ac-c}f(x)dx}{\\int_{0}^{1}f(x)dx}.</span></p>
+
+    <p class="text-gray-300">In order to find the optimal protocol, we have to find the distribution that maximizes this quantity. Intuitively, we want a sampling distribution which makes the adversary indifferent about which fork point to use. Otherwise, queries would be wasted on blocks which an optimal adversary would not make invalid anyway. Concretely, we find an <span class="math">f(x)</span> that satisfies <span class="math">\\int_{0}^{1-c}f(x)dx=\\int_{a}^{1+ac-c}f(x)dx</span>. In other words, if the adversary forked from the beginning of the chain or any other point, we have the same probability of catching it. Through differential analysis, we find that <span class="math">f(x)=\\frac{1-c}{c(1-x)}</span> satisfies this condition, i.e.,</p>
+
+    <p class="text-gray-300"><span class="math">\\int_{a}^{1+ac-c}f(x)dx=\\frac{(c-1)\\ln(c)}{c}.</span></p>
+
+    <p class="text-gray-300">In Figure 2, <span class="math">f(x)</span> and this property are displayed visually.</p>
+
+    <p class="text-gray-300">We now analyze how close our <span class="math">f(x)</span> is to the optimal sampling distribution. We first try to compute the normalized probability density function by normalizing <span class="math">f(x)</span> by an <span class="math">\\int_{0}^{1}f(x)dx</span> factor. Unfortunately, <span class="math">f(x)</span> goes to infinity as <span class="math">x</span> approaches <span class="math">1</span> and <span class="math">\\int_{0}^{1}f(x)dx=\\infty</span>. Luckily, we can restrict the sampling domain from <span class="math">0</span> to <span class="math">1-\\delta</span> and have the verifier always check the last <span class="math">\\delta</span> fraction of the blocks directly. We will later find the optimal value for <span class="math">\\delta</span>. Let</p>
+
+    <p class="text-gray-300"><span class="math">g(x)=\\frac{f(x)}{\\int_{0}^{1-\\delta}f(x)dx}=\\frac{1}{(x-1)\\ln(\\delta)}.</span></p>
+
+    <p class="text-gray-300">The probability of catching the adversary is equal to</p>
+
+    <p class="text-gray-300"><span class="math">p=\\min_{0\\leq a\\leq\\frac{c-\\delta}{c}}\\int_{a}^{1+ac-c}g(x)dx=\\int_{0}^{1-c}\\frac{1}{(x-1)\\ln(\\delta)}dx=\\log_{\\delta}(c).</span></p>
+
+    <p class="text-gray-300">This probability takes into account that all blocks in the last <span class="math">\\delta</span> fraction of the chain are always verified by the verifier. Any fork after <span class="math">\\frac{c-\\delta}{c}</span> will contain at least a block from this <span class="math">\\delta</span> region, and thus will be detected with probability <span class="math">1</span>.</p>
+
+    <p class="text-gray-300">We will now show that <span class="math">g(x)</span> defines an optimal sampling distribution by showing that no sampling distribution can achieve a higher <span class="math">p</span> value, i.e., a higher probability of catching the adversary with a single query. Note that the sampling strategy is optimal for an optimal adversary. This is a strong argument as the optimal adversary can choose the placement of its invalid blocks after learning the sampling strategy.</p>
+
+    <h6 id="sec-36" class="text-base font-medium mt-4">Theorem 2 (Optimal Sampling Distribution).</h6>
+
+    <p class="text-gray-300">Given that the last <span class="math">\\delta=c^{k},c\\in(0,1],k\\in\\mathbb{N}</span> fraction of the chain contains only valid blocks and the adversary can at most create a <span class="math">c</span> fraction of valid blocks after the fork point <span class="math">a</span>, the sampling distribution defined by the PDF <span class="math">g(x)=\\frac{1}{(x-1)\\ln(\\delta)}</span> maximizes the probability of catching any adversary that optimizes the placement of invalid blocks.</p>
+
+    <h6 id="sec-37" class="text-base font-medium mt-4">Proof.</h6>
+
+    <p class="text-gray-300">Let <span class="math">\\delta=c^{k}</span>, for some <span class="math">k\\in\\mathbb{N}</span>, we get that <span class="math">p=1/k</span> and that as <span class="math">k</span> increases the success probability decreases. Hence, the smaller <span class="math">\\delta</span> is set, the fewer the blocks that are always checked near the tip of the chain but the worse our probability of catching the adversary with a sample anywhere else. Therefore, a smaller <span class="math">\\delta</span> leads to more samples from the rest of the chain.</p>
+
+    <p class="text-gray-300">Say <span class="math">g^{<em>}(x)</span> is the probability density function of the best sampling distribution. Note that given Lemma 3, <span class="math">g^{</em>}(x)</span> is increasing and therefore for an optimal adversary the success probability is denoted by</p>
+
+    <p class="text-gray-300"><span class="math">p^{<em>}=\\min_{a,0\\leq a\\leq\\frac{c-d}{c}}\\int_{a}^{1+ac-c}g^{</em>}(x)dx.</span></p>
+
+    <p class="text-gray-300"><span class="math">g^{<em>}(x)</span>, therefore, maximizes <span class="math">p^{</em>}</span>. The optimality condition implies that <span class="math">\\int_{1-c^{i}}^{1-c^{i+1}}g^{<em>}(x)dx\\geq p^{</em>}</span>, for all integers <span class="math">i\\in[0,k]</span>, where <span class="math">a=1-c^{i}</span> is a possible forking point. Further we have that <span class="math">\\int_{0}^{1-c^{k}}g^{*}(x)dx=1</span> since</p>
+
+    <p class="text-gray-300"><span class="math">g^{*}(x)</span> is a PDF. We have</p>
+
+    <p class="text-gray-300"><span class="math">\\int_{0}^{1-c^{k}}g^{<em>}(x)dx=\\sum_{i=0}^{k}\\int_{1-c^{i}}^{1-c^{i+1}}g^{</em>}(x)dx=1\\geq k\\cdot p^{*}.</span></p>
+
+    <p class="text-gray-300">This implies that <span class="math">p^{*}\\leq 1/k</span>. Note that <span class="math">g(x)</span> as a candidate distribution achieves <span class="math">p=1/k</span> and is, therefore, optimal.</p>
+
+    <p class="text-gray-300">∎</p>
+
+    <p class="text-gray-300">Optimizing the Proof Size. Given <span class="math">g(x)</span> and <span class="math">p</span>, we can now define <span class="math">p_{m}=(1-\\frac{1}{k})^{m}</span> as the probability of failure, i.e., not catching the optimal adversary after <span class="math">m</span> independent queries. Note that without loss of generality, <span class="math">k\\geq 1</span> as otherwise <span class="math">\\delta&gt;c</span>, implying that a sufficient fraction of blocks are checked to catch any adversary. If we want <span class="math">p_{m}\\leq 2^{-\\lambda}</span>, then <span class="math">m\\geq\\frac{\\lambda}{\\log_{1/2}\\left(1-\\frac{1}{k}\\right)}</span>. Now, assuming that the verifier always checks the last <span class="math">L</span> blocks of the chain, where <span class="math">L=\\delta n=c^{k}n</span>, we get that <span class="math">k=\\log_{c}\\left(\\frac{L}{n}\\right)</span> and</p>
+
+    <p class="text-gray-300"><span class="math">m\\geq\\frac{\\lambda}{\\log_{1/2}\\left(1-\\frac{1}{\\log_{c}(\\frac{L}{n})}\\right)}.</span></p>
+
+    <p class="text-gray-300">This means that <span class="math">m</span> approximates</p>
+
+    <p class="text-gray-300"><span class="math">\\lambda\\log_{c}(\\frac{1}{2})\\ln(n)=O(\\lambda\\log_{1/c}(n)),</span></p>
+
+    <p class="text-gray-300">thus,</p>
+
+    <p class="text-gray-300"><span class="math">\\lim_{n\\to\\infty}\\frac{m}{\\lambda\\log_{c}(\\frac{1}{2})\\ln(n)}=1.</span></p>
+
+    <p class="text-gray-300">As long as <span class="math">L</span> is a constant, the number of queries is linear in the security parameter <span class="math">\\lambda</span> and logarithmic in the chain length, <span class="math">n</span>.</p>
+
+    <p class="text-gray-300">Verifying Trailing Blocks. The number of blocks checked at the end of the chain (denoted by <span class="math">L</span>) affects the total number of samples needed, <span class="math">m</span>. We can, therefore, further optimize it to get an optimal proof size. It is important to ensure that <span class="math">L</span> is bounded from below by the particular <span class="math">(c,L)</span>-adversary assumption that is used. Given this one can numerically optimize <span class="math">L</span> as we do in our implementation. However, as long as that number is a constant we get an asymptotically optimal proof size:</p>
+
+    <h6 id="sec-38" class="text-base font-medium mt-4">Corollary 2.</h6>
+
+    <p class="text-gray-300">Under the <span class="math">(c,L)</span>-adversary assumption for any constant <span class="math">L</span> and using a collision-resistant hash function the FlyClient proof size is <span class="math">\\Theta(\\lambda\\log(n)\\log_{\\frac{1}{c}}(n)+L)</span></p>
+
+    <p class="text-gray-300">The corollary is a result of the proof size computations above for a negligible failure probability of <span class="math">2^{-\\lambda}</span> and the size of each Merkle path being <span class="math">\\log_{2}(n)</span>.</p>
+
+    <p class="text-gray-300">Note that unlike in the superblock-based NIPoPoW <em>[29]</em> this result holds for all adversaries not just in an optimistic setting. For realistic Ethereum values of <span class="math">\\lambda=50,n=2^{22},c=\\frac{1}{2}</span> bytes, the total proof size is just below 400 KB (See Section 7).</p>
+
+    <h2 id="sec-39" class="text-2xl font-bold">6 FlyClient Under Variable Difficulty</h2>
+
+    <p class="text-gray-300">So far, we have only considered the simplistic case that all blocks have the same difficulty. This is not realistic as the number of miners as well as their hardware continuously changes.</p>
+
+    <p class="text-gray-300">Information theoretically, the distributional view analysis described in Section 5.4 allows us to also handle the variable-difficulty scenario. In the new model, we simply use the same sampling distribution</p>
+
+    <p class="text-gray-300"><span class="math">g(x)=\\frac{1}{(x-1)\\ln\\delta},</span></p>
+
+    <p class="text-gray-300">but now <span class="math">x</span> denotes the relative aggregate difficulty weight and <span class="math">\\delta</span> denotes the relative difficulty weight of the blocks which are sampled with probability 1. For example, <span class="math">x=1/2</span> is the point in the chain where half of the difficulty has been amassed, and <span class="math">g(1/2)</span> is the probability that the block at that point is sampled by FlyClient. Note that <span class="math">x=1/2</span> may refer to a very recent block in the chain if the block difficulty grows fast.</p>
+
+    <p class="text-gray-300">6.1 Variable Difficulty MMR</p>
+
+    <p class="text-gray-300">To enable handling difficulty-based sampling, we need to make two adjustments. We need a data-structure which efficiently and securely enables the verifier to sample blocks based on their relative difficulty positions, rather than their absolute positions as in the standard MMR. Second, Assumption 2, which states that the adversary’s forks have only a fraction of the honest chain’s weight, requires that all difficulty transitions are correct. In fact, as described in Section 3.1, the assumption is broken if the adversary can arbitrarily manipulate block difficulties. We show how an adapted variable-difficulty MMR which aggregates information about the total difficulty as well as difficulty transitions can resolve both issues at once.</p>
+
+    <h6 id="sec-40" class="text-base font-medium mt-4">Definition 7 (Difficulty MMR).</h6>
+
+    <p class="text-gray-300">A difficulty MMR is a variant of the MMR with identical properties, but such that each node contains additional data. Every node can be written as <span class="math">h,w,t,D_{\\text{start}},D_{\\text{next}},n,\\text{data}</span>, where <span class="math">h</span> is a <span class="math">\\lambda</span> bit output of a hash function, <span class="math">w</span> is an integer representing a total difficulty, <span class="math">t</span> is a timestamp, <span class="math">D</span> is a difficulty target, <span class="math">n</span> is an integer representing the size of the subtree rooted by the node and data is an arbitrary string. In a block, i.e., a leaf node, <span class="math">n=1</span> and <span class="math">t</span> is the time it took to mine the current block (the blocks time stamp minus the previous block’s timestamp). <span class="math">w,D_{\\text{start}}</span> is the current difficulty targets and <span class="math">D_{\\text{next}}</span> is the difficulty of the next block computed using the difficulty adjustment function defined Definition 1.</p>
+
+    <p class="text-gray-300">Each non-leaf node is defined as <span class="math">\\{\\mathsf{H}(lc,rc),lc.w+rc.w,lc.t+rc.t,lc.D_{\\text{start}},rc.D_{\\text{next}},lc.n+rc.n,\\bot\\}</span>, where <span class="math">lc=\\text{LeftChild}</span> and <span class="math">rc=\\text{RightChild}</span>.</p>
+
+    <h4 id="sec-41" class="text-lg font-semibold mt-6">6.1.1 Difficulty MMR Verification.</h4>
+
+    <p class="text-gray-300">We need to modify the MMR verification algorithm in several ways. The prover algorithm will be the same generating a proof consisting of a Merkle path. In general the verifier will check the Merkle path and that the targets assigned to each node are feasible. For simplicity, we assume that the epoch length <span class="math">m</span> and the total number of leafs <span class="math">n</span> are powers of 2. Given a left child (<span class="math">lc</span>), a right child (<span class="math">rc</span>) and a parent node (<span class="math">p</span>), the verifier performs the following checks:</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Compute <span class="math">p</span> using <span class="math">lc</span> and <span class="math">rc</span> following Definition 7.</li>
+
+      <li>Verify that <span class="math">lc.D_{\\text{next}}=rc.D_{\\text{start}}</span>.</li>
+
+      <li>For both <span class="math">lc</span> and <span class="math">rc</span> verify that they are internally consistent. That is, ensure that there is a possible set of legal difficulty transitions given the aggregate timing and difficulty parameters of these nodes:</li>
+
+    </ol>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>If the node is within an epoch, i.e., below level <span class="math">\\log_{2}(m)</span>, ensure that the difficulty and weight are consistent with the epoch’s difficulty.</li>
+
+      <li>If the node captures a difficulty transition, ensure that <span class="math">D_{\\text{next}}</span> is computed correctly using the difficulty transition function from Definition 1 and <span class="math">t</span>.</li>
+
+      <li><span class="math">t_{\\text{start}},t_{\\text{end}},w,D_{\\text{start}},D_{\\text{next}}</span>: there is a possible assignment to the difficulty transitions yielding these parameters. See discussion below for details.</li>
+
+    </ul>
+
+    <p class="text-gray-300">The checks require the verifier to know whether there is a possible assignment to the difficulty transition yielding a certain set of parameters. While intricate this can be done efficiently. If the node is below a node that defines an epoch, i.e. the node is at a height lower than <span class="math">\\log_{2}(m)</span> then its difficulty targets <span class="math">w,D_{\\text{start}},D_{\\text{end}}</span> are fully defined by the epoch. For nodes higher in the MMR we can compute what the max and the min total weight <span class="math">w</span> are given the other parameters. The max weight over a given set of difficulty transitions is achieved by first raising the difficulty by the dampening factor <span class="math">\\tau</span> and then lowering it over a set of epochs by <span class="math">\\frac{1}{\\tau}</span> such that the final difficulty target is <span class="math">D_{\\text{end}}</span>. The inverse, i.e. first lowering then raising, achieves the minimum total weight. The timestamps need to be far enough apart to accommodate for all the epochs in which the difficulty decreases. A maximal difficulty decrease requires an epoch length of at least <span class="math">\\tau\\cdot\\frac{m}{f}\\textsuperscript{1}</span>. Conversely an epoch in which the difficulty increases maximally lasts at most <span class="math">\\frac{m}{f\\cdot\\tau}</span>.</p>
+
+    <p class="text-gray-300">Overall, the following checks are sufficient for the simplified scenario, where <span class="math">\\tau^{k}D_{\\text{start}}=D_{\\text{next}}</span> for an integer <span class="math">k\\geq 0</span> and a total of <span class="math">n</span> epochs such that <span class="math">n-k</span> is even:</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li><span class="math">k\\leq n</span></li>
+
+      <li><span class="math">w\\leq D_{\\text{start}}(\\sum_{i=0}^{k+\\frac{n-k}{2}}\\tau^{i}+\\sum_{i=k+1}^{k+\\frac{n-k}{2}-1}\\tau^{i})</span></li>
+
+    </ol>
+
+    <p class="text-gray-300"><span class="math">=D_{\\text{start}}\\cdot\\frac{(\\tau+1)\\tau^{\\frac{k+n}{2}}-\\tau^{1+k}-1}{\\tau-1}</span></p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li><span class="math">w\\geq D_{\\text{start}}(\\sum_{i=-\\frac{n-k}{2}}^{0}\\tau^{i}+\\sum_{i=-\\frac{n-k}{2}+1}^{k-1}\\tau^{i})</span></li>
+
+    </ol>
+
+    <p class="text-gray-300"><span class="math">=D_{\\text{start}}\\cdot\\frac{\\tau^{k}+\\tau-(\\tau+1)\\tau^{\\frac{k+n}{2}}}{\\tau-1}</span></p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li><span class="math">t</span> is at least long enough to cover the required number of difficulty lowering transitions.</li>
+
+      <li>If <span class="math">n=k</span>, i.e., all periods are maximally increasing and <span class="math">t\\leq\\frac{m}{f\\cdot\\tau}\\cdot n</span></li>
+
+    </ol>
+
+    <p class="text-gray-300">For other scenarios such as <span class="math">k</span> not an integer or <span class="math">k&lt;0</span>, the calculations are similar.</p>
+
+    <p class="text-gray-300">All of these checks ensure that the difficulty transitions of queried blocks are valid. Furthermore, they ensure that queried blocks were not affected by an invalid difficulty transition. We formally prove this by saying that an adversary that uses invalid difficulty transitions cannot increase its success probability. Specifically, the adversary might as well have used valid difficulty transitions and mined more invalid blocks.</p>
+
+    <h6 id="sec-42" class="text-base font-medium mt-4">Lemma 4.</h6>
+
+    <p class="text-gray-300">Let <span class="math">A</span> be an adversary as defined by the variable backbone model that produces a chain <span class="math">C</span> with non-negligible probability <span class="math">p</span> such that <span class="math">k</span> blocks are valid as by the definition. Then, assuming a collision-resistant hash function, there exists an adversary <span class="math">A^{\\prime}</span> that using the same number of oracle queries as <span class="math">A</span> respects the retargeting rules and produces a chain <span class="math">C^{\\prime}</span> with probability at least <span class="math">p-negl(\\lambda)</span> that contains the same valid blocks but respects the retargeting rules.</p>
+
+    <h6 id="sec-43" class="text-base font-medium mt-4">Proof.</h6>
+
+    <p class="text-gray-300">Let <span class="math">B_{n}</span> be the head of the chain created by <span class="math">A</span> with MMR root <span class="math">M_{n-1}</span> Let <span class="math">B_{i}\\to B_{i+1}</span> be an invalid difficulty adjustment. Note that this directly implies that there exists no <span class="math">\\Pi_{B_{i}\\in M_{n-1}}</span> as all verifiers will directly reject this proof. Consider the (invalid) proof <span class="math">\\Pi_{B_{i}\\in M_{n-1}}^{\\ast}</span> created by Algorithm 3 with the modifications defined in Definition 7. Let <span class="math">x^{\\prime}</span> be the highest node in <span class="math">\\Pi_{B_{i}\\in M_{n-1}}^{\\ast}</span> that would have led a verifier to reject the proof. For example if the dampening factor <span class="math">\\tau=4</span> and the invalid difficulty adjustment from <span class="math">B_{i}\\to B_{i+1}</span> raises the difficulty by a factor of 100 then <span class="math">x^{\\prime}</span> will be the third node in <span class="math">\\Pi_{B_{i}\\in M_{n-1}}</span>. Note that any proof containing <span class="math">x^{\\prime}</span> will be rejected by the verifier. Let <span class="math">M^{\\prime}</span> be the subtree of <span class="math">M_{n-1}</span> that is spanned by <span class="math">x^{\\prime}</span>s parent. All leafs of <span class="math">M^{\\prime}</span> are invalid as all inclusion proofs for these leafs must contain <span class="math">x^{\\prime}</span> (unless <span class="math">A</span> found a collision on the MMR’s hash function which happens with at most negligible probability). This means <span class="math">A^{\\prime}</span> can change the difficulty adjustment for all of these leafs of <span class="math">M^{\\prime}</span> without changing the validity of any other node. The blocks spanned by <span class="math">M^{\\prime}</span> are all invalid and need not to contain a valid proof of work. <span class="math">A^{\\prime}</span> does this such that the difficulty adjustments are all valid but also consistent with the parent of <span class="math">x^{\\prime}</span>, i.e. the root of <span class="math">M^{\\prime}</span>. Note that this is possible since, by assumption, the parent of <span class="math">x^{\\prime}</span> does <em>not</em> cause the verifier to reject the proof. Consistency with <span class="math">x^{\\prime}</span> implies that the start and end difficulty as well as the total weight, the total time and the total number of blocks are as defined in <span class="math">x^{\\prime}</span>. These parameters therefore don’t change for the subchain spanned by <span class="math">M^{\\prime}</span>s leafs from the chain generated by <span class="math">A</span> vs. the chain generated by <span class="math">A^{\\prime}</span>. <span class="math">A^{\\prime}</span> repeats this process until it creates a chain with only valid difficulty transitions. All other valid blocks <span class="math">A^{\\prime}</span> attempts to create using its oracle queries. Since <span class="math">C^{\\prime}</span> contains at most as much proof of work as <span class="math">C</span> it can be created with at least probability <span class="math">p-negl(\\lambda)</span>. ∎</p>
+
+    <h3 id="sec-44" class="text-xl font-semibold mt-8">6.2 Non-Interactive FlyClient</h3>
+
+    <p class="text-gray-300">We present the probabilistic verification as an interactive protocol between a client and a verifier. Note that the client simply queries random blocks, according to some publicly known probability distribution. We can therefore transform the interactive public-coin protocol into a non-interactive argument using the Fiat-Shamir heuristic <em>[20]</em>. This means that the randomness used to determine which blocks are sampled is derived using a secure hash function (say, SHA-3) applied to the head of the chain. The verifier not only checks the queries itself but also that the randomness was properly derived.</p>
+
+    <p class="text-gray-300">The Fiat-Shamir heuristic turns the statistical soundness of the information theoretic sampling protocol into computational soundness as a prover can receive new samples by recomputing the final block header. On the other hand, recomputing the final header requires solving a new PoW puzzle, which itself requires a high number of queries to the hash function. In fact, our security assumption gives a concrete bound on the number of PoW puzzles the adversary can solve, which is <span class="math">c\\cdot n</span>. Let <span class="math">p_{m}</span> be the soundness of Protocol 1 and <span class="math">2^{-\\lambda}</span> be the desired failure probability (e.g., <span class="math">2^{-50}</span>). Using the union bound, we conclude that the non-interactive FlyClient is secure as long as <span class="math">p_{m}&lt;\\frac{2^{-\\lambda}}{c\\cdot n}</span>.</p>
+
+    <h3 id="sec-45" class="text-xl font-semibold mt-8">6.3 FlyClient Security</h3>
+
+    <p class="text-gray-300">We finally prove security of the overall protocol. The proof uses the security of the information theoretic sampling protocol along with the security of the cryptographic MMR that makes the queries verifiable and ensures that the proper difficulty rules are followed. We now restate the main Theorem and prove it.</p>
+
+    <h6 id="sec-46" class="text-base font-medium mt-4">Theorem 1 (FlyClient).</h6>
+
+    <p class="text-gray-300">Assuming a variable difficulty backbone protocol such that all adversaries are limited to be <span class="math">(c,L)</span>-adversaries as per Assumption 2 and assuming a collision-resistant hash function <span class="math">\\mathsf{H}</span> (Definition 8), the FlyClient protocol is a secure NIPoPoW protocol in the random oracle model as per Definition 3 with all but negligible probability. The protocol is succinct with proof size <span class="math">O(L+\\lambda\\cdot\\log_{1/c}(n)\\cdot\\log_{2}(n))</span>.</p>
+
+    <h6 id="sec-47" class="text-base font-medium mt-4">Proof.</h6>
+
+    <p class="text-gray-300">The <span class="math">(c,L)</span>-adversary assumption requires that all difficulty transitions are honest. Lemma 4 shows that any adversary that doesn’t follow these transitions is not more successful in fooling the verifier. The security of the MMR also ensures that the MMR is position and weight binding with overwhelming probability. Corollary 2 shows that with <span class="math">O(\\lambda\\log_{1/c}(n))</span> queries and a constant number of <span class="math">L</span> blocks being checked at the end, the probability of an adversary evading the sampling protocol is negligible. We can make the one-round public coin protocol non-interactive using the Fiat-Shamir heuristic which is secure in the random oracle model <em>[39]</em>. The proof size consists of <span class="math">L</span> successive blocks being revealed plus the sampled blocks and their MMR paths. This gives a total proof size of <span class="math">O(L+\\lambda\\log_{1/c}(n)\\log_{2}(n))</span> hashes and blocks. ∎</p>
+
+    <h2 id="sec-48" class="text-2xl font-bold">7 Evaluation</h2>
+
+    <p class="text-gray-300">Experimental Setup. We implemented FlyClient and evaluated it empirically in two different scenarios. Our comparisons are focused on the proof size but both creating and verifying proofs is fast. Even in our unoptimized implementation, it takes less than a second over all tested parameters.</p>
+
+    <p class="text-gray-300">First, we compare FlyClient with NIPoPoW in the unrealistic scenario that all blocks have the same difficulty. NIPoPoW cannot handle variable difficulty chains. We show that both NIPoPoWs and FlyClient’s proofs are logarithmic in the chain length and that FlyClient outperforms NIPoPoW over all parameters. Additionally, we show the performance of FlyClient using data from the Ethereum blockchain which has widely varying difficulty. FlyClient significantly outperforms standard SPV clients especially for longer chains. All evaluations assume a block header of size 508 bytes and a hash output of 32 bytes. Additionally, the MMR nodes contain 8 bytes to store the difficulty. Note that Ethereum technically does not require the definition of the variable difficulty model as explained in Section 3.2. We still evaluate FlyClient on Ethereum because it has a high block production rate which makes the evaluation results more interesting. Additionally it is possible to run FlyClient for Ethereum but only with heuristic security guarantees. This seems fundamental until the Ethereum backbone itself has been proven to be secure.</p>
+
+    <p class="text-gray-300">We evaluate the performance of FlyClient using data from the Ethereum blockchain which has widely varying difficulty. FlyClient significantly outperforms standard SPV clients especially for longer chains. The evaluation assumes a block header of size 508 bytes and a hash output of 32 bytes. Additionally, the MMR nodes contain 16 bytes to store the time and difficulty parameters. Note that Ethereum technically does not satisfy the definition of the variable difficulty model as explained in Section 3.2. We still evaluate FlyClient on Ethereum because it has a high block production rate which makes the evaluation results more interesting. Additionally, it is possible to run FlyClient for Ethereum but only with heuristic security guarantees. This seems fundamental until the Ethereum backbone itself has been proven to be secure.</p>
+
+    <h3 id="sec-49" class="text-xl font-semibold mt-8">7.1 Comparison with NIPoPoW</h3>
+
+    <p class="text-gray-300">NIPoPoW like FlyClient promises short proofs of proof of work for light clients. We compare FlyClient with NIPoPoW by analytically computing NIPoPoWs proof size. We match the security level of NIPoPoW and FlyClient such that for security parameter <span class="math">\\lambda</span> an attacker who controls a <span class="math">c</span> fraction of the main chain’s mining power succeeds with probability <span class="math">2^{-\\lambda}</span>. Concretely, in NIPoPoW we set both the number of blocks checked at the end of the chain <span class="math">(k)</span> and the length of each super-chain <span class="math">m</span> to <span class="math">\\log_{\\frac{1}{c}}(2)\\lambda</span>. The total NIPoPoW proof size is</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">$\\log_{\\frac{1}{c}}(2)\\lambda\\cdot((\\log_{2}(n)+1)\\cdot B+\\log_{2}(n)\\cdot\\lceil\\log_{2}(\\log_{2}(n,2),2)\\rceil\\cdot</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">),$</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">for <span class="math">B=508</span> bytes being the size of each block and $</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">=32<span class="math"> bytes being the size of a hash. We compare the two light client approaches in Figure 5. The evaluation uses a security parameter of </span>\\lambda=50<span class="math"> and 3 different parameterizations of </span>c<span class="math">, which is a bound on the fraction of the honest mining power that an adversary controls. </span>\\frac{c}{1+c}<span class="math"> is the fraction of the total mining power that the adversary controls. For </span>c=0.9$ this is 47.3%. We see that both proofs are very efficient producing proofs under 6 MB even for the largest parameters.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">!<a href="img-3.jpeg">img-3.jpeg</a> Figure 4: The plot shows the number of manually checked blocks  <span class="math">L</span>  and the number of queried blocks for the Ethereum blockchain and  <span class="math">c = 0.5, \\lambda = 50</span> . Additionally on the secondary axes the plot shows the proof size both without the MMR proof optimization and without.</p>
+
+    <p class="text-gray-300">FlyClient outperforms NIPoPoW over all parameters but especially for large values of  <span class="math">c</span> , yielding an almost  <span class="math">40\\%</span>  improvement in proof size. This validates the optimization approach for finding an optimal light client design. Note that for  <span class="math">n = 10</span>  million, an SPV client would have required a 4.9 GB proof over 1000 times more than the corresponding FlyClient proof for  <span class="math">c = 0.9</span> .</p>
+
+    <p class="text-gray-300">We implement FlyClient and evaluate it using data from the Ethereum blockchain. We measure its performance at different chain lengths, i.e., at different historic data points. Ethereum's PoW difficulty is not constant but varies widely and has historically been increasing. Note that technically Ethereum's difficulty transition function does not fall into the variable difficulty model of [23]. We still use Ethereum data as it is a popular PoW blockchain with a long (in terms of number of blocks) chain. Additionally using FlyClient for Ethereum is possible but only heuristically secure as explained in Section 3.1.</p>
+
+    <p class="text-gray-300">FlyClient is the first PoPoW design that achieves succinct proof sizes for variable difficulty chains. We demonstrate the efficiency of FlyClient in Figure 6. For  <span class="math">c = 0.5</span> , i.e., the adversary controls less than a third of the total mining power the proofs are less than 1 MB even for 7,000,000 Ethereum blocks. This compares to a 3.4 GB SPV proof size for the same chain. We additionally plot the mining difficulty in the same figure. Interestingly, the proof size decreases from 3 to 4 million blocks as the difficulty rapidly grows. This is because, with high difficulty growth, the manually-checked blocks contain a larger fraction of the overall difficulty. This reduces the number of blocks that need to be sampled from the rest of the chain. From 3 to 4 million blocks, a so-called difficulty bomb [40] resulted in a rapid increase of proof size. This "bomb" was removed at around 4.3 million blocks which led to a drastic decrease in difficulty and accordingly a slightly higher proof size.</p>
+
+    <p class="text-gray-300">A major benefit of the non-interactive proofs is that they are transferable. A single prover can produce a proof and other users can relay the proof without any additional computation. The relayed proof is still convincing to a verifier. A full node, therefore, can create a proof which many other clients can use. Moreover, by applying the Fiat-Shamir heuristic to the head of the chain we enforce that there only exists a single valid non-interactive proof for a given chain. It therefore suffices if a single party produces the proof for the valid chain and forwards it to all FlyClient nodes.</p>
+
+    <p class="text-gray-300">!<a href="img-4.jpeg">img-4.jpeg</a> Figure 5: Comparison of FlyClient and NIPoPoW at varying difficulty levels and  <span class="math">\\lambda = 50</span> .</p>
+
+    <p class="text-gray-300">Another benefit of the non-interactive proofs is that they allow clients to re-sync to a chain that has grown since the last time they were given a proof for it, by only needing to download a shorter proof for the section of the chain they have not seen. Once a FlyClient has received a proof for a chain of  <span class="math">n</span>  blocks (or  <span class="math">D</span>  cumulative difficulty), they are convinced that at the point in time when they received the proof for that chain it was the honest chain. Suppose that at a later point in time the chain has grown to  <span class="math">n&#x27;</span>  blocks (or  <span class="math">D&#x27;</span>  difficulty), the FlyClient needs only to verify that this new section is honest and thus only require a proof logarithmic in the size of the new section. We note that the prover must also provide a single MMR proof that block  <span class="math">n</span>  is in the MMR of block  <span class="math">n&#x27;</span> , meaning the previous chain is a prefix of the new chain.</p>
+
+    <p class="text-gray-300">Theorem 3 (Subchain Proofs). A FlyClient that was given a valid proof for a chain of length  <span class="math">n</span>  at a time when the honest chain had length  <span class="math">n</span> , and when the honest chain has length  <span class="math">n&#x27;</span>  is given a subproof for the subchain from  <span class="math">n</span>  to  <span class="math">n&#x27;</span>  including a Merkle proof that block  <span class="math">n</span>  is in the MMR of block  <span class="math">n&#x27;</span> , would not accept another chain if they were instead given the full proof for a chain of length  <span class="math">n&#x27;</span> .</p>
+
+    <p class="text-gray-300">Proof. We consider two strategies the adversary may choose: (1) It forks from the honest chain after block  <span class="math">n</span> , this is as if the genesis block were set to block  <span class="math">n</span>  and the subproof from block  <span class="math">n</span>  to  <span class="math">n&#x27;</span>  is a whole proof for a chain of  <span class="math">n&#x27; - n</span>  blocks. (2) The adversary forks from the honest chain before  <span class="math">n</span> , by the security of the proof for the first  <span class="math">n</span>  blocks, the FlyClient would not accept the adversary's chain up to  <span class="math">n</span>  so their subproof from  <span class="math">n</span>  to  <span class="math">n&#x27;</span>  would fail because the FlyClient's block  <span class="math">n</span>  is not in the MMR of the adversary's new chain. The FlyClient that receives the whole proof would also not accept the adversary's proof based on the security of a proof for  <span class="math">n&#x27;</span>  blocks.</p>
+
+    <p class="text-gray-300">We note that a subchain proof does not have to be created specifically for the subchain, a FlyClient can take a proof for a chain of  <span class="math">n&#x27;</span>  blocks and only check the blocks after  <span class="math">n</span> . This allows for FlyClient to use only the part of a transferable  <span class="math">n&#x27;</span>  chain proof which it has not yet verified. This is a convenient option for FlyClient that may be running on cell phones or other data-limited devices and do not want to use data re-checking sections they have already verified. Subchain proofs also introduce the option of select checkpoint proofs, meaning that proofs can be created for select points in the chain and a FlyClient can request the precomputed proof they need, minimizing the computation overhead for prover full nodes and proofs will be more easily reused.</p>
+
+    <p class="text-gray-300">!<a href="img-5.jpeg">img-5.jpeg</a> Figure 6: FlyClient for the Ethereum chain at varying chain lengths  <span class="math">n</span>  and for different adversarial powers  <span class="math">c</span> . Additionally we display the difficulty on the secondary axis.</p>
+
+    <p class="text-gray-300">The only modification to the block structure of Bitcoin, Ethereum and similar blockchain protocols that is required to implement FlyClient is to include the MMR root in every block. The MMR root can be added to blocks in three different ways. The first way is a hard fork in which the MMR root is added to the header of all blocks (both old and new). In some newer blockchain designs, such as the Mimblewimble [38]-based Grin and Beam MW [36], this is already the case.</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Alternatively, a soft fork can be used such that new blocks contain the MMR root while old blocks do not. A soft fork gets "activated" when a majority of nodes have enforced the new protocol rules. Starting from the soft fork, new blocks would store the MMR root encoded in a backwards compatible way like in a special transaction. In FlyClient, the miner would provide the block headers, as well as the special transaction and a proof that the transaction is part of the block. The proof size would grow by a factor that is proportional to  $\\log (</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">tx</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">)<span class="math"> , where  </span></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">tx</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">$  is the number of transactions.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">A third deployment path is called a velvet fork and was proposed by [44]. In velvet forks, blocks by outdated miners are not rejected, making it a backwards compatible update to blockchain protocols which rely on clients reinterpreting the blockchain data. For FlyClient the velvet fork would lead to a constant fraction  <span class="math">\\alpha</span>  of blocks containing an MMR root. Blocks created by outdated nodes would not contain the root. The FlyClient protocol would simply treat multiple blocks as one. Concretely, blocks that do not contain an MMR root are viewed as part of the next upgraded block. The miner will always download and check these joined blocks together. If in expectation  <span class="math">1 / \\alpha</span>  blocks are joined, the FlyClient proof would be at most  <span class="math">1 / \\alpha</span>  large than for an equivalent fully upgraded chain. Velvet forks, therefore, lead to less efficient proofs but provide an uncontentious deployment mechanism for FlyClient.</p>
+
+    <p class="text-gray-300">Cohen and Pietrzak [17] propose a simple proof of sequential work (PoSW) construction based on Merkle trees with added edges. A PoSW [33] convinces a verifier that a significant amount of sequential work was applied to a given input. In the construction of [17], the edges which are added to a full Merkle tree connect the left siblings of a leaf's path to the root with the leaf itself. The verifier simply queries random leafs and checks that they are part of the tree and have the correct incoming edges. This construction is almost identical to an iterative MMR construction, where every leaf is the root of the previous MMR. FlyClient follows this design, storing the previous MMR root in every new block/leaf. It is easy to see that constructing a FlyClient chain of length  <span class="math">n</span>  takes  <span class="math">\\theta(n)</span>  sequential steps. The verification algorithm of [17] can be interpreted as our FlyClient protocol with a uniform querying distribution. A FlyClient blockchain is,</p>
+
+    <p class="text-gray-300">therefore, a PoSW, albeit an inefficient one. In a PoSW, a cheating prover will cheat on a constant fraction of leafs in order to save a significant amount of sequential work. FlyClient’s security guarantee is stronger, ensuring that, from no point on the chain, a constant (or more) fraction of leafs are corrupted.</p>
+
+    <h2 id="sec-56" class="text-2xl font-bold">Acknowledgements</h2>
+
+    <p class="text-gray-300">We thank the anonymous CCS reviewers for pointing out Bahack style attacks and problems with the security proof in a previous version of the paper. We also thank Vladislav Gelfer, Dionysis Zindros, Matthew Jagielski and Mahnush Movahedi for helpful comments and discussions.</p>
+
+    <h2 id="sec-57" class="text-2xl font-bold">References</h2>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>[1] Blockchain takes way too long to sync <span class="math">\\cdot</span> issue #2394 <span class="math">\\cdot</span> ethereum/mist. https://github.com/ethereum/mist/issues/2394, 2017. (Accessed on 11/29/2018).</li>
+
+      <li>[2] ethereum/btcrelay: Ethereum contract for bitcoin spv. https://github.com/ethereum/btcrelay, 2018. (Accessed on 12/14/2018).</li>
+
+      <li>[3] Getting deep into geth: Why syncing ethereum node is slow. https://bit.ly/2OOMcXC, July 2018.</li>
+
+      <li>[4] Open timestamps. https://opentimestamps.org/, 2018.</li>
+
+      <li>[5] Over 175 million europeans ready to pay with wearable devices — global hub. https://newsroom.mastercard.com/press-releases/over-175-million-europeans-ready-to-pay-with-wearable-devices/, 2018. (Accessed on 11/27/2018).</li>
+
+      <li>[6] Secure payments and internet-of-things — visa. https://usa.visa.com/visa-everywhere/innovation/visa-brings-secure-payments-to-internet-of-things.html, 2018. (Accessed on 11/27/2018).</li>
+
+      <li>[7] Stampery. https://stampery.com/, 2018.</li>
+
+      <li>[8] Top 6 vendors in the wearable payment market from 2016 to 2020: Technavio — business wire. https://www.businesswire.com/news/home/20161118005252/en/Top-6-Vendors-Wearable-Payment-Market-2016, 2018. (Accessed on 11/27/2018).</li>
+
+      <li>[9] Difficulty - blockchain. https://www.blockchain.com/en/charts/difficulty, 2019. (Accessed on 01/17/2019).</li>
+
+      <li>[10] Ethereum blocks. https://etherscan.io/blocks, July 2019. (Accessed on 07/30/2019).</li>
+
+      <li>[11] Adam Back, Matt Corallo, Luke Dashjr, Mark Friedenbach, Gregory Maxwell, Andrew Miller, Andrew Poelstra, Jorge Timón, and Pieter Wuille. Enabling blockchain innovations with pegged sidechains.</li>
+
+      <li>[12] Adam Back and Gregory Maxwell. Transferring ledger assets between blockchains via pegged sidechains, Nov 2016. US Patent App. 15/150,032.</li>
+
+      <li>[13] Lear Bahack. Theoretical bitcoin attacks with less than half of the computational power (draft). arXiv preprint arXiv:1312.7013, 2013.</li>
+
+      <li>[14] Joseph Bonneau. Why buy when you can rent? bribery attacks on bitcoin-style consensus. In Proceedings of Financial Cryptography, 2016.</li>
+
+      <li>[15] Vitalik Buterin. Ethereum’s white paper. https://github.com/ethereum/wiki/wiki/White-Paper, 2014.</li>
+
+    </ul>
+
+    <p class="text-gray-300">-</p>
+
+    <p class="text-gray-300">[16] Dario Catalano and Dario Fiore. Vector commitments and their applications. In Kaoru Kurosawa and Goichiro Hanaoka, editors, Public-Key Cryptography – PKC 2013, pages 55–72, Berlin, Heidelberg, 2013. Springer Berlin Heidelberg.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>[17] Bram Cohen and Krzysztof Pietrzak. Simple proofs of sequential work. In Annual International Conference on the Theory and Applications of Cryptographic Techniques, pages 451–467. Springer, 2018.</li>
+
+      <li>[18] Cynthia Dwork and Moni Naor. Pricing via processing or combatting junk mail. In Advances in Cryptology — CRYPTO’ 92: 12th Annual International Cryptology Conference Santa Barbara, California, USA August 16–20, 1992 Proceedings, pages 139–147. Springer Berlin Heidelberg, 1993.</li>
+
+      <li>[19] Ittay Eyal and Emin Gün Sirer. Majority is not enough: Bitcoin mining is vulnerable. In Nicolas Christin and Reihaneh Safavi-Naini, editors, Financial Cryptography and Data Security: 18th International Conference, FC 2014, Christ Church, Barbados, March 3-7, 2014, Revised Selected Papers, pages 436–454. Springer Berlin Heidelberg, 2014.</li>
+
+      <li>[20] Amos Fiat and Adi Shamir. How to prove yourself: Practical solutions to identification and signature problems. In Conference on the Theory and Application of Cryptographic Techniques, pages 186–194. Springer, 1986.</li>
+
+      <li>[21] M. Friedenbach. Compact spv proofs via block header commitments. https://www.mail-archive.com/bitcoin-development@lists.sourceforge.net/msg04318.html, March 2014.</li>
+
+      <li>[22] Juan Garay, Aggelos Kiayias, and Nikos Leonardos. The bitcoin backbone protocol: Analysis and applications. In Annual International Conference on the Theory and Applications of Cryptographic Techniques, pages 281–310. Springer, 2015.</li>
+
+      <li>[23] Juan Garay, Aggelos Kiayias, and Nikos Leonardos. The bitcoin backbone protocol with chains of variable difficulty. In Annual International Cryptology Conference, pages 291–323. Springer, 2017.</li>
+
+      <li>[24] Juan A. Garay, Aggelos Kiayias, and Nikos Leonardos. The Bitcoin backbone protocol: Analysis and applications. In Advances in Cryptology - EUROCRYPT 2015, pages 281–310, 2015.</li>
+
+      <li>[25] Arthur Gervais, Hubert Ritzdorf, Ghassan O. Karame, and Srdjan Capkun. Tampering with the delivery of blocks and transactions in bitcoin. In Proceedings of the 22Nd ACM SIGSAC Conference on Computer and Communications Security, CCS ’15, pages 692–705. ACM, 2015.</li>
+
+      <li>[26] Ethan Heilman, Alison Kendler, Aviv Zohar, and Sharon Goldberg. Eclipse attacks on bitcoin’s peer-to-peer network. In 24th USENIX Security Symposium (USENIX Security 15), pages 129–144. USENIX Association, 2015.</li>
+
+      <li>[27] Maurice Herlihy. Atomic cross-chain swaps. arXiv preprint arXiv:1801.09515, 2018.</li>
+
+      <li>[28] Aggelos Kiayias, Nikolaos Lamprou, and Aikaterini-Panagiota Stouka. Proofs of Proofs of Work with Sublinear Complexity, pages 61–78. Springer Berlin Heidelberg, 2016.</li>
+
+      <li>[29] Aggelos Kiayias, Andrew Miller, and Dionysis Zindros. Non-interactive proofs of proof-of-work. 2017.</li>
+
+      <li>[30] Aggelos Kiayias and Dionysis Zindros. Proof-of-work sidechains. Cryptology ePrint Archive, Report 2018/1048, 2018. https://eprint.iacr.org/2018/1048.</li>
+
+      <li>[31] Lucianna Kiffer, Rajmohan Rajaraman, and abhi shelat. A better method to analyze blockchain consistency. In Proceedings of the 2018 ACM SIGSAC Conference on Computer and Communications Security, pages 729–744. ACM, 2018.</li>
+
+      <li>[32] Eleftherios Kokoris-Kogias, Philipp Jovanovic, Linus Gasser, Nicolas Gailly, Ewa Syta, and Bryan Ford. OmniLedger: A secure, scale-out, decentralized ledger via sharding. In 2018 IEEE Symposium on Security and Privacy (S&P), pages 19–34, 2018.</li>
+
+    </ul>
+
+    <p class="text-gray-300">[33] Mohammad Mahmoody, Tal Moran, and Salil Vadhan. Publicly verifiable proofs of sequential work. In Proceedings of the 4th Conference on Innovations in Theoretical Computer Science, ITCS ’13, pages 373–388, New York, NY, USA, 2013. ACM.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>[34] Ralph C. Merkle. A digital signature based on a conventional encryption function. In A Conference on the Theory and Applications of Cryptographic Techniques on Advances in Cryptology, CRYPTO ’87, pages 369–378. Springer-Verlag, 1988.</li>
+
+      <li>[35] Satoshi Nakamoto. Bitcoin: A peer-to-peer electronic cash system, 2008. Available at https://bitcoin.org/bitcoin.pdf.</li>
+
+      <li>[36] Rachel Rose O’Leary. Grin and beam: A tale of two coins being built on mimblewimble. https://www.coindesk.com/grin-and-beam-a-tale-of-two-coins-being-built-on-mimblewimble, December 2018. (Accessed on 02/05/2019).</li>
+
+      <li>[37] Rafael Pass, Lior Seeman, and Abhi Shelat. Analysis of the blockchain protocol in asynchronous networks. In Jean-Sébastien Coron and Jesper Buus Nielsen, editors, Advances in Cryptology – EUROCRYPT 2017, pages 643–673. Springer International Publishing, 2017.</li>
+
+      <li>[38] Andrew Poelstra. Mimblewimble, 2016. https://scalingbitcoin.org/papers/mimblewimble.pdf.</li>
+
+      <li>[39] David Pointcheval and Jacques Stern. Security proofs for signature schemes. In International Conference on the Theory and Applications of Cryptographic Techniques, pages 387–398. Springer, 1996.</li>
+
+      <li>[40] Rakesh Sharma. What is ethereum’s ”difficulty bomb”? https://www.investopedia.com/news/what-ethereums-difficulty-bomb/, August 2018. (Accessed on 02/05/2019).</li>
+
+      <li>[41] socrates1024. The high-value-hash highway. https://bitcointalk.org/index.php?topic=98986.0, 2012.</li>
+
+      <li>[42] Peter Todd. Merkle mountain range. https://github.com/opentimestamps/opentimestamps-server/blob/master/doc/merkle-mountain-range.md, 2012.</li>
+
+      <li>[43] Mahdi Zamani, Mahnush Movahedi, and Mariana Raykova. RapidChain: Scaling blockchain via full sharding. In 2018 ACM Conference on Computer and Communications Security (CCS), 2018.</li>
+
+      <li>[44] Alexei Zamyatin, Nicholas Stifter, Aljosha Judmayer, Philipp Schindler, Edgar Weippl, and William J. Knottenbelt. (short paper) a wild velvet fork appears! inclusive blockchain protocol changes in practice. Cryptology ePrint Archive, Report 2018/087, 2018. https://eprint.iacr.org/2018/087.</li>
+
+    </ul>
+
+    <h2 id="sec-58" class="text-2xl font-bold">Appendix</h2>
+
+    <h3 id="sec-59" class="text-xl font-semibold mt-8">A Preliminaries</h3>
+
+    <p class="text-gray-300">A key component of our protocol is a type of Merkle hash tree <em>[34]</em> which allows every block to commit to all previous blocks. Similar to vector commitments <em>[16]</em>, Merkle trees provide <em>position binding</em>, so that a malicious prover cannot open a commitment to two different values at the same position of a committed sequence. In FlyClient, we use an MMR construction which is a Merkle tree with an efficient append functionality. An MMR further allows a prover to efficiently convince a verifier that two MMRs share the same subtree We will discuss these properties in Section 4.2.</p>
+
+    <p class="text-gray-300">Before defining the preliminaries, we establish our notation and terminology used throughout the paper.</p>
+
+    <p class="text-gray-300">Notation and Terminology. We say an event occurs <em>with high probability</em> if it occurs with probability <span class="math">1-O(1/2^{\\lambda})</span>, where <span class="math">\\lambda</span> is the security parameter. We say a probability is <em>negligible</em> (or <span class="math">negl</span>) if it is <span class="math">O(1/2^{\\lambda})</span>.</p>
+
+    <h6 id="sec-60" class="text-base font-medium mt-4">Definition 8 (Collision resistant hash function).</h6>
+
+    <p class="text-gray-300">A family of hash functions <span class="math">\\mathsf{H}_{\\lambda}:\\{0,1\\}^{*}\\rightarrow\\{0,1\\}^{\\lambda}</span> is collision resistant if for all efficient adversaries <span class="math">\\mathcal{A}</span> the probability that <span class="math">x,y\\stackrel{{\\scriptstyle?}}{{\\leftarrow}}\\mathcal{A}(1^{\\lambda})</span> and <span class="math">\\mathsf{H}(x)=\\mathsf{H}(y)\\wedge x\\neq y</span> is negligible in <span class="math">\\lambda</span>.</p>
+
+    <p class="text-gray-300">B Basic Merkle Tree</p>
+
+    <p class="text-gray-300">A Merkle tree is a balanced binary tree where the leafs hold some value, and each non-leaf node stores a hash of both of its children. Such a structure allows proving the inclusion of any value in the tree with only a logarithmic number of hashes, known as a Merkle proof. In Bitcoin, Merkle trees are used to aggregate the hashes of transactions in a particular block so that the root becomes a binding commitment to all transactions in that block. The root is then stored in the header of the block. An SPV proof of a transaction is the Merkle proof that the hash of the transaction is a leaf in the Merkle tree. Though it is a commonly-used data structure, we redefine a Merkle tree and the security of a Merkle proof in the following so we can extend the definition to MMRs later.</p>
+
+    <h6 id="sec-61" class="text-base font-medium mt-4">Definition 9 (Merkle Tree).</h6>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Given a list of values, a Merkle tree is a balanced binary tree, where each leaf node stores some value, and each non-leaf node holds the value H(LeftChild$</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"><span class="math">RightChild), where H is a collision-resistant hash function. Balanced binary tree here means a tree with </span>n<span class="math"> leaves that has depth less than or equal to </span>\\lceil\\log_{2}n\\rceil$.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <h6 id="sec-62" class="text-base font-medium mt-4">Definition 10.</h6>
+
+    <p class="text-gray-300">Given a Merkle tree, MT, with root <span class="math">r</span>, a Merkle proof that <span class="math">x</span> is the <span class="math">k</span>th node in MT, <span class="math">\\Pi_{k\\in MT}</span>, are the siblings of each node on the path from <span class="math">x</span> to <span class="math">r</span>. Since MT has depth at most <span class="math">\\lceil\\log_{2}(n)\\rceil</span>, the proof length is at most <span class="math">\\log_{2}(n)+1</span> as each node in the path can be calculated from its two children so we only need the siblings and the 2 leaf nodes.</p>
+
+    <p class="text-gray-300">Below, we define a prover-verifier model, where the verifier knows the root of a Merkle tree and the prover wants to convince the verifier that a particular node exists in the tree.</p>
+
+    <p class="text-gray-300">Prover-Verifier Model.</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Verifier has access to <span class="math">r=\\text{root of some Merkle tree}</span>, <span class="math">MT</span>.</li>
+
+      <li>Prover has access to <span class="math">MT</span> and generates a Merkle-Proof path of some <span class="math">x\\in MT=\\Pi_{k\\in MT}</span> using Protocol 3 and sends it to the verifier.</li>
+
+      <li>Verifier uses the proof and <span class="math">x</span> to build up the path to <span class="math">r^{\\prime}</span> using Protocol 4, and checks that <span class="math">r^{\\prime}=r</span>.</li>
+
+      <li>If the checks pass, the Verifier accepts the proof, otherwise it rejects the proof.</li>
+
+    </ol>
+
+    <h6 id="sec-63" class="text-base font-medium mt-4">Theorem 4.</h6>
+
+    <p class="text-gray-300">Given a Merkle tree, <span class="math">MT</span> built using a collision-resistant hash function (Definition 8) , a polynomial-time adversary cannot produce a valid proof <span class="math">\\Pi_{k\\in MT}</span>, for a <span class="math">k</span> not in <span class="math">MT</span>. [Soundness of Merkle-proofs]</p>
+
+    <h6 id="sec-64" class="text-base font-medium mt-4">Proof.</h6>
+
+    <p class="text-gray-300">Assume the adversary can produce a valid proof <span class="math">\\Pi_{k\\in MT}</span>. Let <span class="math">r</span> be the root of <span class="math">MT</span>, any proof must start with <span class="math">r</span>, otherwise the verifier will reject it. Since <span class="math">k\\not\\in MT</span>, the path the adversary gives must have some initial depth <span class="math">i</span> at which it differs from any true path in <span class="math">MT</span>.</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Let <span class="math">p^{\\prime}_{i}</span> be the node in the path at level <span class="math">i</span> and <span class="math">s^{\\prime}_{i}</span> be its sibling, and let <span class="math">p_{i}</span> and <span class="math">s_{i}</span> be the true nodes in a path in <span class="math">MT</span> where $x=p_{i}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">s_{i}<span class="math"> or </span>x=s_{i}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">p_{i}<span class="math"> s.t. </span>H(x)=p_{i-1}<span class="math">. In order for the verifier to accept </span>\\Pi_{k\\in MT}<span class="math">, </span>x^{\\prime}<span class="math"> must equal </span>p^{\\prime}_{i}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">s^{\\prime}_{i}<span class="math"> or </span>s^{\\prime}_{i}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">p^{\\prime}_{i}<span class="math"> s.t. </span>p_{i-1}=H(x^{\\prime})<span class="math">. Since the sets </span>\\{p_{i},s_{i}\\}<span class="math"> and </span>\\{p^{\\prime}_{i},s^{\\prime}_{i}\\}<span class="math"> differ by at least one value as stated above, </span>x\\neq x^{\\prime}<span class="math"> therefore the adversary found a collision of </span>H(\\bot)$. ∎</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <h6 id="sec-65" class="text-base font-medium mt-4">Theorem 5.</h6>
+
+    <p class="text-gray-300">Given a Merkle tree built using a collision resistant hash function, MT, and a node <span class="math">k\\in MT</span>, a polynomial-time adversary cannot generate a proof <span class="math">\\Pi_{k\\in MT}</span> that is not a true path in MT. [Completeness of Merkle proofs].</p>
+
+    <h6 id="sec-66" class="text-base font-medium mt-4">Proof.</h6>
+
+    <p class="text-gray-300">Same as the proof of soundness, if there is some point in the path that differs from a true path in <span class="math">MT</span>, in order for it to be valid, the adversary must have found a hash collision.</p>
+
+    <p class="text-gray-300">|  Algorithm 3 Merkle_Proof (Merkle root r, index k) → MMR Proof Πk for leaf k  |   |</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">---</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">---</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">|  1: if r.leaves = 0 then  |   |</p>
+
+    <p class="text-gray-300">|  2: return []  |   |</p>
+
+    <p class="text-gray-300">|  3: end if  |   |</p>
+
+    <p class="text-gray-300">|  4: if k ≤ r.left.leaves then  |   |</p>
+
+    <p class="text-gray-300">|  5: Π ← Merkle_Proof(r.left, k)  |   |</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">6: return Π</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">r.right.value</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"></th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">|  7: else  |   |</p>
+
+    <p class="text-gray-300">|  8: Π ← Merkle_Proof(r.right, k - r.left.leaves)  |   |</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">9: return Π</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">r.left.value</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"></th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">|  10: end if  |   |</p>
+
+    <p class="text-gray-300">Algorithm 4 Verify_Merkle_Proof ( Merkle tree root  <span class="math">r</span> , number of leaves in the Merkle tree  <span class="math">n</span> , index  <span class="math">k</span> , element  <span class="math">x</span> , Merkle proof  <span class="math">\\Pi_{k\\in n}</span> )</p>
+
+    <p class="text-gray-300">Note: This algorithm can be written recursively since every subtree of an MMR is also an MMR.</p>
+
+    <p class="text-gray-300">1:  <span class="math">y\\gets \\mathsf{H}(x),k&#x27;\\gets k - 1,n&#x27;\\gets n - 1</span></p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">2: if  $</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\Pi_{k\\in n}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\neq \\lceil \\log_2(n')\\rceil$  then</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">3: return reject 4: end if 5: for  <span class="math">z \\in \\Pi_{k \\in n}</span>  do 6: if  <span class="math">k&#x27; \\mod 2 = 0 \\land k&#x27; + 1 \\leq n&#x27;</span>  then</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">7:  $y \\gets \\mathsf{H}(y</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">z)$</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">8: else</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">9:  $y\\gets \\mathsf{H}(z</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">y)$</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">10: end if 11:  <span class="math">k&#x27; \\gets \\lfloor \\frac{k&#x27;}{2} \\rfloor, n&#x27; \\gets \\lfloor \\frac{n&#x27;}{2} \\rfloor</span> 12: end for 13: if  <span class="math">y = r</span>  then 14: return accept 15: else 16: return reject 17: end if</p>
+
+    <p class="text-gray-300">Definition 11. A Merkle Mountain Range,  <span class="math">M</span> , is defined as a tree with  <span class="math">n</span>  leaves, root  <span class="math">r</span> , and the following properties:</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li><span class="math">M</span>  is a binary hash tree.</li>
+
+      <li><span class="math">M</span>  has depth  <span class="math">\\lceil \\log_2n\\rceil</span></li>
+
+      <li>If  <span class="math">n &amp;gt; 1</span> , let  <span class="math">n = 2^i + j</span>  such that  <span class="math">i = \\lfloor \\log_2(n - 1) \\rfloor</span> :</li>
+
+    </ol>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li><span class="math">r</span> .left is an MMR with  <span class="math">2^i</span>  leaves.</li>
+
+      <li><span class="math">r</span> .right is an MMR with  <span class="math">j</span>  leaves.</li>
+
+    </ul>
+
+    <p class="text-gray-300">Note: M is a balanced binary hash tree, i.e., M is a Merkle tree. Therefore, for all nodes  <span class="math">k \\in M</span> ,  <span class="math">\\exists \\Pi_{k \\in M}</span> .</p>
+
+    <p class="text-gray-300">We define AppendLeaf in Protocol 5, the  <span class="math">O(\\log n)</span>  algorithm used to append new nodes to an existing MMR with  <span class="math">n</span>  leaves. Below, we state a theorem that AppendLeaf returns an MMR as defined.</p>
+
+    <p class="text-gray-300">Theorem 6. Given an MMR,  <span class="math">M</span> , with root  <span class="math">r</span>  and  <span class="math">n</span>  leaves, AppendLeaf  <span class="math">(r,x)</span>  will return an MMR,  <span class="math">M&#x27;</span> , with  <span class="math">n + 1</span>  leaves (the  <span class="math">n</span>  leaves of  <span class="math">M</span>  plus  <span class="math">x</span>  added as the right-most leaf).</p>
+
+    <p class="text-gray-300">Proof. We prove the statement through induction on  <span class="math">n</span></p>
+
+    <p class="text-gray-300">Base case:  <span class="math">(n = 1)</span> <span class="math">M</span>  is a single node  <span class="math">r</span>  with depth 0.  <span class="math">r</span> .children  <span class="math">= 0</span> , so AppendLeaf returns a new node</p>
+
+    <p class="text-gray-300">!<a href="img-6.jpeg">img-6.jpeg</a></p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Figure 7: A Merkle tree committing to blocks "A" through "H" (i.e., the leaves). The Merkle proof for block "E" consists of the nodes marked with dark background, i.e.,  <span class="math">\\Pi_E = (H_{\\mathrm{F}}, H_{\\mathrm{GH}}, H_{\\mathrm{ABCD}})</span> . Here,  <span class="math">H</span>  represents a cryptographic hash function,  <span class="math">H_x = H(x)</span>  for any block  <span class="math">x</span> , and  $H_{\\mathrm{XY}} = H(H_{\\mathrm{X}}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H_{\\mathrm{Y}})<span class="math"> , for any sequence of letters  </span>X<span class="math">  and  </span>Y$ .</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">Algorithm 5 AppendLeaf(MMR root  <span class="math">r</span> , new leaf node  <span class="math">x</span> ): Returns new MMR root  <span class="math">r&#x27;</span> 1: if  <span class="math">r</span> .leaves = 2^i for  <span class="math">i \\geq 0 \\in \\mathbb{Z}</span>  then 2: Node  <span class="math">r&#x27;</span> 3:  <span class="math">r&#x27;</span> .left ← r 4:  <span class="math">r&#x27;</span> .right ← x</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">5:  <span class="math">r&#x27;</span> .value ← H(r</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">x)</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">6:  <span class="math">r&#x27;</span> .leaves ← r.leaves + 1 7: return  <span class="math">r&#x27;</span> 8: else 9:  <span class="math">r</span> .right ← AppendLeaf(r.right, x)</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">10:  <span class="math">r</span> .value ← H(r.left</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">r.right)</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">11:  <span class="math">r</span> .leaves ← r.leaves + 1 12: return  <span class="math">r</span> 13: end if</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">with left  <span class="math">= r</span>  and right  <span class="math">= x</span> , and value  $= H(x</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">r)<span class="math"> . This is a balanced binary hash tree with 2 leaves and depth  </span>1 = \\log_2 2$ .</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">Induction step: Assume theorem holds for all  <span class="math">M</span>  with  <span class="math">&amp;lt; n</span>  leaves. Let  <span class="math">M</span>  be an MMR with  <span class="math">n</span>  leaves and root  <span class="math">r</span> , AppendLeaf( <span class="math">r, x</span> ) will return the following:</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">(i) if  <span class="math">n = 2^i</span>  for some  <span class="math">i \\in \\mathbb{N}</span> , AppendLeaf returns a new node,  <span class="math">r&#x27;</span> , with left  <span class="math">= r</span> , right  <span class="math">= x</span>  and value  $= H(r</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">x)<span class="math"> .  </span>M'$  is the new tree with the 3 properties of an MMR.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Since  <span class="math">M</span>  is a hash tree, so is  <span class="math">M&#x27;</span> .</li>
+
+      <li>Since the depth of  <span class="math">M = \\log_2 n</span> , the depth of  <span class="math">M&#x27; = \\log_2 n + 1 = \\lceil \\log_2 (n + 1) \\rceil</span></li>
+
+      <li><span class="math">n^{\\prime} = 2^{i} + 1</span></li>
+
+    </ol>
+
+    <p class="text-gray-300"><span class="math">r^{\\prime}</span>  .left  <span class="math">= M</span>  , a MMR with  <span class="math">n = 2^{i}</span>  leaves</p>
+
+    <p class="text-gray-300"><span class="math">r^{\\prime}</span>  .right  <span class="math">= x</span>  , a MMR with 1 leaf</p>
+
+    <p class="text-gray-300">The leaves of  <span class="math">M&#x27;</span>  are the leaves of  <span class="math">M</span>  plus  <span class="math">x</span>  added as the new right-most leaf.</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">(ii) Otherwise,  <span class="math">\\exists i,j\\in \\mathbb{N}</span>  s.t.  <span class="math">n = \\max_{i}2^{i} + j</span>  , AppendLeaf returns  <span class="math">r</span>  with  <span class="math">r</span>  .left the same, and  <span class="math">r</span>  .right  <span class="math">=</span>  AppendLeaf(r.right,  <span class="math">x</span>  ), and value  $= H(r.\\mathrm{left}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">r.\\mathrm{right})<span class="math">  .  </span>M^{\\prime}$  is the new tree with the following MMR conditions satisfied.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">(1,3) <span class="math">r&#x27;</span>.left is an MMR by definition with <span class="math">2^i</span> leaves, <span class="math">r&#x27;</span>.right is an MMR by the induction hypothesis with <span class="math">j + 1</span> leaves, thus <span class="math">M&#x27;</span> is a hash tree.</p>
+
+    <p class="text-gray-300">(2) <span class="math">M</span> has depth <span class="math">\\log_2 2^i = i \\geq j</span>, thus <span class="math">M&#x27;</span> has depth <span class="math">i + 1 = \\lceil \\log_2(n + 1) \\rceil</span>.</p>
+
+    <p class="text-gray-300">The leaves of <span class="math">M&#x27;</span> are the leaves of <span class="math">r&#x27;</span>.left = <span class="math">r</span>.left, then the leaves of <span class="math">r&#x27;</span>.right which by the induction hypothesis will be the original leaves of <span class="math">r</span>.right plus <span class="math">x</span> on the right-most side.</p>
+
+    <p class="text-gray-300">Algorithm 6 Get_Root(number of leaves in the MMR <span class="math">n</span>, proof for block <span class="math">k \\Pi_{k \\in n}</span>): Given <span class="math">\\Pi_{k \\in n}</span>, the algorithm returns the root for the MMR of the tree with <span class="math">k - 1</span> blocks, i.e., the root stored in the header of block <span class="math">k</span></p>
+
+    <p class="text-gray-300">1: <span class="math">k&#x27; \\gets k - 1</span>, <span class="math">n&#x27; \\gets n - 1</span>, <span class="math">r = \\bot</span> 2: for <span class="math">y \\in \\Pi_{k \\in n}</span> do 3: if <span class="math">k&#x27; \\bmod 2 = 1 \\lor k&#x27; + 1 &amp;gt; n&#x27;</span> then 4: if <span class="math">r = \\bot</span> then 5: <span class="math">r = \\Pi[i]</span> 6: else</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">7: $r = \\mathsf{H}(y</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">r)$</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">8: end if 9: end if 10: <span class="math">k&#x27; \\gets \\lfloor \\frac{k&#x27;}{2} \\rfloor</span>, <span class="math">n&#x27; \\gets \\lfloor \\frac{n&#x27;}{2} \\rfloor</span> 11: end for 12: if <span class="math">y = r</span> then 13: return 1 14: else 15: return 0 16: end if</p>
+
+    <p class="text-gray-300">We now define a set of MMRs <span class="math">M = \\{M_1, M_2, \\dots, M_n\\}</span> created from some list <span class="math">[x_1, x_2, \\dots, x_n]</span>, where <span class="math">M_1</span> is a single node with value <span class="math">x_1</span> and <span class="math">r_i</span> is the root node of an <span class="math">i</span> leaf MMR, <span class="math">M_i = \\text{AppendLeaf}(r_{i-1}, x_i)</span>. A key feature of the way MMRs are constructed is that, assuming all <span class="math">x_i</span>'s are unique, each <span class="math">M_i</span> has an unique root (otherwise there would be a hash collision), and given the Merkle proof <span class="math">\\Pi_{x_k \\in M_n}</span> that some <span class="math">x_k</span> is in <span class="math">M_n</span> for <span class="math">k \\leq n</span>, a verifier can regenerate <span class="math">r_k</span> and therefore verify that <span class="math">M_k</span> is an ancestor of <span class="math">M_n</span> (i.e., <span class="math">M_n</span> was created from <span class="math">n - k</span> appends to <span class="math">M_k</span>). We state this in the following theorem and refer the proof to Appendix C, and Protocol 6 describes the algorithm used to regenerate the root <span class="math">M_k</span>.</p>
+
+    <p class="text-gray-300"><strong>Theorem 7.</strong> For <span class="math">k \\leq n</span>, given <span class="math">\\Pi_{x_k \\in M_n}</span>, i.e., the Merkle proof that leaf <span class="math">x_k</span> is in <span class="math">M_n</span>, a verifier can regenerate <span class="math">r_k</span>, the root of <span class="math">M_k</span>.</p>
+
+    <p class="text-gray-300"><strong>Proof.</strong> We prove the statement through induction on <span class="math">n</span>.</p>
+
+    <p class="text-gray-300"><strong>Base case:</strong> <span class="math">(n = 1)</span> <span class="math">M_1 = \\mathrm{Node}(x_1)</span>, <span class="math">\\Pi_{x_1 \\in M_1} = [r_1]</span>.</p>
+
+    <p class="text-gray-300"><strong>Induction step:</strong> Assume the theorem holds for all <span class="math">M_m</span>, <span class="math">m &amp;lt; n</span> and <span class="math">k \\leq m</span>. Given <span class="math">M_n</span>, any <span class="math">k</span> and <span class="math">\\Pi_{k \\in M_n} = [r_n, r_n.\\text{left}, r_n.\\text{right}, \\ldots]</span>, if <span class="math">k = n</span> then <span class="math">r_k = r_n</span>. Otherwise, let <span class="math">i</span> be the maximum integer s.t. <span class="math">n = 2^i + j</span> where <span class="math">j &amp;gt; 0</span>. We have 3 possibilities:</p>
+
+    <p class="text-gray-300">(i) <span class="math">k = 2^i</span>, <span class="math">r_k = r_n.\\text{left}</span></p>
+
+    <p class="text-gray-300">(ii) <span class="math">k &amp;lt; 2^i</span>, thus <span class="math">x_k</span> is in the left subtree of <span class="math">M_n</span>. Let <span class="math">n&#x27; = 2^i</span> and <span class="math">r_{n&#x27;} = r_n.\\text{left}</span>, we get that <span class="math">\\Pi_{x_k \\in M_{n&#x27;}} = \\Pi_{x_k \\in M_n} - [r_n, r_n.\\text{right}]</span>. Since <span class="math">n&#x27; &amp;lt; n</span>, by the induction hypothesis we can get <span class="math">r_k</span> from <span class="math">\\Pi_{x_k \\in M_{n&#x27;}}</span>.</p>
+
+    <p class="text-gray-300">(iii) <span class="math">k &amp;gt; 2^i</span>, thus <span class="math">x_k</span> is in the right subtree of <span class="math">M_n</span>. Since <span class="math">k &amp;lt; n</span> and <span class="math">i</span> is the maximum integer s.t. <span class="math">n = 2^i + j</span> for some <span class="math">j &amp;gt; 0</span>, <span class="math">i</span> is also the maximum integer s.t. <span class="math">k = 2^i + j&#x27;</span> for some <span class="math">j&#x27; &amp;gt; 0</span>. Thus <span class="math">r_k.\\text{left} = r_n.\\text{left}</span>. Note <span class="math">r_n.\\text{right}</span> is the MMR <span class="math">M_j</span> where <span class="math">k</span> is the <span class="math">k&#x27; = k - 2^i = j&#x27;</span>th leaf. Thus, <span class="math">r_k.\\text{right} = M_{k&#x27;}</span> and <span class="math">\\Pi_{x_{k&#x27;} \\in M_j} = \\Pi_{x_k \\in M_n} - [r_n, r_n.\\text{left}]</span>. By the induction hypothesis we can extract <span class="math">r_{k&#x27;}</span> from <span class="math">\\Pi_{x_{k&#x27;} \\in M_j}</span>. The verifier hashes the left and right roots to get the value of <span class="math">r_k</span>.</p>
+
+    <p class="text-gray-300">Corollary 3. If <span class="math">x_1, \\ldots, x_n</span> are the hashes of blocks 1 through <span class="math">n</span> of chain <span class="math">C_n</span>, <span class="math">r_n</span> commits the first <span class="math">n</span> blocks to <span class="math">x_n</span>, and <span class="math">\\Pi_{k \\in M_n}</span> for any <span class="math">k</span> commits <span class="math">x_1, \\ldots, x_k</span> as the blocks of the chain <span class="math">C_k</span>, where chain <span class="math">C_k</span> is a prefix of chain <span class="math">C_n</span>.</p>
+
+    <p class="text-gray-300">Corollary 4. If an adversary changes any block <span class="math">i</span> in the chain in any way, then it's hash <span class="math">x_i</span> will also change, so any MMR <span class="math">M_k</span> for <span class="math">k \\geq i</span> with root <span class="math">r_k&#x27;</span> that contains the new block <span class="math">x_i&#x27;</span> will have that <span class="math">r_k&#x27; \\neq r_k</span>.</p>`;
+---
+
+<BaseLayout title="Flyclient: Super-Light Clients for Cryptocurrencies (2019/226)">
+  <article class="max-w-4xl mx-auto article-prose">
+    <nav class="mb-8">
+      <a href="/papers" class="text-blue-400 hover:text-blue-300">
+        &larr; Back to Papers
+      </a>
+    </nav>
+
+    <header class="mb-12">
+      <h1 class="text-3xl font-bold mb-4"
+        set:html={TITLE_HTML} />
+      <p class="text-gray-400 mb-2"
+        set:html={AUTHORS_HTML} />
+      <p class="text-gray-500 text-sm mb-4">
+        2019 &middot; eprint 2019/226
+      </p>
+      <div class="flex gap-4 text-sm">
+        <a
+          href={EPRINT_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          class="text-blue-400 hover:text-blue-300"
+        >
+          Paper (eprint) &rarr;
+        </a>
+      </div>
+      <p class="mt-4 text-xs text-gray-500">
+        All content below belongs to the original authors. This page
+        reproduces the paper for educational purposes. Always
+        <a
+          href={EPRINT_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          class="text-blue-400 hover:text-blue-300"
+        >cite the original</a>.
+      </p>
+      <p class="mt-1 text-xs text-gray-600">
+        Converted with: {CRAWLER} &middot; {CONVERTED_DATE}
+      </p>
+    </header>
+
+    <Fragment set:html={CONTENT} />
+
+  </article>
+</BaseLayout>

@@ -1,0 +1,1181 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+
+const EPRINT_URL = 'https://eprint.iacr.org/2018/691';
+const CRAWLER = 'mistral';
+const CONVERTED_DATE = '2026-02-16';
+const TITLE_HTML = 'DIZK: A Distributed Zero Knowledge Proof System';
+const AUTHORS_HTML = 'Howard Wu, Wenting Zheng, Alessandro Chiesa, Raluca Ada Popa, Ion Stoica';
+
+const CONTENT = `    <p class="text-gray-300">DIZK: A Distributed Zero Knowledge Proof System*</p>
+
+    <p class="text-gray-300">Howard Wu howardwu@berkeley.edu UC Berkeley</p>
+
+    <p class="text-gray-300">Wenting Zheng wzheng@eecs.berkeley.edu UC Berkeley</p>
+
+    <p class="text-gray-300">Alessandro Chiesa alexch@berkeley.edu UC Berkeley</p>
+
+    <p class="text-gray-300">Raluca Ada Popa raluca.popa@berkeley.edu UC Berkeley</p>
+
+    <p class="text-gray-300">Ion Stoica istoica@berkeley.edu UC Berkeley</p>
+
+    <p class="text-gray-300">Recently there has been much academic and industrial interest in practical implementations of zero knowledge proofs. These techniques allow a party to prove to another party that a given statement is true without revealing any additional information. In a Bitcoin-like system, this allows a payer to prove validity of a payment without disclosing the payment's details.</p>
+
+    <p class="text-gray-300">Unfortunately, the existing systems for generating such proofs are very expensive, especially in terms of memory overhead. Worse yet, these systems are "monolithic", so they are limited by the memory resources of a single machine. This severely limits their practical applicability.</p>
+
+    <p class="text-gray-300">We describe DIZK, a system that distributes the generation of a zero knowledge proof across machines in a compute cluster. Using a set of new techniques, we show that DIZK scales to computations of up to billions of logical gates (100× larger than prior art) at a cost of 10 μs per gate (100× faster than prior art). We then use DIZK to study various security applications.</p>
+
+    <p class="text-gray-300">Keywords: zero knowledge proofs; cluster computing; SNARKs</p>
+
+    <p class="text-gray-300">*The authors are grateful to Jiahao Wang for participating in early stages of this work. This work was supported by the Intel/NSF CPS-Security grants #1505773 and #20153754, the UC Berkeley Center for Long-Term Cybersecurity, and gifts to the RISELab from Amazon, Ant Financial, CapitalOne, Ericsson, GE, Google, Huawei, IBM, Intel, Microsoft, and VMware. The authors thank Amazon for donating compute credits to RISELab, which were extensively used in this project.</p>
+
+    <p class="text-gray-300">1</p>
+
+    <p class="text-gray-300">2</p>
+
+    <p class="text-gray-300">1  Introduction  3 2  Background on zkSNARKs  5 2.1  High-level description  5 2.2  The zkSNARK language and interface  6 2.3  The zkSNARK protocol of Groth  7 3  Design overview of DIZK  10 4  Design: distributing arithmetic  11 4.1  Distributed fast polynomial arithmetic  11 4.1.1  Arithmetic via evaluation and interpolation  11 4.1.2  Distributed FFT  11 4.1.3  Distributed Lag  12 4.2  Distributed multi-scalar multiplication  12 4.2.1  Distributed fixMSM  13 4.2.2  Distributed varMSM  13 5  Design: distributing the zkSNARK setup  13 6  Design: distributing the zkSNARK prover  15 7  Applications  16 7.1  Authenticity of photos  17 7.2  Integrity of machine learning models  18 8  Implementation  19 9  Experimental setup  20 10 Evaluation of the distributed zkSNARK  20 10.1  Evaluation of the setup and prover  20 10.2  Evaluation of the components  21 10.2.1  Field components: Lag and FFT  21 10.2.2  Group components: fixMSM and varMSM  21 10.3  Effectiveness of our techniques  21 11 Evaluation of applications  24 12 Related work  24 13 Limitations and the road ahead  25 14 Conclusion  25 References  26</p>
+
+    <p class="text-gray-300">1 Introduction</p>
+
+    <p class="text-gray-300">Cryptographic proofs with strong privacy and efficiency properties, known as <em>zkSNARKs</em> (<em>zero-knowledge Succinct Non-interactive ARgument of Knowledge</em>) <em>[x19, x11, x3]</em>, have recently received much attention from academia and industry <em>[x2, BBC^{+}17, x10, x14, BCI^{+}13, x12, BCTV14b, KPP^{+}14, x15, x16, CFH^{+}15, x17, x18, KMS^{+}16, x19, x20, x21, x22, x23]</em>, and have seen industrial deployments <em>[x24, x25, x17, x18]</em>.</p>
+
+    <p class="text-gray-300">For example, zkSNARKs are the core technology of Zcash <em>[x24, BCG^{+}14]</em>, a popular cryptocurrency that, unlike Bitcoin, preserves a user’s payment privacy. Bitcoin requires users to broadcast their private payment details in the clear on the public blockchain, so other participants can check the validity of the payment. In contrast, zkSNARKs enable users to broadcast <em>encrypted</em> transactions details and <em>prove</em> the validity of the payments without disclosing what the payments are.</p>
+
+    <p class="text-gray-300">More formally, zkSNARKs allow a <em>prover</em> (e.g., a Zcash user making a payment) to convince a <em>verifier</em> (e.g., any other Zcash user) of a statement of the form “<em>given a function <span class="math">F</span> and input <span class="math">x</span>, there is a secret <span class="math">w</span> such that <span class="math">F(x,w)=\\mathrm{true}</span></em>”. In the cryptocurrency example, <span class="math">w</span> is the private payment details, <span class="math">x</span> is the encryption of the payment details, and <span class="math">F</span> is a predicate that checks that <span class="math">x</span> is an encryption of <span class="math">w</span> and <span class="math">w</span> is a valid payment. These proofs provide two useful properties: <em>succinctness</em> and <em>zero knowledge</em>. The first property offers extremely small proofs (<span class="math">128\\,\\mathrm{B}</span>) and cheap verification (<span class="math">2\\,\\mathrm{ms}</span> plus a few <span class="math">\\mathrm{\\SIUnitSymbolMicro s}</span> per byte in <span class="math">x</span>), regardless of how long it takes to evaluate <span class="math">F</span> (even if <span class="math">F</span> takes years to compute). The second property enables privacy preservation, which means that the proof reveals <em>no</em> information about the secret <span class="math">w</span> (beyond what is already implied by the statement being proved).</p>
+
+    <p class="text-gray-300">The remarkable power of zkSNARKs comes at a cost: the prover has a significant overhead. zkSNARKs are based on <em>probabilistically checkable proofs</em> (PCPs) from Complexity Theory, which remained prohibitively slow for two decades until a line of recent work brought them closer to practical systems (see Section 12 and Fig. 1). One of the main reasons for the prover’s overhead is that the statement to be proved must be represented via a set of logical gates forming a <em>circuit</em>, and the prover’s cost is quasi-linear in this circuit’s size. Unfortunately, this prover cost is not only in time but also in space.</p>
+
+    <p class="text-gray-300">Thus, in existing systems, the zkSNARK prover is a <em>monolithic</em> process running on a single machine that quickly exceeds memory bounds as the circuit size increases. State-of-the-art zkSNARK systems <em>[x26]</em> can only support statements of up to 10-20 million gates, at a cost of more than <span class="math">1\\,\\mathrm{ms}</span> per gate. Let us put this size in perspective via a simple example: the SHA-256 compression function, which maps a 512-bit input to a 256-bit output, has more than 25,000 gates <em>[BCG^{+}14]</em>; no more than 400 evaluations of this function fit in a circuit of 10 million gates, and such a circuit can be used to hash files of up to a mere <span class="math">13\\,\\mathrm{kB}</span>. In sum, 10 million gates is <em>not many</em>.</p>
+
+    <p class="text-gray-300">This bottleneck severely limits the applicability of SNARKs, and motivates a basic question: <em>can zkSNARKs be used for circuits of much larger sizes, and at what cost?</em></p>
+
+    <p class="text-gray-300">DIZK. We design and build DIZK (<em>DIstributed Zero Knowledge</em>), a zkSNARK system that far exceeds the scale of previous state-of-the-art solutions. At its core, DIZK distributes the execution of a zkSNARK across a compute cluster, thus enabling it to leverage the aggregated cluster’s memory and computation resources. This allows DIZK to support circuits with <em>billions</em> of gates (<span class="math">100\\times</span> larger than prior art) at a cost of <span class="math">10\\,\\mathrm{\\SIUnitSymbolMicro s}</span> per gate (<span class="math">100\\times</span> faster than prior art).</p>
+
+    <p class="text-gray-300">We evaluate DIZK on two applications: proving authenticity of edited photos (as proposed in <em>[x20]</em>), and proving integrity of machine learning models. In both cases, DIZK allows reaching much larger instance sizes. E.g., we ran image editing transformations on photos of <span class="math">2048</span> by <span class="math">2048</span> pixels.</p>
+
+    <p class="text-gray-300">Overall, DIZK makes a significant and conceptual step forward, enlarging the class of applications</p>
+
+    <p class="text-gray-300">feasible for zkSNARKs. We have implemented DIZK via Apache Spark <em>[x1]</em>, and will release it under a permissive software license.</p>
+
+    <p class="text-gray-300">DIZK does inherit important limitations of zkSNARKs (see Section 13). First, while DIZK supports larger circuits than prior systems, its overhead is still prohibitive for many practical applications; improving the efficiency of zkSNARKs for both small and large circuits remains an important challenge. Also, like other zkSNARKs, DIZK requires a trusted party to run a <em>setup</em> procedure that uses secret randomness to sample certain public parameters; the cost of this setup grows with circuit size, which means that this party must also use a cluster, which is harder to protect against attackers than a single machine.</p>
+
+    <p class="text-gray-300">Nevertheless, the recent progress on zkSNARKs has been nothing short of spectacular, which makes us optimistic that future advancements will address these challenges, and bring the power of zkSNARKs to many more practical applications.</p>
+
+    <p class="text-gray-300">Challenges and techniques. Distributing a zkSNARK is challenging. Protocols for zkSNARKs on large circuits involve solving multiple large instances of tasks about polynomial arithmetic over cryptographically-large prime fields and about multi-scalar multiplication over elliptic curve groups. For example, generating proofs for billion-gate circuits requires multiplying polynomials of degree that is in the billions, and merely representing these polynomials necessitates terabit-size arrays. Even more, fast algorithms for solving these tasks, such as Fast Fourier Transforms (FFTs), are notoriously memory intensive, and rely on continuously accessing large pools of shared memory in complex patterns. But each node in a compute cluster can store only a small fraction of the overall state, and thus memory is distributed and communication between nodes incurs network delays. In addition, these heavy algorithmic tasks are all intertwined, which is problematic as reshuffling large amounts of data from the output of one task to give as input to the next task is expensive.</p>
+
+    <p class="text-gray-300">We tackle the above challenges in two steps. First, we single out basic computational tasks about field and group arithmetic and achieve efficient distributed realizations of these. Specifically, for finite fields, DIZK provides distributed FFTs and distributed Lagrange interpolant evaluation (Section 4.1.1); for finite groups, it provides distributed multi-scalar multiplication with fixed bases and with variable bases (Section 4.2). Throughout, we improve efficiency by leveraging characteristics of the zkSNARK setting instead of implementing agnostic solutions.</p>
+
+    <p class="text-gray-300">Second, we build on these components to achieve a distributed zkSNARK. Merely assembling these components into a zkSNARK as in prior monolithic systems, however, does <em>not</em> yield good efficiency. zkSNARKs transform the computation of a circuit into an equivalent representation called a <em>Quadratic Arithmetic Program</em> <em>[x11, x23]</em>: a circuit with <span class="math">N</span> wires and <span class="math">M</span> gates is transformed into a satisfaction problem about <span class="math">O(N)</span> polynomials of degree <span class="math">O(M)</span>. The evaluations of these polynomials yield matrices of size <span class="math">O(N)\\times O(M)</span> that are sparse, with only <span class="math">O(N+M)</span> non-zero entries. While this sparsity gives rise to straightforward serial algorithms, the corresponding distributed computations suffer from consistent stragglers that incur large overheads.</p>
+
+    <p class="text-gray-300">The reason lies in how the foregoing transformation is used in a zkSNARK. Different parts of a zkSNARK leverage the sparsity of the matrices above in different ways: the so-called <em>QAP instance reduction</em> relies on their column sparsity (Section 5), while the corresponding <em>QAP witness reduction</em> relies on their row sparsity (Section 6). However, it turns out that the columns and rows are <em>almost</em> sparse: while most columns and rows are sparse, some are dense, and the dense ones create stragglers.</p>
+
+    <p class="text-gray-300">We address this issue via a two-part solution. First, we run a lightweight distributed computation that quickly identifies and annotates the circuit with information about which columns/rows are dense. Second, we run a hybrid distributed computation that uses different approaches to process the sparse and dense columns/rows. Overall we achieve efficient distributed realizations for these QAP routines. This approach outperforms merely invoking generic approaches that correct for load imbalances such as skewjoin <em>[x26]</em>.</p>
+
+    <p class="text-gray-300">Finally, we emphasize that most of the technical work described above can be re-used as the starting point to distribute many other similar proof systems (see Fig. 1). We have thus packaged these standalone components as a separate library, which we deem of independent interest.</p>
+
+    <p class="text-gray-300">We also briefly mention that supporting billion-gate circuits required us to generate and use a pairing-friendly elliptic curve suitable for this task. See Section 9 for details.</p>
+
+    <p class="text-gray-300">Authenticity of photos &amp; integrity of ML models. We study the use of DIZK for two natural applications: (1) authenticity of edited photos [NT16] (see Section 7.1); and (2) integrity of machine learning models (see Section 7.2). Our experiments show that DIZK enables such applications to scale to much larger instance sizes than what is possible via previous (monolithic) systems.</p>
+
+    <p class="text-gray-300">An application uses DIZK by constructing a circuit for the desired computation, and by computing values for the circuit's wires from the application inputs. We do this, for the above applications, via distributed algorithms that exploit the parallel nature of computations underlying editing photos and ML training algorithms. Circuit gates, and their evaluations, are jointly computed by machines in the compute cluster.</p>
+
+    <p class="text-gray-300">Cryptography at scale? DIZK exemplifies a new paradigm. Cryptographic tools are often executed as monolithic procedures, which hampers their applicability to large problem sizes. We believe that explicitly designing such tools with distributed architectures like compute clusters in mind will help create a toolkit for "cryptography at scale", and we view DIZK as a step in this direction for the case of zkSNARKs.</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Type of proof system</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Theory foundations</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Built systems</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">FFT?</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Does it benefit from distributed</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"></th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+            <td class="px-3 py-2 border-b border-gray-700">variable-base MSM?</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">fixed-base MSM?</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">QAP reduction?</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">batch arguments based on LPCPs</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">[IKO07]</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">[SBW11, SMBW12, SVP+12] [SBV+13, VSBW13, BFR+13]</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">✓</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">✓</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">✓</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">✓</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">SNARKs based on PCPs</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">[Mic00, BCS16]</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">[BBC+17, BBHR18]</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">✓</td>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">SNARKs based on LPCPs</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">[Gro10, Lip12] [BCI+13, GGPR13]</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">[PGHR13, BCG+13, BCTV14b] [KPP+14, ZPK14, CFH+15]</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">✓</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">✓</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">✓</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">✓</td>
+
+          </tr>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">Figure 1: Some proof systems that can benefit from the library of distributed subroutines that we develop.</p>
+
+    <p class="text-gray-300">The notion of a zkSNARK, formulated in [Mic00, GW11, BCCT12], has several definitions. The one that we consider here is known as publicly-verifiable preprocessing zkSNARK (see  <span class="math">\\mathrm{[BCI^{+}13}</span> , GGPR13]).</p>
+
+    <p class="text-gray-300">We cover necessary background on zkSNARKs: we provide a high-level description (Section 2.1), an informal definition (Section 2.2), and the protocol that forms our starting point (Section 2.3).</p>
+
+    <p class="text-gray-300">A zkSNARK can be used to prove/verify statements of the form "given a public predicate  <span class="math">F</span>  and a public input  <span class="math">x</span> , I know a secret input  <span class="math">w</span>  such that  <span class="math">F(x, w) = \\text{true}</span> ". It consists of three algorithms: the setup, prover, and verifier. (See Fig. 2.)</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>The setup receives a predicate  <span class="math">F</span>  (expressed in a certain way as discussed in Section 2.2) and outputs a proving key  <span class="math">\\mathsf{pk}_F</span>  and verification key  <span class="math">\\mathsf{vk}_F</span> . Both keys are published as public parameters and  <span class="math">\\mathsf{pk}_F / \\mathsf{vk}_F</span>  can be used to prove/verify any number of statements about  <span class="math">F</span>  (involving different inputs). In particular, the setup for  <span class="math">F</span>  needs to be run only once.</li>
+
+    </ul>
+
+    <p class="text-gray-300">!<a href="img-0.jpeg">img-0.jpeg</a> Figure 2: Components of a zkSNARK. Shaded components are those that we distribute so to support proving/verifying statements about large computations. Prior systems run these as monolithic procedures on a single machine.</p>
+
+    <p class="text-gray-300">!<a href="img-1.jpeg">img-1.jpeg</a> Figure 3: A distributed zkSNARK. The setup algorithm is run on a compute cluster, and generates a long proving key pk, held in distributed storage, and a short verification key vk. The prover algorithm is also run on a compute cluster.</p>
+
+    <p class="text-gray-300">While the setup outputs keys that are public information, its intermediate computation steps involve secret values that must remain secret. This means that the setup must be run by a trusted party — this is, of course, a challenging requirement, and prior work has studied mitigations (see Section 13).</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>The prover receives the proving key  <span class="math">\\mathsf{pk}_F</span> , a public input  <span class="math">x</span>  for  <span class="math">F</span> , and a secret input  <span class="math">w</span>  for  <span class="math">F</span> , and outputs a proof  <span class="math">\\pi</span> . The proof attests to the statement "given  <span class="math">F</span>  and  <span class="math">x</span> , I know a secret  <span class="math">w</span>  such that  <span class="math">F(x, w) = \\text{true}</span> ", but reveals no information about  <span class="math">w</span>  (beyond what is implied by the statement). The generation of  <span class="math">\\pi</span>  involves randomness that imbues it with zero knowledge. Anyone can run the prover.</li>
+
+      <li>The verifier receives the verification key  <span class="math">\\mathsf{vk}_F</span> , a public input  <span class="math">x</span>  for  <span class="math">F</span> , and a proof  <span class="math">\\pi</span> , and outputs a decision bit ("accept" or "reject"). Anyone can run the verifier.</li>
+
+    </ul>
+
+    <p class="text-gray-300">A zkSNARK's costs are determined by the "execution time"  <span class="math">T_{F}</span>  of  <span class="math">F</span>  (see Section 2.2) and the size  <span class="math">k</span>  of the input  <span class="math">x</span>  (which is at most  <span class="math">T_{F}</span> ). The execution time is at least the size of the input and, in many applications, much larger than it. Thus we think of  <span class="math">T_{F}</span>  as very big and  <span class="math">k</span>  as much smaller than  <span class="math">T_{F}</span> .</p>
+
+    <p class="text-gray-300">The key efficiency feature of a zkSNARK is that the verifier running time is proportional to  <span class="math">k</span>  alone (regardless of  <span class="math">T_{F}</span> ) and the proof has constant size (regardless of  <span class="math">k, T_{F}</span> ). The size of  <span class="math">\\mathsf{vk}_{F}</span>  is proportional to  <span class="math">k</span>  (regardless of  <span class="math">T_{F}</span> ).</p>
+
+    <p class="text-gray-300">However, the setup and the prover are very expensive: their running times are (at least) proportional to  <span class="math">T_{F}</span> . The size of  <span class="math">\\mathsf{pk}_F</span>  is large, because it is proportional to  <span class="math">T_{F}</span> .</p>
+
+    <p class="text-gray-300">Running the setup and prover is a severe bottleneck in prior zkSNARK systems since time and space usage grows in  <span class="math">T_{F}</span> . Our focus is to overcome these bottlenecks.</p>
+
+    <p class="text-gray-300">While typically one expresses a computation  <span class="math">F</span>  via a high-level programming language, a zkSNARK requires expressing  <span class="math">F</span>  via a set of quadratic constraints  <span class="math">\\phi_F</span> , which is closely related to circuits of logical gates. A zkSNARK proof then attests that such a set of constraints is satisfiable. The size of  <span class="math">\\phi_F</span>  is related to the</p>
+
+    <p class="text-gray-300">execution time of <span class="math">F</span>. There has been much research <em>[x13, BCG^{+}13, x2, BF+13, KPP^{+}14, x16, CFH^{+}15, WSR^{+}15, x1, ZGK^{+}17, x18]</em> devoted to techniques for encoding programs via sets of constraints, but this is not our focus; in this paper, we consider <span class="math">\\phi_{F}</span> as given.</p>
+
+    <p class="text-gray-300">The zkSNARK language. We describe the type of computation used in the interface of a zkSNARK. Rather than being boolean, values are in a field <span class="math">\\mathbb{F}</span> of a large prime order <span class="math">p</span>.</p>
+
+    <p class="text-gray-300">An R1CS instance <span class="math">\\phi</span> over <span class="math">\\mathbb{F}</span> is parameterized by the number of inputs <span class="math">k</span>, number of variables <span class="math">N</span> (with <span class="math">k\\leq N</span>), and number of constraints <span class="math">M</span>; <span class="math">\\phi</span> is a tuple <span class="math">(k,N,M,\\mathbf{a},\\mathbf{b},\\mathbf{c})</span> where <span class="math">\\mathbf{a},\\mathbf{b},\\mathbf{c}</span> are <span class="math">(1+N)\\times M</span> matrices over <span class="math">\\mathbb{F}</span>.</p>
+
+    <p class="text-gray-300">An input for <span class="math">\\phi</span> is a vector <span class="math">x</span> in <span class="math">\\mathbb{F}^{k}</span>, and a witness for <span class="math">\\phi</span> is a vector <span class="math">w</span> in <span class="math">\\mathbb{F}^{N-k}</span>. An input-witness pair <span class="math">(x,w)</span> satisfies <span class="math">\\phi</span> if, letting <span class="math">z</span> be the vector <span class="math">\\mathbb{F}^{1+N}</span> that equals the concatenation of <span class="math">1</span>, <span class="math">x</span>, and <span class="math">w</span>, the following holds for all <span class="math">j\\in[M]</span>:</p>
+
+    <p class="text-gray-300"><span class="math">\\left(\\sum_{i=0}^{N}\\mathbf{a}_{i,j}z_{i}\\right)\\cdot\\left(\\sum_{i=0}^{N}\\mathbf{b}_{i,j}z_{i}\\right)=\\sum_{i=0}^{N}\\mathbf{c}_{i,j}z_{i}\\enspace.</span></p>
+
+    <p class="text-gray-300">One can think of each quadratic constraint above as representing a logical gate. Indeed, boolean (and arithmetic) circuits are easily reducible to this form. We can thus view <span class="math">\\mathbf{a},\\mathbf{b},\\mathbf{c}</span> as containing the “left”, “right”, and “output” coefficients respectively; rows index variables and columns index constraints.</p>
+
+    <p class="text-gray-300">The zkSNARK interface. A zkSNARK consists of three algorithms: setup <span class="math">\\mathcal{S}</span>, prover <span class="math">\\mathcal{P}</span>, and verifier <span class="math">\\mathcal{V}</span>.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Setup. On input a R1CS instance <span class="math">\\phi=(k,N,M,\\mathbf{a},\\mathbf{b},\\mathbf{c})</span>, <span class="math">\\mathcal{S}</span> outputs a proving key <span class="math">\\mathsf{pk}</span> and verification key <span class="math">\\mathsf{vk}</span>.</li>
+
+      <li>Prover. On input a proving key <span class="math">\\mathsf{pk}</span> (generated for an R1CS instance <span class="math">\\phi</span>), input <span class="math">x</span> in <span class="math">\\mathbb{F}^{k}</span>, and witness <span class="math">w</span> in <span class="math">\\mathbb{F}^{N-k}</span>, <span class="math">\\mathcal{P}</span> outputs a proof <span class="math">\\pi</span> attesting that <span class="math">\\phi(x,\\cdot)</span> is satisfiable.</li>
+
+      <li>Verifier. On input a verification key <span class="math">\\mathsf{vk}</span> (also generated for <span class="math">\\phi</span>), input <span class="math">x</span> in <span class="math">\\mathbb{F}^{k}</span>, and proof <span class="math">\\pi</span>, <span class="math">\\mathcal{V}</span> outputs a decision bit.</li>
+
+    </ul>
+
+    <p class="text-gray-300">The zkSNARK properties. The key properties of a zkSNARK are the following. Let <span class="math">\\phi</span> be any R1CS instance, and let <span class="math">(\\mathsf{pk},\\mathsf{vk})</span> be a key pair generated by <span class="math">\\mathcal{S}</span> on input <span class="math">\\phi</span>. (The statements below hold for a random choice of such keys.)</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Completeness. For every input-witness pair <span class="math">(x,w)</span> that satisfies <span class="math">\\phi</span>, any proof sampled as <span class="math">\\pi\\leftarrow\\mathcal{P}(\\mathsf{pk},x,w)</span> is such that <span class="math">\\mathcal{V}(\\mathsf{vk},x,\\pi)=1</span>.</li>
+
+      <li>Soundness. For every input <span class="math">x</span> such that <span class="math">\\phi(x,\\cdot)</span> is not satisfiable, no efficient malicious prover can produce a proof <span class="math">\\pi</span> such that <span class="math">\\mathcal{V}(\\mathsf{vk},x,\\pi)=1</span>.</li>
+
+      <li>Zero knowledge. For every input-witness pair <span class="math">(x,w)</span> that satisfies <span class="math">\\phi</span>, a proof sampled as <span class="math">\\pi\\leftarrow\\mathcal{P}(\\mathsf{pk},x,w)</span> reveals no information about the witness <span class="math">w</span> (beyond the fact that the statement being proved is true).</li>
+
+      <li>Succinctness. The proof <span class="math">\\pi</span> has size <span class="math">O(1)</span> and the running time of <span class="math">\\mathcal{V}</span> is <span class="math">O(k)</span>. (Both expressions hide a polynomial dependence on the security parameter.)</li>
+
+    </ul>
+
+    <h3 id="sec-6" class="text-xl font-semibold mt-8">2.3 The zkSNARK protocol of Groth</h3>
+
+    <p class="text-gray-300">Our system provides a distributed implementation of a zkSNARK protocol due to Groth <em>[x10]</em>. We selected Groth’s protocol because it is one of the most efficient zkSNARK protocols. That said, our techniques are easily adapted to similar zkSNARK protocols <em>[x9, BCI^{+}13, x16, x13, x12]</em>. In order to facilitate later discussions, we now describe Groth’s protocol, limiting our description to outlining the steps in its setup, prover, and verifier. We refer the reader to <em>[x10]</em> for more details, including for the cryptographic assumptions that underlie security (briefly, the protocol is proved secure in the so-called generic group model). For reference, we include the full protocol in Fig. 4 using the notation introduced in this section.</p>
+
+    <p class="text-gray-300">QAPs. Groth’s zkSNARK protocol uses Quadratic Arithmetic Programs (QAPs) <em>[x9, x16]</em> to efficiently express the satisfiability of R1CS instances via certain low-degree polynomials. Essentially, the</p>
+
+    <p class="text-gray-300">constraints are “bundled” into a single equation that involves univariate polynomials of degree <span class="math">O(M)</span>. The prover’s goal is then to convince the verifier that this equation holds. In fact, it suffices for the verifier to know that this equation holds at a random point because distinct polynomials of small degree (relative to the field size) can only agree on a small number of points.</p>
+
+    <p class="text-gray-300">In more detail, we now define what is a QAP instance, and what does satisfying such an instance mean.</p>
+
+    <p class="text-gray-300">A QAP instance <span class="math">\\Phi</span> over <span class="math">\\mathbb{F}</span> has three parameters, the number of inputs <span class="math">k</span>, number of variables <span class="math">N</span> (with <span class="math">k\\leq N</span>), and degree <span class="math">M</span>; <span class="math">\\Phi</span> is a tuple <span class="math">(k,N,M,\\mathbf{A},\\mathbf{B},\\mathbf{C},D)</span> where <span class="math">\\mathbf{A},\\mathbf{B},\\mathbf{C}</span> are each a vector of <span class="math">1+N</span> polynomials over <span class="math">\\mathbb{F}</span> of degree <span class="math">&lt;M</span>, and <span class="math">D</span> is a subset of <span class="math">\\mathbb{F}</span> of size <span class="math">M</span>.</p>
+
+    <p class="text-gray-300">An input for <span class="math">\\Phi</span> is a vector <span class="math">x</span> in <span class="math">\\mathbb{F}^{k}</span>, and a witness for <span class="math">\\Phi</span> is a pair <span class="math">(w,h)</span> where <span class="math">w</span> is a vector in <span class="math">\\mathbb{F}^{N-k}</span> and <span class="math">h</span> is a vector in <span class="math">\\mathbb{F}^{M-1}</span>. An input-witness pair <span class="math">\\big{(}x,(w,h)\\big{)}</span> satisfies <span class="math">\\Phi</span> if, letting <span class="math">z\\in\\mathbb{F}^{1+N}</span> be the concatenation of <span class="math">1</span>, <span class="math">x</span>, and <span class="math">w</span>:</p>
+
+    <p class="text-gray-300"><span class="math">\\left(\\sum_{i=0}^{N}\\mathbf{A}_{i}(X)z_{i}\\right)\\cdot\\left(\\sum_{i=0}^{N}\\mathbf{B}_{i}(X)z_{i}\\right)</span> <span class="math">=\\sum_{i=0}^{N}\\mathbf{C}_{i}(X)z_{i}+\\left(\\sum_{i=0}^{M-2}h_{i}X^{i}\\right)\\cdot Z_{D}(X)\\enspace,</span></p>
+
+    <p class="text-gray-300">where <span class="math">Z_{D}(X):=\\prod_{\\alpha\\in D}(X-\\alpha)</span>.</p>
+
+    <p class="text-gray-300">One can efficiently reduce R1CS instances to QAP instances <em>[x11, x24]</em>: there is a QAP instance reduction qapl and a QAP witness reduction qapW. Our system provides distributed implementations of both, so we now describe how they work.</p>
+
+    <p class="text-gray-300">QAP instance reduction. For every R1CS instance <span class="math">\\phi=(k,N,M,\\mathbf{a},\\mathbf{b},\\mathbf{c})</span>, <span class="math">\\textsf{qapl}(\\phi)</span> outputs a QAP instance <span class="math">\\Phi=(k,N,M,\\mathbf{A},\\mathbf{B},\\mathbf{C},D)</span> that preserves satisfiability: for every input <span class="math">x</span> in <span class="math">\\mathbb{F}^{k}</span>, <span class="math">\\phi(x,\\cdot)</span> is satisfiable iff <span class="math">\\Phi(x,\\cdot)</span> is satisfiable. It works as follows: let <span class="math">D</span> be a subset of <span class="math">\\mathbb{F}</span> of size <span class="math">M</span> and then, for each <span class="math">i\\in\\{0,1,\\ldots,N\\}</span>, let <span class="math">\\mathbf{A}_{i}</span> be the polynomial of degree <span class="math">&lt;M</span> that interpolates over <span class="math">D</span> the <span class="math">i</span>-th row of the matrix <span class="math">\\mathbf{a}</span>; similarly for each <span class="math">\\mathbf{B}_{i}</span> and <span class="math">\\mathbf{C}_{i}</span> with regard to rows of <span class="math">\\mathbf{b}</span> and <span class="math">\\mathbf{c}</span>.</p>
+
+    <p class="text-gray-300">QAP witness reduction. For every witness <span class="math">w</span> in <span class="math">\\mathbb{F}^{N-k}</span> s.t. <span class="math">(x,w)</span> satisfies <span class="math">\\phi</span>, <span class="math">\\textsf{qapW}(\\phi,x,w)</span> outputs <span class="math">h</span> in <span class="math">\\mathbb{F}^{M-1}</span> s.t. <span class="math">(x,(w,h))</span> satisfies <span class="math">\\Phi</span>. It works as follows: let <span class="math">h</span> be the coefficients of the polynomial <span class="math">H(X)</span> of degree less than <span class="math">M-1</span> that equals the quotient of <span class="math">(\\sum_{i=0}^{N}\\mathbf{A}_{i}(X)z_{i})\\cdot(\\sum_{i=0}^{N}\\mathbf{B}_{i}(X)z_{i})-\\sum_{i=0}^{N}\\mathbf{C}_{i}(X)z_{i}</span> and <span class="math">Z_{D}(X)</span>.</p>
+
+    <p class="text-gray-300">Bilinear encodings. Groth’s protocol uses bilinear encodings, which enable hiding secrets while still allowing for anyone to homomorphically evaluate linear functions as well as zero-test quadratic functions. These rely on bilinear groups.</p>
+
+    <p class="text-gray-300">We denote by <span class="math">\\mathbb{G}</span> a group, and consider only groups that have a prime order <span class="math">p</span>, which are generated by an element <span class="math">\\mathcal{G}</span>. We use additive notation for group arithmetic: <span class="math">\\mathcal{P}+\\mathcal{Q}</span> denotes addition of the two elements <span class="math">\\mathcal{P}</span> and <span class="math">\\mathcal{Q}</span>. Thus, <span class="math">s\\cdot\\mathcal{P}</span> denotes scalar multiplication of <span class="math">\\mathcal{P}</span> by the scalar <span class="math">s\\in\\mathbb{Z}</span>. Since <span class="math">p\\cdot\\mathcal{P}</span> equals the identity element, we can equivalently think of a scalar <span class="math">s</span> as in the field <span class="math">\\mathbb{F}</span> of size <span class="math">p</span>. The encoding (relative to <span class="math">\\mathcal{G}</span>) of a scalar <span class="math">s\\in\\mathbb{F}</span> is <span class="math">[s]:=s\\cdot\\mathcal{G}</span>; similarly, the encoding of a vector of scalars <span class="math">\\mathbf{s}\\in\\mathbb{F}^{n}</span> is <span class="math">[\\mathbf{s}]:=(\\mathbf{s}_{1}\\cdot\\mathcal{G},\\ldots,\\mathbf{s}_{n}\\cdot\\mathcal{G})</span>. The encoding of a scalar can be efficiently computed via the double-and-add algorithm; yet (for suitable choices of <span class="math">\\mathbb{G}</span>) its inverse is conjecturally hard to compute, which means that <span class="math">[s]</span> hides (some) information about <span class="math">s</span>. Encodings are also linearly homomorphic: <span class="math">[\\alpha s+\\beta t]=\\alpha[s]+\\beta[t]</span> for all <span class="math">\\alpha,\\beta,s,t\\in\\mathbb{F}</span>.</p>
+
+    <p class="text-gray-300">Bilinear encodings involve three groups of order <span class="math">p</span>: <span class="math">\\mathbb{G}_{1},\\mathbb{G}_{2},\\mathbb{G}_{3}</span> generated by <span class="math">\\mathcal{G}_{1},\\mathcal{G}_{2},\\mathcal{G}_{3}</span> respectively. The encoding of a scalar <span class="math">s\\in\\mathbb{F}</span> in <span class="math">\\mathbb{G}_{i}</span> is <span class="math">[s]_{i}:=s\\cdot\\mathcal{G}_{i}</span>. Moreover, there is also an efficiently computable map <span class="math">e\\colon\\mathbb{G}_{1}\\times\\mathbb{G}_{2}\\to\\mathbb{G}_{3}</span>, called pairing, that is bilinear: for every nonzero <span class="math">\\alpha,\\beta\\in\\mathbb{F}</span>, it holds that <span class="math">e\\left([\\alpha]_{1},[\\beta]_{2}\\right)=\\alpha\\beta\\cdot e\\left(\\mathcal{G}_{1},\\mathcal{G}_{2}\\right)</span>. (Also, <span class="math">e</span> is non-degenerate in the sense that <span class="math">e\\left([1]_{1},[1]_{2}\\right)\\neq[0]_{3}</span>.) Pairings allow zero-testing quadratic polynomials evaluated on encodings. For example, given <span class="math">[s]_{1},[t]_{2},[u]_{1}</span>, one can test if <span class="math">st+u=0</span> by testing if <span class="math">e\\left([s]_{1},[t]_{2}\\right)+e\\left([u]_{1},[1]_{2}\\right)=[0]_{3}</span>.</p>
+
+    <p class="text-gray-300">Setup. The setup  <span class="math">S</span>  receives an R1CS instance  <span class="math">\\phi = (k, N, M, \\mathbf{a}, \\mathbf{b}, \\mathbf{c})</span>  and then samples a proving key  <span class="math">\\mathsf{pk}</span>  and a verification key  <span class="math">\\mathsf{vk}</span>  as follows. First,  <span class="math">S</span>  reduces the R1CS instance  <span class="math">\\phi</span>  to a QAP instance  <span class="math">\\Phi = (k, N, M, \\mathbf{A}, \\mathbf{B}, \\mathbf{C}, D)</span>  by running the algorithm qapl. Then,  <span class="math">S</span>  samples random elements  <span class="math">t, \\alpha, \\beta, \\gamma, \\delta</span>  in  <span class="math">\\mathbb{F}</span>  (this is the randomness that must remain secret). After that,  <span class="math">S</span>  evaluates the polynomials in  <span class="math">\\mathbf{A}, \\mathbf{B}, \\mathbf{C}</span>  at the element  <span class="math">t</span> , and computes</p>
+
+    <p class="text-gray-300"><span class="math">\\mathbf{K}^{\\mathrm{vk}}(t)\\coloneqq \\left(\\frac{\\beta\\mathbf{A}_i(t) + \\alpha\\mathbf{B}_i(t) + \\mathbf{C}_i(t)}{\\gamma}\\right)_{i = 0,\\dots ,k}</span> <span class="math">\\mathbf{K}^{\\mathrm{pk}}(t)\\coloneqq \\left(\\frac{\\beta\\mathbf{A}_i(t) + \\alpha\\mathbf{B}_i(t) + \\mathbf{C}_i(t)}{\\delta}\\right)_{i = k + 1,\\ldots ,N}</span></p>
+
+    <p class="text-gray-300">and</p>
+
+    <div class="my-4 text-center"><span class="math-block">\\mathbf {Z} (t) := \\left(\\frac {t ^ {j} Z _ {D} (t)}{\\delta}\\right) _ {j = 0, \\dots , M - 2}.</span></div>
+
+    <p class="text-gray-300">Finally, the setup algorithm computes encodings of these elements and outputs pk and vk defined as follows:</p>
+
+    <p class="text-gray-300"><span class="math">\\mathsf{pk}:= \\left([ \\alpha ]_1,\\frac{[\\beta]_1,[\\delta]_1}{[\\beta]_2,[\\delta]_2},\\frac{[\\mathbf{A}(t)]_1}{[\\mathbf{B}(t)]_2},\\frac{[\\mathbf{K}^{\\mathsf{pk}}(t)]_1}{[\\mathbf{Z}(t)]_1}\\right)</span> <span class="math">\\mathsf{vk}:= (e(\\alpha ,\\beta),[\\gamma ]_2,[\\delta ]_2,\\frac{[\\mathbf{K}^{\\mathsf{vk}}(t)]_1)}{}</span></p>
+
+    <p class="text-gray-300">Prover. The prover  <span class="math">\\mathcal{P}</span>  receives a proving key  <span class="math">\\mathsf{pk}</span> , input  <span class="math">x</span>  in  <span class="math">\\mathbb{F}^k</span> , and witness  <span class="math">w</span>  in  <span class="math">\\mathbb{F}^{N - k}</span> , and then samples a proof  <span class="math">\\pi</span>  as follows. First,  <span class="math">\\mathcal{P}</span>  extends the  <span class="math">x</span> -witness  <span class="math">w</span>  for the R1CS instance  <span class="math">\\phi</span>  to a  <span class="math">x</span> -witness  <span class="math">(w,h)</span>  for the QAP instance  <span class="math">\\Phi</span>  by running the algorithm qapW. Then,</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"><span class="math">\\mathcal{P}</span>  samples random elements  <span class="math">r, s</span>  in  <span class="math">\\mathbb{F}</span>  (this is the randomness that imbues the proof with zero knowledge). Next, letting  $z := 1 \\</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">x \\</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">w<span class="math"> ,  </span>\\mathcal{P}$  computes three encodings obtained as follows</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300"><span class="math">[A_r]_1 \\coloneqq [\\alpha]_1 + \\sum_{i=0}^N z_i[\\mathbf{A}_i(t)]_1 + r[\\delta]_1</span> ,</p>
+
+    <p class="text-gray-300"><span class="math">[B_s]_1 \\coloneqq [\\beta]_1 + \\sum_{i=0}^N z_i[\\mathbf{B}_i(t)]_1 + s[\\delta]_1</span></p>
+
+    <p class="text-gray-300"><span class="math">[B_s]_2 \\coloneqq [\\beta]_2 + \\sum_{i=0}^N z_i[\\mathbf{B}_i(t)]_2 + s[\\delta]_2</span> .</p>
+
+    <p class="text-gray-300">Then  <span class="math">\\mathcal{P}</span>  uses these two compute a fourth encoding:</p>
+
+    <p class="text-gray-300"><span class="math">[K_{r,s}]_1\\coloneqq s[A_r]_1 + r[B_s]_1 - rs[\\delta ]_1</span></p>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>\\sum_ {i = k + 1} ^ {N} z _ {i} \\left[ \\mathbf {K} _ {i} ^ {\\mathrm {p k}} (t) \\right] _ {1} + \\sum_ {j = 0} ^ {M - 2} h _ {j} \\left[ \\mathbf {Z} _ {j} (t) \\right] _ {1}.</li>
+
+    </ul>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <p class="text-gray-300">The output proof is  <span class="math">\\pi \\coloneqq ([A_r]_1, [B_s]_2, [K_{r,s}]_1)</span> .</p>
+
+    <p class="text-gray-300">Verifier. The verifier  <span class="math">\\mathcal{V}</span>  receives a verification key  <span class="math">\\mathsf{vk}</span> , input  <span class="math">x</span>  in  <span class="math">\\mathbb{F}^k</span> , and proof  <span class="math">\\pi</span> , and, letting  <span class="math">x_0 := 1</span> , checks that the following holds:</p>
+
+    <p class="text-gray-300"><span class="math">e\\left([A_r]_1,[B_s]_2\\right) = e(\\alpha ,\\beta)</span></p>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>e \\left(\\sum_ {i = 0} ^ {k} x _ {i} \\left[ \\mathbf {K} _ {i} ^ {\\mathrm {v k}} (t) \\right] _ {1}, [ \\gamma ] _ {2}\\right) + e \\left(\\left[ K _ {r, s} \\right] _ {1}, [ \\delta ] _ {2}\\right).</li>
+
+    </ul>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <p class="text-gray-300">Figure 4: The zkSNARK setup, prover, and verifier of Groth [Gro16] (using notation from Section 2.3).</p>
+
+    <p class="text-gray-300">3 Design overview of DIZK</p>
+
+    <p class="text-gray-300">Fig. 3 shows the outline of DIZK’s design. The setup and the prover in DIZK are modified from monolithic procedures to distributed jobs on a cluster; <span class="math">F</span>, <span class="math">\\mathsf{pk}_{F}</span>, and <span class="math">w</span> are stored as data structures distributed across multiple machines instead of on a single machine. The verifier remains unchanged from the vanilla protocol as it is inexpensive, enabling DIZK’s proofs to be verified by existing implementations of the verifier. The underlying zkSNARK protocol that we implement is due to Groth <em>[x13]</em>, and is described in Section 2.3.</p>
+
+    <p class="text-gray-300">Spark. We implemented DIZK using Apache Spark <em>[x1]</em>, a popular framework for cluster computing. The design principles behind DIZK can be applied to other frameworks <em>[x10, x20, IBY^{+}07]</em>.</p>
+
+    <p class="text-gray-300">Spark consists of two components: the driver and executors. Applications are created by the driver and consist of jobs broken down into stages that dictate a set of tasks. An executor is a unit of computation. Large data is represented via <em>Resilient Distributed Datasets</em> (RDDs).</p>
+
+    <p class="text-gray-300">System interface. The interface of DIZK matches the interface of a zkSNARK for proving/verifying satisfiability of R1CS instances (see Section 2.2) except that large objects are represented via RDDs.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>[leftmargin=*]</li>
+
+      <li>The setup receives an R1CS instance <span class="math">\\phi=(k,N,M,\\mathbf{a},\\mathbf{b},\\mathbf{c})</span> and outputs corresponding keys <span class="math">\\mathsf{pk}</span> and <span class="math">\\mathsf{vk}</span>. As instance size grows (i.e., as the number of variables <span class="math">N</span> and of constraints <span class="math">M</span> grow), <span class="math">\\phi</span> and <span class="math">\\mathsf{pk}</span> grow in size (linearly in <span class="math">N</span> and <span class="math">M</span>), so both are represented as RDDs.</li>
+
+      <li>The prover receives the proving key <span class="math">\\mathsf{pk}</span>, input <span class="math">x</span> in <span class="math">\\mathbb{F}^{k}</span>, and witness <span class="math">w</span> in <span class="math">\\mathbb{F}^{N-k}</span>. The prover outputs a proof <span class="math">\\pi</span> of constant size (<span class="math">128\\,\\mathrm{B}</span>). The input size <span class="math">k</span> is typically small while the witness size <span class="math">N-k</span> is typically large, so we represent the input as a simple array and the witness as an RDD.</li>
+
+    </ul>
+
+    <p class="text-gray-300">When using DIZK in an application, the application setup needs to provide <span class="math">\\phi</span> to the DIZK setup, and the application prover needs to provide <span class="math">x</span> and <span class="math">w</span> to the DIZK prover. Since these items are big, they may also need to be generated in a distributed way; we do so for our applications in Section 7.</p>
+
+    <p class="text-gray-300">High-level approach. The setup and prover in serial implementations of zkSNARKs run monolithic space-intensive computations that quickly exceed memory bounds. Our approach for an efficient distributed implementation is as follows.</p>
+
+    <p class="text-gray-300">First, we identify the heavy computational tasks that underlie the setup and prover. In Groth’s protocol (Fig. 4) these fall in three categories: (1) arithmetic (multiplication and division) for polynomials of large degree over large prime fields; (2) multi-scalar multiplication over large prime groups; (3) the QAP instance and witness reductions described in Section 2.3. Such computations underlie other proof systems (see Fig. 1).</p>
+
+    <p class="text-gray-300">Second, we design distributed implementations of these components. While there are simple strawman designs that follow naive serial algorithms, these are too expensive (e.g., run in quadratic time); on the other hand, non-naive serial algorithms gain efficiency by leveraging large pools of memory. We explain how to distribute these memory-intensive algorithms.</p>
+
+    <p class="text-gray-300">Finally, we assemble the aforementioned distributed components into a distributed setup and prover. This assembly poses additional challenges because the data workflow from one component to the next involves several large-scale re-shuffles that need to be tackled with tailored data structures.</p>
+
+    <p class="text-gray-300">Fig. 5 presents a diagram of the main parts of the design, and we describe them in the following sections: Section 4 discusses how to distribute polynomial arithmetic and multi-scalar multiplication; Section 5 discusses how to distribute the QAP instance reduction, and how to obtain the distributed setup from it; Section 6 discusses how to distribute the QAP witness reduction, and how to obtain the distributed prover from it.</p>
+
+    <p class="text-gray-300">!<a href="img-2.jpeg">img-2.jpeg</a> Figure 5: Distributed setup and prover (and sub-components).</p>
+
+    <p class="text-gray-300">We describe the computational tasks involving finite field and finite group arithmetic that arise in the zkSNARK, and how we distribute these tasks. These form subroutines of the distributed setup and prover computations (see Sections 5 and 6).</p>
+
+    <p class="text-gray-300">The reduction from an R1CS instance  <span class="math">\\phi = (k, N, M, \\mathbf{a}, \\mathbf{b}, \\mathbf{c})</span>  to a QAP instance  <span class="math">\\Phi = (k, N, M, \\mathbf{A}, \\mathbf{B}, \\mathbf{C}, D)</span>  (in the setup) and its witness reduction (in the prover) involves arithmetic on  <span class="math">\\Theta(N)</span>  polynomials of degree  <span class="math">\\Theta(M)</span> ; see Section 2.3. (Recall that  <span class="math">N</span>  is the number of variables and  <span class="math">M</span>  is the number of constraints.) We distribute the necessary polynomial arithmetic, allowing us to scale to  <span class="math">N</span>  and  <span class="math">M</span>  that are in the billions.</p>
+
+    <p class="text-gray-300">Fast polynomial arithmetic is well-known to rely on fast algorithms for two fundamental tasks: polynomial evaluation and interpolation. In light of this, our approach is the following: (i) we achieve distributed fast implementations of evaluation and interpolation, and (ii) use these to achieve distributed fast polynomial arithmetic such as multiplication and division.</p>
+
+    <p class="text-gray-300">Recall that (multi-point) polynomial evaluation is the following problem: given a polynomial  <span class="math">P(X) = \\sum_{j=0}^{n-1} c_j X^j</span>  over  <span class="math">\\mathbb{F}</span>  and elements  <span class="math">u_1, \\ldots, u_n</span>  in  <span class="math">\\mathbb{F}</span> , compute the elements  <span class="math">P(u_1), \\ldots, P(u_n)</span> . One can do this by simply evaluating  <span class="math">P</span>  at each point, costing  <span class="math">\\Theta(n^2)</span>  field operations overall.</p>
+
+    <p class="text-gray-300">Conversely, polynomial interpolation is the following problem: given elements  <span class="math">u_{1}, v_{1}, \\ldots, u_{n}, v_{n}</span>  in  <span class="math">\\mathbb{F}</span> , compute the polynomial  <span class="math">P(X) = \\sum_{j=0}^{n-1} c_{j} X^{j}</span>  over  <span class="math">\\mathbb{F}</span>  such that  <span class="math">v_{i} = P(u_{i})</span>  for every  <span class="math">i \\in \\{1, \\ldots, n\\}</span> . One can do this by using  <span class="math">u_{1}, \\ldots, u_{n}</span>  to compute the Lagrange interpolants  <span class="math">L_{1}(X), \\ldots, L_{n}(X)</span> , which costs  <span class="math">\\Theta(n^{2} \\log n)</span>  field operations [vG13], and then output  <span class="math">\\sum_{j=1}^{n} v_{j} L_{j}(X)</span> , which costs another  <span class="math">\\Theta(n^{2})</span> .</p>
+
+    <p class="text-gray-300">Both are straightforward to distribute, but they are too expensive due to the quadratic growth in  <span class="math">n</span> .</p>
+
+    <p class="text-gray-300">Fast Fourier Transforms (FFTs) [vG13] provide much faster solutions, which run in time  <span class="math">\\tilde{O}(n)</span> .</p>
+
+    <p class="text-gray-300">For instance, the Cooley–Tukey algorithm <em>[x10]</em> solves <em>both</em> problems with <span class="math">O(n\\log n)</span> field operations, provided that <span class="math">\\mathbb{F}</span> has suitable algebraic structure (in our setting it does). The algorithm requires storing an array of <span class="math">n</span> field elements in working memory, and performing <span class="math">O(\\log n)</span> “passes” on this array, each costing <span class="math">O(n)</span>. The structure of this algorithm can be viewed as a <em>butterfly network</em> since each pass requires shuffling the array according to certain memory patterns.</p>
+
+    <p class="text-gray-300">While the Cooley–Tukey algorithm implies a fast parallel algorithm, its communication structure is not suitable for compute clusters. Informally, at each layer of the butterfly network, half of the executors are left idle and the other half have their memory consumption doubled; moreover, each such layer requires a shuffle involving the entire array.</p>
+
+    <p class="text-gray-300">We take a different approach, suggested by Sze <em>[x27]</em>, who studies the problem of computing the product of terabit-size integers on compute clusters, via MapReduce. Sze’s approach uses only a <em>single</em> shuffle. Roughly, an FFT computation with input size <span class="math">n</span> is reduced to <em>two</em> batches of <span class="math">\\sqrt{n}</span> FFT computations, each on input size <span class="math">\\sqrt{n}</span>. The first batch is computed by the mappers; after the shuffle, the second batch is computed by the reducers. We use the same approach, and achieve a distributed FFT for finite fields.</p>
+
+    <h4 id="sec-11" class="text-lg font-semibold mt-6">4.1.3 Distributed <span class="math">\\mathrm{Lag}</span></h4>
+
+    <p class="text-gray-300">An additional task that arises (in the setup, see Section 5) is a problem related to polynomial evaluation that we call <span class="math">\\mathrm{Lag}</span> (from “Lagrange”): given a domain <span class="math">\\{u_{1},\\ldots,u_{n}\\}\\subseteq\\mathbb{F}</span> and an element <span class="math">t\\in\\mathbb{F}</span>, compute the evaluation at <span class="math">t</span> of all Lagrange interpolants <span class="math">L_{1}(X),\\ldots,L_{n}(X)</span> for the domain.</p>
+
+    <p class="text-gray-300">A common approach to do so is via the <em>barycentric Lagrange formula</em> <em>[x5]</em>: compute the barycentric weights <span class="math">r_{1},\\ldots,r_{n}</span> as <span class="math">r_{i}:=1/\\prod_{j\\neq i}(u_{i}-u_{j})</span>, and then compute <span class="math">L_{1}(t),\\ldots,L_{n}(t)</span> as <span class="math">L_{i}(t):=\\frac{r_{i}}{t-u_{i}}\\cdot L(t)</span> where <span class="math">L(X):=\\prod_{j=1}^{n}(X-u_{j})</span>.</p>
+
+    <p class="text-gray-300">When the domain is a multiplicative subgroup of the field generated by some <span class="math">\\omega\\in\\mathbb{F}</span> (in our setting it is), this approach results in an expression, <span class="math">L_{i}(X)=\\frac{\\omega^{i}/n}{X-\\omega^{i}}\\cdot(X^{n}-1)</span>, that is cheap to evaluate. This suggests a simple but effective distributed strategy: each executor in the cluster receives the value <span class="math">t\\in\\mathbb{F}</span> and a chunk of the index space <span class="math">i</span>, and uses the inexpensive formula to evaluate <span class="math">L_{i}(t)</span> for each index in that space.</p>
+
+    <h3 id="sec-12" class="text-xl font-semibold mt-8">4.2 Distributed multi-scalar multiplication</h3>
+
+    <p class="text-gray-300">In addition to the expensive finite field arithmetic discussed above, the setup and prover also perform expensive group arithmetic, which we must efficiently distribute.</p>
+
+    <p class="text-gray-300">After obtaining the evaluations of <span class="math">\\Theta(N+M)</span> polynomials, the setup encodes these values in the groups <span class="math">\\mathbb{G}_{1}</span> and <span class="math">\\mathbb{G}_{2}</span>, performing the encoding operations <span class="math">s\\to[s]_{1}</span> and <span class="math">s\\to[s]_{2}</span> for <span class="math">\\Theta(N+M)</span> values of <span class="math">s</span>. In contrast, the prover computes linear combinations of <span class="math">\\Theta(N+M)</span> encodings. (See Fig. 4.) Again, we seek to scale to <span class="math">N</span> and <span class="math">M</span> that are in the billions.</p>
+
+    <p class="text-gray-300">These operations can be summarized as two basic computational problems within a group <span class="math">\\mathbb{G}</span> of a prime order <span class="math">p</span> (where scalars come from the field <span class="math">\\mathbb{F}</span> of size <span class="math">p</span>).</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li><em>Fixed-base multi-scalar multiplication</em> (<span class="math">\\mathrm{fixMSM}</span>). Given a vector of scalars <span class="math">\\mathbf{s}</span> in <span class="math">\\mathbb{F}^{n}</span> and element <span class="math">\\mathcal{P}</span> in <span class="math">\\mathbb{G}</span>, compute the vector of elements <span class="math">\\mathbf{s}\\cdot\\mathcal{P}</span> in <span class="math">\\mathbb{G}^{n}</span>.</li>
+
+      <li><em>Variable-base multi-scalar multiplication</em> (<span class="math">\\mathrm{varMSM}</span>). Given a vector of scalars <span class="math">\\mathbf{s}</span> in <span class="math">\\mathbb{F}^{n}</span> and a vector of elements <span class="math">(\\mathcal{P}_{i})_{i=1}^{n}</span> in <span class="math">\\mathbb{G}^{n}</span>, compute the element <span class="math">\\sum_{i=1}^{n}\\mathbf{s}_{i}\\cdot\\mathcal{P}_{i}</span> in <span class="math">\\mathbb{G}</span>.</li>
+
+    </ul>
+
+    <p class="text-gray-300">For small <span class="math">n</span>, both problems have simple solutions: for <span class="math">\\mathrm{fixMSM}</span>, compute each element <span class="math">\\mathbf{s}_{i}\\cdot\\mathcal{P}</span> and output it; for <span class="math">\\mathrm{varMSM}</span>, compute each element <span class="math">\\mathbf{s}_{i}\\cdot\\mathcal{P}_{i}</span> and output the sum of all these elements.</p>
+
+    <p class="text-gray-300">In our setting, these solutions are expensive not only because <span class="math">n</span> is huge, but also because the scalars are (essentially) random in <span class="math">\\mathbb{F}</span>, whose cryptographically-large prime size <span class="math">p</span> has <span class="math">k\\approx 256</span> bits. This means that the (average) number of group operations in these simple solutions is <span class="math">\\approx 1.5kn</span>, a prohibitive cost.</p>
+
+    <p class="text-gray-300">Both problems can be solved via algorithms that, while being much faster, make an intensive use of memory. We next discuss our approach to efficiently distribute these.</p>
+
+    <h4 id="sec-13" class="text-lg font-semibold mt-6">4.2.1 Distributed fixMSM</h4>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Efficient algorithms for fixMSM use time-space tradeoffs <em>[x1]</em>. Essentially, one first computes a certain look-up table of multiples of <span class="math">\\mathcal{P}</span>, and then uses it to compute each <span class="math">\\mathbf{s}_{i}\\cdot\\mathcal{P}</span>. As a simple example, via $\\log</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mathbb{F}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"><span class="math"> group operations, one can compute the table </span>(\\mathcal{P},2\\cdot\\mathcal{P},4\\cdot\\mathcal{P},\\ldots,2^{\\log</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mathbb{F}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">}\\cdot\\mathcal{P})<span class="math">, and then compute each </span>\\mathbf{s}_{i}\\cdot\\mathcal{P}<span class="math"> with only </span>\\log</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mathbb{F}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">/2<span class="math"> group operations (on average). More generally one can increase the “density” of the look-up table and further reduce the time to compute each </span>\\mathbf{s}_{i}\\cdot\\mathcal{P}<span class="math">. As </span>n$ increases, it is better for the look-up table to also grow, but larger tables require more memory to store them.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">A natural approach to distribute this workload across a cluster is to evenly divide the <span class="math">n</span> scalars among the set of executors, have each executor build its own in-memory look-up table and perform all assigned scalar multiplications aided by that table, and then assemble the output from all executors.</p>
+
+    <p class="text-gray-300">This approach does not fit Spark well, because each executor receives many “partitions” and these cannot hold shared references to local results previously computed by the executor.</p>
+
+    <p class="text-gray-300">Instead, we let a single executor (the driver) build the look-up table and <em>broadcast</em> it to all other executors. Each executor receives this table and a share of the scalars, and computes all its assigned scalar multiplications.</p>
+
+    <h4 id="sec-14" class="text-lg font-semibold mt-6">4.2.2 Distributed varMSM</h4>
+
+    <p class="text-gray-300">An efficient algorithm for varMSM is Pippenger’s algorithm <em>[x23]</em>, which is within <span class="math">1+o(1)</span> of optimal for nearly all scalar vectors <em>[x23]</em>. In the setting of serial zkSNARKs this algorithm outperforms, by 20-30%, the popular Bos–Coster algorithm <em>[x1, §4]</em>. (Other well-known algorithms like Straus’ algorithm <em>[x30]</em> and the Chang–Lou algorithm <em>[x5]</em> are not as fast on large instances; see <em>[x1]</em>.)</p>
+
+    <p class="text-gray-300">Given scalars <span class="math">s_{1},\\ldots,s_{n}</span> and their bases <span class="math">\\mathcal{P}_{1},\\cdots,\\mathcal{P}_{n}</span>, Pippenger’s algorithm chooses a radix <span class="math">2^{c}</span>, computes <span class="math">\\lfloor s_{1}/2^{c}\\rfloor\\mathcal{P}_{1}+\\cdots+\\lfloor s_{n}/2^{c}\\rfloor\\mathcal{P}_{n}</span>, doubles it <span class="math">c</span> times, and sums it to <span class="math">(s_{1}\\bmod 2^{c})\\mathcal{P}_{1}+\\cdots+(s_{n}\\bmod 2^{c})\\mathcal{P}_{n}</span>. To perform the last step efficiently, the algorithm sorts the base elements into <span class="math">2^{c}</span> buckets according to <span class="math">(s_{1}\\bmod 2^{c}),\\ldots,(s_{n}\\bmod 2^{c})</span> (discarding bucket 0), sums the base elements in the remaining buckets to obtain intermediate sums <span class="math">\\mathcal{Q}_{1},\\ldots,\\mathcal{Q}_{2^{c}-1}</span>, and computes <span class="math">\\mathcal{Q}_{1}+2\\mathcal{Q}_{2}+\\cdots+(2^{c}-1)\\mathcal{Q}_{2^{c}-1}=(s_{1}\\bmod 2^{c})\\mathcal{P}_{1}+\\cdots+(s_{n}\\bmod 2^{c})\\mathcal{P}_{n}</span>. For a suitable choice of <span class="math">2^{c}</span>, this last step saves computation because each bucket contains the sum of several input bases.</p>
+
+    <p class="text-gray-300">A natural approach to distribute Pippenger’s algorithm is to set the number of partitions to <span class="math">2^{c}</span> and use a custom partitioner that takes in a scalar <span class="math">s_{i}</span> as the key and maps its base element <span class="math">b_{i}</span> to partition <span class="math">(s_{i}\\bmod 2^{c})</span>. While this approach is convenient, we find in practice that the cost of shuffling in this approach is too high. Instead, we find it much faster to merely split the problem evenly across executors, run Pippenger’s algorithm serially on each executor, and combine the computed results.</p>
+
+    <h2 id="sec-15" class="text-2xl font-bold">5 Design: distributing the zkSNARK setup</h2>
+
+    <p class="text-gray-300">The zkSNARK setup receives as input an R1CS instance <span class="math">\\phi=(k,N,M,\\mathbf{a},\\mathbf{b},\\mathbf{c})</span> and then samples a proving key <span class="math">\\mathsf{pk}</span> and a verification key <span class="math">\\mathsf{vk}</span>, following the protocol in Fig. 4.</p>
+
+    <p class="text-gray-300">Informally, the protocol has three stages: (i) evaluate the polynomials <span class="math">\\mathbf{A},\\mathbf{B},\\mathbf{C}</span> at a random element <span class="math">t</span>, where <span class="math">\\mathbf{A},\\mathbf{B},\\mathbf{C}</span> are from the QAP instance <span class="math">\\Phi=(k,N,M,\\mathbf{A},\\mathbf{B},\\mathbf{C},D)</span> corresponding to <span class="math">\\phi</span>; (ii) compute certain random linear combinations of these; (iii) compute encodings of corresponding vectors. The second stage is straightforward to distribute, and the third stage is an instance of fixMSM (see Section 4.2.1). Thus here we discuss efficient distribution of the first stage only.</p>
+
+    <p class="text-gray-300">Recall from the QAP instance reduction (in Section 2.3) that <span class="math">\\mathbf{A}=(\\mathbf{A}_{0},\\ldots,\\mathbf{A}_{N})</span> where <span class="math">\\mathbf{A}_{i}</span> is the polynomial of degree <span class="math">&lt;M</span> that interpolates over <span class="math">D</span> the <span class="math">i</span>-th row of the matrix <span class="math">\\mathbf{a}</span>; similarly for each <span class="math">\\mathbf{B}</span> and <span class="math">\\mathbf{C}</span> with regard to <span class="math">\\mathbf{b}</span> and <span class="math">\\mathbf{c}</span>. Focusing on <span class="math">\\mathbf{a}</span> for simplicity and letting <span class="math">L_{1},\\ldots,L_{M}</span> be the Lagrange interpolants for the set <span class="math">D</span> (i.e., <span class="math">L_{j}</span> evaluates to <span class="math">1</span> at the <span class="math">j</span>-th element of <span class="math">D</span> and to <span class="math">0</span> everywhere else in <span class="math">D</span>), the task we need to solve in a distributed way is the following.</p>
+
+    <p class="text-gray-300"><span class="math">\\text{in:}\\quad</span> <span class="math">\\mathbf{a}\\in\\mathbb{F}^{(1+N)\\times M}\\text{ and }t\\in\\mathbb{F}</span> <span class="math">\\text{out:}\\quad</span> <span class="math">(\\mathbf{A}_{i}(t))_{i=0}^{N}\\text{ where }\\mathbf{A}_{i}(t):=\\sum_{j=1}^{M}\\mathbf{a}_{i,j}L_{j}(t)</span></p>
+
+    <p class="text-gray-300">One should treat the parameters <span class="math">N</span> and <span class="math">M</span> as huge (no single machine can store vectors of length <span class="math">N</span> or <span class="math">M</span>).</p>
+
+    <p class="text-gray-300">In both serial zkSNARK systems and in our distributed system, the first step is to compute <span class="math">(L_{j}(t))_{j=1}^{M}</span>. We do so via the distributed Lag protocol described in Section 4.1.3, which computes and stores <span class="math">(L_{j}(t))_{j=1}^{M}</span> in an RDD. We now focus on the remainder of the task.</p>
+
+    <p class="text-gray-300">A key property of the matrix <span class="math">\\mathbf{a}</span> exploited in serial zkSNARK systems is its sparsity, i.e., <span class="math">\\mathbf{a}</span> contains very few non-zero entries. This enables the serial algorithm to iterate through every nonzero <span class="math">\\mathbf{a}_{i,j}</span>, look up the value <span class="math">L_{j}(t)</span>, and add <span class="math">\\mathbf{a}_{i,j}L_{j}(t)</span> to the <span class="math">i</span>-th entry in <span class="math">\\mathbf{A}(t)</span>. Distributing this approach in the natural way, however, results in a solution that is both inefficient in time and cannot scale to large <span class="math">N</span> and <span class="math">M</span>, as discussed next.</p>
+
+    <h4 id="sec-16" class="text-lg font-semibold mt-6">Strawman.</h4>
+
+    <p class="text-gray-300">Represent <span class="math">\\mathbf{a}=(\\mathbf{a}_{i,j})_{i,j}</span> and <span class="math">(L_{j}(t))_{j}</span> as two RDDs and perform the following computations:</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Join the set <span class="math">(\\mathbf{a}_{i,j})_{i,j}</span> with the set <span class="math">(L_{j}(t))_{j}</span> by index <span class="math">j</span>.</li>
+
+      <li>Map each pair <span class="math">(\\mathbf{a}_{i,j},L_{j}(t))</span> to its product <span class="math">\\mathbf{a}_{i,j}L_{j}(t)</span>.</li>
+
+      <li>Reduce the evaluations by <span class="math">i</span> to get <span class="math">(\\sum_{j=1}^{M}\\mathbf{a}_{i,j}L_{j}(t))_{i=0}^{N}</span>.</li>
+
+    </ol>
+
+    <p class="text-gray-300">When running this computation, we encounter notable issues at every step: the set of joined pairs <span class="math">(\\mathbf{a}_{i,j},L_{j}(t))</span> is unevenly distributed among executors, the executors take drastically differing amounts of time to perform the pair evaluations, and a small set of executors quickly exceed memory bounds from insufficient heap space.</p>
+
+    <p class="text-gray-300">Our problems lie in that, while the matrix <span class="math">\\mathbf{a}</span> is sparse, its columns are merely <em>almost</em> sparse: most columns are sparse, but a few are dense. This occurs when in an R1CS instance <span class="math">\\phi</span> some constraints “touch” many variables. This is not a rarity, but a common occurrence in typical constraint systems. E.g., consider the basic linear-algebraic operation of computing the dot product between a large variable vector and a large constant vector. The single constraint in <span class="math">\\phi</span> that captures this dot product has as many variables as the number of non-zero constants in the constant vector, inducing a dense column.</p>
+
+    <p class="text-gray-300">The default (hash-based) partitioner of the join algorithm maps all entries in a column to the <em>same</em> executor, and thus executors for dense columns become stragglers due to overload.</p>
+
+    <p class="text-gray-300">While there exist alternative join algorithms to handle load imbalances, like blockjoin and skewjoin <em>[x18]</em>, these do not perform well in our setting, as we now explain.</p>
+
+    <p class="text-gray-300">First, blockjoin replicates <em>each</em> entry in one RDD (the one for <span class="math">(L_{j}(t))_{j}</span>) in the hopes that when joining with the other RDD (the one for <span class="math">(\\mathbf{a}_{i,j})_{i,j}</span>) the partitions will be more evenly spread across executors. However, in our setting we cannot afford blowing up the size of the first RDD.</p>
+
+    <p class="text-gray-300">Second, skewjoin takes a more fine-grained approach, by first computing statistics of the second RDD and then using these to inform how much to replicate each entry in the first RDD. While the blow up in space is smaller, it is still undesirable.</p>
+
+    <p class="text-gray-300">Even so, a problem of both approaches is that replicating entries entails changing the keys of the two RDDs, by first adding certain counters to each key before the join and then removing these after the join to continue with the protocol. Each of these changes requires expensive shuffles to relocate keys to the correct partitions based on their hash. Also, another inefficiency is due to performing a single monolithic join on the two (modified) RDDs, which uses a lot of working memory.</p>
+
+    <p class="text-gray-300">We circumvent all these problems via a systematic two-part solution tailored to our setting, as described below. (And only briefly mention that the foregoing skewjoin approach does not scale beyond 50 million constraints on even 128 executors and, until then, is twice as slow as our solution below.)</p>
+
+    <p class="text-gray-300">Part 1: identify dense vectors. Before running the setup, DIZK runs a lightweight, distributed computation to identify the columns that have many non-zero elements and annotates them for Part 2. Using a straightforward map and reduce computation would also result in stragglers because of the dense columns. DIZK avoids stragglers for this task as follows. Suppose that the matrix <span class="math">\\mathbf{a}</span> is stored as an RDD with <span class="math">\\ell</span> partitions. First, DIZK assigns each partition to a random executor. Second, each executor computes, for every column <span class="math">j</span>, the number of non-zero elements it receives. Third, the executors run a shuffle, during which the elements for the same column go to the same executor. Finally, each executor computes the final count for the columns assigned to it. Thus even dense columns will have at most <span class="math">\\ell</span> values to aggregate, which avoids stragglers.</p>
+
+    <p class="text-gray-300">DIZK then identifies which columns have more than a threshold of non-zero elements and annotates them for use in Part 2. We heuristically set the threshold to be <span class="math">\\sqrt{M}</span>. Since <span class="math">\\mathbf{a}</span> is overall sparse, there are not many dense constraints. Let <span class="math">J_{\\mathbf{a}}</span> be the set of indices <span class="math">j</span> identified as dense.</p>
+
+    <p class="text-gray-300">Part 2: employ a hybrid solution. DIZK now executes two jobs: one for the few dense columns, and one for the many sparse columns. The first computation filters each dense column into multiple partitions, so that no executor deals with an entire dense column but only with a part of it, and evaluates the joined pairs. The second computation is the strawman above, limited to indices not in <span class="math">J_{\\mathbf{a}}</span>. We do so without having to re-key RDDs or incur any replication. In more detail, the computation is:</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>For all dense column indices <span class="math">j\\in J_{\\mathbf{a}}</span>:</li>
+
+    </ol>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>filter <span class="math">\\mathbf{a}</span> by index <span class="math">j</span> to obtain column <span class="math">\\mathbf{a}_{j}</span> as an RDD;</li>
+
+      <li>join the RDD <span class="math">(\\mathbf{a}_{i,j})_{i,j}</span> with <span class="math">L_{j}(t)</span> for <span class="math">j</span>;</li>
+
+      <li>map each pair <span class="math">(\\mathbf{a}_{i,j},L_{j}(t))</span> to its product <span class="math">\\mathbf{a}_{i,j}L_{j}(t)</span>.</li>
+
+      <li>Join the set <span class="math">(\\mathbf{a}_{i,j})_{i,j\\notin J_{\\mathbf{a}}}</span> with <span class="math">L_{j}(t)</span> by index <span class="math">j</span>.</li>
+
+      <li>Map each pair <span class="math">(\\mathbf{a}_{i,j},L_{j}(t))</span> to its evaluation <span class="math">\\mathbf{a}_{i,j}L_{j}(t)</span>.</li>
+
+      <li>Union <span class="math">(\\mathbf{a}_{i,j}L_{j}(t))_{j\\in J_{\\mathbf{a}}}</span> with <span class="math">(\\mathbf{a}_{i,j}L_{j}(t))_{j\\notin J_{\\mathbf{a}}}</span>.</li>
+
+      <li>Reduce all <span class="math">\\mathbf{a}_{i,j}L_{j}(t)</span> by <span class="math">i</span> using addition to get <span class="math">(\\mathbf{A}_{i}(t))_{i=0}^{N}</span>.</li>
+
+    </ol>
+
+    <h2 id="sec-17" class="text-2xl font-bold">6 Design: distributing the zkSNARK prover</h2>
+
+    <p class="text-gray-300">The zkSNARK prover receives a proving key <span class="math">\\mathsf{pk}</span>, input <span class="math">x</span> in <span class="math">\\mathbb{F}^{k}</span>, and witness <span class="math">w</span> in <span class="math">\\mathbb{F}^{N-k}</span>, and then samples a proof <span class="math">\\pi</span>, following the protocol in Fig. 4.</p>
+
+    <p class="text-gray-300">Informally, the protocol has two stages: (i) extend the <span class="math">x</span>-witness <span class="math">w</span> for the R1CS instance <span class="math">\\phi</span> to a <span class="math">x</span>-witness <span class="math">(w,h)</span> for the QAP instance <span class="math">\\Phi</span>; (ii) use <span class="math">x</span>, <span class="math">w</span>, <span class="math">h</span> and additional randomness to compute certain linear combinations of <span class="math">\\mathsf{pk}</span>. The second stage is an instance of <span class="math">\\mathrm{varMSM}</span> (see Section 4.2.2). Thus here we discuss efficient distribution of the first stage only.</p>
+
+    <p class="text-gray-300">Recall from the QAP witness reduction (in Section 2.3) that <span class="math">h</span> is the vector of coefficients of the</p>
+
+    <p class="text-gray-300">polynomial <span class="math">H(X)</span> of degree less than <span class="math">M-1</span> that equals the ratio</p>
+
+    <p class="text-gray-300"><span class="math">\\frac{(\\sum_{i=0}^{N}\\mathbf{A}_{i}(X)z_{i})\\cdot(\\sum_{i=0}^{N}\\mathbf{B}_{i}(X)z_{i})-\\sum_{i=0}^{N}\\mathbf{C}_{i}(X)z_{i}}{Z_{D}(X)}\\enspace.</span></p>
+
+    <p class="text-gray-300">This polynomial division can be achieved by: (a) choosing a domain <span class="math">D^{\\prime}</span> disjoint from <span class="math">D</span> of size <span class="math">M</span> (so that the denominator <span class="math">Z_{D}(X)</span> never vanishes on <span class="math">D^{\\prime}</span>, avoiding divisions by zero); (b) computing the component-wise ratio of the evaluations of the numerator and denominator on <span class="math">D^{\\prime}</span> and then interpolating the result. Below we discuss how to evaluate the numerator on <span class="math">D^{\\prime}</span> because the same problem for the denominator is not hard since <span class="math">Z_{D}(X)</span> is a sparse polynomial (for suitably chosen <span class="math">D</span>).</p>
+
+    <p class="text-gray-300">The evaluation of the numerator on <span class="math">D^{\\prime}</span> can be computed by first evaluating the numerator on <span class="math">D</span>, and then using FFT techniques to convert this evaluation into an evaluation on the disjoint domain <span class="math">D^{\\prime}</span> (run an inverse FFT on <span class="math">D</span> and then a forward FFT on <span class="math">D^{\\prime}</span>). The second part can be done via a distributed FFT (Section 4.1.2) but the first part needs a discussion.</p>
+
+    <p class="text-gray-300">Let us focus for simplicity on computing the evaluation of the polynomial <span class="math">\\mathbf{A}_{z}(X):=\\sum_{i=0}^{N}\\mathbf{A}_{i}(X)z_{i}</span> on <span class="math">D</span>, which is one of the terms in the numerator. Since the evaluation of <span class="math">\\mathbf{A}_{i}</span> on <span class="math">D</span> equals the <span class="math">i</span>-th row of <span class="math">\\mathbf{a}</span>, the task that needs to be solved in a distributed way is the following.</p>
+
+    <p class="text-gray-300"><span class="math">\\text{in:}\\quad</span> <span class="math">\\mathbf{a}\\in\\mathbb{F}^{(1+N)\\times M}\\text{ and }z\\in\\mathbb{F}^{1+N}</span> <span class="math">\\text{out:}\\quad</span> <span class="math">(\\sum_{i=0}^{N}\\mathbf{a}_{i,j}z_{i})_{j=1}^{M}</span></p>
+
+    <p class="text-gray-300">Again, the parameters <span class="math">N</span> and <span class="math">M</span> are huge, so no single machine can store arrays with <span class="math">N</span> or <span class="math">M</span> field elements.</p>
+
+    <p class="text-gray-300">Strawman. Encode <span class="math">\\mathbf{a}=(\\mathbf{a}_{i,j})_{i,j}</span> and <span class="math">z=(z_{i})_{i}</span> as two RDDs and perform the following distributed computation:</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Join the set <span class="math">(\\mathbf{a}_{i,j})_{i,j}</span> and the set <span class="math">(z_{i})_{i}</span> by the index <span class="math">i</span>.</li>
+
+      <li>Map each <span class="math">(\\mathbf{a}_{i,j},z_{i})</span> pair to their product <span class="math">\\mathbf{a}_{i,j}z_{i}</span>.</li>
+
+      <li>Reduce the evaluations by index <span class="math">j</span> to get <span class="math">(\\sum_{i=0}^{N}\\mathbf{a}_{i,j}z_{i})_{j=1}^{M}</span>.</li>
+
+    </ol>
+
+    <p class="text-gray-300">When running this computation, we ran into a stragglers problem that is the converse of that described in Section 5: while the matrix <span class="math">\\mathbf{a}</span> is sparse, its rows are almost sparse because, while most rows are sparse, some rows are dense. The join was overloading the executors assigned to dense rows.</p>
+
+    <p class="text-gray-300">The reason underlying the problem is also the converse: some variables participate in many constraints. This situation too is a common occurrence in R1CS instances. For example, the constant value <span class="math">1</span> is used often (e.g., every constraint capturing boolean negations) and this constant appears as an entry in <span class="math">z</span>.</p>
+
+    <p class="text-gray-300">Generic solutions for load imbalances like skewjoin [ske17] were not performant for the same reasons as in Section 5.</p>
+
+    <p class="text-gray-300">Our approach. We solve this problem via a two-part solution analogous to that in Section 5, with the change that the computation is now for rows instead of columns. The dense vectors depend on the constraints alone so they do not change during proving, even for different inputs <span class="math">x</span>. Hence, Part 1 runs once during setup, and not again during proving (only Part 2 runs then).</p>
+
+    <h2 id="sec-18" class="text-2xl font-bold">7 Applications</h2>
+
+    <p class="text-gray-300">We study two applications for our distributed zkSNARK: (1) authenticity of edited photos [NT16] (see Section 7.1); and (2) integrity of machine learning models (see Section 7.2). In both cases the application consists of algorithms for two tasks. One task is expressing the application predicate as an R1CS instance,</p>
+
+    <p class="text-gray-300">which means generating a certain set of constraints (ideally, as small as possible) to pass as input to the setup. The other task is mapping the application inputs to a satisfying assignment to the constraints, to pass as input to the prover.</p>
+
+    <p class="text-gray-300">Recall that our distributed zkSNARK expects the R1CS instance (set of constraints) and witness (assignment) to be distributed data structures (see Section 3). In both applications above, distributing the constraint generation and witness generation across multiple machines is not hard, and thus we write our algorithms to do so, for convenience. (For large enough instance sizes, this also confers greater efficiency.)</p>
+
+    <p class="text-gray-300">We now describe our approach to constraint and witness generation for each application, and how we distribute these.</p>
+
+    <h3 id="sec-19" class="text-xl font-semibold mt-8">7.1 Authenticity of photos</h3>
+
+    <p class="text-gray-300">Authenticity of photos is crucial for journalism and investigations but is difficult to ensure due to powerful digital editing tools. One approach is to rely on special cameras that sign photos via secret keys embedded in them, so that anyone can verify the signature accompanying an image. (Some such cameras already exist.) However, often it is not useful or acceptable to release the original photograph because, e.g., some information needs to be redacted or blurred. These operations, however, cause the problem that the signature will not verify relative to the edited photo. A recent paper proposes an approach, called PhotoProof <em>[x21]</em>, that relies on zkSNARKs to prove, in zero knowledge, that the edited image was obtained from a signed (and thus valid) input image only according to a set of permissible transformations. (More precisely, the camera actually signs a commitment to the input image, and this commitment and signature also accompany the edited image, and thus can be verified separately.)</p>
+
+    <p class="text-gray-300">We benchmark our system on this application because the system implemented in <em>[x21]</em> relies on monolithic zkSNARK implementations and is thus limited to small photo sizes. Additionally, the generation of constraints and witnesses for many photo transformations is easy to distribute across machines. Overall, the greater scalability of our distributed zkSNARK allows reaching relatively large images (see Section 11). Below we describe the three transformations that we implemented: crop, rotation, and blur; the first two are also implemented in <em>[x21]</em>, while the third one is from <em>[x14]</em>. Throughout, we consider images of dimension <span class="math">r\\times c</span> that are black and white, which means that each pixel is an integer between <span class="math">0</span> and <span class="math">255</span>; we represent such an image as a list of <span class="math">rc</span> field elements each storing a pixel. Our algorithms can be extended to color images via RGB representation, but we do not do so in this work.</p>
+
+    <p class="text-gray-300">Crop. The crop transformation is specified by a <span class="math">r\\times c</span> mask and maps an input <span class="math">r\\times c</span> image into an output <span class="math">r\\times c</span> image by keeping or zeroing out each pixel according to the corresponding bit in the mask. This choice is realized via a MUX gadget controlled by the mask’s bit. We obtain that the number of constraints is <span class="math">rc</span> and the number of variables is <span class="math">3rc</span>. In our implementation, we distribute the generation of constraints and variable assignment by individually processing blocks of pixels.</p>
+
+    <p class="text-gray-300">Rotation. The rotation transformation is specified by an angle <span class="math">\\theta\\in[0,\\pi/4]</span> and maps a pixel in position <span class="math">(x,y)</span> to position <span class="math">\\left(\\begin{smallmatrix}\\cos\\theta&amp;-\\sin\\theta\\cr\\sin\\theta&amp;\\cos\\theta\\end{smallmatrix}\\right)(x,y)</span>; this rotates the image by angle <span class="math">\\theta</span> around <span class="math">(0,0)</span>. Some pixels go outside the image and are thus lost, while “new” pixels appear and we set those to zero.</p>
+
+    <p class="text-gray-300">We follow the approach of <em>[x21]</em>, and use the method of rotation by shears <em>[x20]</em>, which uses the identity <span class="math">\\left(\\begin{smallmatrix}\\cos\\theta&amp;-\\sin\\theta\\cr\\sin\\theta&amp;\\cos\\theta\\end{smallmatrix}\\right)=\\left(\\begin{smallmatrix}1&amp;-\\tan(\\theta/2)\\cr 0&amp;1\\end{smallmatrix}\\right)\\left(\\begin{smallmatrix}1&amp;\\ 0\\\\ \\sin\\theta&amp;1\\end{smallmatrix}\\right)\\left(\\begin{smallmatrix}1&amp;-\\tan(\\theta/2)\\cr 0&amp;1\\end{smallmatrix}\\right)</span>. The first is a shear by row, the second a shear by column, and the third again a shear by row. Each shear is performed by individually invoking a barrel shifter to every row or column, with the correct offset.</p>
+
+    <p class="text-gray-300">Computing the correct offsets involves computing, for each row index <span class="math">i\\in[r]</span> the integer <span class="math">\\lfloor\\tan(\\theta/2)\\cdot i\\rfloor</span> and for each column index <span class="math">j\\in[c]</span> the integer <span class="math">\\lfloor\\sin(\\theta)\\cdot j\\rfloor</span>, which amounts to <span class="math">r+c</span> real number multiplications</p>
+
+    <p class="text-gray-300">followed by rounding. Computing <span class="math">\\tan(\\theta/2)</span> and <span class="math">\\sin(\\theta)</span> from <span class="math">\\theta</span> may seem expensive, but <em>[x20]</em> shows how to use non-deterministic advice to do so cheaply: given <span class="math">a</span> and <span class="math">b</span> that allegedly equal <span class="math">\\tan(\\theta/2)</span> and <span class="math">\\sin\\theta</span>, the prover also supplies <span class="math">c</span> and <span class="math">d</span> that allegedly equal <span class="math">\\sin(\\theta/2)</span> and <span class="math">\\cos(\\theta/2)</span>, and the constraints check that <span class="math">c^{2}+d^{2}=1</span>, <span class="math">da=c</span>, and <span class="math">2cd=b</span>. These equations are also over the real numbers. Overall, this amounts to <span class="math">r+c+O(1)</span> arithmetic operations on real numbers, which we realize via finite field operations by considering finite-precision representations of these numbers.</p>
+
+    <p class="text-gray-300">Once all offsets are computed (and represented in binary) we perform the shears. A row shear uses <span class="math">rc\\log(c)</span> constraints and <span class="math">rc\\log(c)</span> variables, because each of the <span class="math">r</span> row barrel shifters uses <span class="math">c\\log(c)</span> constraints and <span class="math">c\\log(c)</span> variables. Similarly, a column shear uses <span class="math">rc\\log(r)</span> constraints and <span class="math">rc\\log(r)</span> variables. Thus, the three shears (row, column, row) overall use <span class="math">rc(2\\log(c)+\\log(r))</span> constraints and <span class="math">rc(2\\log(c)+\\log(r))</span> variables. These costs dominate the costs of computing offets.</p>
+
+    <p class="text-gray-300">In our implementation, we distribute the generation of constraints and variable assignment by distributing each shear, by generating each barrel shifter’s constraints and variable assignment in parallel.</p>
+
+    <h5 id="sec-20" class="text-base font-semibold mt-4">Blur.</h5>
+
+    <p class="text-gray-300">The blur transformation is specified by a position <span class="math">(x,y)</span>, height <span class="math">u</span>, and width <span class="math">v</span>; it maps an input <span class="math">r\\times c</span> image into an output <span class="math">r\\times c</span> image in which Gaussian blur has been applied to the <span class="math">u\\times v</span> rectangle whose bottom-left corner is at <span class="math">(x,y)</span>. More precisely, we approximate Gaussian blur via three sequential box blurs <em>[x17]</em>. Each box blur consists of a horizontal blur followed by a vertical blur; each of these directional blurs is specified by a length <span class="math">r</span>. Informally, each pixel in the selected region is replaced with the average of the <span class="math">2r+1</span> pixels at distance at most <span class="math">r</span> in either direction (including itself). Overall, Gaussian blur is approximated by six directional blurs.</p>
+
+    <p class="text-gray-300">To realize this transformation as constraints, we need to verify, for each of the <span class="math">uv</span> positions in the selected region and for each of the <span class="math">6</span> directional blurs, that the new pixel is the correct (rounded) average of the <span class="math">2r+1</span> pixels in the old image.</p>
+
+    <p class="text-gray-300">Letting <span class="math">v</span> be the new pixel and <span class="math">v_{0},\\ldots,v_{2r}</span> the old pixels, we check that <span class="math">\\sum_{i=0}^{r}v_{i}=(2r+1)v+w</span> via one constraint and <span class="math">w&lt;2r+1</span> via an integer comparison (we view <span class="math">v</span> and <span class="math">w</span> as the quotient and remainder when dividing the sum by <span class="math">2r+1</span>). This uses <span class="math">1+\\lceil\\log_{2}(2r+1)\\rceil</span> constraints and variables.</p>
+
+    <p class="text-gray-300">Overall, we use <span class="math">uv\\cdot 6\\cdot(1+\\lceil\\log_{2}(2r+1)\\rceil)</span> constraints and <span class="math">uv\\cdot(13+6\\lceil\\log_{2}(2r+1)\\rceil)</span> variables.</p>
+
+    <p class="text-gray-300">In our implementation, since each new pixel only depends on few surrounding pixels, we distribute the generation of constraints and witnesses by blocks in the selected region.</p>
+
+    <h3 id="sec-21" class="text-xl font-semibold mt-8">7.2 Integrity of machine learning models</h3>
+
+    <p class="text-gray-300">Suppose that a hospital owns sensitive patient data, and a researcher wishes to build a (public) model by running a (public) training algorithm on this sensitive data. The hospital does not want (or legally cannot) release the data; on the other hand, the researcher wants others to be able to check the integrity of the model. One way to resolve this tension is to have the hospital use a zkSNARK to prove that the model is the output obtained when running it on the sensitive data.</p>
+
+    <p class="text-gray-300">In this paper, we study two operations: linear regression and covariance matrix calculation (an important subroutine for classification algorithms). Both use core linear-algebraic operations, which are computations that are simple to express as constraints and to distribute across machines.</p>
+
+    <h5 id="sec-22" class="text-base font-semibold mt-4">Linear regression.</h5>
+
+    <p class="text-gray-300">Least-squares linear regression is a popular supervised machine learning training</p>
+
+    <p class="text-gray-300">algorithm that models the relationship between variables as linear. The input is a labeled dataset <span class="math">D=(X,Y)</span> where the rows of <span class="math">X\\in\\mathbb{R}^{n\\times d}</span> and <span class="math">Y\\in\\mathbb{R}^{n\\times 1}</span> are the observations’ independent and dependent variables.</p>
+
+    <p class="text-gray-300">Assuming that <span class="math">Xw\\approx Y</span> for some <span class="math">w\\in\\mathbb{R}^{d\\times 1}</span>, the algorithm’s goal is to find such a <span class="math">w</span>. The algorithm finds <span class="math">w</span> by minimizing the mean squared-error loss: <span class="math">\\frac{1}{n}\\min_{w}\\sum_{i=1}^{n}(X_{i}w-Y_{i})^{2}</span>, where <span class="math">X_{i}</span> is the <span class="math">i</span>-th row of <span class="math">X</span> and <span class="math">Y_{i}</span> the <span class="math">i</span>-th entry of <span class="math">Y</span>. The solution to this optimization problem is <span class="math">w=(X^{T}X)^{-1}X^{T}Y</span>.</p>
+
+    <p class="text-gray-300">While the formula to compute <span class="math">w</span> uses a matrix inversion, one can easily check correctness of <span class="math">w</span> without inversions by checking that <span class="math">X^{T}Xw=X^{T}y</span>. The problem is thus reduced to checking matrix multiplications, which can be easily expressed and distributed as we now describe.</p>
+
+    <p class="text-gray-300">In a matrix multiplication <span class="math">AB=C</span> where <span class="math">A</span> is <span class="math">n_{1}\\times n_{2}</span> and <span class="math">B</span> is <span class="math">n_{2}\\times n_{3}</span> there are <span class="math">n_{1}n_{3}</span> dot products. We check each dot product via <span class="math">n_{2}+1</span> constraints: <span class="math">n_{2}</span> constraints to check pairwise multiplications, and one constraint to check their summation. Overall, we use <span class="math">n_{1}n_{3}\\cdot(n_{2}+1)</span> constraints, which involve <span class="math">n_{1}n_{2}+n_{2}n_{3}+n_{1}n_{3}\\cdot(n_{2}+1)</span> variables.</p>
+
+    <p class="text-gray-300">We generate the constraints and variable assignments by following a distributed block-based algorithm for matrix multiplication <em>[x1, x10, x16]</em>. Such an algorithm splits the output matrix into blocks, and assigns each block to a machine. After shuffling values of the input matrices so that values needed to produce a block are on the same machine, the output matrix is obtained by independently computing each block via matrix multiplication on the shuffled values. We follow this simple approach: each block independently generates its constraints and variable assignments after receiving the necessary values. This simple approach works well for us because memory usage is dominated by the number of constraints and variables rather than the size of the input/output matrices.</p>
+
+    <h4 id="sec-23" class="text-lg font-semibold mt-6">Covariance matrix.</h4>
+
+    <p class="text-gray-300">Computing covariance matrices is an important subroutine in classification algorithms such as Gaussian naive Bayes and linear discriminant analysis <em>[x2]</em>. These algorithms classify observations into discrete classes, e.g., images into digits <em>[x11]</em>, by constructing a probability distribution for each class. This reduces to computing the mean and covariance matrix for each class of sample points.</p>
+
+    <p class="text-gray-300">Namely, suppose that <span class="math">\\{x_{i}\\in\\mathbb{R}^{d\\times 1}\\}_{i=1..n}</span> is an input data set from a single class. Its covariance matrix is <span class="math">M:=\\frac{1}{n-1}\\sum_{i=1}^{n}(x_{i}-\\bar{x})(x_{i}-\\bar{x})^{T}\\in\\mathbb{R}^{d\\times d}</span>, where <span class="math">\\bar{x}:=(\\frac{1}{n}\\sum_{i=1}^{n}x_{i})\\in\\mathbb{R}^{d\\times 1}</span> is the average of the <span class="math">n</span> observations.</p>
+
+    <p class="text-gray-300">We check correctness of <span class="math">M</span> as follows. First, we check correctness of the mean <span class="math">\\bar{x}</span> by individually checking each of the <span class="math">d</span> entries; for each entry we use the same approach as in the case of blur (in Section 7.1) and thus use <span class="math">1+\\lceil\\log_{2}n\\rceil</span> constraints and variables; overall this costs <span class="math">d\\cdot(1+\\lceil\\log_{2}n\\rceil)</span> constraints and variables. Then, we check correctness of each matrix multiplication <span class="math">(x_{i}-\\bar{x})(x_{i}-\\bar{x})^{T}</span>, using <span class="math">n\\cdot 2(d+d^{2})</span> constraints and variables. Finally, we check correctness of the “average” of the <span class="math">n</span> resulting matrices, using <span class="math">d^{2}\\cdot(1+\\lceil\\log_{2}(n-1)\\rceil)</span> constraints and variables. This all adds up to <span class="math">d(1+\\lceil\\log_{2}n\\rceil)+2(d+d^{2})n+d^{2}(1+\\lceil\\log_{2}(n-1)\\rceil)</span> constraints and variables.</p>
+
+    <h2 id="sec-24" class="text-2xl font-bold">8 Implementation</h2>
+
+    <p class="text-gray-300">We implemented the distributed zkSNARK in around <span class="math">10</span>K lines of Java code over Apache Spark <em>[x1]</em>, a popular cluster computing framework. All data representations are designed to fit within the Spark computation model. For example, we represent an R1CS instance <span class="math">\\phi=(k,N,M,\\mathbf{a},\\mathbf{b},\\mathbf{c})</span> via three RDDs, one for each of the three matrices <span class="math">\\mathbf{a},\\mathbf{b},\\mathbf{c}</span>, and each record in an RDD is a tuple <span class="math">(j,(i,v))</span> where <span class="math">v</span> is the <span class="math">(i,j)</span>-th entry of the matrix. (Recall from Section 2.2 that <span class="math">\\mathbf{a},\\mathbf{b},\\mathbf{c}</span> are coefficient matrices that determine all constraints of the instance.) Since DIZK deals with large instances, we carefully adjust the RDD partition size such that each partition fits on an executor’s heap space.</p>
+
+    <p class="text-gray-300">9 Experimental setup</p>
+
+    <p class="text-gray-300">We evaluated DIZK on Amazon EC2 using r3.large instances (2 vCPUs, <span class="math">15\\text{\\,}\\mathrm{GiB}</span> of memory) and r3.8xlarge instances (32 vCPUs, <span class="math">244\\text{\\,}\\mathrm{GiB}</span> of memory). For single-machine experiments, we used one r3.large instance. For distributed experiments, we used a cluster of ten r3.8xlarge instances for up to <span class="math">128</span> executors, and a cluster of twenty r3.8xlarge for <span class="math">256</span> executors.</p>
+
+    <p class="text-gray-300">We instantiate the zkSNARK via a 256-bit Barreto–Naehrig curve <em>[x1]</em>, a standard choice in prior zkSNARK implementations. This means that <span class="math">\\mathbb{G}_{1}</span> and <span class="math">\\mathbb{G}_{2}</span> are elliptic curve groups of a prime order <span class="math">p</span> of <span class="math">256</span> bits, and the scalar field <span class="math">\\mathbb{F}</span> has this same size.</p>
+
+    <p class="text-gray-300">An important technicality is that we cannot rely on curves used in prior zkSNARK works, because they do not support the large instance sizes in this work, as we now explain. To allow for efficient implementations of the setup and the prover one needs a curve in which the group order <span class="math">p</span> is such that <span class="math">p-1</span> is divisible by <span class="math">2^{a}</span>, where <span class="math">2^{a}</span> is larger than the maximum instance size to be supported <em>[BCG^{+}13]</em>. As the instance sizes that we support are in the billions, we would like, say, <span class="math">a\\geq 40</span>.</p>
+
+    <p class="text-gray-300">We thus generated (by modifying the sampling algorithm in <em>[x1]</em>) a 256-bit Barreto–Naehrig curve with <span class="math">a=50</span>, which suffices for our purposes. The curve is <span class="math">E/\\mathbb{F}_{q}\\colon y^{2}=x^{3}+13</span> with <span class="math">q=17855808334804902850260923831770255773779740579862519338010824535856509878273</span>, and its order is <span class="math">p=17855808334804902850260923831770255773646114952324966112694569107431857586177</span>.</p>
+
+    <h2 id="sec-25" class="text-2xl font-bold">10 Evaluation of the distributed zkSNARK</h2>
+
+    <p class="text-gray-300">We evaluated our distributed zkSNARK and established that:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>We support instances of <em>more than a billion gates</em>, a significant improvement over serial implementations, which exceed memory bounds at 10-20 million gates.</li>
+
+      <li>Fixing a number of executors on the cluster and letting the instance size increase (from several millions to over a billion), the running time of the setup and prover increases close to linearly as expected, demonstrating scalability over this range of instance sizes.</li>
+
+      <li>Fixing an input size and letting the number of executors grow (from a few to hundreds), the running time of the setup and prover decreases close to linearly as expected, demonstrating parallelization over this range of executors.</li>
+
+    </ul>
+
+    <p class="text-gray-300">In the next few sub-sections we support these findings.</p>
+
+    <h3 id="sec-26" class="text-xl font-semibold mt-8">10.1 Evaluation of the setup and prover</h3>
+
+    <p class="text-gray-300">We evaluate our distributed implementation of the zkSNARK setup and prover. Below we use “instance size” to denote the number of constraints <span class="math">M</span> in a R1CS instance.</p>
+
+    <p class="text-gray-300">First, we measure the largest instance size (as a power of <span class="math">2</span>) that is supported by:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>the serial implementation of Groth’s protocol in libsnark <em>[x10]</em>, a state-of-the-art zkSNARK library;</li>
+
+      <li>our distributed implementation of the same protocol.</li>
+
+    </ul>
+
+    <p class="text-gray-300">(Also, we plot the same for the serial implementation of PGHR <em>[x20]</em>’s protocol in libsnark, a common zkSNARK choice.)</p>
+
+    <p class="text-gray-300">Data from our experiments, reported in Fig. 6, shows that using more executors allows us to support larger instance sizes, in particular supporting <em>billions</em> of constraints with sufficiently many executors. Instances of this size are much larger than what was previously possible via serial techniques.</p>
+
+    <p class="text-gray-300">Next, we measure the running time of the setup and the prover on an increasing number of constraints and with an increasing number of executors. Data from our experiments, reported in Fig. 7, shows that (a) for a given number of executors, running times increase nearly linearly as expected, demonstrating <em>scalability</em> over a wide range of instance sizes; (b) for a given instance size, running times decrease nearly linearly as expected, demonstrating <em>parallelization</em> over a wide range of number of executors.</p>
+
+    <p class="text-gray-300">Finally, we again stress that we do not evaluate the zkSNARK verifier because it is a simple and fast algorithm that can be run even on a smartphone. Thus, we simply use libsnark’s implementation of the verifier <em>[x22]</em>, whose running time is <span class="math">\\approx 2\\,\\mathrm{ms}+0.5\\,\\textup{\\textup{\\textup{\\textup{\\textup{\\textup{\\textup{\\textup{\\textup{\\textup{\\textup{\\textup{\\textup{\\textup{\\textup{\\textup{\\textup{\\textup{\\textup{\\textup{\\textup{\\textup{\\textup{\\textup{\\textup{\\textup{\\textup{\\textup{\\textup{\\textup{\\textup{\\textup{\\textup{\\textup{\\textup{\\textup{\\textup{\\textup{\\textup{\\textup{\\textup{\\textup{\\textup{\\textup{\\textup{\\textup{\\textup{\\textup{\\textup{\\textup{\\textup{\\textup{\\textup{\\textup{\\textup{\\textup{\\textup{\\textup{\\textup{\\textup{\\textup{\\textup{\\textup{\\textup{\\textup{\\textup{\\textup{\\textup{\\textup{\\textup{\\textup }}}}}}}}}}}}}}}}}}}}}}}}}}}</span>}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}</p>
+
+    <h2 id="sec-27" class="text-2xl font-bold">10.2.2</h2>
+
+    <p class="text-gray-300">We separate our distributed implementation of Lag and FFT (used in the setup) and FFT (used in the prover). For the scalar field <span class="math">\\mathbb{F}</span>, we measure the running time, for an increasing instance size and increasing number of executors in the cluster. Data from our experiments, reported in Fig. 8, shows that our implementation behaves as desired: for a given number of executors, running times increase close to linearly in the instance size; also, for a given instance size, running times decrease close to linearly as the number of executors grow.</p>
+
+    <h4 id="sec-28" class="text-lg font-semibold mt-6">10.2.1 Field components: Lag and FFT</h4>
+
+    <p class="text-gray-300">We evaluate our distributed implementation of Lag (used in the setup) and FFT (used in the prover). For each of the elliptic-curve groups <span class="math">\\mathbb{G}_{1}</span> and <span class="math">\\mathbb{G}_{2}</span>, we measure the total running time, for increasing instance size and number of executors in the cluster. Data from our experiments, reported in Fig. 9, shows that our implementation behaves as desired: for a given number of executors, running times increase close to linearly in the instance size; also, for a given instance size, running times decrease close to linearly in the number of executors.</p>
+
+    <h4 id="sec-29" class="text-lg font-semibold mt-6">10.2.2 Group components: fixMSM and varMSM</h4>
+
+    <p class="text-gray-300">We evaluate our implementation of distributed algorithms for fixMSM (used in the setup) and varMSM (used in the prover). For each of the elliptic-curve groups <span class="math">\\mathbb{G}_{1}</span> and <span class="math">\\mathbb{G}_{2}</span>, we measure the total running time, for increasing instance size and number of executors in the cluster. Data from our experiments, reported in Fig. 9, shows that our implementation behaves as desired: for a given number of executors, running times increase close to linearly in the instance size; also, for a given instance size, running times decrease close to linearly in the number of executors.</p>
+
+    <h3 id="sec-30" class="text-xl font-semibold mt-8">10.3 Effectiveness of our techniques</h3>
+
+    <p class="text-gray-300">We ran experiments (32 and 64 executors for all feasible instances) comparing the performance of the setup and prover with two implementations: (1) the implementation that is part of DIZK, which has optimizations described in the design sections (Section 4, Section 5, Section 6); and (2) an implementation that does not employ these optimizations (e.g., uses skewjoin instead of our solution, and so on). Our data established that our techniques allow achieving instance sizes that are 10 times larger, at a performance that is 2-4 times faster in the setup and prover.</p>
+
+    <p class="text-gray-300">!<a href="img-3.jpeg">img-3.jpeg</a></p>
+
+    <p class="text-gray-300">!<a href="img-4.jpeg">img-4.jpeg</a> Figure 6: Largest instance size supported by libsnark's serial implementation of PGHR's protocol [PGHR13] and Groth's protocol [Gro16] vs. our distributed system.</p>
+
+    <p class="text-gray-300">!<a href="img-5.jpeg">img-5.jpeg</a> Figure 7: Setup and prover running times for different combinations of instance size and number of executors. Figure 9: Running times of fixMSM, varMSM over  <span class="math">\\mathbb{G}_1</span> ,  <span class="math">\\mathbb{G}_2</span>  for combinations of instance size and number of executors.</p>
+
+    <p class="text-gray-300">!<a href="img-6.jpeg">img-6.jpeg</a> Figure 8: Running times of Lag and FFT over  <span class="math">\\mathbb{F}</span>  for different combinations of instance size and number of executors.</p>
+
+    <p class="text-gray-300">!<a href="img-7.jpeg">img-7.jpeg</a></p>
+
+    <p class="text-gray-300">!<a href="img-8.jpeg">img-8.jpeg</a></p>
+
+    <p class="text-gray-300">!<a href="img-9.jpeg">img-9.jpeg</a></p>
+
+    <p class="text-gray-300">!<a href="img-10.jpeg">img-10.jpeg</a> (a) Constraints generation (c) Constraints generation Figure 10: Scalability of linear regression. Figure 11: Costs of some applications: number of constraints, time to generate constraints, and time to generate the witness. (Both times are for 64 executors.)</p>
+
+    <p class="text-gray-300">!<a href="img-11.jpeg">img-11.jpeg</a> (b) Witness generation (d) Witness generation</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Application</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Size</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Generate constraints</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Generate witness</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">matrix multiplication (of 700 × 700 matrices)</td>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+            <td class="px-3 py-2 border-b border-gray-700">685 M</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">12 s</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">62 s</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">covariance matrix (for 20K points in 100 dims)</td>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+            <td class="px-3 py-2 border-b border-gray-700">402 M</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">13 s</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">67 s</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">linear regression (for 20K points in 100 dims)</td>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+            <td class="px-3 py-2 border-b border-gray-700">404 M</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">18 s</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">77 s</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">2048 × 2048 image</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">blur</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">13.6 M</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">3 s</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">31 s</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+            <td class="px-3 py-2 border-b border-gray-700">crop</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">4.2 M</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1 s</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">34 s</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+            <td class="px-3 py-2 border-b border-gray-700">rotation</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">138 M</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">7 s</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">14.6 s</td>
+
+          </tr>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">11 Evaluation of applications</p>
+
+    <p class="text-gray-300">We evaluated the performance of constraint and witness generation for the applications described in Section 7.</p>
+
+    <p class="text-gray-300">Fig. 11 shows, for various instances of our applications, the number of constraints and the performance of constraint and witness generation. In all cases, witness generation is markedly more expensive than constraint generation due to data shuffling. Either way, both costs are insignificant when compared to the corresponding costs of the SNARK setup and prover. Hence, we did not try to optimize this performance further.</p>
+
+    <p class="text-gray-300">Fig. 10 shows the scaling behavior of constraint and witness generation for one application, linear regression. Figs. 10a and 10b show the time for constraint and witness generation when fixing the number of executors and increasing the instance size (as determined by the number of constraints); the graphs show that time scales nearly linearly, which means that the algorithm parallelizes well with respect to instance size. On the other hand, Figs. 10c and 10d show the time for constraint and witness generation when fixing the instance size and increasing the number of executors; the graphs show that the system scales well as the number of executors are increased (at some point, a fixed overhead dominates, so the time flattens out).</p>
+
+    <h2 id="sec-31" class="text-2xl font-bold">12 Related work</h2>
+
+    <h5 id="sec-32" class="text-base font-semibold mt-4">Optimization and implementation of proof systems.</h5>
+
+    <p class="text-gray-300">Recent years have seen beautiful works that optimize and implement information-theoretic and cryptographic proof systems. These proof systems enable a weak verifier (e.g., a mobile device) to outsource an expensive computation to a powerful prover (e.g., a cloud provider). For example, doubly-efficient interactive proofs for parallel computation <em>[x11]</em> have been optimized and implemented in software <em>[x10, x31, x32, x23]</em> and hardware <em>[WHG^{+}16, WJB^{+}17]</em>. Also, batch arguments based on Linear PCPs <em>[x18]</em> have attained remarkable efficiency <em>[x33, x34, SVP^{+}12, SBV^{+}13, x40, BFR^{+}13]</em>.</p>
+
+    <p class="text-gray-300">Some proof systems, such as zkSNARKs, also provide zero knowledge, which is important for applications <em>[x12, BCG^{+}14, WSR^{+}15, CFH^{+}15, x25, KMS^{+}16, x35, x26]</em>.</p>
+
+    <p class="text-gray-300">Approaches to construct zkSNARKs include using PCPs <em>[x36, x2, BBC^{+}17, x1]</em>, Linear PCPs <em>[x19, x24, BCG^{+}13, x16, x27, x28, x14, x15, x29, x30, x31]</em>, Other works relax the requirement that proof verification is cheap, aiming only at short proofs <em>[x22, x2, WTS^{+}18]</em>, and others. Other works relax the requirement that proof verification is cheap, aiming only at short proofs <em>[x23, x2]</em>.</p>
+
+    <p class="text-gray-300">The comparison between all of these approaches, and their various instantiations, is multi-faceted and lies beyond the scope of this work. We only mention that the zkSNARK considered in this work belongs to the second approach, and to the best of our knowledge achieves the smallest known proof length.</p>
+
+    <h5 id="sec-33" class="text-base font-semibold mt-4">Proof systems & distributed systems.</h5>
+
+    <p class="text-gray-300">While prior work does not distribute the prover’s computation across a cluster, some prior work studied how even monolithic provers can be used to prove correct execution of distributed computations. For example, the system Pantry <em>[BFR^{+}13]</em> transforms a proof system such as a batch argument or a zkSNARK into an interactive argument for outsourcing MapReduce computations (though it does not preserve zero knowledge). Also, the framework of Proof-Carrying Data <em>[x17, x18]</em> allows reasoning, and proving the correctness of, certain distributed computations via the technique of recursive proof composition of SNARKs. This technique can be used to attain zkSNARKs for MapReduce <em>[x13]</em>, and also for “breaking up” generic computation into certain sub-computations while proving each of these correct <em>[x2, CFH^{+}15]</em>.</p>
+
+    <p class="text-gray-300">Our work is <em>complementary to the above approaches</em>: prior work can leverage our distributed zkSNARK (instead of a “monolithic” one) so to enlarge the instance sizes that it can feasibly support. For instance, Pantry can use our distributed zkSNARK as the starting point of their transformation.</p>
+
+    <h4 id="sec-34" class="text-lg font-semibold mt-6">Trusted hardware.</h4>
+
+    <p class="text-gray-300">If one assumes trusted hardware, achieving “zero knowledge proofs”, even ones that are short and cheap to verify, is easier. For example, trusted hardware with attested execution (e.g. Intel SGX) suffices <em>[TZL^{+}17, x21]</em>. DIZK does not assume trusted hardware, and thus protects against a wider range of attackers at the prover than these approaches.</p>
+
+    <h2 id="sec-35" class="text-2xl font-bold">13 Limitations and the road ahead</h2>
+
+    <p class="text-gray-300">While we are excited about scaling to larger circuits, zkSNARKs continue to suffer from important limitations.</p>
+
+    <p class="text-gray-300">First, even if DIZK enables using zkSNARKs for much larger circuits than what was previously possible, doing so is still very expensive (we resort to using a compute cluster!) and so scaling to even larger sizes (say, hundreds of billions of gates) requires resources that may even go beyond those of big clusters. Making zkSNARKs more efficient overall (across <em>all</em> circuit sizes) remains a challenging open problem.</p>
+
+    <p class="text-gray-300">Second, the zkSNARKs that we study require a trusted party to run a <em>setup</em> procedure that uses secret randomness to sample certain public parameters. This setup is needed only once per circuit, but its time and space costs also grow with circuit size. While DIZK provides a distributed setup (in addition to the same for the prover), performing this setup in practice is challenging due to many real-world security concerns. Currently-deployed zkSNARKs have relied on Secure Multi-party Computation “ceremonies” for this <em>[BCG^{+}15, x1]</em>, and it remains to be studied if those techniques can be distributed by building on our work, perhaps by considering multiple clusters each owned by a party in the ceremony.</p>
+
+    <p class="text-gray-300">Our outlook is optimistic. The area of efficient proof systems has seen tremendous progress <em>[x34]</em>, not only in terms of real-world deployment <em>[x30]</em> but also for zkSNARK constructions that, while still somewhat expensive, merely rely on public randomness <em>[x1, BBC^{+}17, x1]</em>. (No setup is needed!)</p>
+
+    <h2 id="sec-36" class="text-2xl font-bold">14 Conclusion</h2>
+
+    <p class="text-gray-300">We design and build DIZK, a distributed zkSNARK system. While prior systems only support circuits of up to 10-20 million gates (at a cost of <span class="math">1\\text{\\,}\\mathrm{m}\\mathrm{s}</span> per gate in the prover), DIZK leverages the combined CPU and memory resources in a cluster to support circuits of up to billions of gates (at a cost of <span class="math">10\\text{\\,}\\mathrm{\\SIUnitSymbolMicro s}</span> per gate in the prover). This is a qualitative leap forward in the capabilities zkSNARKs, a recent cryptographic tool that has garnered much academic and industrial interest.</p>
+
+    <p class="text-gray-300">##</p>
+
+    <p class="text-gray-300">References</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>[AHIV17] Scott Ames, Carmit Hazay, Yuval Ishai, and Muthuramakrishnan Venkitasubramaniam. Ligero: Lightweight sublinear arguments without a trusted setup. In Proceedings of the 24th ACM Conference on Computer and Communications Security, CCS ’17, pages 2087–2104, 2017.</li>
+
+      <li>[Apa17] Apache Spark, 2017. http://spark.apache.org/.</li>
+
+      <li>[BBB^{+}18] Benedikt Bünz, Jonathan Bootle, Dan Boneh, Andrew Poelstra, Pieter Wuille, and Greg Maxwell. Bulletproofs: Short proofs for confidential transactions and more. In Proceedings of the 39th IEEE Symposium on Security and Privacy, S&P ’18, pages 319–338, 2018.</li>
+
+      <li>[BBC^{+}17] Eli Ben-Sasson, Iddo Bentov, Alessandro Chiesa, Ariel Gabizon, Daniel Genkin, Matan Hamilis, Evgenya Pergament, Michael Riabzev, Mark Silberstein, Eran Tromer, and Madars Virza. Computational integrity with a public random string from quasi-linear PCPs. In Proceedings of the 36th Annual International Conference on Theory and Application of Cryptographic Techniques, EUROCRYPT ’17, pages 551–579, 2017.</li>
+
+      <li>[BBHR18] Eli Ben-Sasson, Iddo Bentov, Yinon Horesh, and Michael Riabzev. Scalable, transparent, and post-quantum secure computational integrity. Cryptology ePrint Archive, Report 2018/046, 2018.</li>
+
+      <li>[BCCT12] Nir Bitansky, Ran Canetti, Alessandro Chiesa, and Eran Tromer. From extractable collision resistance to succinct non-interactive arguments of knowledge, and back again. In Proceedings of the 3rd Innovations in Theoretical Computer Science Conference, ITCS ’12, pages 326–349, 2012.</li>
+
+      <li>[BCG^{+}13] Eli Ben-Sasson, Alessandro Chiesa, Daniel Genkin, Eran Tromer, and Madars Virza. SNARKs for C: Verifying program executions succinctly and in zero knowledge. In Proceedings of the 33rd Annual International Cryptology Conference, CRYPTO ’13, pages 90–108, 2013.</li>
+
+      <li>[BCG^{+}14] Eli Ben-Sasson, Alessandro Chiesa, Christina Garman, Matthew Green, Ian Miers, Eran Tromer, and Madars Virza. Zerocash: Decentralized anonymous payments from Bitcoin. In Proceedings of the 2014 IEEE Symposium on Security and Privacy, SP ’14, pages 459–474, 2014.</li>
+
+      <li>[BCG^{+}15] Eli Ben-Sasson, Alessandro Chiesa, Matthew Green, Eran Tromer, and Madars Virza. Secure sampling of public parameters for succinct zero knowledge proofs. In Proceedings of the 36th IEEE Symposium on Security and Privacy, S&P ’15, pages 287–304, 2015.</li>
+
+      <li>[BCI^{+}13] Nir Bitansky, Alessandro Chiesa, Yuval Ishai, Rafail Ostrovsky, and Omer Paneth. Succinct non-interactive arguments via linear interactive proofs. In Proceedings of the 10th Theory of Cryptography Conference, TCC ’13, pages 315–333, 2013.</li>
+
+      <li>[BCS16] Eli Ben-Sasson, Alessandro Chiesa, and Nicholas Spooner. Interactive oracle proofs. In Proceedings of the 14th Theory of Cryptography Conference, TCC ’16-B, pages 31–60, 2016.</li>
+
+      <li>[BCTV14a] Eli Ben-Sasson, Alessandro Chiesa, Eran Tromer, and Madars Virza. Scalable zero knowledge via cycles of elliptic curves. In Proceedings of the 34th Annual International Cryptology Conference, CRYPTO ’14, pages 276–294, 2014. Extended version at http://eprint.iacr.org/2014/595.</li>
+
+      <li>[BCTV14b] Eli Ben-Sasson, Alessandro Chiesa, Eran Tromer, and Madars Virza. Succinct non-interactive zero knowledge for a von Neumann architecture. In Proceedings of the 23rd USENIX Security Symposium, Security ’14, pages 781–796, 2014. Extended version at http://eprint.iacr.org/2013/879.</li>
+
+      <li>[BDLO12] Daniel J. Bernstein, Jeroen Doumen, Tanja Lange, and Jan-Jaap Oosterwijk. Faster batch forgery identification. In Proceedings of the 13th International Conference on Cryptology in India, INDOCRYPT ’12, pages 454–473, 2012.</li>
+
+      <li>[BFR^{+}13] Benjamin Braun, Ariel J. Feldman, Zuocheng Ren, Srinath Setty, Andrew J. Blumberg, and Michael Walfish. Verifying computations with state. In Proceedings of the 25th ACM Symposium on Operating Systems Principles, SOSP ’13, pages 341–357, 2013.</li>
+
+    </ul>
+
+    <p class="text-gray-300">-</p>
+
+    <p class="text-gray-300">[BGG16] Sean Bowe, Ariel Gabizon, and Matthew Green. A multi-party protocol for constructing the public parameters of the Pinocchio zk-SNARK. https://github.com/zcash/mpc/blob/master/whitepaper.pdf, 2016.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>[BGMW93] Ernest F. Brickell, Daniel M. Gordon, Kevin S. McCurley, and David B. Wilson. Fast exponentiation with precomputation. In Proceedings of the 11th Annual International Conference on Theory and Application of Cryptographic Techniques, EUROCRYPT ’92, pages 200–207, 1993.</li>
+
+      <li>[Bis06] Christopher M. Bishop. Pattern recognition and machine learning. Springer-Verlag New York, 2006.</li>
+
+      <li>[BN06] Paulo S. L. M. Barreto and Michael Naehrig. Pairing-friendly elliptic curves of prime order. In Proceedings of the 12th International Conference on Selected Areas in Cryptography, SAC’05, pages 319–331, 2006.</li>
+
+      <li>[BT04] Jean-Paul Berrut and Lloyd N. Trefethen. Barycentric Lagrange interpolation. SIAM Review, 46(3):501–517, 2004.</li>
+
+      <li>[Can69] Lynn E Cannon. A cellular computer to implement the Kalman filter algorithm. Technical report, DTIC Document, 1969.</li>
+
+      <li>[CFH^{+}15] Craig Costello, Cédric Fournet, Jon Howell, Markulf Kohlweiss, Benjamin Kreuter, Michael Naehrig, Bryan Parno, and Samee Zahur. Geppetto: Versatile verifiable computation. In Proceedings of the 36th IEEE Symposium on Security and Privacy, S&P ’15, pages 250–273, 2015.</li>
+
+      <li>[Chr17] Chronicled, 2017. https://www.chronicled.com/.</li>
+
+      <li>[CL03] Chin-Chen Chang and Der-Chyuan Lou. Fast parallel computation of multi-exponentiation for public key cryptosystems. In Proceedings of the 4th International Conference on Parallel and Distributed Computing, Applications and Technologies, PDCAT ’2003, pages 955–958, 2003.</li>
+
+      <li>[CMT12] Graham Cormode, Michael Mitzenmacher, and Justin Thaler. Practical verified computation with streaming interactive proofs. In Proceedings of the 4th Symposium on Innovations in Theoretical Computer Science, ITCS ’12, pages 90–112, 2012.</li>
+
+      <li>[CT65] James W. Cooley and John W. Tukey. An algorithm for the machine calculation of complex Fourier series. Mathematics of Computation, 19:297–301, 1965.</li>
+
+      <li>[CT10] Alessandro Chiesa and Eran Tromer. Proof-carrying data and hearsay arguments from signature cards. In Proceedings of the 1st Symposium on Innovations in Computer Science, ICS ’10, pages 310–331, 2010.</li>
+
+      <li>[CT12] Alessandro Chiesa and Eran Tromer. Proof-carrying data: Secure computation on untrusted platforms (high-level description). The Next Wave: The National Security Agency’s review of emerging technologies, 19(2):40–46, 2012.</li>
+
+      <li>[CTV15] Alessandro Chiesa, Eran Tromer, and Madars Virza. Cluster computing in zero knowledge. In Proceedings of the 34th Annual International Conference on Theory and Application of Cryptographic Techniques, EUROCRYPT ’15, pages 371–403, 2015.</li>
+
+      <li>[de 94] Peter de Rooij. Efficient exponentiation using precomputation and vector addition chains. In Proceedings of the 13th Annual International Conference on Theory and Application of Cryptographic Techniques, EUROCRYPT ’94, pages 389–399, 1994.</li>
+
+      <li>[DFGK14] George Danezis, Cedric Fournet, Jens Groth, and Markulf Kohlweiss. Square span programs with applications to succinct NIZK arguments. In Proceedings of the 20th International Conference on the Theory and Application of Cryptology and Information Security, ASIACRYPT ’14, pages 532–550, 2014.</li>
+
+      <li>[DFKP13] George Danezis, Cedric Fournet, Markulf Kohlweiss, and Bryan Parno. Pinocchio Coin: building Zerocoin from a succinct pairing-based proof system. In Proceedings of the 2013 Workshop on Language Support for Privacy Enhancing Technologies, PETShop ’13, 2013.</li>
+
+    </ul>
+
+    <p class="text-gray-300">[DFKP16] Antoine Delignat-Lavaud, Cédric Fournet, Markulf Kohlweiss, and Bryan Parno. Cinderella: Turning shabby X.509 certificates into elegant anonymous credentials with the magic of verifiable computation. In Proceedings of the 37th IEEE Symposium on Security and Privacy, S&P ’16, pages 235–254, 2016.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>[DG04] Jeffrey Dean and Sanjay Ghemawat. MapReduce: Simplified data processing on large clusters. In Proceedings of the 6th Symposium on Operating System Design and Implementation, OSDI ’04, pages 137–149, 2004.</li>
+
+      <li>[GGPR13] Rosario Gennaro, Craig Gentry, Bryan Parno, and Mariana Raykova. Quadratic span programs and succinct NIZKs without PCPs. In Proceedings of the 32nd Annual International Conference on Theory and Application of Cryptographic Techniques, EUROCRYPT ’13, pages 626–645, 2013.</li>
+
+      <li>[GKR15] Shafi Goldwasser, Yael Tauman Kalai, and Guy N. Rothblum. Delegating computation: Interactive proofs for muggles. Journal of the ACM, 62(4):27:1–27:64, 2015.</li>
+
+      <li>[GM17] Jens Groth and Mary Maller. Snarky signatures: Minimal signatures of knowledge from simulation-extractable SNARKs. In Proceedings of the 37th Annual International Cryptology Conference, CRYPTO ’17, pages 581–612, 2017.</li>
+
+      <li>[GMO16] Irene Giacomelli, Jesper Madsen, and Claudio Orlandi. ZKBoo: Faster zero-knowledge for boolean circuits. In Proceedings of the 25th USENIX Security Symposium, Security ’16, pages 1069–1083, 2016.</li>
+
+      <li>[Gro10] Jens Groth. Short pairing-based non-interactive zero-knowledge arguments. In Proceedings of the 16th International Conference on the Theory and Application of Cryptology and Information Security, ASIACRYPT ’10, pages 321–340, 2010.</li>
+
+      <li>[Gro16] Jens Groth. On the size of pairing-based non-interactive arguments. In Proceedings of the 35th Annual International Conference on Theory and Application of Cryptographic Techniques, EUROCRYPT ’16, pages 305–326, 2016.</li>
+
+      <li>[GW11] Craig Gentry and Daniel Wichs. Separating succinct non-interactive arguments from all falsifiable assumptions. In Proceedings of the 43rd Annual ACM Symposium on Theory of Computing, STOC ’11, pages 99–108, 2011.</li>
+
+      <li>[Had17] Apache Hadoop, 2017. http://hadoop.apache.org/.</li>
+
+      <li>[IBY^{+}07] Michael Isard, Mihai Budiu, Yuan Yu, Andrew Birrell, and Dennis Fetterly. Dryad: distributed data-parallel programs from sequential building blocks. In Proceedings of the 2007 EuroSys Conference, EuroSys ’07, pages 59–72, 2007.</li>
+
+      <li>[IKO07] Yuval Ishai, Eyal Kushilevitz, and Rafail Ostrovsky. Efficient arguments without short PCPs. In Proceedings of the Twenty-Second Annual IEEE Conference on Computational Complexity, CCC ’07, pages 278–291, 2007.</li>
+
+      <li>[JKS16] Ari Juels, Ahmed E. Kosba, and Elaine Shi. The ring of Gyges: Investigating the future of criminal smart contracts. In Proceedings of the 2016 ACM SIGSAC Conference on Computer and Communications Security, CCS ’16, pages 283–295, 2016.</li>
+
+      <li>[JPM17] J.P. Morgan Quorum, 2017. https://www.jpmorgan.com/country/US/EN/Quorum.</li>
+
+      <li>[KMS^{+}16] Ahmed E. Kosba, Andrew Miller, Elaine Shi, Zikai Wen, and Charalampos Papamanthou. Hawk: The blockchain model of cryptography and privacy-preserving smart contracts. In Proceedings of the 2016 IEEE Symposium on Security and Privacy, SP ’16, pages 839–858, 2016.</li>
+
+      <li>[KPP^{+}14] Ahmed E. Kosba, Dimitrios Papadopoulos, Charalampos Papamanthou, Mahmoud F. Sayed, Elaine Shi, and Nikos Triandopoulos. TRUESET: Faster verifiable set computations. In Proceedings of the 23rd USENIX Security Symposium, Security ’14, pages 765–780, 2014.</li>
+
+      <li>[KPS18] Ahmed E. Kosba, Charalampos Papamanthou, and Elaine Shi. xJsnark: A framework for efficient verifiable computation. In Proceedings of the 39th IEEE Symposium on Security and Privacy, S&P ’18, pages 543–560, 2018.</li>
+
+    </ul>
+
+    <p class="text-gray-300">[Kut] Ivan Kutskir. Fastest Gaussian blur (in linear time). http://blog.ivank.net/fastest-gaussian-blur.html.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>[LeC98] Yann LeCun. The MNIST database of handwritten digits, 1998. http://yann.lecun.com/exdb/mnist/.</li>
+
+      <li>[Lip12] Helger Lipmaa. Progression-free sets and sublinear pairing-based non-interactive zero-knowledge arguments. In Proceedings of the 9th Theory of Cryptography Conference on Theory of Cryptography, TCC ’12, pages 169–189, 2012.</li>
+
+      <li>[LRF97] Hyuk-Jae Lee, James P. Robertson, and José A. B. Fortes. Generalized Cannon’s algorithm for parallel matrix multiplication. In Proceedings of the 11th International Conference on Supercomputing, ICS ’97, pages 44–51, 1997.</li>
+
+      <li>[Mic00] Silvio Micali. Computationally sound proofs. SIAM Journal on Computing, 30(4):1253–1298, 2000. Preliminary version appeared in FOCS ’94.</li>
+
+      <li>[NT16] Assa Naveh and Eran Tromer. Photoproof: Cryptographic image authentication for any set of permissible transformations. In Proceedings of the 2016 IEEE Symposium on Security and Privacy, SP ’16, pages 255–271, 2016.</li>
+
+      <li>[Pae86] Alan W. Paeth. A fast algorithm for general raster rotation. In Proceedings on Graphics Interface ’86/Vision Interface ’86, pages 77–81, 1986.</li>
+
+      <li>[PGHR13] Brian Parno, Craig Gentry, Jon Howell, and Mariana Raykova. Pinocchio: Nearly practical verifiable computation. In Proceedings of the 34th IEEE Symposium on Security and Privacy, Oakland ’13, pages 238–252, 2013.</li>
+
+      <li>[Pip76] Nicholas Pippenger. On the evaluation of powers and related problems. In Proceedings of the 17th Annual Symposium on Foundations of Computer Science, FOCS ’76, pages 258–263, 1976.</li>
+
+      <li>[Pip80] Nicholas Pippenger. On the evaluation of powers and monomials. SIAM Journal on Computing, 9(2):230–250, 1980.</li>
+
+      <li>[PST17] Rafael Pass, Elaine Shi, and Florian Tramèr. Formal abstractions for attested execution secure processors. In Proceedings of the 36th Annual International Conference on Theory and Application of Cryptographic Techniques, EUROCRYPT ’17, pages 260–289, 2017.</li>
+
+      <li>[QED17] QED-it, 2017. http://qed-it.com/.</li>
+
+      <li>[SBV^{+}13] Srinath Setty, Benjamin Braun, Victor Vu, Andrew J. Blumberg, Bryan Parno, and Michael Walfish. Resolving the conflict between generality and plausibility in verified computation. In Proceedings of the 8th EuoroSys Conference, EuroSys ’13, pages 71–84, 2013.</li>
+
+      <li>[SBW11] Srinath Setty, Andrew J. Blumberg, and Michael Walfish. Toward practical and unconditional verification of remote computations. In Proceedings of the 13th USENIX Conference on Hot Topics in Operating Systems, HotOS ’11, pages 29–29, 2011.</li>
+
+      <li>[SCI17] SCIPR Lab. libsnark: a C++ library for zkSNARK proofs, 2017. https://github.com/scipr-lab/libsnark.</li>
+
+      <li>[ske17] skewjoin, 2017. https://github.com/tresata/spark-skewjoin.</li>
+
+      <li>[SMBW12] Srinath Setty, Michael McPherson, Andrew J. Blumberg, and Michael Walfish. Making argument systems for outsourced computation practical (sometimes). In Proceedings of the 2012 Network and Distributed System Security Symposium, NDSS ’12, 2012.</li>
+
+      <li>[Str64] Ernst G. Straus. Addition chains of vectors (problem 5125). The American Mathematical Monthly, 71(7):806–808, 1964.</li>
+
+    </ul>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>[SVP^{+}12] Srinath Setty, Victor Vu, Nikhil Panpalia, Benjamin Braun, Andrew J. Blumberg, and Michael Walfish. Taking proof-based verified computation a few steps closer to practicality. In Proceedings of the 21st USENIX Security Symposium, Security ’12, pages 253–268, 2012.</li>
+
+      <li>[Sze11] Tsz-Wo Sze. Schönhage–Strassen algorithm with mapreduce for multiplying terabit integers. In Proceedings of the 2011 International Workshop on Symbolic-Numeric Computation, SNC ’11, pages 54–62, 2011.</li>
+
+      <li>[Tha13] Justin Thaler. Time-optimal interactive proofs for circuit evaluation. In Proceedings of the 33rd Annual International Cryptology Conference, CRYPTO ’13, pages 71–89, 2013.</li>
+
+      <li>[Tha15] Justin Thaler. A note on the GKR protocol. http://people.cs.georgetown.edu/jthaler/GKRNote.pdf, 2015.</li>
+
+      <li>[TRMP12] Justin Thaler, Mike Roberts, Michael Mitzenmacher, and Hanspeter Pfister. Verifiable computation with massively parallel interactive proofs. In Proceedings of the 4th USENIX Workshop on Hot Topics in Cloud Computing, HotCloud ’12, 2012.</li>
+
+      <li>[TZL^{+}17] Florian Tramèr, Fan Zhang, Huang Lin, Jean-Pierre Hubaux, Ari Juels, and Elaine Shi. Sealed-glass proofs: Using transparent enclaves to prove and sell knowledge. In Proceedings of the 2017 IEEE European Symposium on Security and Privacy, EuroS&P ’17, pages 19–34, 2017.</li>
+
+      <li>[vG13] Joachim von zur Gathen and Jürgen Gerhard. Modern Computer Algebra. Cambridge University Press, 3rd edition, 2013.</li>
+
+      <li>[VSBW13] Victor Vu, Srinath Setty, Andrew J. Blumberg, and Michael Walfish. A hybrid architecture for interactive verifiable computation. In Proceedings of the 34th IEEE Symposium on Security and Privacy, Oakland ’13, pages 223–237, 2013.</li>
+
+      <li>[vW97] Robert A. van de Geijn and Jerrell Watts. SUMMA: scalable universal matrix multiplication algorithm. Concurrency - Practice and Experience, 9(4):255–274, 1997.</li>
+
+      <li>[WB15] Michael Walfish and Andrew J. Blumberg. Verifying computations without reexecuting them. Communications of the ACM, 58(2):74–84, 2015.</li>
+
+      <li>[WHG^{+}16] Riad S. Wahby, Max Howald, Siddharth J. Garg, Abhi Shelat, and Michael Walfish. Verifiable ASICs. In Proceedings of the 37th IEEE Symposium on Security and Privacy, S&P ’16, pages 759–778, 2016.</li>
+
+      <li>[WJB^{+}17] Riad S. Wahby, Ye Ji, Andrew J. Blumberg, Abhi Shelat, Justin Thaler, Michael Walfish, and Thomas Wies. Full accounting for verifiable outsourcing. Cryptology ePrint Archive, Report 2017/242, 2017.</li>
+
+      <li>[WSR^{+}15] Riad S. Wahby, Srinath Setty, Zuocheng Ren, Andrew J. Blumberg, and Michael Walfish. Efficient RAM and control flow in verifiable outsourced computation. In Proceedings of the 22nd Network and Distributed System Security Symposium, NDSS ’15, 2015.</li>
+
+      <li>[WTS^{+}18] Riad S. Wahby, Ioanna Tzialla, Abhi Shelat, Justin Thaler, and Michael Walfish. Doubly-efficient zkSNARKs without trusted setup. In Proceedings of the 39th IEEE Symposium on Security and Privacy, S&P ’18, pages 975–992, 2018.</li>
+
+      <li>[ZCa17] ZCash Company, 2017. https://z.cash/.</li>
+
+      <li>[ZGK^{+}17] Yupeng Zhang, Daniel Genkin, Jonathan Katz, Dimitrios Papadopoulos, and Charalampos Papamanthou. vSQL: Verifying arbitrary SQL queries over dynamic outsourced databases. In Proceedings of the 38th IEEE Symposium on Security and Privacy, S&P ’17, pages 863–880, 2017.</li>
+
+      <li>[ZGK^{+}18] Yupeng Zhang, Daniel Genkin, Jonathan Katz, Dimitrios Papadopoulos, and Charalampos Papamanthou. vRAM: Faster verifiable RAM with program-independent preprocessing. In Proceedings of the 39th IEEE Symposium on Security and Privacy, S&P ’18, pages 203–220, 2018.</li>
+
+      <li>[ZPK14] Yupeng Zhang, Charalampos Papamanthou, and Jonathan Katz. Alitheia: Towards practical verifiable graph processing. In Proceedings of the 21st ACM Conference on Computer and Communications Security, CCS ’14, pages 856–867, 2014.</li>
+
+    </ul>`;
+---
+
+<BaseLayout title="DIZK: A Distributed Zero Knowledge Proof System (2018/691)">
+  <article class="max-w-4xl mx-auto article-prose">
+    <nav class="mb-8">
+      <a href="/papers" class="text-blue-400 hover:text-blue-300">
+        &larr; Back to Papers
+      </a>
+    </nav>
+
+    <header class="mb-12">
+      <h1 class="text-3xl font-bold mb-4"
+        set:html={TITLE_HTML} />
+      <p class="text-gray-400 mb-2"
+        set:html={AUTHORS_HTML} />
+      <p class="text-gray-500 text-sm mb-4">
+        2018 &middot; eprint 2018/691
+      </p>
+      <div class="flex gap-4 text-sm">
+        <a
+          href={EPRINT_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          class="text-blue-400 hover:text-blue-300"
+        >
+          Paper (eprint) &rarr;
+        </a>
+      </div>
+      <p class="mt-4 text-xs text-gray-500">
+        All content below belongs to the original authors. This page
+        reproduces the paper for educational purposes. Always
+        <a
+          href={EPRINT_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          class="text-blue-400 hover:text-blue-300"
+        >cite the original</a>.
+      </p>
+      <p class="mt-1 text-xs text-gray-600">
+        Converted with: {CRAWLER} &middot; {CONVERTED_DATE}
+      </p>
+    </header>
+
+    <Fragment set:html={CONTENT} />
+
+  </article>
+</BaseLayout>

@@ -1,0 +1,1675 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+
+const EPRINT_URL = 'https://eprint.iacr.org/2024/1964';
+const CRAWLER = 'mistral';
+const CONVERTED_DATE = '2026-02-16';
+const TITLE_HTML = 'Lova: Lattice-Based Folding Scheme from Unstructured Lattices';
+const AUTHORS_HTML = 'Giacomo Fenzi, Christian Knabenhans, Ngoc Khanh Nguyen, Duc Tu Pham';
+
+const CONTENT = `    <p class="text-gray-300">Giacomo Fenzi giacomo.fenzi@epfl.ch EPFL Christian Knabenhans christian.knabehans@epfl.ch EPFL Ngoc Khanh Nguyen ngoc_khanh.nguyen@kcl.ac.uk King's College London Duc Tu Pham pdtu01@gmail.com ENS Paris</p>
+
+    <p class="text-gray-300">Abstract. Folding schemes (Kothapalli et al., CRYPTO 2022) are a conceptually simple, yet powerful cryptographic primitive that can be used as a building block to realise incrementally verifiable computation (IVC) with low recursive overhead without general-purpose non-interactive succinct arguments of knowledge (SNARK). Most folding schemes known rely on the hardness of the discrete logarithm problem, and thus are both not quantum-resistant and operate over large prime fields. Existing post-quantum folding schemes (Boneh, Chen, ePrint 2024/257) based on lattice assumptions instead are secure under structured lattice assumptions, such as the Module Short Integer Solution Assumption (MSIS), which also binds them to relatively complex arithmetic. In contrast, we construct Lova, the first folding scheme whose security relies on the (unstructured) SIS assumption. We provide a Rust implementation of Lova, which makes only use of arithmetic in hardware-friendly power-of-two moduli. Crucially, this avoids the need of implementing and performing any finite field arithmetic. At the core of our results lies a new exact Euclidean norm proof which might be of independent interest.</p>
+
+    <p class="text-gray-300">Incrementally verifiable computation [Val08] (IVC) is a cryptographic primitive that allows a long (possibly infinite) computation to be run, such that correctness of the state of the computation can be efficiently verified at any point. IVC and its generalisation, proof-carrying data [CT10] (PCD), have found numerous applications in succinct blockchains [BMRS20; BGH19; Mina], verifiable delay functions [BBBF18; KMT22], SNARKs for machine computations [BCTV14], and more.</p>
+
+    <p class="text-gray-300">Originally, IVC and PCD were built on recursive SNARKs [BCCT13; BCTV14; Val08] which prove that: (i) the current computation step was executed correctly, and (ii) there exists a proof that the computation was performed correctly for all previous steps up to that point. This approach, however, suffers from several restrictions on the choice of the underlying SNARKs, making the approach rather impractical. More recent constructions of IVC and PCD were proposed from</p>
+
+    <p class="text-gray-300">so-called folding and (split-)accumulation schemes <em>[x1, BCL+21, x2, x12, x13]</em>. Informally, a folding scheme “folds” several instances of a certain relation into a single instance, so that correctness of the folded instance implies correctness of all original instances. Until recently, folding (aka accumulation) schemes are instantiated using Pedersen commitments, and their security holds in the random oracle model under the discrete logarithm assumption. Consequently, all the constructions are currently exposed to efficient quantum attacks <em>[x20]</em>.</p>
+
+    <p class="text-gray-300">Given the recent announcement of the US National Institute of Standardisation and Technology (NIST) on the post-quantum standardisation effort <em>[x17]</em>, it is becoming more and more likely that lattices will form the future foundation of public-key cryptography. Hence, a natural question arises as to whether folding schemes can be efficiently realised from lattice-based assumptions.</p>
+
+    <h3 id="sec-3" class="text-xl font-semibold mt-8">1.1 Our Results</h3>
+
+    <p class="text-gray-300">In this paper, we present Lova, the first folding scheme based on unstructured lattice assumptions, i.e. the Short Integer Solution (SIS) assumption. Our construction brings the following benefits over relying on more structured assumptions, such as Module-SIS <em>[x16]</em>. It allows for much simpler (yet efficient) instantiations of the folding scheme, without implementing polynomial ring arithmetic and requiring NTT-friendly prime moduli while relying on a more established computational assumption.</p>
+
+    <p class="text-gray-300">Our starting point is a generic construction of a folding scheme from Nova <em>[x12]</em>, which requires an additively homomorphic compressing commitment scheme <span class="math">\\mathsf{Com}</span>. The rough intuition can be described as follows; the folding scheme focuses on “commit-and-prove”-type relations:</p>
+
+    <p class="text-gray-300"><span class="math">\\mathsf{R}:=\\left\\{\\left((x,t),(w,r)\\right):(x,w)\\in R\\wedge t=\\mathsf{Com}(w;r)\\right\\},</span></p>
+
+    <p class="text-gray-300">where <span class="math">\\mathsf{R}</span> is a binary <span class="math">\\mathsf{NP}</span> relation. Further, given two valid instances <span class="math">(\\mathtt{x}_{0},\\mathtt{w}_{0})</span> and <span class="math">(\\mathtt{x}_{1},\\mathtt{w}_{1})\\in\\mathsf{R}</span>, the folded instance <span class="math">(\\mathtt{x}^{<em>}:=(x^{</em>},t^{<em>}),\\mathtt{w}^{</em>}:=(w^{<em>},r^{</em>}))\\in\\mathsf{R}</span> is constructed by taking a linear combination of <span class="math">(\\mathtt{x}_{0},\\mathtt{w}_{0})</span> and <span class="math">(\\mathtt{x}_{1},\\mathtt{w}_{1})</span> with challenges generated by the verifier, or in the non-interactive case, output values of the random oracle. Thus, one could naively obtain a lattice-based folding scheme by instantiating <span class="math">\\mathsf{Com}</span> with the folklore Ajtai commitment scheme <em>[x1]</em>.</p>
+
+    <p class="text-gray-300">The resulting construction, unfortunately, comes with a major efficiency drawback. Indeed, Ajtai commitments are binding only with respect to short message and randomness vectors. This limitation becomes particularly problematic because the norm of the folded witness <span class="math">\\mathtt{w}^{*}</span> increases after each folding step. The consequences are twofold. First, a maximal number of folding steps must be known ahead of setting the lattice parameters. This is contradictory to the concept of IVC, where we do consider long, and possibly infinite, computations.</p>
+
+    <p class="text-gray-300">Second, the extracted message <span class="math">w^{<em>}</span> may not be a valid witness for <span class="math">x^{</em>}</span> with respect to the relation R, due to slack and other related norm growth problems <em>[x1, x2, x3]</em>. In this work, we incorporate two main techniques to circumvent these limitations.</p>
+
+    <p class="text-gray-300">Decompose-and-fold. First, we apply the (folklore by now) “decompose-and-fold” paradigm <em>[x13, x4, x5]</em> which allows us to control the norm growth during an honest execution. Intuitively, given a witness <span class="math">\\mathbb{w}_{i}</span> of norm at most <span class="math">\\beta</span>, where <span class="math">i\\in\\{0,1\\}</span>, the prover starts by decomposing it (usually w.r.t. some decomposition base <span class="math">b</span>) into many intermediate witnesses <span class="math">\\mathbb{w}_{i,1},\\ldots,\\mathbb{w}_{i,k}</span>, where each <span class="math">\\mathbb{w}_{i,j}</span> has much smaller norm than <span class="math">\\mathbb{w}_{i}</span>. Afterwards, the prover folds all the <span class="math">2k</span> intermediate witnesses <span class="math">(\\mathbb{w}_{i,j})_{i\\in\\{0,1\\},j\\in[k]}</span> into the final witness <span class="math">\\mathbb{w}^{<em>}</span>. By picking appropriate parameters <span class="math">b</span> and <span class="math">\\beta</span>, one can ensure that norm of the folded witness <span class="math">\\mathbb{w}^{</em>}</span> is also bounded by <span class="math">\\beta</span>; thus no norm growth occurs when following the protocol honestly.</p>
+
+    <p class="text-gray-300">Exact Euclidean norm proof. The second component is a new exact Euclidean norm proof. This ingredient ensures that no slack and stretch occurs in the knowledge soundness/extractability argument. Combined with the decompose-and-fold approach, this enables us to build a lattice-based folding scheme, where the number of folding steps is independent of the instantiated lattice parameters. We highlight that our Euclidean norm proof could be of independent interest, and may be applied in the context of lattice-based succinct arguments with fast verification, e.g., in the recent polynomial commitment scheme by Cini et al. <em>[x6]</em>.</p>
+
+    <p class="text-gray-300">To showcase the simplicity and practicality of our folding scheme, we provide a concrete instantiation and a proof-of-concept implementation. The Lova protocol is relatively simple and relies on unstructured assumptions, which makes it particularly easy to implement and straightforward to parallelize. Both our prover and verifier mostly perform linear algebra operations (especially matrix-matrix multiplication with bounded-norm entries), and we do not require more complex operations that appear in other lattice-based constructions (e.g., number-theoretic transforms for polynomial arithmetic, or sumcheck-style computations). In addition, we are able to choose the lattice modulus to be a hardware-friendly power-of-two (<span class="math">q=2^{64}</span> in our evaluation), which eschews modular arithmetic altogether and reduces to standard integer arithmetic.</p>
+
+    <h3 id="sec-4" class="text-xl font-semibold mt-8">1.2 Technical Overview</h3>
+
+    <p class="text-gray-300">We provide a brief overview of our techniques.</p>
+
+    <h4 id="sec-5" class="text-lg font-semibold mt-6">1.2.1 Background</h4>
+
+    <p class="text-gray-300">Ajtai commitment. In the Ajtai commitment scheme <em>[x1]</em>, one commits to a short vector <span class="math">\\mathbf{s}\\in\\mathbb{Z}^{m}</span> by computing</p>
+
+    <p class="text-gray-300"><span class="math">\\mathbf{A}\\mathbf{s}\\equiv\\mathbf{t}\\pmod{q}\\enspace.</span></p>
+
+    <p class="text-gray-300">In the above <span class="math">q</span> and <span class="math">\\mathbf{A}\\in\\mathbb{Z}^{n\\times m}</span> are public parameters of the scheme, and <span class="math">\\mathbf{t}\\in\\mathbb{Z}^{n}</span> is the commitment to <span class="math">\\mathbf{s}</span>. That Ajtai commitments are binding follows directly from</p>
+
+    <p class="text-gray-300">the SIS assumptions, as two distinct short vectors <span class="math">\\mathbf{s},\\mathbf{s}^{\\star}</span> that satisfy the above equation imply that <span class="math">\\mathbf{s} - \\mathbf{s}^{\\star}\\neq 0</span> is also short and <span class="math">\\mathbf{A}(\\mathbf{s} - \\mathbf{s}^{\\star}) = \\mathbf{0}</span> (mod <span class="math">q</span>).</p>
+
+    <p class="text-gray-300"><strong>Reductions of knowledge.</strong> Reductions of Knowledge (RoK) [KST22] are interactive protocols between a prover and a verifier that reduce checking membership of an instance in a relation to checking membership a related instance in a (usually simpler) relation. In a reduction of knowledge from <span class="math">\\mathsf{R} \\to \\mathsf{R}&#x27;</span>, the prover and the verifier have access to an index <span class="math">\\mathbf{i}</span> and an instance <span class="math">\\mathbf{x}</span>. The honest prover additionally has access to a witness <span class="math">\\mathbf{w}</span> for the instance. They interact and at the end of the interaction:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>If <span class="math">(\\mathbf{i}, \\mathbf{x}, \\mathbf{w}) \\in \\mathsf{R}</span>, the verifier accepts and outputs an instance <span class="math">\\mathbf{x}&#x27;</span> and the prover outputs a witness <span class="math">\\mathbf{w}&#x27;</span> such that <span class="math">(\\mathbf{i}, \\mathbf{x}&#x27;, \\mathbf{w}&#x27;) \\in \\mathsf{R}&#x27;</span>.</li>
+
+      <li>If at the end of the interaction the verifier accepts and outputs an instance <span class="math">\\mathbf{x}&#x27;</span>, there is an efficient extractor that given <span class="math">(\\mathbf{i}, \\mathbf{x}, \\mathbf{x}&#x27;)</span> and <span class="math">\\mathbf{w}&#x27;</span> such that <span class="math">(\\mathbf{i}, \\mathbf{x}&#x27;, \\mathbf{w}&#x27;) \\in \\mathsf{R}&#x27;</span> outputs <span class="math">\\mathbf{w}</span> such that <span class="math">(\\mathbf{i}, \\mathbf{x}, \\mathbf{w}) \\in \\mathsf{R}</span>.</li>
+
+    </ul>
+
+    <p class="text-gray-300">A folding scheme is then simply reduction of knowledge from a relation <span class="math">\\mathsf{R}^2</span> to itself. Note that both completeness and (knowledge) soundness require then that the updated witness belongs to the same relation and that the extracted witness belong to the original relation. For the lattice setting, where norm growth and slack tend to accrue, this is the major technical hurdle to solve. The relation that we consider is the following, which is a slight generalization of the natural opening relation for Ajtai commitments<span class="math">^2</span>:</p>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mathsf{R}_{q,\\beta,t}^{\\mathsf{SIS}} := \\left\\{ (\\mathbf{A}, \\mathbf{T}, \\mathbf{S}) \\in \\mathbb{Z}^{n \\times m} \\times \\mathbb{Z}^{n \\times t} \\times \\mathbb{Z}^{m \\times t} \\left</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\begin{array}{l} \\mathbf{A S} \\equiv \\mathbf{T} \\pmod{q} \\\\ \\forall i \\in [t], \\; \\</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mathbf{S}_{*,i}\\</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\leq \\beta \\end{array} \\right. \\right\\}.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <p class="text-gray-300">Since an instance of <span class="math">(\\mathsf{R}_{q,\\beta,t}^{\\mathsf{SIS}})^2</span> can be reduced to one of <span class="math">\\mathsf{R}_{q,\\beta,2t}^{\\mathsf{SIS}}</span>, we consider designing a RoK for <span class="math">\\mathsf{R}_{q,\\beta,2t}^{\\mathsf{SIS}} \\to \\mathsf{R}_{q,\\beta,t}^{\\mathsf{SIS}}</span>.</p>
+
+    <h2 id="sec-6" class="text-2xl font-bold">1.2.2 A Naive Attempt to Folding Schemes</h2>
+
+    <p class="text-gray-300">As in previous folding approaches, we will aim to do so via a random linear combinations, which will inevitably incur into problems. Let <span class="math">(\\mathbf{A},\\mathbf{T},\\mathbf{S}) \\in \\mathsf{R}_{q,\\beta,2t}^{\\mathsf{SIS}}</span>. The (naive) protocol that we design is the following:</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>The verifier samples a challenge <span class="math">\\mathbf{C} \\gets \\mathcal{C}^{2t \\times t} \\subseteq \\mathbb{Z}^{2t \\times t}</span> (from a yet unspecified sampling set) and send it to the prover.</li>
+
+      <li>The prover computes and outputs the updated witness <span class="math">\\mathbf{Z} := \\mathbf{S C}</span>.</li>
+
+      <li>The verifier computes the updated instance <span class="math">\\mathbf{T}&#x27; := \\mathbf{T C}</span>, accepts and outputs it.</li>
+
+    </ol>
+
+    <p class="text-gray-300">This protocol suffers from two main issues:</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"><strong>Completeness norm growth.</strong> Folding must reduce checking two instances of a relation to checking a single instance of the same relation. In this case, the new opening <span class="math">\\mathbf{Z}</span> will not in fact satisfy $\\</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mathbf{Z}_{*,i}\\</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\leq \\beta<span class="math"> for any non-trivial sampling set </span>\\mathcal{C}$.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300"><span class="math">^2</span> Which we can recover by setting <span class="math">t = 1</span>. We use this formulation as it will notationally more convenient later on.</p>
+
+    <h4 id="sec-7" class="text-lg font-semibold mt-6">Extraction norm growth.</h4>
+
+    <p class="text-gray-300">The protocol is knowledge sound, as we can construct an extractor that produces a (relaxed) witness via coordinate-wise special soundness <em>[BBC+18, 14]</em>. Interpreting the challenge set <span class="math">\\mathcal{C}^{2t\\times 1}\\cong(\\mathcal{C}^{t})^{2t}</span> (i.e. so that each coordinate correspond to a row of the matrix) the extractor is given access to a tree of <span class="math">2t+1</span> accepting transcripts,</p>
+
+    <p class="text-gray-300">\\[ \\left(\\left(\\begin{matrix}\\mathbf{C}^{(0)}\\\\ \\mathbf{Z}^{(0)}\\end{matrix}\\right),\\cdots,\\left(\\begin{matrix}\\mathbf{C}^{(2t)}\\\\ \\mathbf{Z}^{(2t)}\\end{matrix}\\right)\\right)\\enspace, \\]</p>
+
+    <p class="text-gray-300">such that, for <span class="math">j\\in[2t]</span>, <span class="math">\\mathbf{C}^{(0)},\\mathbf{C}^{(j)}</span> differ in exactly row <span class="math">j</span>. Letting <span class="math">i^{<em>}</span> denote the column in which the two differ we have that <span class="math">C^{(0)}_{j,i^{</em>}}\\neq C^{(j)}_{j,i^{*}}</span> and <span class="math">C^{(0)}_{j^{\\prime},i}=C^{(j^{\\prime})}_{j^{\\prime},i}</span> for <span class="math">i\\in[t]</span> and <span class="math">j^{\\prime}\\neq j</span>. For <span class="math">j\\in[2t]</span>, the extractor computes</p>
+
+    <p class="text-gray-300"><span class="math">\\mathbf{S}_{<em>,j}\\equiv\\frac{\\mathbf{Z}^{(0)}_{</em>,j}-\\mathbf{Z}^{(j)}_{<em>,j}}{C^{(0)}_{j,i^{</em>}}-C^{(j)}_{j,i^{*}}}\\pmod{q}\\enspace,</span></p>
+
+    <p class="text-gray-300">and sets <span class="math">\\mathbf{S}:=\\left[\\mathbf{S}_{<em>,1},\\ldots,\\mathbf{S}_{</em>,2t}\\right]</span>. It is easy to see then that, for every <span class="math">j\\in[2t]</span>,</p>
+
+    <p class="text-gray-300"><span class="math">\\mathbf{A}\\mathbf{S}_{<em>,j}\\equiv\\frac{\\mathbf{A}\\mathbf{Z}^{(0)}_{</em>,j}-\\mathbf{A}\\mathbf{Z}^{(j)}_{<em>,j}}{C^{(0)}_{j,i^{</em>}}-C^{(j)}_{j,i^{<em>}}}\\equiv\\mathbf{T}_{</em>,j}\\pmod{q}\\enspace.</span></p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">What is left is to bound the norm of the extracted witness <span class="math">\\mathbf{S}</span>. Letting $\\beta_{\\mathcal{C}}:=\\max_{c\\neq c^{\\prime}\\in\\mathcal{C}}\\</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">(c-c^{\\prime})^{-1}\\bmod q\\</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"><span class="math">, and </span>\\beta^{\\prime}<span class="math"> denote the completeness norm bound on </span>\\mathbf{Z}<span class="math">, we can only conclude that norm of </span>\\mathbf{S}_{<em>,j}<span class="math"> is at most </span>2\\cdot\\beta_{\\mathcal{C}}\\cdot\\beta^{\\prime}>\\beta<span class="math">. So, even if there were no completeness norm growth and </span>\\beta^{\\prime}=\\beta<span class="math"> (which as argued before, is not currently the case), the extraction incurs in a norm blowup. The particularly hard term to control is </span>\\beta_{\\mathcal{C}}<span class="math">. Selecting </span>\\mathcal{C}<span class="math"> that simultaneously is (i) large enough for soundness; (ii) with elements of small norm (to keep the completeness norm under control); and (iii) with </span>\\beta_{\\mathcal{C}}<span class="math"> small is challenging. In polynomial rings, setting </span>\\mathcal{C}$ to be the monomials can partially help, but there are limitations even in the cyclotomic ring setting </em>[1]*.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">To construct an efficient folding scheme for Ajtai commitments, we have to solve both of the above problems.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>To solve the completeness norm growth, we will ask the prover to decompose its opening and send us an updated commitment, which we can check for consistency against the old commitment.</li>
+
+      <li>To solve the extraction norm growth, we will proceed in steps. First, we will present an approach to extract (a decomposed witness) with almost no extraction blowup, and then we will augment this protocol with a proof of exact norm that allows it to eliminate it completely.</li>
+
+    </ul>
+
+    <h4 id="sec-8" class="text-lg font-semibold mt-6">1.2.3 Extracting Witness with Small Norm</h4>
+
+    <p class="text-gray-300">We now aim to choose a challenge set <span class="math">\\mathcal{C}</span> suitable for both keeping completeness and extraction norm growth under control. A natural choice is the set of binary challenges <span class="math">\\mathcal{C}=\\{0,1\\}</span> as used in <em>[BBC+18, 14]</em>. Then, as demonstrated in</p>
+
+    <p class="text-gray-300">the aforementioned works, we have <span class="math">\\beta_{\\mathcal{C}}=1</span> and norm of the extracted matrix is at most <span class="math">2\\beta^{\\prime}</span>. Below, we consider a slight extension of this approach, which later will be crucial to prove <em>exact</em> norm bounds.</p>
+
+    <p class="text-gray-300">Namely, consider ternary challenges <span class="math">\\mathcal{C}=\\{-1,0,1\\}</span> instead. As in the binary case, those challenges are small, so they will contribute little to the completeness growth. For extraction, recall that norm growth was in large part contributed by the term <span class="math">\\beta_{\\mathcal{C}}</span>. For our choice of <span class="math">\\mathcal{C}</span>, the differences of challenges consists of <span class="math">\\delta:=\\alpha-\\alpha^{\\prime}</span> with <span class="math">\\alpha,\\alpha^{\\prime}\\in\\{-1,0,1\\}</span> and <span class="math">\\alpha\\neq\\alpha^{\\prime}</span>. We notice that <span class="math">\\delta\\in\\{\\pm 1,\\pm 2\\}</span> and further equals <span class="math">2</span> only if <span class="math">(\\alpha,\\alpha^{\\prime})=(\\pm 1,\\mp 1)</span>. When <span class="math">\\delta=\\pm 1</span>, dividing by <span class="math">\\delta</span> does not create <em>any norm blowup</em>, similarly as in the binary case. On the other hand, for <span class="math">\\delta=\\pm 2</span>, it is unclear whether the extracted witness is short, or even if it is well-defined, e.g. for even moduli <span class="math">q</span>.</p>
+
+    <p class="text-gray-300">To leverage this observation, we revisit the coordinate-wise special soundness (CWSS) property and the heavy-row analysis in <em>[x1, Lemma 3]</em>. For each coordinate <span class="math">i</span>, we construct an extractor that recovers two accepting transcripts <span class="math">(\\mathbf{C},\\mathbf{Z}),(\\mathbf{C}^{\\prime},\\mathbf{Z}^{\\prime})</span> such that: (i) <span class="math">\\mathbf{C}</span> and <span class="math">\\mathbf{C}^{\\prime}</span> differ exactly, and only, in the <span class="math">i</span>-th row, and (ii) their corresponding <span class="math">i</span>-th row vectors <span class="math">\\mathbf{c}_{i},\\mathbf{c}_{i}^{\\prime}</span> satisfy <span class="math">\\mathbf{c}_{i}\\not\\equiv\\mathbf{c}_{i}^{\\prime}</span> (mod 2). The latter condition makes sure that there exists an entry of <span class="math">\\mathbf{c}_{i}-\\mathbf{c}_{i}^{\\prime}</span> which is <span class="math">\\pm 1</span> and allows for extracting a witness with norm at most <span class="math">2\\beta^{\\prime}</span> as in the binary setting.</p>
+
+    <p class="text-gray-300">Roughly, the analysis relies on the heavy-row argument <em>[x10]</em>. Suppose a cheating prover succeeds to produce a valid response <span class="math">\\mathbf{Z}</span> for a random challenge matrix <span class="math">\\mathbf{C}</span> with a noticeable probability. Then, for any coordinate <span class="math">i</span>, with sufficiently large probability (i.e. the probability of “landing in a heavy row”), the set of matrix challenges <span class="math">\\mathbf{C}^{\\prime}</span>, which satisfy conditions (i) and (ii) described above, that are simultaneously “good” (in the sense that the prover outputs an accepting transcript) must be big enough.</p>
+
+    <p class="text-gray-300">Replicating the CWSS analysis with the improved extraction procedure to the strawman protocol, we reduce the extraction norm blowup of the strawman protocol to <span class="math">2\\cdot\\beta^{\\prime}</span>. We highlight that the new approach suffers from a larger soundness than in the binary challenge setting, which is now roughly <span class="math">(\\frac{2}{3})^{t}</span>.</p>
+
+    <h4 id="sec-9" class="text-lg font-semibold mt-6">1.2.4 Almost a Folding Scheme</h4>
+
+    <p class="text-gray-300">Following the above strategy, we design a folding scheme with no completeness blowup. Further, we use the extraction strategy previously described to extract a very short (decomposed) witness, which we later show how to upgrade to extract a witness with no extraction norm blowup.</p>
+
+    <h5 id="sec-10" class="text-base font-semibold mt-4"><span class="math">b</span>-decomposition.</h5>
+
+    <p class="text-gray-300">In the sequel <span class="math">\\mathbf{G}</span> is the <span class="math">b</span>-decomposition gadget matrix, and <span class="math">\\mathbf{G}^{-1}</span> denote its inverse, i.e. <span class="math">\\mathbf{G}^{-1}(\\mathbf{S})\\mathbf{G}=\\mathbf{S}</span> for every <span class="math">\\mathbf{S}</span>. <span class="math">\\mathbf{G}^{-1}</span> decomposes <span class="math">\\mathbf{S}</span> into a matrix <span class="math">\\tilde{\\mathbf{S}}</span> where each entry is in <span class="math">[-\\lfloor b/2\\rfloor,\\lfloor b/2\\rfloor]</span> (in this work, we use balanced base-<span class="math">b</span> decomposition).</p>
+
+    <h5 id="sec-11" class="text-base font-semibold mt-4">Folding scheme.</h5>
+
+    <p class="text-gray-300">Let <span class="math">(\\mathbf{A},\\mathbf{T},\\mathbf{S})\\in\\mathsf{R}^{\\mathsf{SIS}}_{q,\\beta,2t}</span>. The new protocol that we design is the following:</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>The prover computes <span class="math">\\tilde{\\mathbf{S}}:=\\mathbf{G}^{-1}(\\mathbf{S})</span>, <span class="math">\\tilde{\\mathbf{T}}:=\\mathbf{A}\\tilde{\\mathbf{S}}\\mod q</span> and sends <span class="math">\\tilde{\\mathbf{T}}</span> to the verifier.</li>
+
+      <li>The verifier samples a challenge <span class="math">\\mathbf{C}\\leftarrow\\{-1,0,1\\}^{2kt\\times t}</span> and send it to the prover.</li>
+
+    </ol>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>The prover computes and outputs the updated witness <span class="math">\\mathbf{Z} := \\tilde{\\mathbf{S}}\\mathbf{C}</span>.</li>
+
+      <li>The verifier computes <span class="math">\\mathbf{T}&#x27; := \\tilde{\\mathbf{T}}\\mathbf{C}</span>, accepts if</li>
+
+    </ol>
+
+    <div class="my-4 text-center"><span class="math-block">\\tilde{\\mathbf{T}}\\mathbf{G} \\equiv \\mathbf{T} \\pmod{q} ,</span></div>
+
+    <p class="text-gray-300">and outputs the updated instance <span class="math">\\mathbf{T}&#x27;</span>.</p>
+
+    <p class="text-gray-300">We analyse completeness and knowledge soundness of the above RoK. <strong>Completeness.</strong> First, it is easy to see that the verifier's algebraic checks succeed.</p>
+
+    <div class="my-4 text-center"><span class="math-block">\\begin{array}{l} \\tilde{\\mathbf{T}}\\mathbf{G} \\equiv \\mathbf{A}\\tilde{\\mathbf{S}}\\mathbf{G} \\equiv \\mathbf{A}\\mathbf{S} \\equiv \\mathbf{T} \\pmod{q} , \\\\ \\mathbf{A}\\mathbf{Z} \\equiv \\mathbf{A}\\tilde{\\mathbf{S}}\\mathbf{C} \\equiv \\tilde{\\mathbf{T}}\\mathbf{C} \\pmod{q} . \\end{array}</span></div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">We are left to check the norms of <span class="math">\\mathbf{Z}</span>. Let <span class="math">i \\in [t]</span>, and consider $\\</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mathbf{Z}_{*,i} \\</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"><span class="math">. Since </span>\\left\\</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\tilde{\\mathbf{S}}_{*,j} \\right\\</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\leq \\left\\lfloor \\frac{b}{2} \\right\\rfloor \\sqrt{m}$, we have that</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\left\\</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mathbf{Z}_{*,j} \\right\\</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\leq \\left\\</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\sum_{i=1}^{2kt} \\mathbf{C}_{i,j} \\tilde{\\mathbf{S}}_{*,i} \\right\\</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\leq 2kt \\left\\lfloor \\frac{b}{2} \\right\\rfloor \\sqrt{m} .</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <p class="text-gray-300">As long as <span class="math">t \\leq \\frac{\\beta}{2k\\left\\lfloor \\frac{b}{2} \\right\\rfloor \\sqrt{m}}</span>, the above norm is then bounded above by <span class="math">\\beta</span>.</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"><strong>Relaxed Knowledge Soundness.</strong> We apply a similar analysis to that in the strawman protocol, except now that the extraction procedure is applied on <span class="math">2kt + 1</span> coordinates instead of <span class="math">2t + 1</span>. This recovers a decomposed witness <span class="math">\\tilde{\\mathbf{S}} \\in \\mathbb{Z}^{n \\times 2kt}</span> which has $\\left\\</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\tilde{\\mathbf{S}}_{*,j} \\right\\</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\leq 2\\beta<span class="math"> and for which </span>\\mathbf{A}\\tilde{\\mathbf{S}} \\equiv \\tilde{\\mathbf{T}} \\pmod{q}<span class="math">. Later on, we will make use of this intermediate short extracted witness. The final extracted witness is </span>\\mathbf{S} := \\tilde{\\mathbf{S}}\\mathbf{G}$ which satisfies</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="my-4 text-center"><span class="math-block">\\mathbf{A}\\mathbf{S} \\equiv \\mathbf{A}\\tilde{\\mathbf{S}}\\mathbf{G} \\equiv \\tilde{\\mathbf{T}}\\mathbf{G} \\equiv \\mathbf{T} \\pmod{q} .</span></div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Note that, for <span class="math">j \\in [2t]</span>, $\\</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mathbf{S}_{*,j} \\</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\leq 2\\beta^2$.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <h2 id="sec-12" class="text-2xl font-bold">1.2.5 Exact Euclidean Norm Proof</h2>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">To construct the final protocol, we require to augment the above protocol with a proof of exact norm. Our first observation is that, if for every <span class="math">j \\in [2t]</span> $\\</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mathbf{S}_{*,j} \\</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\leq \\beta<span class="math"> then the matrix </span>\\mathbf{D} := \\mathbf{S}^{\\top} \\mathbf{S}<span class="math"> has a diagonal bounded by </span>\\beta^2<span class="math">, i.e. for every </span>i \\in [2t]<span class="math">, has </span>D_{i,i} \\leq \\beta^2$. This is because</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">D_{i,i} = \\langle \\mathbf{S}_{<em>,i}, \\mathbf{S}_{</em>,i} \\rangle = \\left\\</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mathbf{S}_{*,i} \\right\\</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">^2 \\leq \\beta^2.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <p class="text-gray-300">We then rewrite the relation for opening of Ajtai commitments to:</p>
+
+    <p class="text-gray-300">$$ \\mathsf{R}_{q,\\beta,t} := \\left\\{ \\begin{array}{l}</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\left(\\mathbf{A}, (\\mathbf{T}, \\mathbf{D}), \\mathbf{S}\\right) \\quad \\left</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\begin{array}{l}</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">\\mathbf{A}\\mathbf{S} \\equiv \\mathbf{T} \\pmod{q} \\\\  \\wedge \\mathbf{D} = \\mathbf{S}^{\\top} \\mathbf{S} \\\\  \\wedge \\forall i \\in [t], D_{i,i} \\leq \\beta^2 \\end{array} \\right. \\\\ \\text{ \\times} \\mathbb{Z}^{n \\times m} \\times (\\mathbb{Z}^{n \\times t} \\times \\mathbb{Z}^{t \\times t}) \\times \\mathbb{Z}^{m \\times t} \\end{array} \\right. \\tag{1} $$</p>
+
+    <p class="text-gray-300">Now, let <span class="math">(\\mathbf{A}, (\\mathbf{T}, \\mathbf{D}), \\mathbf{S}) \\in \\mathsf{R}_{q,\\beta,2t}</span>. The final protocol that we design is the following:</p>
+
+    <p class="text-gray-300">7</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>The prover computes <span class="math">\\tilde{\\mathbf{S}} := \\mathbf{G}^{-1}(\\mathbf{S})</span>, <span class="math">\\tilde{\\mathbf{T}} \\equiv \\mathbf{A}\\tilde{\\mathbf{S}} \\mod q</span> and <span class="math">\\tilde{\\mathbf{D}} := \\tilde{\\mathbf{S}}^{\\top}\\tilde{\\mathbf{S}}</span> and sends <span class="math">\\tilde{\\mathbf{T}}, \\tilde{\\mathbf{D}}</span> to the verifier.</li>
+
+      <li>The verifier samples a challenge <span class="math">\\mathbf{C} \\gets \\{0, \\pm 1\\}^{2kt \\times t}</span> and send it to the prover.</li>
+
+      <li>The prover computes and outputs the updated witness <span class="math">\\mathbf{Z} := \\tilde{\\mathbf{S}}\\mathbf{C}</span>.</li>
+
+      <li>The verifier computes <span class="math">\\mathbf{T}&#x27; := \\tilde{\\mathbf{T}}\\mathbf{C}</span> and <span class="math">\\mathbf{D}&#x27; := \\mathbf{C}^\\top \\tilde{\\mathbf{D}}\\mathbf{C}</span>, accepts if</li>
+
+    </ol>
+
+    <div class="my-4 text-center"><span class="math-block">\\begin{array}{l} \\mathbf {G} ^ {\\top} \\tilde {\\mathbf {D}} \\mathbf {G} = \\mathbf {D} \\\\ \\wedge \\tilde {\\mathbf {T}} \\mathbf {G} \\equiv \\mathbf {T} \\pmod {q}, \\end{array}</span></div>
+
+    <p class="text-gray-300">and outputs the updated instance <span class="math">(\\mathbf{T}&#x27;,\\mathbf{D}&#x27;)</span>.</p>
+
+    <p class="text-gray-300">The protocol is complete with no norm blowup. We are left to show that the additional information allows us to enforce exact extracted norm. We consider a new extractor that acts as a following:</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Run the malicious prover, answering its query with a uniformly random <span class="math">\\mathbf{C} \\gets \\mathcal{C}^{2kt \\times t}</span>, to obtain a transcript <span class="math">(\\tilde{\\mathbf{T}}, \\tilde{\\mathbf{D}}, \\mathbf{C}, \\mathbf{Z})</span>.</li>
+
+      <li>If the transcript is not accepting, abort.</li>
+
+      <li>Rewind the prover to the beginning and run the extractor to obtain a witness <span class="math">\\bar{\\mathbf{S}} \\in \\mathbb{Z}^{m \\times 2kt}</span> (note that this is not the final witness that we previously extracted, which can be recovered by right multiplying by <span class="math">\\mathbf{G}</span>), aborting if extraction fails.</li>
+
+      <li>Output <span class="math">\\mathbf{S} := \\bar{\\mathbf{S}}\\mathbf{G}</span>.</li>
+
+    </ol>
+
+    <p class="text-gray-300">First note that, as desired:</p>
+
+    <div class="my-4 text-center"><span class="math-block">\\mathbf {A} \\mathbf {S} \\equiv \\mathbf {A} \\bar {\\mathbf {S}} \\mathbf {G} \\equiv \\bar {\\mathbf {T}} \\mathbf {G} \\equiv \\mathbf {T} \\pmod {q}.</span></div>
+
+    <p class="text-gray-300">If <span class="math">\\bar{\\mathbf{S}}^{\\top}\\bar{\\mathbf{S}} = \\tilde{\\mathbf{D}}</span>, then we have that</p>
+
+    <div class="my-4 text-center"><span class="math-block">\\mathbf {S} ^ {\\top} \\mathbf {S} = (\\bar {\\mathbf {S}} \\mathbf {G}) ^ {\\top} \\bar {\\mathbf {S}} \\mathbf {G} = \\mathbf {G} ^ {\\top} \\tilde {\\mathbf {D}} \\mathbf {G} = \\mathbf {D},</span></div>
+
+    <p class="text-gray-300">and since, for <span class="math">i \\in [2t]</span>, <span class="math">D_{i,i} \\leq \\beta^2</span> we are done. What is left is to bound the probability that <span class="math">\\bar{\\mathbf{S}}^\\top \\bar{\\mathbf{S}} \\neq \\bar{\\mathbf{D}}</span>. Since the first transcript is accepting, it must be that</p>
+
+    <div class="my-4 text-center"><span class="math-block">\\mathbf {A} \\mathbf {Z} \\equiv \\mathbf {T} ^ {\\prime} \\equiv \\bar {\\mathbf {T}} \\mathbf {C} \\equiv \\mathbf {A} \\bar {\\mathbf {S}} \\mathbf {C} \\pmod {q}.</span></div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Thus, it must be that <span class="math">\\mathbf{Z} = \\bar{\\mathbf{S}}\\mathbf{C}</span>, or else the adversary has found a short SIS solution (since for every <span class="math">j \\in [2t]</span>, $\\</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\bar{\\mathbf{S}}_{*,j} \\</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\leq 2\\beta<span class="math"> and </span>\\mathbf{C}, \\mathbf{Z}<span class="math"> are short). When this holds, it must also be that </span>(\\bar{\\mathbf{S}}\\mathbf{C})^\\top \\bar{\\mathbf{S}}\\mathbf{C} = \\mathbf{C}^\\top \\tilde{\\mathbf{D}}\\mathbf{C}<span class="math">. Writing </span>f(\\mathbf{X}) = (\\bar{\\mathbf{S}}\\mathbf{X})^\\top \\bar{\\mathbf{S}}\\mathbf{X}<span class="math"> and </span>g(\\mathbf{X}) = \\mathbf{X}^\\top \\tilde{\\mathbf{D}}\\mathbf{X}<span class="math">, the above conditions can be rewritten as </span>f(\\mathbf{C}) = g(\\mathbf{C})<span class="math">. The functions </span>f<span class="math"> and </span>g<span class="math"> can be thought as </span>2kt \\times t<span class="math"> functions (one for each coordinate), and each of these functions is a multivariate polynomial of total degree at most 2. Indexing accordingly, further if </span>f(\\mathbf{C}) = g(\\mathbf{C})<span class="math"> then </span>f_{i,i}(\\mathbf{C}_{<em>,i}) = g_{i,i}(\\mathbf{C}_{</em>,i})<span class="math"> for </span>i \\in [t]<span class="math">. Since </span>\\bar{\\mathbf{S}}^\\top \\bar{\\mathbf{S}} \\neq \\bar{\\mathbf{D}}<span class="math">, these two polynomials are not identically equal, and so the probability that, over a random setting of the variables, the equation holds is at most </span>\\frac{2}{</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mathcal{C}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">}<span class="math"> by the Demillo-Lipton-Schwartz-Zippel lemma (applied over the integral domain </span>\\mathbb{Z}$). Since the equation needs to hold jointly over all the choices</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">3 Choosing <span class="math">\\mathcal{C}</span> to be ternary instead of the arguably more natural binary challenges, in hindsight, is what allows us to have soundness in this step.</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">of <span class="math">i</span>, then the probability is at most $\\left(\\frac{2}{</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mathcal{C}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">}\\right)^{t}$. This concludes our argument. We highlight that this probabilistic test was the main reason why chose challenge matrices with ternary entries.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <h3 id="sec-13" class="text-xl font-semibold mt-8">1.3 Related Works</h3>
+
+    <p class="text-gray-300">Folding schemes were introduced by Kothapalli et al. <em>[x13]</em> as a motivation to build incrementally verifiable computation from simple cryptographic building blocks. In a concurrent work, Bünz et al. <em>[BCL+21]</em> generically constructed an IVC from a similar primitive, called a split-accumulation scheme. In both works, the underlying folding/accumulation scheme works for a fixed, but universal, R1CS language. More recently, there has been significant progress in building folding schemes which circumvent the limitation of a single fixed R1CS, by supporting multiple circuits, high-degree relations, and lookup gates <em>[x1, x10, x13, x14]</em>. The aforementioned constructions still crucially rely on additively homomorphic vector commitments. Thus, we believe that our techniques could be applied to the aforementioned constructions identically as for <em>[BCL+21, x13]</em>.</p>
+
+    <p class="text-gray-300">To the best of our knowledge, the only lattice-based folding scheme is the work by Boneh and Chen <em>[x1]</em>, called LatticeFold. The construction also follows the decompose-and-fold paradigm, which circumvents the norm growth issue during an honest execution. On the contrary, the paper introduces a new way to prove shortness in the infinity norm by cleverly combining the CRT packing technique <em>[x2, x11, YAZ+19]</em>, together with the sumcheck argument <em>[x16]</em>. By the nature of the techniques, the folding scheme must rely on structured lattice assumptions. Moreover, proving the <span class="math">\\ell_{2}</span> norm, rather than the <span class="math">\\ell_{\\infty}</span> one, is very often what one would like to do when constructing proofs for lattice-based primitives – especially when the witness vector comes from performing trapdoor sampling <em>[x1, x4, x20]</em>.</p>
+
+    <h2 id="sec-14" class="text-2xl font-bold">2 Preliminaries</h2>
+
+    <h4 id="sec-15" class="text-lg font-semibold mt-6">Notation.</h4>
+
+    <p class="text-gray-300">We denote the security parameter by <span class="math">\\lambda</span>, which is implicitly given to all algorithms unless specified otherwise. Further, we write <span class="math">\\mathsf{negl}(\\lambda)</span> (resp. <span class="math">\\mathsf{poly}(\\lambda)</span>) to denote an unspecified negligible function (resp. polynomial) in <span class="math">\\lambda</span>. In this work, we implicitly assume that the vast majority of the key parameters, e.g. the ring dimension, and the dimensions of matrices and vectors, are <span class="math">\\mathsf{poly}(\\lambda)</span>. However, the modulus used in this work may be super-polynomial in <span class="math">\\lambda</span>.</p>
+
+    <p class="text-gray-300">For <span class="math">a,b\\in\\mathbb{N}</span> with <span class="math">a&lt;b</span>, write <span class="math">[a,b]\\coloneqq\\{a,a+1,\\ldots,b\\},[a]\\coloneqq[1,a]</span>. For <span class="math">q\\in\\mathbb{N}</span> write <span class="math">\\mathbb{Z}_{q}</span> for the integers modulo <span class="math">q</span>. We denote vectors with lowercase boldface (i.e. <span class="math">\\mathbf{u},\\mathbf{v}</span>) and matrices with uppercase boldface (i.e. <span class="math">\\mathbf{A},\\mathbf{B}</span>). Specifically, for a matrix <span class="math">\\mathbf{A}</span>, we write <span class="math">\\mathbf{A}_{i,<em>}</span> and <span class="math">\\mathbf{A}_{</em>,j}</span> for the <span class="math">i</span>-th row and the <span class="math">j</span>-th column of <span class="math">\\mathbf{A}</span> respectively, and write with lowercase <span class="math">A_{i,j}</span> for the entry in the <span class="math">i</span>-th row and <span class="math">j</span>-th column. For a vector <span class="math">\\mathbf{x}</span> of length <span class="math">n</span>, we write <span class="math">x_{i}</span> or <span class="math">\\mathbf{x}[i]</span> for its <span class="math">i</span>-th entry. Similarly, we define <span class="math">\\mathbf{x}_{i}\\coloneqq(x_{1},\\ldots,x_{i})</span> for <span class="math">i\\in[n]</span>. Given two vectors <span class="math">\\mathbf{u},\\mathbf{v}</span>, we denote by <span class="math">(\\mathbf{u},\\mathbf{v})</span> its concatenation.</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Decompose and gadget matrix. Let <span class="math">b &amp;gt; 1</span>. We set <span class="math">k \\coloneqq \\lfloor \\log_b\\beta \\rfloor +2^4</span> and <span class="math">\\mathbf{g} = [1,b,\\dots ,b^{k - 1}]^{\\top}\\in \\mathbb{Z}^{k}</span>. Given <span class="math">\\mathbf{S}\\in \\mathbb{Z}^{m\\times n}</span>, we can decompose it by computing <span class="math">\\tilde{\\mathbf{S}}\\in \\mathbb{Z}^{m\\times kn}</span> such that <span class="math">\\mathbf{S} = \\tilde{\\mathbf{S}}\\mathbf{G}_n</span>, where <span class="math">\\mathbf{G}_n</span> is the gadget matrix and <span class="math">\\mathbf{G}_n\\coloneqq \\mathbf{I}_n\\otimes \\mathbf{g}\\in \\mathbb{Z}^{kn\\times n}</span>. Note that if $\\</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mathbf{S}_{*,i}\\</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\leq \\beta<span class="math"> for all </span>i\\in [n]<span class="math">, then </span>\\left\\</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\tilde{\\mathbf{S}}_{*,j}\\right\\</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\leq \\left\\lfloor \\frac{b}{2}\\right\\rfloor \\sqrt{m}<span class="math"> for all </span>j\\in [kn]<span class="math">. We denote </span>\\mathbf{G}_n^{-1}:\\mathbb{Z}^{m\\times n}\\to \\mathbb{Z}^{m\\times kn}<span class="math"> for the function that decomposes </span>\\mathbf{S}<span class="math"> into </span>\\tilde{\\mathbf{S}}<span class="math"> satisfying </span>\\mathbf{S} = \\tilde{\\mathbf{S}}\\mathbf{G}_n<span class="math">. When the dimensions are clear from context we simply write </span>\\mathbf{G}<span class="math"> and </span>\\mathbf{G}^{-1}$.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">Definition 1 (SIS). Let <span class="math">q = q(\\lambda)</span>, <span class="math">n = n(\\lambda)</span>, <span class="math">m = m(\\lambda)</span> and <span class="math">\\beta = \\beta (\\lambda)</span>. We say that the <span class="math">\\mathsf{SIS}_{n,m,q,\\beta}</span> assumption holds if for any PPT adversary <span class="math">\\mathcal{A}</span>, the following holds:</p>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\operatorname * {P r} \\left[ \\mathbf {A z} \\equiv \\mathbf {0} \\pmod {q} \\wedge 0 &lt;   \\</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mathbf {z} \\</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\leq \\beta \\left</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\begin{array}{l} \\mathbf {A} \\leftarrow \\mathbb {Z} _ {q} ^ {n \\times m} \\\\ \\mathbf {z} \\leftarrow \\mathcal {A} (\\mathbf {A}) \\end{array} \\right] = \\mathsf {n e g l} (\\lambda) .</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <h2 id="sec-16" class="text-2xl font-bold">2.1 The Demillo-Lipton-Schwartz-Zippel Lemma</h2>
+
+    <p class="text-gray-300">We recall the Demillo-Lipton-Schwartz-Zippel lemma [DL78; Sch80; Zip79], a tool for probabilistic polynomial identity testing commonly used in proof systems.</p>
+
+    <p class="text-gray-300">Lemma 1 (Demillo-Lipton-Schwartz-Zippel Lemma). Let <span class="math">f \\in \\mathcal{R}[x_1, x_2, \\ldots, x_n]</span> be a non-zero polynomial of total degree <span class="math">d</span> over an integral domain <span class="math">\\mathcal{R}</span>. Let <span class="math">S</span> be a finite subset of <span class="math">\\mathcal{R}</span> and <span class="math">r_1, \\ldots, r_n</span> be sampled independently and uniformly random from <span class="math">S</span>. Then</p>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\Pr \\left[ f \\left(r _ {1}, \\dots , r _ {n}\\right) = 0 \\right] \\leq \\frac {d}{</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">S</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">}.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <h2 id="sec-17" class="text-2xl font-bold">2.2 Concentration Inequalities</h2>
+
+    <p class="text-gray-300">We will use the following well-known Chernoff-Hoeffding bound.</p>
+
+    <p class="text-gray-300">Lemma 2 (Chernoff-Hoeffding Bound). Let <span class="math">X_{1},\\ldots ,X_{n}</span> be independent random variables taking value in <span class="math">\\{0,1\\}</span>. Let <span class="math">X = \\sum_{i = 1}^{n}X_{i}</span> denote their sum and let <span class="math">\\mu = \\mathbb{E}[X]</span>. Then for all <span class="math">\\epsilon \\geq 0</span>:</p>
+
+    <div class="my-4 text-center"><span class="math-block">\\Pr \\left[ X \\leq \\mu - \\epsilon n \\right] \\leq e ^ {- 2 \\epsilon^ {2} n}.</span></div>
+
+    <h2 id="sec-18" class="text-2xl font-bold">2.3 Reduction of Knowledge</h2>
+
+    <p class="text-gray-300">We recall the definition of reduction of knowledge from [KP23], which also captures the notion of folding scheme. That is, a prover, who wants to prove that it knows a witness <span class="math">\\mathbf{w}_1</span> such that <span class="math">(\\mathbf{x}_1,\\mathbf{w}_1)\\in \\mathsf{R}_1</span>, can use a reduction of knowledge from <span class="math">\\mathsf{R}_1</span> to <span class="math">\\mathsf{R}_2</span> and try to prove that it knows a witness <span class="math">\\mathbf{w}_2</span> such that <span class="math">(\\mathbf{x}_2,\\mathbf{w}_2)\\in \\mathsf{R}_2</span>, where <span class="math">\\mathbf{x}_2</span> is the reduced instance.</p>
+
+    <p class="text-gray-300">10</p>
+
+    <p class="text-gray-300">Definition 2 (Reduction of Knowledge). Consider ternary relations <span class="math">\\mathsf{R}_1</span> and <span class="math">\\mathsf{R}_2</span>. A reduction of knowledge from <span class="math">\\mathsf{R}_1</span> to <span class="math">\\mathsf{R}_2</span> consists of three PPT algorithms <span class="math">(\\mathcal{G},\\mathcal{P},\\mathcal{V})</span> denoting the generator, the prover, and the verifier</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li><span class="math">\\mathcal{G}(\\lambda) \\to \\mathbf{i}</span>: Takes security parameter <span class="math">\\lambda</span>. Outputs public parameters <span class="math">\\mathbf{i}</span>.</li>
+
+      <li><span class="math">\\mathcal{P}(\\mathbf{i}, \\mathbf{x}_1, \\mathbf{w}_1) \\to (\\mathbf{x}_2, \\mathbf{w}_2)</span>: Takes as input public parameters <span class="math">\\mathbf{i}</span>, and statement-witness pair <span class="math">(\\mathbf{x}_1, \\mathbf{w}_1)</span>. Interactively reduces the statement <span class="math">(\\mathbf{i}, \\mathbf{x}_1, \\mathbf{w}_1) \\in \\mathsf{R}_1</span> to a new statement <span class="math">(\\mathbf{i}, \\mathbf{x}_2, \\mathbf{w}_2) \\in \\mathsf{R}_2</span>.</li>
+
+      <li><span class="math">\\mathcal{V}(\\mathbf{i}, \\mathbf{x}_1) \\to \\mathbf{x}_2</span>: Takes as input public parameters <span class="math">\\mathbf{i}</span>, and statement <span class="math">\\mathbf{x}_1</span> associated with <span class="math">\\mathsf{R}_1</span>. Interactively reduces the task of checking <span class="math">\\mathbf{x}_1</span> to the task of checking a new statement <span class="math">\\mathbf{x}_2</span> associated with <span class="math">\\mathsf{R}_2</span>.</li>
+
+    </ul>
+
+    <p class="text-gray-300">Let <span class="math">\\langle \\mathcal{P},\\mathcal{V}\\rangle</span> denote the interaction between <span class="math">\\mathcal{P}</span> and <span class="math">\\mathcal{V}</span> that runs the interaction on prover input <span class="math">(\\mathbf{i},\\mathbf{x}_1,\\mathbf{w}_1)</span> and verifier input <span class="math">(\\mathbf{i},\\mathbf{x}_1)</span>, then outputs the verifier's statement <span class="math">\\mathbf{x}_2</span> and the prover's witness <span class="math">\\mathbf{w}_2</span>. A reduction of knowledge <span class="math">\\varPi=(\\mathcal{G},\\mathcal{P},\\mathcal{V})</span> from <span class="math">\\mathsf{R}_1</span> to <span class="math">\\mathsf{R}_2</span> satisfies the following properties.</p>
+
+    <p class="text-gray-300">Definition 3 (Perfect Completeness). <span class="math">\\varPi</span> has perfect completeness if for all PPT adversaries <span class="math">\\mathcal{A}</span>,</p>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\operatorname{Pr} \\left[ (\\mathbf{i}, \\mathbf{x}_2, \\mathbf{w}_2) \\in \\mathsf{R}_2 \\left</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\begin{array}{c} \\mathbf{i} \\leftarrow \\operatorname{Setup}(1^{\\lambda}) \\\\ (\\mathbf{x}_1, \\mathbf{w}_1) \\leftarrow \\mathcal{A}(\\mathbf{i}) \\\\ (\\mathbf{x}_2, \\mathbf{w}_2) \\leftarrow \\langle \\mathcal{P}(\\mathbf{i}, \\mathbf{x}_1, \\mathbf{w}_1), \\mathcal{V}(\\mathbf{i}, \\mathbf{x}_1) \\rangle \\end{array} \\right. \\right] = 1.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <p class="text-gray-300">Definition 4 (Knowledge Soundness). <span class="math">\\varPi</span> is knowledge sound (with knowledge error <span class="math">\\kappa(\\lambda)</span>) if for all expected polynomial-time adversaries <span class="math">\\mathcal{A}</span> and <span class="math">\\mathcal{P}^*</span>, there is an expected polynomial-time extractor <span class="math">\\mathcal{E}</span> such that</p>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\operatorname{Pr} \\left[ \\begin{array}{c} (\\mathbf{i}, \\mathbf{x}_2, \\mathbf{w}_2) \\in \\mathsf{R}_2 \\\\ \\wedge (\\mathbf{i}, \\mathbf{x}_1, \\mathbf{w}_1) \\notin \\mathsf{R}_1 \\end{array} \\left</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\begin{array}{c} \\mathbf{i} \\leftarrow \\operatorname{Setup}(1^{\\lambda}) \\\\ (\\mathbf{x}_1, \\mathbf{st}) \\leftarrow \\mathcal{A}(\\mathbf{i}) \\\\ (\\mathsf{Tr}, \\mathbf{x}_2, \\mathbf{w}_2) \\leftarrow \\langle \\mathcal{P}^<em>(\\mathbf{i}, \\mathbf{x}_1, \\mathbf{st}), \\mathcal{V}(\\mathbf{i}, \\mathbf{x}_1) \\rangle \\\\ \\mathbf{w}_1 \\leftarrow \\mathcal{E}^{\\mathcal{P}^</em>}(\\mathbf{i}, \\mathbf{x}_1, \\mathbf{st}) \\end{array} \\right. \\right] \\leq \\kappa(\\lambda) ^ {5}.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <p class="text-gray-300">Definition 5 (Public Reducibility). <span class="math">\\varPi</span> satisfies public reducibility if there exists a deterministic polynomial-time algorithm <span class="math">f</span> such that for any PPT adversary <span class="math">\\mathcal{A}</span> and expected polynomial-time adversary <span class="math">\\mathcal{P}^*</span>,</p>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\operatorname{Pr} \\left[ f(\\mathbf{i}, \\mathbf{x}_1, \\mathsf{Tr}) = \\mathbf{x}_2 \\left</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\begin{array}{c} \\mathbf{i} \\leftarrow \\operatorname{Setup}(1^{\\lambda}) \\\\ (\\mathbf{x}_1, \\mathbf{st}) \\leftarrow \\mathcal{A}(\\mathbf{i}) \\\\ (\\mathsf{Tr}, \\mathbf{x}_2, \\mathbf{w}_2) \\leftarrow \\langle \\mathcal{P}^*(\\mathbf{i}, \\mathbf{x}_1, \\mathbf{st}), \\mathcal{V}(\\mathbf{i}, \\mathbf{x}_1) \\rangle \\end{array} \\right. \\right] = 1.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <p class="text-gray-300">5 Our definition of knowledge soundness is different but equivalent to that of [KP23].</p>
+
+    <p class="text-gray-300">11</p>
+
+    <p class="text-gray-300">!<a href="img-0.jpeg">img-0.jpeg</a> Fig. 1: Reduction of knowledge from  <span class="math">(\\mathsf{R}_{q,\\beta ,t})^2</span>  to  <span class="math">\\mathsf{R}_{q,\\beta ,2t}</span></p>
+
+    <p class="text-gray-300">In this section, we construct a folding scheme for the Ajtai commitment openings relation  <span class="math">\\mathsf{R}_{q,\\beta,t}</span> , defined in Equation (1); or equivalently, a reduction of knowledge from  <span class="math">(\\mathsf{R}_{q,\\beta,t})^2</span>  to  <span class="math">\\mathsf{R}_{q,\\beta,t}</span> .</p>
+
+    <p class="text-gray-300">For simplicity, we describe the folding scheme as the composition of two reductions of knowledge from  <span class="math">(\\mathsf{R}_{q,\\beta,t})^2</span>  to  <span class="math">\\mathsf{R}_{q,\\beta,2t}</span>  and from  <span class="math">\\mathsf{R}_{q,\\beta,2t}</span>  to  <span class="math">\\mathsf{R}_{q,\\beta,t}</span> . The first reduction of knowledge serves the purpose of merging two instances of  <span class="math">\\mathsf{R}_{q,\\beta,t}</span>  into one single instance  <span class="math">\\mathsf{R}_{q,\\beta,2t}</span>  of larger size, while the second reduction of knowledge is where folding takes place to reduce the size of the instance from  <span class="math">\\mathsf{R}_{q,\\beta,2t}</span>  to  <span class="math">\\mathsf{R}_{q,\\beta,t}</span> .</p>
+
+    <p class="text-gray-300">Let  <span class="math">(\\mathbf{A},(\\mathbf{T}_1,\\mathbf{D}_1),\\mathbf{S}_1)</span> <span class="math">(\\mathbf{A},(\\mathbf{T}_2,\\mathbf{D}_2),\\mathbf{S}_2)</span>  be two instances of  <span class="math">\\mathsf{R}_{q,\\beta ,t}</span> . The idea is to concatenate  <span class="math">\\mathbf{S} := [\\mathbf{S}_1\\mathbf{S}_2]</span>  and  <span class="math">\\mathbf{T} := [\\mathbf{T}_1\\mathbf{T}_2]</span> . However, the verifier does not have enough information to compute  <span class="math">\\mathbf{D} = \\mathbf{S}^{\\top}\\mathbf{S}</span> . Hence, we let the prover send  <span class="math">\\mathbf{S}_1^\\top \\mathbf{S}_2</span>  and  <span class="math">\\mathbf{S}_2^\\top \\mathbf{S}_1</span>  to the verifier. We illustrate the protocol in Figure 1.</p>
+
+    <p class="text-gray-300">Lemma 3. The protocol shown in Figure 1 satisfies public reducibility, perfect completeness, and knowledge soundness.</p>
+
+    <p class="text-gray-300">Proof. We prove each property separately.</p>
+
+    <p class="text-gray-300">Public reducibility: Given the instances  <span class="math">(\\mathbf{T}_1, \\mathbf{D}_1), (\\mathbf{T}_2, \\mathbf{D}_2)</span>  and the transcript  <span class="math">\\mathrm{Tr} = (\\mathbf{U}, \\mathbf{V})</span> , one can efficiently compute  <span class="math">\\mathbf{T}, \\mathbf{D}</span> .</p>
+
+    <p class="text-gray-300">Completeness: We have that</p>
+
+    <p class="text-gray-300"><span class="math">\\mathbf{A}\\mathbf{S} \\equiv \\mathbf{A}\\left[\\mathbf{S}_1 \\mathbf{S}_2\\right] \\equiv \\left[\\mathbf{A}\\mathbf{S}_1 \\mathbf{A}\\mathbf{S}_2\\right] \\equiv \\left[\\mathbf{T}_1 \\mathbf{T}_2\\right] \\equiv \\mathbf{T} \\pmod{q}</span> ,</p>
+
+    <p class="text-gray-300"><span class="math">\\mathbf{S}^{\\top}\\mathbf{S} = \\left[ \\begin{array}{l}\\mathbf{S}_1^{\\top}\\\\ \\mathbf{S}_2^{\\top} \\end{array} \\right]\\left[\\mathbf{S}_1\\mathbf{S}_2\\right] = \\left[ \\begin{array}{ll}\\mathbf{S}_1^{\\top}\\mathbf{S}_1 &amp;amp; \\mathbf{S}_1^{\\top}\\mathbf{S}_2\\\\ \\mathbf{S}_2^{\\top}\\mathbf{S}_1 &amp;amp; \\mathbf{S}_2^{\\top}\\mathbf{S}_2 \\end{array} \\right] = \\left[ \\begin{array}{ll}\\mathbf{D}_1 &amp;amp; \\mathbf{V}\\\\ \\mathbf{U} &amp;amp; \\mathbf{D}_2 \\end{array} \\right] = \\mathbf{D}</span></p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Parameter</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Explanation</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">q</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">SIS modulus</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">n</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">Height of the matrix A</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">m</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">Width of the matrix A</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">β</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">Norm bound for SIS instances</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">t</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">Number of commitment openings</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">b</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">Decomposition base</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">k</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">[logbβ] + 2</td>
+
+          </tr>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">Table 1: Overview of parameters and notation.</p>
+
+    <p class="text-gray-300">We can see from the last inequality that the diagonal of  <span class="math">\\mathbf{D}</span>  containing the diagonals of  <span class="math">\\mathbf{D}_1</span>  and  <span class="math">\\mathbf{D}_2</span> , thus  <span class="math">D_{i,i} \\leq \\beta^2, \\forall i \\in [2t]</span> .</p>
+
+    <p class="text-gray-300">Knowledge soundness: Given  <span class="math">(\\mathbf{A},(\\mathbf{T},\\mathbf{D}),\\mathbf{S})\\in \\mathsf{R}_{q,\\beta ,2t}</span> , it is not hard to see that if we parse  <span class="math">\\left[\\bar{\\mathbf{S}}_1\\bar{\\mathbf{S}}_2\\right]\\coloneqq \\mathbf{S}</span> , then</p>
+
+    <div class="my-4 text-center"><span class="math-block">\\left(\\mathbf {A}, \\left(\\mathbf {T} _ {1}, \\mathbf {D} _ {1}\\right), \\bar {\\mathbf {S}} _ {1}\\right), \\left(\\mathbf {A}, \\left(\\mathbf {T} _ {2}, \\mathbf {D} _ {2}\\right), \\bar {\\mathbf {S}} _ {2}\\right) \\in \\mathsf {R} _ {q, \\beta , t}.</span></div>
+
+    <p class="text-gray-300">Now, we describe the reduction of knowledge (see Figure 2) to fold a larger instance to a smaller one while keeping the norm small.</p>
+
+    <p class="text-gray-300">The prover starts by decomposing the witness  <span class="math">\\bar{\\mathbf{S}} = \\mathbf{G}^{-1}(\\mathbf{S})</span> . In this section, the dimension  <span class="math">2t</span>  is fixed, and we write  <span class="math">\\mathbf{G}</span>  and  <span class="math">\\mathbf{G}^{-1}</span>  as shorthand for  <span class="math">\\mathbf{G}_{2t}</span>  and  <span class="math">\\mathbf{G}_{2t}^{-1}</span> , respectively.</p>
+
+    <p class="text-gray-300">Next, it computes and sends  <span class="math">\\bar{\\mathbf{T}} := \\mathbf{A}\\bar{\\mathbf{S}}</span>  and  <span class="math">\\bar{\\mathbf{D}} := \\bar{\\mathbf{S}}^{\\top}\\bar{\\mathbf{S}}</span>  to the verifier, where  <span class="math">\\bar{\\mathbf{D}}</span>  serves as a proof of exact norm. The verifier then proceeds with uniform sampling and sending the challenge  <span class="math">\\mathbf{C} \\in \\mathcal{C}^{2kt \\times t}</span> .</p>
+
+    <p class="text-gray-300">Finally, the prover outputs the folded witness  <span class="math">\\mathbf{S}&#x27; \\coloneqq \\tilde{\\mathbf{SC}}</span> . Meanwhile, the verifier performs two checks. Firstly, it checks  <span class="math">\\mathbf{G}^{\\top}\\tilde{\\mathbf{D}}\\mathbf{G}^{\\top} = \\mathbf{D}</span>  to verify the norm proof. Secondly, it checks  <span class="math">\\bar{\\mathbf{T}}\\mathbf{G} \\equiv \\mathbf{T} \\mod q</span>  to ensure that the prover decomposes correspondently. Then, it outputs  <span class="math">(\\mathbf{T}&#x27; \\coloneqq \\tilde{\\mathbf{T}}\\mathbf{C}, \\mathbf{D}&#x27; \\coloneqq \\mathbf{C}^{\\top}\\tilde{\\mathbf{D}}\\mathbf{C})</span>  as the folded instance. Note that the norm of the new witness does not increase as long as the challenge space only contains small elements. Furthermore, looking ahead to knowledge soundness, we set  <span class="math">\\mathcal{C} \\coloneqq \\{-1,0,1\\}</span> .</p>
+
+    <p class="text-gray-300">Now, we prove that this reduction of knowledge satisfies public reducibility, perfect completeness, and knowledge soundness.</p>
+
+    <p class="text-gray-300">Lemma 4 (Public Reducibility and Perfect Completeness). The protocol  <span class="math">\\Pi</span>  shown in Figure 2 satisfies public reducibility. Furthermore, if  <span class="math">t \\leq \\beta / (2k\\lfloor \\frac{b}{2}\\rfloor \\sqrt{m})</span> ,  <span class="math">\\Pi</span>  satisfies perfect completeness.</p>
+
+    <p class="text-gray-300">!<a href="img-1.jpeg">img-1.jpeg</a> Fig.2: Reduction of knowledge from  <span class="math">\\mathsf{R}_{q,\\beta,2t}</span>  to  <span class="math">\\mathsf{R}_{q,\\beta,t}</span> .</p>
+
+    <p class="text-gray-300">Proof. We prove each property in turn.</p>
+
+    <p class="text-gray-300">Public reducibility. Given the instance  <span class="math">(\\mathbf{A},(\\mathbf{T},\\mathbf{D}),\\mathbf{S})</span>  and the transcript  <span class="math">\\mathrm{Tr} = (\\tilde{\\mathbf{T}},\\tilde{\\mathbf{D}},\\mathbf{C})</span> , one can efficiently compute  <span class="math">(\\mathbf{T}&#x27;,\\mathbf{D}&#x27;)</span> .</p>
+
+    <p class="text-gray-300">Perfect completeness. We have that</p>
+
+    <p class="text-gray-300"><span class="math">\\mathbf{G}^{\\top}\\tilde{\\mathbf{D}}\\mathbf{G} = \\mathbf{G}^{\\top}\\tilde{\\mathbf{S}}^{\\top}\\tilde{\\mathbf{S}}\\mathbf{G} = \\mathbf{S}^{\\top}\\mathbf{S} = \\mathbf{D}</span></p>
+
+    <p class="text-gray-300"><span class="math">\\tilde{\\mathbf{T}}\\mathbf{G}\\equiv \\mathbf{A}\\tilde{\\mathbf{S}}\\mathbf{G}\\equiv \\mathbf{A}\\mathbf{S}\\equiv \\mathbf{T}</span>  (mod  <span class="math">q</span>  ，</p>
+
+    <p class="text-gray-300"><span class="math">\\mathbf{A}\\mathbf{S}^{\\prime}\\equiv \\mathbf{A}\\tilde{\\mathbf{S}}\\mathbf{C}\\equiv \\tilde{\\mathbf{T}}\\mathbf{C}\\equiv \\mathbf{T}^{\\prime}</span>  (mod  <span class="math">q</span>  ，</p>
+
+    <p class="text-gray-300"><span class="math">\\mathbf{S}^{\\prime \\top}\\mathbf{S}^{\\prime} = (\\tilde{\\mathbf{S}}\\mathbf{C})^{\\top}\\tilde{\\mathbf{S}}\\mathbf{C} = \\mathbf{C}^{\\top}\\tilde{\\mathbf{S}}^{\\top}\\tilde{\\mathbf{S}}\\mathbf{C} = \\mathbf{C}^{\\top}\\tilde{\\mathbf{D}}\\mathbf{C} = \\mathbf{D}^{\\prime}</span></p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">$\\left\\</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mathbf{S}_{*,j}^{\\prime}\\right\\</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\leq \\left\\</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\sum_{i = 1}^{2kt}\\mathbf{C}_{i,j}\\tilde{\\mathbf{S}}_{*,i}\\right\\</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\leq 2kt\\left\\lfloor \\frac{b}{2}\\right\\rfloor \\sqrt{m}\\leq \\beta ,$</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">where the last inequality holds when  <span class="math">t \\leq \\beta / (2k \\left\\lfloor \\frac{b}{2} \\right\\rfloor \\sqrt{m})</span> .</p>
+
+    <p class="text-gray-300">To demonstrate that the protocol shown in Figure 2 is knowledge sound (with exact witnesses), we first construct an extractor that yields a relaxed witness, as detailed in Lemma 5. Then, in Lemma 6, we augment this relaxed extractor in order to achieve (exact) knowledge soundness.</p>
+
+    <p class="text-gray-300">Lemma 5 (Relaxed Knowledge Soundness). For a malicious prover  <span class="math">\\mathcal{P}</span> , which convinces the verifier with probability  <span class="math">\\epsilon &amp;gt; 4 \\cdot 2^{t(\\delta + 2/3)} / 3^t</span>  for any  <span class="math">\\delta &amp;gt; 0</span> ,</p>
+
+    <p class="text-gray-300">there exists an extractor for the protocol in Figure 2 that yields <span class="math">\\overline{\\mathbf{S}}</span> satisfying</p>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mathbf{A} \\overline{\\mathbf{S}} \\equiv \\bar{\\mathbf{T}} \\bmod q, \\quad \\left\\</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\overline{\\mathbf{S}}_{*,j} \\right\\</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\leq 2\\beta, \\quad (2)</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <p class="text-gray-300">and runs in time <span class="math">O(\\lambda kt / \\epsilon)</span>.</p>
+
+    <p class="text-gray-300">Proof. We closely follow the approach from Baum et al. [BBC+18]. For <span class="math">j \\in [2kt]</span>, we construct an extractor that produces two accepting transcripts, with challenges <span class="math">\\mathbf{C}^{(0,j)}, \\mathbf{C}^{(1,j)}</span> and corresponding witnesses <span class="math">\\mathbf{Z}^{(0,j)}, \\mathbf{Z}^{(1,j)}</span> such that <span class="math">\\mathbf{C}^{(0,j)}</span> and <span class="math">\\mathbf{C}^{(1,j)}</span> are identical except for the <span class="math">j</span>-th row, and further such that, there exists <span class="math">i \\in [t]</span> such that <span class="math">C_{j,i}^{(0,j)} - C_{j,i}^{(1,j)} = \\pm 1</span>. This suffices to show the lemma since we have that</p>
+
+    <div class="my-4 text-center"><span class="math-block">\\mathbf{A} (\\mathbf{Z}_{*,i}^{(0,j)} - \\mathbf{Z}_{*,i}^{(1,j)}) = (C_{j,i}^{(0,j)} - C_{j,i}^{(1,j)}) \\bar{\\mathbf{T}}_{*,j} \\pmod{q}.</span></div>
+
+    <p class="text-gray-300">We therefore obtain <span class="math">\\overline{\\mathbf{S}}_{<em>,j} \\coloneqq (\\mathbf{Z}_{</em>,i}^{(0,j)} - \\mathbf{Z}_{*,i}^{(1,j)}) / (C_{j,i}^{(0,j)} - C_{j,i}^{(1,j)})</span> with norm at most <span class="math">2\\beta</span>.</p>
+
+    <p class="text-gray-300">Let <span class="math">\\mathcal{P}</span> denote a (possibly malicious) prover, which we assume to be deterministic without loss of generality. Let <span class="math">\\epsilon</span> denote the success probability of the prover <span class="math">\\mathcal{P}</span> (over the randomness of the choice of the challenge <span class="math">\\mathbf{C}</span>). For <span class="math">j \\in [2kt]</span>, the extractor <span class="math">\\mathcal{E}_j</span> is the following algorithm.</p>
+
+    <p class="text-gray-300"><span class="math">\\mathcal{E}_j^{\\mathcal{P}}(\\mathbf{x})</span>:</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Run <span class="math">\\mathcal{P}</span> until it outputs its first message <span class="math">\\bar{\\mathbf{T}},\\tilde{\\mathbf{D}}</span>.</li>
+
+      <li>Sample <span class="math">\\mathbf{C}^{(0,j)}\\gets \\mathcal{C}^{2kt\\times t}</span></li>
+
+      <li>Run <span class="math">\\mathcal{P}</span> until it outputs a witness <span class="math">\\mathbf{Z}^{(0,j)}</span>.</li>
+
+      <li>If the verifier accepts the transcript <span class="math">(\\bar{\\mathbf{T}},\\tilde{\\mathbf{D}},\\mathbf{C}^{(0,j)},\\mathbf{Z}^{(0,j)})</span> continue, else go to Item 2.</li>
+
+      <li>Define</li>
+
+    </ol>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">S_j := \\left\\{ \\mathbf{C} \\in \\mathcal{C}^{2kt \\times t} \\middle</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\begin{array}{c} \\exists i \\in [t] \\text{ s.t. }</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">C_{j,i}^{(0,j)} - C_{j,i}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">= 1 \\\\ \\forall i \\in [t], j' \\in [2kt] \\text{ s.t. } j \\neq j': C_{j,i}^{(0,j)} = C_{j',i} \\end{array} \\right\\}</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Rewind the prover <span class="math">\\mathcal{P}</span>. If this label has been reached more than <span class="math">\\lambda/\\epsilon</span> times, abort.</li>
+
+      <li>Sample <span class="math">\\mathbf{C}^{(1,j)}\\gets S_j</span></li>
+
+      <li>Run <span class="math">\\mathcal{P}</span> until it outputs a witness <span class="math">\\mathbf{Z}^{(1,j)}</span>.</li>
+
+      <li>If the verifier accepts the transcript <span class="math">(\\bar{\\mathbf{T}},\\tilde{\\mathbf{D}},\\mathbf{C}^{(1,j)},\\mathbf{Z}^{(1,j)})</span> continue, else go to Item 6.</li>
+
+      <li>Output <span class="math">(\\mathbf{C}^{(0,j)},\\mathbf{C}^{(1,j)},\\mathbf{Z}^{(0,j)},\\mathbf{Z}^{(1,j)})</span></li>
+
+    </ol>
+
+    <p class="text-gray-300">The expected running time of the extractor is at most <span class="math">1/\\epsilon + \\lambda/\\epsilon = \\mathsf{poly}(\\lambda)/\\epsilon</span>.</p>
+
+    <p class="text-gray-300">We are left to bound the failure probability of the extractor. We denote by <span class="math">G \\subseteq \\mathcal{C}^{2kt \\times t}</span> the set of accepting challenges, i.e., those for which <span class="math">\\mathcal{P}</span> outputs an accepting transcript. We also say a challenge <span class="math">\\mathbf{C}&#x27;</span> is <span class="math">j</span>-special w.r.t. <span class="math">\\mathbf{C}</span> if they disagree only in the <span class="math">j</span>-th row, that have the required difference in at least on entry. The goal of the extractor <span class="math">\\mathcal{E}_j^{\\mathcal{P}}</span> is to output a challenge <span class="math">\\mathbf{C}^{(1,j)}</span> that is both accepting and <span class="math">j</span>-special w.r.t. <span class="math">\\mathbf{C}^{(0,j)}</span>. Consider the binary matrix <span class="math">\\mathbf{M}_j</span>, whose</p>
+
+    <p class="text-gray-300">15</p>
+
+    <p class="text-gray-300">etries correspond to challenges. We index the rows of <span class="math">\\mathbf{M}_{j}</span> by <span class="math">\\mathbf{C}_{j,<em>}</span> and its columns by <span class="math">(\\mathbf{C}_{1,</em>},\\ldots,\\mathbf{C}_{j-1,<em>},\\mathbf{C}_{j+1,</em>},\\ldots,\\mathbf{C}_{2kt,*})</span>. An entry <span class="math">\\mathbf{C}</span> in <span class="math">\\mathbf{M}_{j}</span> is <span class="math">1</span> if <span class="math">\\mathbf{C}\\in G</span>, and <span class="math">0</span> otherwise. Note that the fraction of ones in <span class="math">\\mathbf{M}_{j}</span> is at least <span class="math">\\epsilon</span>.</p>
+
+    <p class="text-gray-300">Following the terminology in <em>[x1]</em>, a column in <span class="math">\\mathbf{M}_{j}</span> is heavy if its fractions of ones is at least <span class="math">\\epsilon/2</span>. By <em>[x1, Lemma 2]</em>, given <span class="math">\\mathbf{C}^{(0,j)}</span> is accepted, the probability that the column containing <span class="math">\\mathbf{C}^{(0,j)}</span> is heavy is at least <span class="math">1/2</span>. In this case, the fraction of both accepting and <span class="math">j</span>-special (w.r.t. <span class="math">\\mathbf{C}^{(0,j)}</span>) challenges associated with the column is at least <span class="math">\\epsilon/2-g(Z)</span>, where <span class="math">g(Z)</span> is the fraction of challenges that are not <span class="math">j</span>-special in that column, depending on the number of zeroes <span class="math">Z</span> in the <span class="math">j</span>-th row of <span class="math">\\mathbf{C}^{(0,j)}</span>. Concretely, a challenge <span class="math">\\mathbf{C}^{\\prime}</span> is not <span class="math">j</span>-special w.r.t. to <span class="math">\\mathbf{C}</span> if and only if, in the <span class="math">j</span>-th row, <span class="math">\\mathbf{C}^{\\prime}</span> has the same zero entries as <span class="math">\\mathbf{C}</span> and the remaining entries are <span class="math">\\pm 1</span>; thus</p>
+
+    <p class="text-gray-300"><span class="math">g(Z)=\\frac{2^{t-Z}}{3^{t}}\\enspace.</span></p>
+
+    <p class="text-gray-300">Since <span class="math">\\mathbf{C}^{(0,j)}</span> is sampled uniformly from <span class="math">\\mathcal{C}^{t}</span>, <span class="math">Z</span> is concentrated around <span class="math">t/3</span>. Using the Chernoff-Hoeffding bound, we obtain an upper-bound on the abort probability. Specifically, let <span class="math">A</span> be the event that the extractor aborts and <span class="math">H</span> be the event that the column containing <span class="math">\\mathbf{C}^{(0,j)}</span> is heavy, we have</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"><span class="math">\\Pr[A]</span> $=\\Pr\\left[A\\>\\big{</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">}\\>\\bar{H}\\right]\\cdot\\Pr[\\bar{H}]+\\Pr[A\\wedge H]$</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">$+\\Pr\\left[A\\wedge H\\></td>
+
+            <td class="px-3 py-2 border-b border-gray-700">\\>Z>t/3-\\delta t\\right]\\cdot\\Pr[Z>t/3-\\delta t]$</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">$\\leq\\Pr[\\bar{H}]+\\Pr[Z\\leq t/3-\\delta t]+\\Pr\\left[A\\wedge H\\></td>
+
+            <td class="px-3 py-2 border-b border-gray-700">\\>Z>t/3-\\delta t\\right]$</td>
+
+          </tr>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300"><span class="math">\\leq 1/2+e^{-2\\delta^{2}t}+(1-(\\epsilon/2-g(t/3-\\delta t))^{\\lambda/\\epsilon}\\enspace.</span></p>
+
+    <p class="text-gray-300">If <span class="math">\\epsilon&gt;4\\cdot 2^{t(\\delta+2/3)}/3^{t}</span>, then <span class="math">\\epsilon/2-g(t/3-\\delta t)&gt;\\epsilon/4</span> and</p>
+
+    <p class="text-gray-300"><span class="math">(1-(\\epsilon/2-g(t/3-\\delta t))^{\\lambda/\\epsilon}&lt;(1-\\epsilon/4)^{\\lambda/\\epsilon}&lt;e^{-4\\lambda}&lt;2^{-\\lambda}\\enspace,</span> <span class="math">\\Pr[A]&lt;1/2+e^{-2\\delta^{2}t}+2^{-\\lambda}\\enspace.</span></p>
+
+    <p class="text-gray-300">Running the extractor <span class="math">O(\\lambda)</span> times yields an extractor that runs in expected time <span class="math">\\mathsf{poly}(\\lambda)/\\epsilon</span> and outputs a transcript of the required structure. ∎</p>
+
+    <p class="text-gray-300">By using Lemma 5, we obtain a relaxed extractor, which can be used to prove knowledge soundness of the protocol in Figure 2. We note that this alternative notion of knowledge soundness, where the extractor runs in expected <span class="math">\\mathsf{poly}(\\lambda)/\\epsilon</span> times, is equivalent to the notion adapted for a reduction of knowledge (see <em>[x2, Remark 2.4]</em> for more discussion).</p>
+
+    <h6 id="sec-22" class="text-base font-medium mt-4">Lemma 6 (Exact Knowledge Soundness).</h6>
+
+    <p class="text-gray-300">Assuming <span class="math">\\mathsf{SIS}_{n,m,q,(2kt+1)\\beta}</span>, the protocol in Figure 2 satisfies knowledge soundness.</p>
+
+    <h6 id="sec-23" class="text-base font-medium mt-4">Proof.</h6>
+
+    <p class="text-gray-300">Let <span class="math">(\\mathsf{Tr}:=(\\tilde{\\mathbf{T}},\\tilde{\\mathbf{D}},\\mathbf{C}),\\mathbb{x}_{2}:=(\\mathbf{T}^{\\prime},\\mathbf{D}^{\\prime}),\\mathbb{w}_{2}:=\\mathbf{S}^{\\prime})</span> be the output of the interaction between a malicious prover <span class="math">\\mathcal{P}^{<em>}</span> and the verifier <span class="math">\\mathcal{V}</span>. If <span class="math">(\\mathbf{A},\\mathbb{x}_{2},\\mathbb{w}_{2})\\in\\mathcal{P}^{</em>}</span></p>
+
+    <p class="text-gray-300"><span class="math">\\mathsf{R}_{q,\\beta,t}</span>, then by Lemma 5, we obtain a relaxed extractor that outputs <span class="math">\\bar{\\mathbf{S}}</span> satisfying Equation (2).</p>
+
+    <p class="text-gray-300">Furthermore, in such cases, we have that <span class="math">\\mathbf{S}&#x27; = \\bar{\\mathbf{S}}\\mathbf{C}</span> with probability at least <span class="math">1 - \\kappa_{\\mathrm{SS}}</span>. Indeed, otherwise, <span class="math">\\mathbf{S}&#x27; - \\bar{\\mathbf{S}}\\mathbf{C}</span> is <span class="math">\\mathsf{SIS}_{n,m,q,(2kt + 1)\\beta}</span> solutions since</p>
+
+    <div class="my-4 text-center"><span class="math-block">\\mathbf {A} \\mathbf {S} ^ {\\prime} \\equiv \\mathbf {T} ^ {\\prime} \\equiv \\bar {\\mathbf {T}} \\mathbf {C} \\equiv \\mathbf {A} \\bar {\\mathbf {S}} \\mathbf {C} \\pmod {q}.</span></div>
+
+    <p class="text-gray-300">In addition, when <span class="math">\\mathbf{S}&#x27; = \\bar{\\mathbf{S}}\\mathbf{C}</span>, we have that <span class="math">\\mathbf{C}^{\\top}\\bar{\\mathbf{S}}^{\\top}\\bar{\\mathbf{S}}\\mathbf{C} = \\mathbf{S}&#x27;^{\\top}\\mathbf{S}&#x27; = \\mathbf{C}^{\\top}\\tilde{\\mathbf{D}}\\mathbf{C}</span>, or equivalently, <span class="math">f(\\mathbf{C}) = g(\\mathbf{C})</span>, where <span class="math">f(\\mathbf{X}) := \\mathbf{X}^{\\top}\\bar{\\mathbf{S}}^{\\top}\\bar{\\mathbf{S}}\\mathbf{X}</span> and <span class="math">g(\\mathbf{X}) := \\mathbf{X}^{\\top}\\tilde{\\mathbf{D}}\\mathbf{X}</span> are functions in the variables <span class="math">\\mathbf{X} \\in \\mathcal{C}^{2kt \\times t}</span>. Looking at the index <span class="math">(i, i)</span> of <span class="math">f</span> and <span class="math">g</span>,</p>
+
+    <div class="my-4 text-center"><span class="math-block">f _ {i, i} (\\mathbf {X}) = \\sum_ {u \\in [ 2 k t ]} \\sum_ {v \\in [ 2 k t ]} (\\bar {S} ^ {\\top} \\bar {S}) _ {u, v} X _ {u, i} X _ {v, i},</span></div>
+
+    <div class="my-4 text-center"><span class="math-block">g _ {i, i} (\\mathbf {X}) = \\sum_ {u \\in [ 2 k t ]} \\sum_ {v \\in [ 2 k t ]} \\tilde {D} _ {u, v} X _ {u, i} X _ {v, i},</span></div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">which both have total degree 2. Then by the Demillo-Lipton-Schwartz-Zippel lemma for the integral domain <span class="math">\\mathbb{Z}</span>, we have that the probability of <span class="math">f_{i,i}(\\mathbf{C}_{<em>,i}) = g_{i,i}(\\mathbf{C}_{</em>,i})</span> but <span class="math">\\bar{\\mathbf{S}}^{\\top}\\bar{\\mathbf{S}} \\neq \\tilde{\\mathbf{D}}</span> is at most $2 /</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mathcal{C}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"><span class="math"> for uniformly random </span>\\mathbf{C}_{*,i}<span class="math"> in </span>\\mathcal{C}^{2kt}$.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">Note that when <span class="math">\\overline{\\mathbf{S}}^{\\top}\\overline{\\mathbf{S}} = \\tilde{\\mathbf{D}}</span>, then</p>
+
+    <div class="my-4 text-center"><span class="math-block">\\mathbf {G} ^ {\\top} \\overline {{\\mathbf {S}}} ^ {\\top} \\overline {{\\mathbf {S}}} \\mathbf {G} = \\mathbf {G} ^ {\\top} \\tilde {\\mathbf {D}} \\mathbf {G} = \\mathbf {D},</span></div>
+
+    <div class="my-4 text-center"><span class="math-block">\\mathbf {A} \\overline {{\\mathbf {S}}} \\mathbf {G} \\equiv \\bar {\\mathbf {T}} \\mathbf {G} \\equiv \\mathbf {T} \\pmod {q},</span></div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">which implies <span class="math">\\overline{\\mathbf{S}}\\mathbf{G}</span> is a valid witness for <span class="math">\\mathbf{T}</span>. Therefore, we can bound the probability of <span class="math">(\\mathbf{A},\\mathbf{x}_2,\\mathbf{w}_2)\\in \\mathsf{R}_{q,\\beta ,t}</span> but <span class="math">\\bar{\\mathbf{S}}\\mathbf{G}</span> is not a witness for <span class="math">(\\mathbf{A},(\\mathbf{T},\\mathbf{D}))</span> by the probability that <span class="math">f(\\mathbf{C}) = g(\\mathbf{C})</span> but <span class="math">\\overline{\\mathbf{S}}^{\\top}\\overline{\\mathbf{S}}\\neq \\tilde{\\mathbf{D}}</span>, which is at most $(2 /</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mathcal{C}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">)^t<span class="math"> because for each </span>i\\in [t]<span class="math">, </span>f_{i,i}(\\mathbf{C}_{<em>,i}) = g_{i,i}(\\mathbf{C}_{</em>,i})<span class="math"> and </span>\\mathbf{C}_{*,i}<span class="math"> is sampled independently and uniformly at random from </span>\\mathcal{C}^{2kt}<span class="math">. More precisely, if </span>E$ is the event that the extractor in Lemma 5 succeeds, then</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">$$ \\begin{array}{l} \\Pr \\left[ \\left(\\mathbf {A}, \\left(\\mathbf {T} ^ {\\prime}, \\mathbf {D} ^ {\\prime}\\right), \\mathbf {S} ^ {\\prime}\\right) \\in \\mathrm {R} _ {q, \\beta , t} \\wedge (\\mathbf {A}, (\\mathbf {T}, \\mathbf {D}), \\bar {\\mathbf {S}} \\mathbf {G}) \\notin \\mathrm {R} _ {q, \\beta , 2 t} \\wedge E \\right] \\\\ \\leq \\Pr \\left[ f (\\mathbf {C}) = g (\\mathbf {C}) \\wedge (\\mathbf {A}, (\\mathbf {T}, \\mathbf {D}), \\bar {\\mathbf {S}} \\mathbf {G}) \\notin \\mathrm {R} _ {q, \\beta , 2 t} \\wedge E \\right] + \\kappa_ {\\mathrm {S S}} \\\\ \\leq \\Pr \\left[ f (\\mathbf {C}) = g (\\mathbf {C}) \\wedge \\bar {\\mathbf {S}} ^ {\\top} \\bar {\\mathbf {S}} \\neq \\tilde {\\mathbf {D}} \\wedge E \\right] + \\kappa_ {\\mathrm {S S}} \\\\</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\leq \\left(\\frac {2}{</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mathcal {C}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">}\\right) ^ {t} + \\kappa_ {\\mathrm {S S}}.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">\\end{array} $$</p>
+
+    <p class="text-gray-300">□</p>
+
+    <p class="text-gray-300">Applications to folding schemes for NP relations. Unfortunately, unlike in Nova [KST22], we cannot easily modify our construction to support (relaxed) R1CS relations. The issue is that the norm of the (additional cross-term) folded witness now depends on the magnitude of entries in the R1CS matrices <span class="math">\\mathbf{A},\\mathbf{B},\\mathbf{C}</span>, which we cannot assume is small in general. We leave a construction of a lattice-based folding schemes for R1CS-type relations as future work.</p>
+
+    <p class="text-gray-300">17</p>
+
+    <p class="text-gray-300">Instead, we provide a sketch on how to build a folding scheme for the subset sum problem which is NP-complete. We recall that the subset sum problem is essentially to find a binary vector <span class="math">\\mathbf{s}</span> such that <span class="math">\\mathbf{M}\\mathbf{s} = \\mathbf{y}</span> over <span class="math">\\mathbb{Z}</span> for public matrix <span class="math">\\mathbf{M}</span> and vector <span class="math">\\mathbf{y}</span>.</p>
+
+    <p class="text-gray-300">First, we use the observation from [LNP22] that an integer vector <span class="math">\\mathbf{s}</span> has binary values if and only if <span class="math">\\langle \\mathbf{s},\\mathbf{s} - \\mathbf{1}\\rangle = 0</span>, where <span class="math">\\mathbf{1}</span> is the all-one vector. Secondly, we can pick a proof system modulus <span class="math">q</span> large enough so that <span class="math">\\mathbf{M}\\mathbf{s} = \\mathbf{y}</span> (mod <span class="math">q</span>) is equivalent to <span class="math">\\mathbf{M}\\mathbf{s} = \\mathbf{y}</span> over integers, i.e. no modulo overflow occurs.</p>
+
+    <p class="text-gray-300">Thus, similarly to (1) we can define a relation:</p>
+
+    <div class="my-4 text-center"><span class="math-block">\\mathsf {R} _ {q, \\beta , t} ^ {\\star} := \\left\\{ \\begin{array}{c c} (\\mathbf {A}, (\\mathbf {T}, \\mathbf {D}), \\mathbf {S}) &amp;amp; \\mathbf {A} \\mathbf {S} \\equiv \\mathbf {T} \\pmod {q} \\\\ \\in \\mathbb {Z} ^ {n \\times m} \\times (\\mathbb {Z} ^ {n \\times t} \\times \\mathbb {Z} ^ {t \\times t}) \\times \\mathbb {Z} ^ {m \\times t} &amp;amp; \\wedge \\mathbf {D} = \\mathbf {S} ^ {\\top} \\mathbf {S} - \\mathbf {S} ^ {\\top} \\mathbf {1} \\end{array} \\right\\} \\tag {3}</span></div>
+
+    <p class="text-gray-300">where in this equation <span class="math">\\mathbf{1}</span> is the all-one matrix. Here, the matrix <span class="math">\\mathbf{A}</span> will contain the SIS commitment key (to ensure binding), together with the matrix <span class="math">\\mathbf{M}</span> related to the subset sum problem. Then, given a valid tuple <span class="math">(\\mathbf{A}, (\\mathbf{T}, \\mathbf{D}), \\mathbf{S}) \\in \\mathsf{R}_{q,\\beta,t}^{\\star}</span>, one can be convinced that the matrix <span class="math">\\mathbf{S}</span> has binary entries by simply checking that diagonal entries <span class="math">D_{i,i}</span> of <span class="math">\\mathbf{D}</span> are equal to zero. Finally, building a folding scheme for <span class="math">\\mathsf{R}_{q,\\beta,t}^{\\star}</span> is almost identical to the construction above up to certain straightforward modifications.</p>
+
+    <h2 id="sec-24" class="text-2xl font-bold">4 Implementation &amp; Evaluation</h2>
+
+    <h3 id="sec-25" class="text-xl font-semibold mt-8">4.1 Parameter Selection</h3>
+
+    <p class="text-gray-300">For an input witness length <span class="math">m</span> and a security parameter <span class="math">t</span>, we need to select a SIS modulus <span class="math">q \\in \\mathbb{N}</span>, a commitment output length <span class="math">n \\in \\mathbb{N}</span>, a norm <span class="math">\\beta &amp;lt; q</span>, a decomposition basis <span class="math">b</span> (which fixes a decomposition length <span class="math">k = \\lfloor \\log_b\\beta \\rfloor + 2</span>) such that the following conditions are fulfilled:</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>The knowledge error <span class="math">\\kappa_{\\kappa s} = Q(\\kappa_{\\mathrm{err}} + \\kappa_{\\mathrm{cs}} + \\kappa_{\\mathrm{SS}})</span> must be at most <span class="math">2^{-\\lambda}</span>, where <span class="math">\\kappa_{\\mathrm{cs}}</span> is the knowledge error from Lemma 5;</li>
+
+      <li>For perfect completeness, <span class="math">2tk\\left(\\left\\lfloor \\frac{b}{2}\\right\\rfloor \\sqrt{m}\\right)\\leq \\beta</span></li>
+
+      <li>For (knowledge) soundness, <span class="math">\\mathsf{SIS}_{n,m,\\beta ,L_2}</span> must be <span class="math">\\kappa_{\\mathrm{SS}}</span>-hard.</li>
+
+    </ol>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">The knowledge error is <span class="math">\\kappa_{\\kappa s} = Q(\\kappa_{\\mathrm{err}} + \\kappa_{\\mathrm{cs}} + \\kappa_{\\mathrm{SS}}) = Q((\\frac{2}{3})^t + 4(\\frac{2^{t(\\delta + 2/3)}}{3^t}) + \\kappa_{\\mathrm{SS}})</span>. Setting <span class="math">\\lambda = 128</span> and <span class="math">Q = 2^{64}</span>, we choose <span class="math">t = 330</span> and <span class="math">\\kappa_{\\mathrm{SS}} \\leq 2^{-(129 + 64)}</span> such that <span class="math">\\kappa_{\\kappa s} \\leq 5 \\cdot 2^{64} (\\frac{2}{3})^{334} + 2^{-129} \\leq 2^{-\\lambda}</span>. The second condition gives rise to the bounds <span class="math">\\beta \\geq e^{-W_{-1}(-\\frac{\\ln b}{\\lambda t \\sqrt{m}})} + 2 \\left\\lfloor \\frac{b}{2} \\right\\rfloor t \\sqrt{m}</span> (where <span class="math">W_{-1}</span> is the non-principal branch of the real Lambert W-function). Additionally, <span class="math">2 \\leq b \\leq \\sqrt{\\beta}</span>. For efficiency, we want <span class="math">b</span> to be as large as possible, i.e., <span class="math">b \\approx \\sqrt{\\beta}</span>. Substituting in the condition above, we get $t \\left</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\log_{\\sqrt{\\beta}}(\\beta) + 2 \\right</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\sqrt{\\beta} \\sqrt{m} \\leq \\beta<span class="math">, which yields </span>\\beta = (4t)^2 m, b = \\lfloor \\sqrt{\\beta} \\rfloor<span class="math">, and </span>k = 4$.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">We choose <span class="math">q = 2^{64}</span> for the lattice modulus, which is both large enough to guarantee SIS hardness and allows for very efficient modular arithmetic (modular reductions reduce to wrapping 64-bit arithmetic, and are implemented directly in hardware for machines with 64-bit instruction sets).</p>
+
+    <p class="text-gray-300">18</p>
+
+    <p class="text-gray-300">Finally, we perform binary search on <span class="math">n</span> in order to find the smallest <span class="math">n</span> such that the underlying SIS instances are <span class="math">\\kappa_{\\text{ss}}</span>-hard. We rely on the lattice-estimator tool <em>[x10]</em>, which uses the methodology outlined by Gama and Nguyen <em>[x13]</em>.</p>
+
+    <p class="text-gray-300">Improving Proof Size. For the parameter sets outlined above, we made use of a worst-case bound on the norm of folded witnesses to ensure perfect completeness. If one is willing to accept a negligibly small completeness error <span class="math">\\kappa_{\\text{c}}</span>, we can leverage probabilistic upper bounds on the norm of folded witnesses to reduce proof sizes.</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Since $</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">C_{i,j}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"><span class="math"> is a Bernoulli-distributed random variable with </span>p=\\frac{2}{3}<span class="math">, we have </span>\\mathbb{E}\\left[\\sum_{l\\in[2kt]}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">C_{l,j}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\right]=\\frac{4kt}{3}<span class="math"> and </span>\\Pr\\left[\\sum_{l\\in[2kt]}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">C_{l,j}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\geq\\frac{4kt}{3}+2kt\\epsilon\\right]\\leq e^{-4kt\\epsilon^{2}}<span class="math"> by a Chernoff-Hoeffding bound. Solving for </span>e^{4kt\\epsilon^{2}}=\\kappa_{\\text{c}}=2^{-\\mu}<span class="math"> yields </span>\\epsilon=\\frac{\\sqrt{\\mu\\ln 2}}{2kt}$. Putting everything together, we have that</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">$\\left\\</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mathbf{S}_{*,j}\\right\\</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\leq\\left\\lfloor\\frac{b}{2}\\right\\rfloor\\left(\\frac{4kt}{3}+2kt\\epsilon\\right)\\sqrt{m}=\\left\\lfloor\\frac{b}{2}\\right\\rfloor\\left(\\frac{4kt}{3}+\\sqrt{\\mu\\ln 2}\\right)\\sqrt{m}$</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">with all but negligible probability. Setting <span class="math">\\mu=128</span>, and for <span class="math">t=330</span> and <span class="math">k=4</span> as above, this bound is roughly a third of the worst-case bound.</p>
+
+    <h3 id="sec-26" class="text-xl font-semibold mt-8">4.2 Implementation</h3>
+
+    <p class="text-gray-300">We implement Lova and open-source our implementation. In our implementation, we translate several nice properties of Lova into hardware-friendly optimizations:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>We leverage symmetries to compute and send fewer matrix entries; in particular, our prover only computes one matrix instead of two for the protocol in Figure 1, and only computes the lower triangular part of symmetric matrices for the protocol in Figure 2.</li>
+
+      <li>Since our challenges are ternary, random linear combinations can be computed without any multiplications, using only negations, and additions.</li>
+
+      <li>We parallelize both the prover and verifier.</li>
+
+      <li>As mentioned above, we set the SIS modulus to <span class="math">q=2^{64}</span>, which allows us to eschew modular arithmetic in favor of native 64-bit arithmetic.</li>
+
+    </ul>
+
+    <p class="text-gray-300">In order to safely instantiate the Fiat-Shamir transform, we rely on and extend the nimue framework <em>[x11]</em>. We benchmark our implementation on an AWS EC2 m5.8xlarge instance with 128 GB of RAM and 32 Intel Xeon vCPUs @ 3.1 GHz.</p>
+
+    <h3 id="sec-27" class="text-xl font-semibold mt-8">4.3 Evaluation</h3>
+
+    <p class="text-gray-300">Proof size. For one run of the Lova folding protocol with two witnesses of size <span class="math">m</span>, the prover sends one <span class="math">t\\times t</span> matrix with entries of norm at most <span class="math">\\beta^{2}</span> (noting that <span class="math">\\mathbf{U}=\\mathbf{V}^{\\top}</span>), one <span class="math">n\\times 2kt</span> matrix with entries in <span class="math">\\mathbb{Z}_{q}</span>, and one <span class="math">2kt\\times 2kt</span></p>
+
+    <p class="text-gray-300">symmetric matrix with entries of norm at most  <span class="math">\\left\\lfloor \\frac{b}{2} \\right\\rfloor^2</span> , totalling  <span class="math">t^2 \\left\\lfloor 2 + \\log \\beta^2 \\right\\rfloor + 2hkt \\left\\lfloor 1 + \\log q \\right\\rfloor + \\frac{(2kt)(2kt + 1)}{2} \\left\\lfloor 2 + \\log \\left\\lfloor \\frac{b}{2} \\right\\rfloor^2 \\right\\rfloor</span>  bits.</p>
+
+    <p class="text-gray-300">In general (what we call PCD-type settings), the prover folds two full witnesses, i.e., matrices with  <span class="math">t</span>  columns. In IVC-type settings, the prover repeatedly folds a fresh witness (i.e., which consists of the same vector concatenated  <span class="math">t</span>  times with itself) with a non-fresh witness. In this setting, the prover and the verifier can exploit this extra structure to reduce computation and proof size. We show concrete proof times for varying witness lengths in Table 2.</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Instance length</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">217</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">218</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">219</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">IVC</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">Proof size (κc=0)</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">17.53 MB</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">18.36 MB</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">19.18 MB</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+            <td class="px-3 py-2 border-b border-gray-700">Proof size (κc≤2-128)</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">16.62 MB</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">17.42 MB</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">18.24 MB</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">PCD</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">Proof size (κc=0)</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">43.64 MB</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">45.51 MB</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">47.36 MB</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+            <td class="px-3 py-2 border-b border-gray-700">Proof size (κc≤2-128)</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">41.62 MB</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">43.43 MB</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">45.28 MB</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+            <td class="px-3 py-2 border-b border-gray-700">Prover time (κc=0)</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">725.35 s</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1568.5 s</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">3243.8 s</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+            <td class="px-3 py-2 border-b border-gray-700">Prover time (κc≤2-128)</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">702.11 s</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1492.8 s</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">3002.9 s</td>
+
+          </tr>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">Table 2: Proof sizes and prover runtime for a single folding step. We consider IVC and PCD-type settings, and perfect completeness (worst-case bound analysis) and negligible completeness error (probabilistic bound analysis).</p>
+
+    <p class="text-gray-300">Prover Runtime and Verifier Complexity. Concrete prover runtimes are shown in Table 2. The verifier needs to sample  <span class="math">\\lceil 3^{2kt^2} \\rceil \\approx 3.22 \\cdot kt^2</span>  bits from a hash function in order to generate the ternary challenge matrix. Checking  <span class="math">\\tilde{\\mathbf{T}}\\mathbf{G} \\equiv \\mathbf{T} \\bmod q</span>  and  <span class="math">\\mathbf{G}^\\top \\tilde{\\mathbf{D}}\\mathbf{G} = \\mathbf{D}</span>  requires  <span class="math">n \\cdot 2t</span>  and  <span class="math">(2t)^2</span>  linear constraints, respectively. Finally, in order to check that the new instance is valid, the verifier needs to check  <span class="math">\\mathbf{T}&#x27; = \\tilde{\\mathbf{T}}\\mathbf{C}</span>  and  <span class="math">\\mathbf{D}&#x27; = \\mathbf{C}^\\top \\tilde{\\mathbf{D}}\\mathbf{C}</span> , which requires  <span class="math">n \\cdot 2t</span>  and  <span class="math">(2k)^2 + (2kt)^2</span>  quadratic constraints, respectively. Note that these constraints are very sparse, and the for the latter constraints, the values of some variables are ternary; depending on the chosen constraint and proof systems, these properties may be exploited to significantly reduce the overhead of proving and verifying this circuit.</p>
+
+    <p class="text-gray-300">Giacomo Fenzi is partially supported by the Ethereum Foundation and the Sui Foundation. Ngoc Khanh Nguyen was supported by the Ethereum Foundation Ecosystem Support Program FY24-1358.</p>
+
+    <p class="text-gray-300">References</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>[ABB10] S. Agrawal, D. Boneh, and X. Boyen. “Efficient Lattice (H)IBE in the Standard Model”. In: EUROCRYPT. 2010, pp. 553–572.</li>
+
+      <li>[ACK21] T. Attema, R. Cramer, and L. Kohl. “A Compressed <span class="math">\\varSvarSigma</span>-Protocol Theory for Lattices”. In: CRYPTO (2). Vol. 12826. Lecture Notes in Computer Science. Springer, 2021, pp. 549–579.</li>
+
+      <li>[Ajt96] M. Ajtai. “Generating Hard Instances of Lattice Problems (Extended Abstract)”. In: STOC. 1996, pp. 99–108.</li>
+
+      <li>[AL21] M. R. Albrecht and R. W. F. Lai. “Subtractive Sets over Cyclotomic Rings - Limits of Schnorr-Like Arguments over Lattices”. In: CRYPTO (2). Vol. 12826. Lecture Notes in Computer Science. Springer, 2021, pp. 519–548.</li>
+
+      <li>[Att23] T. Attema. “Compressed Sigma-Protocol Theory”. PhD thesis. CWI and TNO, 2023. url: https://hdl.handle.net/1887/3619596.</li>
+
+      <li>[BBBF18] D. Boneh, J. Bonneau, B. Bünz, and B. Fisch. “Verifiable Delay Functions”. In: CRYPTO (1). Vol. 10991. Lecture Notes in Computer Science. Springer, 2018, pp. 757–788.</li>
+
+      <li>[BBC+18] C. Baum, J. Bootle, A. Cerulli, R. d. Pino, J. Groth, and V. Lyuba- shevsky. “Sub-linear Lattice-Based Zero-Knowledge Arguments for Arithmetic Circuits”. In: Proceedings of the 38th Annual International Cryptology Conference. CRYPTO ’18. 2018, pp. 669–699.</li>
+
+      <li>[BC23] B. Bünz and B. Chen. ProtoStar: Generic Efficient Accumulation/Folding for Special Sound Protocols. Cryptology ePrint Archive, Paper 2023/620. https://eprint.iacr.org/2023/620. 2023. url: https://eprint.iacr.org/2023/620.</li>
+
+      <li>[BC24] D. Boneh and B. Chen. LatticeFold: A Lattice-based Folding Scheme and its Applications to Succinct Proof Systems. Cryptology ePrint Archive, Paper 2024/257. https://eprint.iacr.org/2024/257. Last accessed: 19.05.2024. 2024. url: https://eprint.iacr.org/2024/257.</li>
+
+      <li>[BCCT13] N. Bitansky, R. Canetti, A. Chiesa, and E. Tromer. “Recursive Composition and Bootstrapping for SNARKs and Proof-Carrying Data”. In: Proceedings of the 45th ACM Symposium on the Theory of Computing. STOC ’13. 2013, pp. 111–120.</li>
+
+      <li>[BCL+21] B. Bünz, A. Chiesa, W. Lin, P. Mishra, and N. Spooner. “Proof-Carrying Data Without Succinct Arguments”. In: CRYPTO (1). Vol. 12825. Lecture Notes in Computer Science. Springer, 2021, pp. 681–710.</li>
+
+      <li>[BCMS20] B. Bünz, A. Chiesa, P. Mishra, and N. Spooner. “Recursive Proof Composition from Accumulation Schemes”. In: TCC (2). Vol. 12551. Lecture Notes in Computer Science. Springer, 2020, pp. 1–18.</li>
+
+      <li>[BCTV14] E. Ben-Sasson, A. Chiesa, E. Tromer, and M. Virza. “Scalable Zero Knowledge via Cycles of Elliptic Curves”. In: Proceedings of the 34th Annual International Cryptology Conference. CRYPTO ’14.</li>
+
+    </ul>
+
+    <p class="text-gray-300">Extended version at http://eprint.iacr.org/2014/595. 2014, pp. 276–294.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>[BGH19] S. Bowe, J. Grigg, and D. Hopwood. Halo2. 2019. url: https://github.com/zcash/halo2.</li>
+
+      <li>[BLNS20] J. Bootle, V. Lyubashevsky, N. K. Nguyen, and G. Seiler. “A Non-PCP Approach to Succinct Quantum-Safe Zero-Knowledge”. In: CRYPTO (2). Vol. 12171. Lecture Notes in Computer Science. Springer, 2020, pp. 441–469.</li>
+
+      <li>[BLS19] J. Bootle, V. Lyubashevsky, and G. Seiler. “Algebraic Techniques for Short(er) Exact Lattice-Based Zero-Knowledge Proofs”. In: CRYPTO (1). Vol. 11692. Lecture Notes in Computer Science. Springer, 2019, pp. 176–202.</li>
+
+      <li>[BMRS20] J. Bonneau, I. Meckler, V. Rao, and E. Shapiro. Coda: Decentralized Cryptocurrency at Scale. Cryptology ePrint Archive, Paper 2020/352. https://eprint.iacr.org/2020/352. 2020. url: https://eprint.iacr.org/2020/352.</li>
+
+      <li>[BS23] W. Beullens and G. Seiler. “LaBRADOR: Compact Proofs for R1CS from Module-SIS”. In: Lecture Notes in Computer Science 14085 (2023), pp. 518–548.</li>
+
+      <li>[CMNW24] V. Cini, G. Malavolta, N. K. Nguyen, and H. Wee. Polynomial Commitments from Lattices: Post-Quantum Security, Fast Verification and Transparent Setup. Cryptology ePrint Archive, Paper 2024/281. https://eprint.iacr.org/2024/281. 2024. url: https://eprint.iacr.org/2024/281.</li>
+
+      <li>[CT10] A. Chiesa and E. Tromer. “Proof-Carrying Data and Hearsay Arguments from Signature Cards”. In: Proceedings of the 1st Symposium on Innovations in Computer Science. ICS ’10. 2010, pp. 310–331.</li>
+
+      <li>[Dam10] I. Damgård. On <span class="math">\\Sigma</span> Protocols. http://www.cs.au.dk/~ivan/Sigma.pdf. 2010.</li>
+
+      <li>[DL78] R. A. DeMillo and R. J. Lipton. “A Probabilistic Remark on Algebraic Program Testing”. In: Information Processing Letters 7.4 (1978), pp. 193–195.</li>
+
+      <li>[DLP14] L. Ducas, V. Lyubashevsky, and T. Prest. “Efficient Identity-Based Encryption over NTRU Lattices”. In: ASIACRYPT. 2014, pp. 22–41.</li>
+
+      <li>[EG23] L. Eagen and A. Gabizon. ProtoGalaxy: Efficient ProtoStar-style folding of multiple instances. Cryptology ePrint Archive, Paper 2023/1106. https://eprint.iacr.org/2023/1106. 2023. url: https://eprint.iacr.org/2023/1106.</li>
+
+      <li>[ESLL19] M. F. Esgin, R. Steinfeld, J. K. Liu, and D. Liu. “Lattice-Based Zero-Knowledge Proofs: New Techniques for Shorter and Faster Constructions and Applications”. In: CRYPTO (1). Springer, 2019, pp. 115–146.</li>
+
+      <li>[est] M. R. Albrecht, B. Curtis, C. Yun, C. Lefebvre, F. Virdia, F. Göpfert, H. Hunt, H. Kippen, J. Owen, L. Ducas, L. Pulles, M.</li>
+
+    </ul>
+
+    <p class="text-gray-300">Schmidt, M. Walter, R. Player, and S. Scott. lattice-estimator. URL: https://github.com/malb/lattice-estimator.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>[FMN23] G. Fenzi, H. Moghaddas, and N. K. Nguyen. Lattice-Based Polynomial Commitments: Towards Asymptotic and Concrete Efficiency. Cryptology ePrint Archive, Paper 2023/846. https://eprint.iacr.org/2023/846. 2023. URL: https://eprint.iacr.org/2023/846.</li>
+
+      <li>[GN08] N. Gama and P. Q. Nguyen. “Predicting Lattice Reduction”. In: Advances in Cryptology – EUROCRYPT 2008. Springer Berlin Heidelberg, 2008, pp. 31–51. URL: http://dx.doi.org/10.1007/978-3-540-78967-3_3.</li>
+
+      <li>[KMT22] D. Khovratovich, M. Maller, and P. R. Tiwari. MinRoot: Candidate Sequential Function for Ethereum VDF. Cryptology ePrint Archive, Paper 2022/1626. https://eprint.iacr.org/2022/1626. 2022. URL: https://eprint.iacr.org/2022/1626.</li>
+
+      <li>[KP23] A. Kothapalli and B. Parno. “Algebraic Reductions of Knowledge”. In: Advances in Cryptology – CRYPTO 2023. Ed. by H. Handschuh and A. Lysyanskaya. Cham: Springer Nature Switzerland, 2023, pp. 669–701. ISBN: 978-3-031-38551-3.</li>
+
+      <li>[KS22] A. Kothapalli and S. Setty. SuperNova: Proving universal machine executions without universal circuits. Cryptology ePrint Archive, Paper 2022/1758. https://eprint.iacr.org/2022/1758. 2022. URL: https://eprint.iacr.org/2022/1758.</li>
+
+      <li>[KS23] A. Kothapalli and S. Setty. HyperNova: Recursive arguments for customizable constraint systems. Cryptology ePrint Archive, Paper 2023/573. https://eprint.iacr.org/2023/573. 2023. URL: https://eprint.iacr.org/2023/573.</li>
+
+      <li>[KST22] A. Kothapalli, S. T. V. Setty, and I. Tzialla. “Nova: Recursive Zero-Knowledge Arguments from Folding Schemes”. In: CRYPTO (4). Vol. 13510. Lecture Notes in Computer Science. Springer, 2022, pp. 359–388.</li>
+
+      <li>[LFKN92] C. Lund, L. Fortnow, H. J. Karloff, and N. Nisan. “Algebraic Methods for Interactive Proof Systems”. In: Journal of the ACM 39.4 (1992), pp. 859–868.</li>
+
+      <li>[LNP22] V. Lyubashevsky, N. K. Nguyen, and M. Plançon. “Lattice-Based Zero-Knowledge Proofs and Applications: Shorter, Simpler, and More General”. In: CRYPTO (2). Vol. 13508. Lecture Notes in Computer Science. Springer, 2022, pp. 71–101.</li>
+
+      <li>[LS15] A. Langlois and D. Stehlé. “Worst-case to average-case reductions for module lattices”. In: Des. Codes Cryptogr. 75.3 (2015), pp. 565–599.</li>
+
+      <li>[Mina] O(1) Labs. Mina cryptocurrency. 2017. URL: https://minaprotocol.com/.</li>
+
+      <li>[MP12] D. Micciancio and C. Peikert. “Trapdoors for Lattices: Simpler, Tighter, Faster, Smaller”. In: EUROCRYPT. 2012, pp. 700–718.</li>
+
+    </ul>
+
+    <p class="text-gray-300">[nimue] M. Orrù. <em>nimue</em>. URL: https://github.com/arkworks-rs/nimue.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>[NIST] NIST. <em>Status Report on the Third Round of the NIST Post-Quantum Cryptography Standardization Process</em>. 2022. URL: https://csrc.nist.gov/pubs/ir/8413/final.</li>
+
+      <li>[PSTY13] C. Papamanthou, E. Shi, R. Tamassia, and K. Yi. “Streaming Authenticated Data Structures”. In: <em>EUROCRYPT</em>. Vol. 7881. Lecture Notes in Computer Science. Springer, 2013, pp. 353–370.</li>
+
+      <li>[Sch80] J. T. Schwartz. “Fast Probabilistic Algorithms for Verification of Polynomial Identities”. In: <em>Journal of the ACM</em> 27.4 (1980), pp. 701–717.</li>
+
+      <li>[Sho94] P. W. Shor. “Algorithms for Quantum Computation: Discrete Logarithms and Factoring”. In: <em>FOCS</em>. IEEE Computer Society, 1994, pp. 124–134.</li>
+
+      <li>[Val08] P. Valiant. “Incrementally Verifiable Computation or Proofs of Knowledge Imply Time/Space Efficiency”. In: <em>Proceedings of the 5th Theory of Cryptography Conference</em>. TCC ’08. 2008, pp. 1–18.</li>
+
+      <li>[YAZ+19] R. Yang, M. H. Au, Z. Zhang, Q. Xu, Z. Yu, and W. Whyte. “Efficient Lattice-Based Zero-Knowledge Arguments with Standard Soundness: Construction and Applications”. In: <em>CRYPTO (1)</em>. Springer, 2019, pp. 147–175.</li>
+
+      <li>[Zip79] R. Zippel. “Probabilistic algorithms for sparse polynomials”. In: <em>Proceedings of the 1979 International Symposium on Symbolic and Algebraic Computation</em>. EUROSAM ’79. 1979, pp. 216–226.</li>
+
+    </ul>`;
+---
+
+<BaseLayout title="Lova: Lattice-Based Folding Scheme from Unstructured Lattice... (2024/1964)">
+  <article class="max-w-4xl mx-auto article-prose">
+    <nav class="mb-8">
+      <a href="/papers" class="text-blue-400 hover:text-blue-300">
+        &larr; Back to Papers
+      </a>
+    </nav>
+
+    <header class="mb-12">
+      <h1 class="text-3xl font-bold mb-4"
+        set:html={TITLE_HTML} />
+      <p class="text-gray-400 mb-2"
+        set:html={AUTHORS_HTML} />
+      <p class="text-gray-500 text-sm mb-4">
+        2024 &middot; eprint 2024/1964
+      </p>
+      <div class="flex gap-4 text-sm">
+        <a
+          href={EPRINT_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          class="text-blue-400 hover:text-blue-300"
+        >
+          Paper (eprint) &rarr;
+        </a>
+      </div>
+      <p class="mt-4 text-xs text-gray-500">
+        All content below belongs to the original authors. This page
+        reproduces the paper for educational purposes. Always
+        <a
+          href={EPRINT_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          class="text-blue-400 hover:text-blue-300"
+        >cite the original</a>.
+      </p>
+      <p class="mt-1 text-xs text-gray-600">
+        Converted with: {CRAWLER} &middot; {CONVERTED_DATE}
+      </p>
+    </header>
+
+    <Fragment set:html={CONTENT} />
+
+  </article>
+</BaseLayout>

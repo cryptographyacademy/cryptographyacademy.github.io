@@ -1,0 +1,1089 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+
+const EPRINT_URL = 'https://eprint.iacr.org/2022/1758';
+const CRAWLER = 'mistral';
+const CONVERTED_DATE = '2026-02-16';
+const TITLE_HTML = 'SuperNova: Proving universal machine executions without universal circuits';
+const AUTHORS_HTML = 'Abhiram Kothapalli, Srinath Setty';
+
+const CONTENT = `    <p class="text-gray-300">SuperNova: Proving universal machine executions without universal circuits</p>
+
+    <p class="text-gray-300">Abhiram Kothapalli†</p>
+
+    <p class="text-gray-300">Srinath Setty</p>
+
+    <p class="text-gray-300">†Carnegie Mellon University</p>
+
+    <p class="text-gray-300">*Microsoft Research</p>
+
+    <p class="text-gray-300">Abstract. This paper introduces SuperNova, a new recursive proof system for incrementally producing succinct proofs of correct execution of programs on a stateful machine with a particular instruction set (e.g., EVM, RISC-V). A distinguishing aspect of SuperNova is that the cost of proving a step of a program is proportional only to the size of the circuit representing the instruction invoked by the program step. This is a stark departure from prior works that employ universal circuits where the cost of proving a program step is proportional at least to the sum of sizes of circuits representing each supported instruction—even though a particular program step invokes only one of the supported instructions. Naturally, SuperNova can support a rich instruction set without affecting the per-step proving costs. SuperNova achieves its cost profile by building on Nova, a prior high-speed recursive proof system, and leveraging its internal building block, folding schemes, in a new manner. We formalize SuperNova's approach as a way to realize non-uniform IVC, a generalization of IVC. Furthermore, SuperNova's prover costs and the recursion overhead are the same as Nova's, and in fact, SuperNova is equivalent to Nova for machines that support a single instruction.</p>
+
+    <p class="text-gray-300">1 Introduction</p>
+
+    <p class="text-gray-300">We study the problem of producing succinct cryptographic proofs of correct execution of programs on a stateful machine with a particular instruction set (e.g., EVM, RISC-V, Wasm).</p>
+
+    <p class="text-gray-300">As a motivating example, such a proof system enables "replicated systems without replicated execution" or "rollups" [22, 25, 36]. In particular, it enables replicated systems such as blockchains to safely "outsource" transaction processing to centralized infrastructure (e.g., the cloud) without trust: the cloud executes the blockchain's virtual machine with a batch of transactions and then produces a succinct proof that it correctly executed the virtual machine. The replicated system only needs to replicate the verification of proofs, which reduces per-transaction costs as long as the cost of producing a proof for a batch of transactions and the replicated verification of the proof is cheaper than the replicated execution of the batch of transactions.</p>
+
+    <p class="text-gray-300">The paper uses "proofs" and "arguments" interchangeably. In both cases, we mean an argument where soundness holds only under cryptographic hardness assumptions.</p>
+
+    <p class="text-gray-300">In more detail, we seek a cryptographic proof system consisting of a <em>prover</em> and a <em>verifier</em>, where given the specification of a (virtual) machine and a program designed to run on such a machine, the prover can produce a proof to convince the correct execution of the program to the verifier, with the following requirements (the program can potentially take a secret, non-deterministic witness from the prover and some public inputs from the verifier).</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li><em>Succinctness:</em> The size of a proof and the time to verify a proof are at most polylogarithmic in the time to execute the program.</li>
+
+      <li><em>Zero-knowledge:</em> The proof does not reveal anything beyond what is implied by the correct execution of a specified program.</li>
+
+      <li><em>“A la carte” cost profile:</em> The cost of proving a step of a program execution is proportional only to the size of the circuit representing the instruction invoked by the program step.</li>
+
+      <li><em>Incremental proof generation:</em> The prover can produce a separate proof for each step of the program execution independently (and potentially in parallel), and then recursively combine those proofs into a single proof (as we discuss next, this offers substantial benefits).</li>
+
+    </ul>
+
+    <h3 id="sec-1" class="text-xl font-semibold mt-8">Benefits of incremental proof systems.</h3>
+
+    <p class="text-gray-300">As a core advantage, incremental proofs do not require static bounds on loop iterations in a program and therefore are well-suited for stateful computations with dynamic control flow. Furthermore, incremental proof generation imposes minimal memory overhead: at each step of a program execution, the prover only needs space proportional to the space needed to execute that particular step.</p>
+
+    <p class="text-gray-300">Moreover, incremental proof systems <em>can</em> enable distribution and parallelization of proof generation. Specifically, the prover can first execute a desired program on a machine, recording inputs, outputs, and state changes. Then, in parallel and on different CPUs, for each step in the execution, the prover can produce a <em>separate</em> proof proving the correct execution of the step. The prover can then use the incremental capabilities of the proof system to aggregate different proofs (e.g., in a binary tree style manner) into a single proof to be checked by the verifier. Such parallel proving is especially important for large-scale applications of proof systems such as rollups <em>[22, 25, 36]</em> where the size of the circuit whose satisfiability is proven can be on the order of a billion gates or more.</p>
+
+    <p class="text-gray-300">Finally, state-of-the-art incremental proof systems, such as Nova <em>[21]</em>, offer a new paradigm for reducing proof generation costs <em>[12]</em>. Specifically, to prove an iterative computation consisting of <span class="math">N</span> steps, Nova recursively folds together <span class="math">N</span> circuit satisfiability instances into one instance, and then invokes a general-purpose proof system (e.g., <em>[29]</em>) to prove that folded instance. Compared to directly applying a general-purpose proof system to prove <span class="math">N</span> steps, Nova’s approach to apply the fold operation and then invoke a general-purpose proof system incurs at least an order of magnitude lower resource costs.</p>
+
+    <p class="text-gray-300">##</p>
+
+    <p class="text-gray-300">1.1 Prior approaches and challenges</p>
+
+    <p class="text-gray-300">A classic approach to prove machine executions is based on incrementally verifiable computation (IVC) <em>[33]</em>. In this approach, one first designs a universal circuit (e.g., <em>[1, 4, 16, 23, 28]</em>) that can execute any instruction supported by the machine (the circuit implements the fetch-decode-execute loop of the corresponding machine). To prove the correct execution of programs on the corresponding machine, it suffices to recursively prove repeated invocations of this circuit on an input program and memory state <em>[3]</em>. In more detail, at each step of the program execution, the prover employs a succinct non-interactive argument of knowledge (SNARK) <em>[5, 15, 19, 24]</em> to prove the correct execution of an augmented circuit, where the augmented circuit contains an invocation of the universal circuit and a verifier circuit that verifies the SNARK produced by the prover for the previous step of program execution. Unfortunately, the cost of proving a program’s step is proportional to the size of the universal circuit—even though the corresponding program step invokes only one of the supported instructions.</p>
+
+    <p class="text-gray-300">Given the high costs imposed by universal circuits, designers of these machines aim to employ a minimal instruction set, to keep the size of the universal circuit and thereby the cost of proving a program step minimal <em>[2, 4, 16]</em>. However, this is a not a panacea: for real applications, one needs to execute an enormous number of iterations of the minimal circuit (e.g., billions of iterations), making the prover’s work largely untenable. This also means that emulating real programs that target <em>existing</em> virtual machines with rich instruction sets (e.g., EVM, RISC-V, Wasm) via a machine with a minimal instruction sets would incur enormous costs.</p>
+
+    <p class="text-gray-300">Buffet <em>[34]</em>, building on Pantry <em>[10]</em> and Ben-Sasson et al. <em>[4]</em>, avoids the high cost of universal circuits yet supports a general class of programs. For example, Buffet supports any program in the C programming language as long as it neither invokes goto statements nor uses function pointers. Furthermore, Buffet provides an “a la carte” cost profile where the prover’s proof generation costs are proportional only to the sum of sizes of circuits of the operations invoked by the program execution. However, Buffet adopts a “line-by-line compilation” approach <em>[9, 10, 26, 32]</em>, where it unrolls programs into non-uniform circuits by translating each program statement into a concise set of constraints. Unfortunately, this approach requires static bounds on program execution lengths. More importantly, it is unclear how to prove the satisfiability of unrolled non-uniform circuits in an incremental fashion. Furthermore, although general, it is unclear how to use Buffet’s approach to prove program executions on a stateful machine <em>without</em> producing a non-uniform circuit for each program. Having a separate circuit for each program is undesirable in practice as it is not clear how in that model one program can invoke another program (a la “composability”).</p>
+
+    <p class="text-gray-300">A subsequent work, called vRAM <em>[37]</em>, achieves Buffet-like costs for program executions on vnTinyRAM <em>[3]</em>, a RAM machine with a minimal instruction set. In particular, during program execution, at the granularity of a processor cycle, vRAM uses a “trimmed” version of the vnTinyRAM universal circuit where the trimmed version eliminates circuit elements corresponding to instructions that were not invoked. Unfortunately, like Buffet, this approach is not incremental.</p>
+
+    <p class="text-gray-300">Specifically, it requires proving that certain global invariants hold over the entire trace of program execution (e.g., to prove that the trimmed version of the circuit is correct), using randomized fingerprinting techniques. As with Buffet, it is unclear how to prove these global invariants hold in an incremental fashion. Furthermore, this approach reveals, for each program execution, the number of invocations of each instruction supported by the machine to the verifier, so vRAM’s approach does not ensure zero-knowledge.</p>
+
+    <p class="text-gray-300">MIRAGE <em>[20]</em> adapts vRAM’s techniques in the context of Groth’s SNARK <em>[17]</em> (vRAM uses a CMT-based argument <em>[11]</em>). Like vRAM, MIRAGE still relies on proving invariants over the entire execution trace via fingerprinting techniques, making its techniques incompatible with incremental proof systems.</p>
+
+    <h4 id="sec-2" class="text-lg font-semibold mt-6">Our solution: SuperNova</h4>
+
+    <p class="text-gray-300">We describe SuperNova, a new incremental proof system for proving arbitrary stateful machine executions, where the cost of proving a step of a program is proportional only to size of the circuit representing the requested instruction. SuperNova can be viewed as a way to achieve Buffet’s and vRAM’s “a la carte” cost profile (i.e., pay the prover’s costs only for instructions that were executed) in the context of incremental proof systems but without any of their downsides.</p>
+
+    <p class="text-gray-300">SuperNova achieves these results by leveraging folding schemes, a cryptographic primitive introduced and employed by Nova <em>[21]</em> to construct IVC <em>[33]</em>. We formalize SuperNova’s approach as a way to realize <em>non-uniform IVC</em>, a generalization of IVC that formally captures the “a la carte” cost profile. Indeed, SuperNova can be viewed as a generalization of Nova: whereas Nova supports machines with a single instruction, SuperNova supports machines with an arbitrary instruction set. Perhaps surprisingly, this generality does <em>not</em> add (substantial) overheads: SuperNova’s recursion overhead and the prover’s costs are the similar to that of Nova. Furthermore, the prover’s cost at each step is dominated by two multiexponentiations of size proportional to the size of the circuit representing the executed instruction.</p>
+
+    <p class="text-gray-300">As presented in this paper, SuperNova does not immediately support parallel proof generation. There exists a generic compiler <em>[6]</em> to transform constructions such as SuperNova into a form that does support parallel proving. We leave it to the near-term future work to provide a solution tailored to SuperNova.</p>
+
+    <h3 id="sec-3" class="text-xl font-semibold mt-8">1.2 A technical overview of SuperNova</h3>
+
+    <p class="text-gray-300">SuperNova provides a realization of non-uniform IVC, a generalization of IVC <em>[33]</em> that we introduce. As we discuss below, non-uniform IVC implies succinct proofs of program execution on a specified machine. In particular, one can define the behavior of the stateful machine by specifying its instruction set and state passed from one instruction to the next. SuperNova can then prove correct executions of programs designed to run on such a stateful machine.</p>
+
+    <p class="text-gray-300">Below, we first provide an overview of the computational model supported by non-uniform IVC. We then describe how that computational model can be used to build stateful machines ranging from “ASICs” that perform a highly</p>
+
+    <p class="text-gray-300">specific task (e.g., execute or verify certain iterations of a delay function, verify cryptocurrency payment operations) to general-purpose CPUs (e.g., RISC-V) and virtual machines (e.g., EVM). Finally, we discuss how to achieve non-uniform IVC by extending Nova.</p>
+
+    <h4 id="sec-4" class="text-lg font-semibold mt-6">Computational model of non-uniform IVC.</h4>
+
+    <p class="text-gray-300">Consider a collection of <span class="math">\\ell+1</span> non-deterministic, polynomial time computable functions (<span class="math">\\{F_{1},\\ldots,F_{\\ell}\\},\\varphi</span>), where <span class="math">\\ell\\geq 1</span>. Suppose that each function <span class="math">F_{j}</span>, where <span class="math">1\\leq j\\leq\\ell</span> takes <span class="math">s</span> inputs and produces <span class="math">s</span> outputs, where <span class="math">s&gt;0</span>; <span class="math">F_{j}</span> can additionally take arbitrary non-deterministic input. Furthermore, <span class="math">\\varphi</span> is a function that takes <span class="math">s</span> inputs and arbitrary non-deterministic input and produces an element of <span class="math">\\mathbb{Z}_{\\ell+1}^{<em>}</span> (i.e., the set <span class="math">\\{1,\\ldots,\\ell\\}</span>). In SuperNova’s realization of non-uniform IVC, each of these <span class="math">\\ell+1</span> functions are specified with R1CS, a popular NP-complete problem that is implicit in the QAPs formalism </em>[14, 31]*.</p>
+
+    <p class="text-gray-300">A non-uniform IVC scheme enables a prover to incrementally prove that it has performed an <span class="math">n</span>-step computation with an initial input <span class="math">z_{0}</span> to produce an output <span class="math">z_{n}</span>. In particular, at step <span class="math">i</span>, the prover proves that it has applied <span class="math">F_{j}</span> on input <span class="math">(z_{i-1},\\omega_{i-1})</span> to produce an output <span class="math">z_{i}</span>, where <span class="math">z_{i-1}</span> is output of step <span class="math">i-1</span>, <span class="math">\\omega_{i-1}</span> is a (potentially secret) non-deterministic input from the prover for step <span class="math">i</span>, and <span class="math">j=\\varphi(z_{i-1},\\omega_{i-1})</span>. That is, <span class="math">\\varphi</span> selects one of the possible <span class="math">\\ell</span> functions to apply at step <span class="math">i</span> using inputs to step <span class="math">i</span>. A bit more concisely, for a specified (<span class="math">\\{F_{1},\\ldots,F_{\\ell}\\},\\varphi</span>) and <span class="math">(n,z_{0},z_{n})</span>, the prover proves the knowledge of a set of non-deterministic values <span class="math">\\{\\omega_{0},\\ldots,\\omega_{n-1}\\}</span> and <span class="math">\\{z_{1},\\ldots,z_{n-1}\\}</span> such that <span class="math">\\forall i\\in\\{0,\\ldots,n-1\\}</span>, we have that <span class="math">z_{i+1}=F_{\\varphi(z_{i},\\omega_{i})}(z_{i},\\omega_{i})</span>.</p>
+
+    <h4 id="sec-5" class="text-lg font-semibold mt-6">Devising stateful machines using non-uniform IVC.</h4>
+
+    <p class="text-gray-300">We now describe how one can use non-uniform IVC to prove program executions on stateful machine.</p>
+
+    <p class="text-gray-300">In general, with SuperNova, one can build a machine with a <em>custom</em> instruction set and then prove program executions on such a machine. For example, one can build a RAM machine where one of the instructions performs an application-specific task such as validating a cryptocurrency transaction and appropriately updating balances in a Merkle tree based key-value store. More generally, one can support an instruction that performs certain expensive operations (e.g., a signature verification, a hash computation, etc.). Fortunately, because of SuperNova’s cost profile, the prover’s cost at a particular step is proportional only to the size of the circuit to encode the invoked instruction. In particular, the per-step proving cost is independent of the sizes of circuits of “uninvoked” instructions.</p>
+
+    <p class="text-gray-300"><em>A VDF machine.</em> As a warm-up, we use non-uniform IVC to prove executions of a machine whose instruction set includes invocations of a delay function (a function that takes non-trivial sequential time to compute). This realizes a verifiable delay function (VDF) <em>[8, 35]</em>. In more detail, consider a stateful machine that supports a single instruction i.e., <span class="math">\\ell=1</span>. In particular, <span class="math">F_{1}</span> executes a certain, fixed number of iterations of a delay function (e.g., MinRoot <em>[18]</em>). Furthermore,</p>
+
+    <p class="text-gray-300"><span class="math">\\varphi(.,.)=1</span> since there is only one instruction. Finally, <span class="math">z_{0}</span> is the initial input to the VDF and <span class="math">z_{i}</span> is the output the VDF after <span class="math">i</span> executions of the delay instruction.</p>
+
+    <p class="text-gray-300"><em>A RAM machine.</em> We now show how to use non-uniform IVC to prove program executions on a RAM machine (e.g., RISC-V).</p>
+
+    <p class="text-gray-300">Let the RAM machine support <span class="math">\\ell</span> instructions, <span class="math">s</span> registers of width <span class="math">w</span> bits, and a memory of size <span class="math">2^{w}</span>. Let <span class="math">\\{F_{1},\\ldots,F_{\\ell}\\}</span> denote a collection of non-deterministic functions, where a function <span class="math">F_{j}</span> verifies the input/output behavior of instruction <span class="math">j</span> supported by the machine. Each instruction takes certain input values (which we specify next) and arbitrary non-deterministic input, and outputs certain values. In particular, the input of each <span class="math">F_{j}</span> consists of <span class="math">s+1</span> field elements, where the first entry holds a commitment to a memory (e.g., the root of a Merkle tree with <span class="math">2^{w}</span> leaves) that stores both a program and its state, and the remaining entries are the values of <span class="math">s</span> registers. Furthermore, the output of each <span class="math">F_{j}</span> consists of <span class="math">s+1</span> field elements that are updated values of the provided input.</p>
+
+    <p class="text-gray-300">Without loss of generality, let the first of the <span class="math">s</span> registers be designated as the “program counter”. We define <span class="math">\\varphi</span> as follows: For step <span class="math">i</span>, given input <span class="math">z_{i-1}</span> and the non-deterministic input <span class="math">\\omega_{i-1}</span>, <span class="math">\\varphi(z_{i-1},\\omega_{i-1})</span> picks the instruction in the memory (whose commitment is at <span class="math">z_{i-1}[1]</span>) at address in the program counter register <span class="math">z_{i-1}[2]</span>. The initial state <span class="math">z_{0}[1]</span> holds a commitment to the verifier’s desired memory of size <span class="math">2^{w}</span> with its program stored in it and the rest of <span class="math">z_{0}</span> contains the verifier’s desired initial values of the machine’s registers.</p>
+
+    <h4 id="sec-6" class="text-lg font-semibold mt-6">SuperNova’s mechanisms to achieve non-uniform IVC.</h4>
+
+    <p class="text-gray-300">SuperNova leverages folding schemes <em>[21]</em>, a cryptographic primitive that enables a prover and a verifier to fold two <span class="math">N</span>-sized NP instances into a single <span class="math">N</span>-sized NP instance such that the folded instance is satisfiable only if the original instances are satisfiable. In particular, SuperNova leverages a folding scheme for (a variant of) R1CS.</p>
+
+    <p class="text-gray-300">At each step, SuperNova’s prover folds an R1CS instance (and its associated witness) representing the prior step of the program execution into a running instance (and running witness). Furthermore, the prover feeds that instance and certain advice generated by the folding scheme to an <em>augmented circuit</em>, which contains a <em>verifier circuit</em> in addition to one of the <span class="math">\\ell</span> functions in <span class="math">\\{F_{1},\\ldots,F_{\\ell}\\}</span>. In particular, the verifier circuit contains two components: (1) the verifier of the non-interactive folding scheme for R1CS (to fold the incoming instance into a running instance); and (2) a circuit for computing <span class="math">\\varphi</span>.</p>
+
+    <p class="text-gray-300">In more detail, SuperNova uses multiple running instances, one for each instruction supported by the machine. As such, the verifier circuit folds an incoming instance into an appropriate running instance. The choice of which running instance to use is constrained by <span class="math">\\varphi</span> embedded in the verifier circuit. A natural design of the verifier circuit makes the size of the verifier circuit scale linearly with <span class="math">\\ell</span>. We later discuss how to use offline memory checking techniques <em>[7, 22, 30]</em> to make the verifier circuit size independent of <span class="math">\\ell</span>.</p>
+
+    <p class="text-gray-300">At the end of <span class="math">N</span> steps, the prover holds <span class="math">\\ell</span> running instances and an R1CS instance that represents the last step of the program execution. To prove these, the prover can send the associated witnesses, which the verifier can check. Unfortunately, the proof size, while <em>not</em> dependent on the number of steps of the</p>
+
+    <p class="text-gray-300">program execution, it is proportional to the sum of sizes of circuits for functions in  <span class="math">(\\{F_1,\\ldots ,F_\\ell \\} ,\\varphi)</span> , so it is not concretely small. Furthermore, the proof is not zero-knowledge. As in Nova, one can obtain compressed proofs and achieve zero-knowledge by invoking a general-purpose zkSNARK (e.g., Spartan [29]).</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Let  <span class="math">\\mathbb{F}</span>  denote a finite field with  $</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mathbb{F}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">= 2^{\\Theta(\\lambda)}<span class="math"> , where  </span>\\lambda<span class="math">  is the security parameter. Let  </span>\\cong$  denote computational indistinguishability with respect to a PPT adversary. We globally assume that generator algorithms that produce public parameters are additionally provided appropriate size bounds.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">IVC [33] is a cryptographic proof system that allows producing proofs of knowledge of witnesses to a non-deterministic computation in an incremental fashion. We provide a formal definition below.</p>
+
+    <p class="text-gray-300">Definition 1 (Incrementally verifiable computation (IVC)). An incrementally verifiable computation (IVC) scheme is defined by PPT algorithms  <span class="math">(\\mathcal{G},\\mathcal{P},\\mathcal{V})</span>  and deterministic  <span class="math">\\kappa</span>  denoting the generator, the prover, the verifier, and the encoder respectively, with the following interface</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li><span class="math">\\mathcal{G}(1^{\\lambda})\\to \\mathfrak{pp}</span> : on input security parameter  <span class="math">\\lambda</span> , samples public parameters  <span class="math">\\mathfrak{pp}</span> .</li>
+
+      <li><span class="math">\\mathcal{K}(\\mathfrak{pp}, F) \\to (\\mathfrak{pk}, \\mathsf{vk})</span> : on input public parameters  <span class="math">\\mathfrak{pp}</span> , and polynomial-time function  <span class="math">F</span> , deterministically produces a prover key  <span class="math">\\mathfrak{pk}</span>  and a verifier key  <span class="math">\\mathsf{vk}</span> .</li>
+
+      <li><span class="math">\\mathcal{P}(\\mathsf{pk}, (i, z_0, z_i), \\omega_i, \\Pi_i) \\to \\Pi_{i+1}</span> : on input a prover key  <span class="math">\\mathsf{pk}</span> , a counter  <span class="math">i</span> , an initial input  <span class="math">z_0</span> , a claimed output after  <span class="math">i</span>  iterations  <span class="math">z_i</span> , a non-deterministic advice  <span class="math">\\omega_i</span> , and an IVC proof  <span class="math">\\Pi_i</span>  attesting to  <span class="math">z_i</span> , produces a new proof  <span class="math">\\Pi_{i+1}</span>  attesting to  <span class="math">z_{i+1} = F(z_i, \\omega_i)</span> .</li>
+
+      <li><span class="math">\\mathcal{V}(\\mathsf{vk}, (i, z_0, z_i), \\Pi_i) \\to \\{0, 1\\}</span> : on input a verifier key  <span class="math">\\mathsf{vk}</span> , a counter  <span class="math">i</span> , an initial input  <span class="math">z_0</span> , a claimed output after  <span class="math">i</span>  iterations  <span class="math">z_i</span> , and an IVC proof  <span class="math">\\Pi_i</span>  attesting to  <span class="math">z_i</span> , outputs 1 if  <span class="math">\\Pi_i</span>  is accepting, and 0 otherwise.</li>
+
+    </ul>
+
+    <p class="text-gray-300">An IVC scheme  <span class="math">(\\mathcal{G},\\mathcal{K},\\mathcal{P},\\mathcal{V})</span>  satisfies the following requirements.</p>
+
+    <p class="text-gray-300">(i) Perfect Completeness: For any PPT adversary  <span class="math">\\mathcal{A}</span></p>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\operatorname * {P r} \\left[ \\mathcal {V} (\\mathsf {v k}, (i + 1, z _ {0}, z _ {i + 1}), \\Pi_ {i + 1}) = 1 \\left</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\begin{array}{l} \\mathsf {p p} \\leftarrow \\mathcal {G} (1 ^ {\\lambda}), \\\\ F, (i, z _ {0}, z _ {i}, \\Pi_ {i}) \\leftarrow \\mathcal {A} (\\mathsf {p p}), \\\\ (\\mathsf {p k}, \\mathsf {v k}) \\leftarrow \\mathcal {K} (\\mathsf {p p}, F), \\\\ z _ {i + 1} \\leftarrow F (z _ {i}, \\omega_ {i}), \\\\ \\mathcal {V} (\\mathsf {v k}, i, z _ {0}, z _ {i}, \\Pi_ {i}) = 1, \\\\ \\Pi_ {i + 1} \\leftarrow \\mathcal {P} (\\mathsf {p k}, (i, z _ {0}, z _ {i}), \\omega_ {i}, \\Pi_ {i}) \\end{array} \\right] = 1 \\right.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <p class="text-gray-300">where  <span class="math">F</span>  is a polynomial-time computable function.</p>
+
+    <p class="text-gray-300">(ii) Knowledge Soundness: For any constant  <span class="math">n \\in \\mathbb{N}</span> , and expected polynomial-time adversaries  <span class="math">\\mathcal{P}^*</span>  there exists expected polynomial-time extractor  <span class="math">\\mathcal{E}</span>  such that</p>
+
+    <div class="my-4 text-center"><span class="math-block">\\Pr \\left[ \\begin{array}{c c} &amp;amp; \\mathsf {p p} \\leftarrow \\mathcal {G} (1 ^ {\\lambda}), \\\\ z _ {n} \\neq z, &amp;amp; F, (z _ {0}, z, \\Pi) \\leftarrow \\mathcal {P} ^ {*} (\\mathsf {p p}), \\\\ \\mathcal {V} (\\mathsf {v k}, n, z _ {0}, z, \\Pi) = 1 &amp;amp; (\\mathsf {p k}, \\mathsf {v k}) \\leftarrow \\mathcal {K} (\\mathsf {p p}, F), \\\\ &amp;amp; (\\omega_ {0}, \\ldots , \\omega_ {n - 1}) \\leftarrow \\mathcal {E} (\\mathsf {p p}, z _ {0}, z), \\\\ &amp;amp; z _ {i + 1} \\leftarrow F (z _ {i}, \\omega_ {i}) \\quad \\forall i \\in \\{0, \\ldots , n - 1 \\} \\end{array} \\right] \\leq \\mathsf {n e g l} (\\lambda).</span></div>
+
+    <p class="text-gray-300">(iii) Succinctness: The size of an IVC proof  <span class="math">\\Pi</span>  is independent of the number of iterations  <span class="math">n</span> .</p>
+
+    <h2 id="sec-9" class="text-2xl font-bold">2.2 A commitment scheme for vectors</h2>
+
+    <p class="text-gray-300">Throughout this paper, we employ a commitment scheme for vectors over  <span class="math">\\mathbb{F}</span>  that is additively homomorphic and provides succinct commitments. Below, we provide a formal definition.</p>
+
+    <p class="text-gray-300"><strong>Definition 2 (A commitment scheme for vectors).</strong> A commitment scheme for  <span class="math">\\mathbb{F}^m</span>  is a tuple of three protocols with the following interface:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li><span class="math">\\leftarrow \\operatorname{Gen}(1^{\\lambda}, m) \\to \\mathfrak{pp}</span> : on input security parameter  <span class="math">\\lambda</span> , and a length parameter  <span class="math">m \\in \\mathbb{N}</span> , produces public parameters  <span class="math">\\mathfrak{pp}</span> .</li>
+
+      <li><span class="math">\\operatorname{Com}(\\mathfrak{pp}, x, r) \\to C</span> : on input  <span class="math">\\mathfrak{pp}</span> , a vector  <span class="math">x \\in \\mathbb{F}^m</span> , and randomness  <span class="math">r \\in \\mathbb{F}</span> , produces a commitment  <span class="math">C</span> .</li>
+
+      <li><span class="math">\\operatorname{Open}(\\mathfrak{pp}, C, x, r) \\to \\{0, 1\\}</span> : on input  <span class="math">\\mathfrak{pp}</span> , a commitment  <span class="math">C</span> , a vector  <span class="math">x \\in \\mathbb{F}^m</span> , and randomness  <span class="math">r \\in \\mathbb{F}</span>  verifies the opening of commitment  <span class="math">C</span>  to  <span class="math">x \\in \\mathbb{F}^m</span>  and  <span class="math">r \\in \\mathbb{F}</span> ; outputs 1 if verification passes and 0 otherwise.</li>
+
+    </ul>
+
+    <p class="text-gray-300">A commitment scheme (Gen, Com, Open) satisfies the following requirements</p>
+
+    <p class="text-gray-300">(i) Binding: For any PPT adversary  <span class="math">\\mathcal{A}</span> , the following probability is  <span class="math">\\mathrm{negl}(\\lambda)</span> :</p>
+
+    <div class="my-4 text-center"><span class="math-block">\\Pr \\left[ \\begin{array}{l l} &amp;amp; \\mathsf {p p} \\leftarrow \\mathsf {G e n} (1 ^ {\\lambda}, m), \\\\ b _ {0} = b _ {1} = 1, &amp;amp; (C, x _ {0}, x _ {1}, r _ {0}, r _ {1}) \\leftarrow \\mathcal {A} (\\mathsf {p p}), \\\\ x _ {0} \\neq x _ {1} &amp;amp; b _ {0} \\leftarrow \\mathsf {O p e n} (\\mathsf {p p}, C, x _ {0}, r _ {0}), \\\\ &amp;amp; b _ {1} \\leftarrow \\mathsf {O p e n} (\\mathsf {p p}, C, x _ {1}, r _ {1}) \\end{array} \\right]</span></div>
+
+    <p class="text-gray-300">(ii) Hiding: For all PPT adversaries  <span class="math">\\mathcal{A} = (\\mathcal{A}_0, \\mathcal{A}_1)</span> , the following probability is  <span class="math">\\mathrm{negl}(\\lambda)</span> :</p>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\left</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\frac {1}{2} - \\Pr \\left[ b = \\bar {b} \\left</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\begin{array}{l} (x _ {0}, x _ {1}, \\mathsf {s t}) \\leftarrow \\mathcal {A} _ {0} (\\mathsf {p p}), \\\\ b \\leftarrow_ {R} \\{0, 1 \\}, r \\leftarrow_ {R} \\mathbb {F}, \\\\ C \\leftarrow \\mathsf {C o m} (\\mathsf {p p}, x _ {b}, r), \\\\ \\bar {b} \\leftarrow \\mathcal {A} _ {1} (\\mathsf {s t}, C) \\end{array} \\right. \\right] \\right. \\right</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <p class="text-gray-300">If hiding holds for all adversaries, then the commitment is statistically hiding.</p>
+
+    <h6 id="sec-10" class="text-base font-medium mt-4">Definition 3 (Additive homomorphism).</h6>
+
+    <p class="text-gray-300">A commitment scheme for vectors over <span class="math">\\mathbb{F}^{m}</span>, <span class="math">(\\mathsf{Gen},\\mathsf{Com},\\mathsf{Open})</span>, is additively homomorphic if for all public parameters <span class="math">\\mathsf{pp}</span> produced from <span class="math">\\mathsf{Gen}(1^{\\lambda},m)</span>, and for any <span class="math">x_{1},x_{2}\\in\\mathbb{F}^{m}</span> and for any <span class="math">r_{1},r_{2}\\in\\mathbb{F}</span>, <span class="math">\\mathsf{Com}(\\mathsf{pp},x_{1},r_{1})+\\mathsf{Com}(\\mathsf{pp},x_{2},r_{2})=\\mathsf{Com}(\\mathsf{pp},x_{1}+x_{2},r_{1}+r_{2})</span>.</p>
+
+    <h6 id="sec-11" class="text-base font-medium mt-4">Definition 4 (Succinctness).</h6>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">A commitment scheme for vectors over <span class="math">\\mathbb{F}^{m}</span>, <span class="math">(\\mathsf{Gen},\\mathsf{Com},\\mathsf{Open})</span>, provides succinct commitments if for all public parameters <span class="math">\\mathsf{pp}</span> produced from <span class="math">\\mathsf{Gen}(1^{\\lambda},m)</span>, and any <span class="math">x\\in\\mathbb{F}^{m}</span> and <span class="math">r\\in\\mathbb{F}</span>, $</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mathsf{Com}(\\mathsf{pp},x,r)</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">=O_{\\lambda}(\\mathsf{polylog}(</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">x</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">))$.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <h6 id="sec-12" class="text-base font-medium mt-4">Remark 1 (Pedersen commitment scheme).</h6>
+
+    <p class="text-gray-300">An example commitment scheme is Pedersen’s commitment scheme <em>[27]</em>, which relies on cryptographic groups where the discrete logarithm problem is hard. It provides a commitment scheme where a commitment to a vector is a single group element.</p>
+
+    <h3 id="sec-13" class="text-xl font-semibold mt-8">2.3 Folding schemes</h3>
+
+    <p class="text-gray-300">A folding scheme for a relation <span class="math">\\mathcal{R}</span> is a protocol between a <em>prover</em> and <em>verifier</em> in which the prover and the verifier reduce the task of checking two instances in <span class="math">\\mathcal{R}</span> with the same structure into the task of checking a single instance in <span class="math">\\mathcal{R}</span>.</p>
+
+    <p class="text-gray-300">Kothapalli et al. <em>[21]</em> devise a folding scheme for a variant of a popular <span class="math">\\mathsf{NP}</span>-complete relation, which they call <em>committed relaxed R1CS</em>, and use it to build an IVC scheme. Similarly, as we discuss later, SuperNova uses the same folding scheme to realize a generalization of IVC.</p>
+
+    <p class="text-gray-300">Below, we first formally define folding schemes and then state prior constructions of folding schemes that SuperNova builds upon.</p>
+
+    <h6 id="sec-14" class="text-base font-medium mt-4">Definition 5 (Folding scheme).</h6>
+
+    <p class="text-gray-300">Consider a relation <span class="math">\\mathcal{R}</span> over public parameters, structure, instance, and witness tuples. A folding scheme for <span class="math">\\mathcal{R}</span> consists of a PPT generator algorithm <span class="math">\\mathcal{G}</span>, a deterministic encoder algorithm <span class="math">\\mathcal{K}</span>, and a pair of PPT algorithms <span class="math">\\mathcal{P}</span> and <span class="math">\\mathcal{V}</span> denoting the prover and the verifier respectively, with the following interface:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li><span class="math">\\mathcal{G}(1^{\\lambda})\\to\\mathsf{pp}</span>: on input security parameter <span class="math">\\lambda</span>, samples public parameters <span class="math">\\mathsf{pp}</span>.</li>
+
+      <li><span class="math">\\mathcal{K}(\\mathsf{pp},\\mathsf{S})\\to(\\mathsf{pk},\\mathsf{vk})</span>: on input <span class="math">\\mathsf{pp}</span>, and a common structure <span class="math">\\mathsf{S}</span> between the instances to be folded, outputs a prover key <span class="math">\\mathsf{pk}</span> and a verifier key <span class="math">\\mathsf{vk}</span>.</li>
+
+      <li><span class="math">\\mathcal{P}(\\mathsf{pk},(u_{1},w_{1}),(u_{2},w_{2}))\\to(u,w)</span>: on input instance-witness tuples <span class="math">(u_{1},w_{1})</span> and <span class="math">(u_{2},w_{2})</span>, outputs a new instance-witness tuple <span class="math">(u,w)</span> of the same size.</li>
+
+      <li><span class="math">\\mathcal{V}(\\mathsf{vk},u_{1},u_{2})\\to u</span>: on input instances <span class="math">u_{1}</span> and <span class="math">u_{2}</span>, outputs a new instance <span class="math">u</span>.</li>
+
+    </ul>
+
+    <p class="text-gray-300">Let</p>
+
+    <p class="text-gray-300"><span class="math">(u,w)\\leftarrow\\langle\\mathcal{P}(\\mathsf{pk},w_{1},w_{2}),\\mathcal{V}(\\mathsf{vk})\\rangle(u_{1},u_{2})</span></p>
+
+    <p class="text-gray-300">denote the the verifier’s output instance <span class="math">u</span> and the prover’s output witness <span class="math">w</span> from the interaction of <span class="math">\\mathcal{P}</span> and <span class="math">\\mathcal{V}</span> on witnesses <span class="math">(w_{1},w_{2})</span>, prover key <span class="math">\\mathsf{pk}</span>, verifier key <span class="math">\\mathsf{vk}</span> and instances <span class="math">(u_{1},u_{2})</span>. Likewise, let</p>
+
+    <p class="text-gray-300"><span class="math">\\mathsf{tr}=\\langle\\mathcal{P}(\\mathsf{pk},w_{1},w_{2}),\\mathcal{V}(\\mathsf{vk})\\rangle(u_{1},u_{2})</span></p>
+
+    <p class="text-gray-300">denote the corresponding interaction transcript. We call a transcript an accepting transcript if  <span class="math">\\mathcal{P}</span>  outputs a satisfying folded witness  <span class="math">w</span>  for the folded instance  <span class="math">u</span> . A folding scheme satisfies the following requirements.</p>
+
+    <p class="text-gray-300">(i) Perfect Completeness: For all PPT adversaries  <span class="math">\\mathcal{A}</span></p>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\Pr \\left[ \\begin{array}{l} (\\mathsf {p p}, \\mathsf {S}, u, w) \\in \\mathcal {R} \\end{array} \\left</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\begin{array}{l} \\mathsf {p p} \\leftarrow \\mathcal {G} (1 ^ {\\lambda}), \\\\ (\\mathsf {S}, (u _ {1}, w _ {1}), (u _ {2}, w _ {2})) \\leftarrow \\mathcal {A} (\\mathsf {p p}), \\\\ (\\mathsf {p p}, \\mathsf {S}, u _ {1}, w _ {1}), (\\mathsf {p p}, \\mathsf {S}, u _ {2}, w _ {2}) \\in \\mathcal {R}, \\\\ (\\mathsf {p k}, \\mathsf {v k}) \\leftarrow \\mathcal {K} (\\mathsf {p p}, \\mathsf {S}), \\\\ (u, w) \\leftarrow \\langle \\mathcal {P} (\\mathsf {p k}, w _ {1}, w _ {2}), \\mathcal {V} (\\mathsf {v k}) \\rangle (u _ {1}, u _ {2}) \\end{array} \\right. \\right] = 1.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <p class="text-gray-300">(ii) Knowledge Soundness: For any expected polynomial-time adversary  <span class="math">\\mathcal{P}^*</span>  there is an expected polynomial-time extractor  <span class="math">\\mathcal{E}</span>  such that</p>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\begin{array}{l} \\Pr \\left[ \\begin{array}{l} (\\mathsf {p p}, \\mathsf {S}, u _ {1}, w _ {1}) \\in \\mathcal {R}, \\\\ (\\mathsf {p p}, \\mathsf {S}, u _ {2}, w _ {2}) \\in \\mathcal {R} \\end{array} \\left</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\begin{array}{l} \\mathsf {p p} \\leftarrow \\mathcal {G} (1 ^ {\\lambda}), \\\\ (\\mathsf {S}, (u _ {1}, u _ {2})) \\leftarrow \\mathcal {P} ^ {*} (\\mathsf {p p}), \\\\ (w _ {1}, w _ {2}) \\leftarrow \\mathcal {E} (\\mathsf {p p}) \\end{array} \\right. \\right] \\geq \\\\ \\Pr \\left[ \\begin{array}{l} (\\mathsf {p p}, \\mathsf {S}, u, w) \\in \\mathcal {R} \\end{array} \\left</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\begin{array}{l} \\mathsf {p p} \\leftarrow \\mathcal {G} (1 ^ {\\lambda}), \\\\ (\\mathsf {S}, (u _ {1}, u _ {2})) \\leftarrow \\mathcal {P} ^ {<em>} (\\mathsf {p p}), \\\\ (\\mathsf {p k}, \\mathsf {v k}) \\leftarrow \\mathcal {K} (\\mathsf {p p}, \\mathsf {S}), \\\\ (u, w) \\leftarrow \\langle \\mathcal {P} ^ {</em>} (\\mathsf {p k}), \\mathcal {V} (\\mathsf {v k}) \\rangle (u _ {1}, u _ {2}) \\end{array} \\right. \\right] - \\mathsf {n e g l} (\\lambda) \\right. \\\\ \\end{array}</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <p class="text-gray-300">(iii) Efficiency: The communication costs and  <span class="math">\\mathcal{V}</span> 's computation are lower in the case where  <span class="math">\\mathcal{V}</span>  participates in the folding scheme and then checks a witness sent by  <span class="math">\\mathcal{P}</span>  for the folded instance than the case where  <span class="math">\\mathcal{V}</span>  checks witnesses sent by  <span class="math">\\mathcal{P}</span>  for each of the original instances.</p>
+
+    <p class="text-gray-300">A folding scheme is secure in the random oracle model if the above requirements hold when all parties are provided access to a random oracle.</p>
+
+    <p class="text-gray-300">Definition 6 (Non-interactive). A folding scheme  <span class="math">(\\mathcal{G},\\mathcal{K},\\mathcal{P},\\mathcal{V})</span>  is non-interactive if the interaction between  <span class="math">\\mathcal{P}</span>  and  <span class="math">\\mathcal{V}</span>  consists of a single message from  <span class="math">\\mathcal{P}</span>  to  <span class="math">\\mathcal{V}</span> . This single message is denoted as an output of  <span class="math">\\mathcal{P}</span>  and as an input to  <span class="math">\\mathcal{V}</span> .</p>
+
+    <p class="text-gray-300">Definition 7 (Public coin). A folding scheme  <span class="math">(\\mathcal{G},\\mathcal{K},\\mathcal{P},\\mathcal{V})</span>  is called public coin if all the messages sent from  <span class="math">\\mathcal{V}</span>  to  <span class="math">\\mathcal{P}</span>  are sampled from a uniform distribution.</p>
+
+    <p class="text-gray-300">R1CS is an NP-complete problem implicit in the work of GGPR [14]. Below, we recall its definition and its folding-friendly variant, committed relaxed R1CS.</p>
+
+    <p class="text-gray-300">Definition 8 (R1CS). Consider a finite field  <span class="math">\\mathbb{F}</span> . Let the public parameters consist of size bounds  <span class="math">m, n, \\ell \\in \\mathbb{N}</span>  where  <span class="math">m &amp;gt; \\ell</span> . The R1CS structure consists of sparse matrices  <span class="math">A, B, C \\in \\mathbb{F}^{m \\times m}</span>  with at most  <span class="math">n = \\Omega(m)</span>  non-zero entries in each matrix. An instance  <span class="math">\\mathbf{x} \\in \\mathbb{F}^{\\ell}</span>  consists of public inputs and outputs and is satisfied by a witness  <span class="math">W \\in \\mathbb{F}^{m - \\ell - 1}</span>  if  <span class="math">(A \\cdot Z) \\circ (B \\cdot Z) = C \\cdot Z</span> , where  <span class="math">Z = (W, \\mathbf{x}, 1)</span> .</p>
+
+    <h6 id="sec-15" class="text-base font-medium mt-4">Definition 9 (Committed relaxed R1CS).</h6>
+
+    <p class="text-gray-300">Consider a finite field <span class="math">\\mathbb{F}</span> and a commitment scheme <span class="math">\\mathsf{Com}</span> over <span class="math">\\mathbb{F}</span>. Let the public parameters consist of size bounds <span class="math">m,n,\\ell\\in\\mathbb{N}</span> where <span class="math">m&gt;\\ell</span>, and commitment parameters <span class="math">\\mathsf{pp}_{W}</span> and <span class="math">\\mathsf{pp}_{E}</span> for vectors of size <span class="math">m</span> and <span class="math">m-\\ell-1</span> respectively. The committed relaxed R1CS structure consists of sparse matrices <span class="math">A,B,C\\in\\mathbb{F}^{m\\times m}</span> with at most <span class="math">n=\\Omega(m)</span> non-zero entries in each matrix. A committed relaxed R1CS instance is a tuple <span class="math">(\\overline{E},u,\\overline{W},\\mathsf{x})</span>, where <span class="math">\\overline{E}</span> and <span class="math">\\overline{W}</span> are commitments, <span class="math">u\\in\\mathbb{F}</span>, and <span class="math">\\mathsf{x}\\in\\mathbb{F}^{\\ell}</span> are public inputs and outputs. An instance <span class="math">(\\overline{E},u,\\overline{W},\\mathsf{x})</span> is satisfied by a witness <span class="math">(E,r_{E},W,r_{W})\\in(\\mathbb{F}^{m},\\mathbb{F},\\mathbb{F}^{m-\\ell-1},\\mathbb{F})</span> if <span class="math">\\overline{E}=\\mathsf{Com}(\\mathsf{pp}_{E},E,r_{E})</span>, <span class="math">\\overline{W}=\\mathsf{Com}(\\mathsf{pp}_{W},W,r_{W})</span>, and <span class="math">(A\\cdot Z)\\circ(B\\cdot Z)=u\\cdot(C\\cdot Z)+E</span>, where <span class="math">Z=(W,\\mathsf{x},u)</span>.</p>
+
+    <p class="text-gray-300">Below, we state a key prior result on folding schemes for <span class="math">\\mathsf{NP}</span>. We first describe the result in the random oracle model, and then describe the result that is heuristically secure in the plain model.</p>
+
+    <h6 id="sec-16" class="text-base font-medium mt-4">Lemma 1 (A folding scheme for committed relaxed R1CS <em>[21]</em>).</h6>
+
+    <p class="text-gray-300">Consider <span class="math">n\\in\\mathbb{N}</span> and security parameter <span class="math">\\lambda</span>. Consider an additively homomorphic commitment scheme <span class="math">\\mathsf{Com}</span> over <span class="math">\\mathbb{F}^{n}</span> with <span class="math">O_{\\lambda}(1)</span>-sized commitments. There exists a non-interactive folding scheme for committed relaxed R1CS with respect to <span class="math">\\mathsf{Com}</span> in the random oracle model. For an <span class="math">n</span>-sized committed relaxed R1CS instances over a finite field <span class="math">\\mathbb{F}</span>, the prover’s time complexity is <span class="math">O_{\\lambda}(n)</span>, the verifier’s time complexity is <span class="math">O_{\\lambda}(1)</span>, and the communication complexity is <span class="math">O_{\\lambda}(1)</span>.</p>
+
+    <h6 id="sec-17" class="text-base font-medium mt-4">Assumption 1 (Random oracle instantiation <em>[21]</em>).</h6>
+
+    <p class="text-gray-300">Consider <span class="math">n\\in\\mathbb{N}</span> and security parameter <span class="math">\\lambda</span>. Consider an additively homomorphic commitment scheme <span class="math">\\mathsf{Com}</span> over <span class="math">\\mathbb{F}^{n}</span> with <span class="math">O_{\\lambda}(1)</span>-sized commitments. There exists a non-interactive folding scheme for committed relaxed R1CS with respect to <span class="math">\\mathsf{Com}</span> in the plain model. For <span class="math">n</span>-sized committed relaxed R1CS instances over a finite field <span class="math">\\mathbb{F}</span>, the prover’s time complexity is <span class="math">O_{\\lambda}(n)</span>, the verifier’s time complexity is <span class="math">O_{\\lambda}(1)</span>, and the communication complexity is <span class="math">O_{\\lambda}(1)</span>.</p>
+
+    <p class="text-gray-300">Justification. We apply the Fiat-Shamir transformation <em>[13]</em>. In particular, we heuristically instantiate the random oracle in Lemma 1 with a concrete cryptographic hash function. ∎</p>
+
+    <h2 id="sec-18" class="text-2xl font-bold">3 Non-uniform incrementally verifiable computation</h2>
+
+    <p class="text-gray-300">This section introduces non-uniform IVC (NIVC), a generalization of IVC <em>[33]</em>, where at each step of an incremental computation, the prover proves the satisfiability of a relation chosen from a set of possible relations (the choice of which relation to use is made by an additional designated relation), whereas in the standard IVC, there is only one possible relation. As a result of this generalization, the overall relation proven by non-uniform IVC can be a non-uniform circuit, which motivates its name.</p>
+
+    <p class="text-gray-300">As detailed in the introduction, non-uniform IVC implies proofs of program executions on machines with a pre-defined custom instruction set. In the next section, we construct SuperNova, an efficient NIVC scheme.</p>
+
+    <p class="text-gray-300">Overview.</p>
+
+    <p class="text-gray-300">To formally define NIVC, we extend standard definitions of IVC. In particular, we extend the definitions provided by Kothapalli et al. <em>[21]</em> in a recent work. Below, we review the definition of IVC (Definition 1) before introducing NIVC.</p>
+
+    <p class="text-gray-300">In the standard IVC, for some polynomial-time function <span class="math">F</span>, the prover takes as input a claim/statement <span class="math">(i,z_{0},z)</span> and a corresponding proof <span class="math">\\Pi_{i}</span> that proves the knowledge of witnesses <span class="math">(\\omega_{0},\\ldots,\\omega_{i-1})</span> such that by computing</p>
+
+    <p class="text-gray-300"><span class="math">z_{j+1}\\leftarrow F(z_{j},\\omega_{j})</span></p>
+
+    <p class="text-gray-300">for all <span class="math">j\\in\\{0,\\ldots,i-1\\}</span> we have that <span class="math">z=z_{i}</span>. To incrementally update a proof, the prover additionally takes as input a new witness <span class="math">\\omega_{i}</span> and computes a new proof <span class="math">\\Pi_{i+1}</span> which attests to the statement <span class="math">(i+1,z_{0},z_{i+1})</span> for <span class="math">z_{i+1}=F(z_{i},\\omega_{i})</span>. A key requirement is that proofs are succinct, that is, they do not grow in size with each incremental update.</p>
+
+    <p class="text-gray-300">Informally, completeness holds if given an accepting proof <span class="math">\\Pi_{i}</span> for a statement <span class="math">(i,z_{0},z_{i})</span> and a witness <span class="math">\\omega_{i}</span> such that <span class="math">z_{i+1}=F(z_{i},\\omega_{i})</span>, the prover is guaranteed to produce an accepting proof <span class="math">\\Pi_{i+1}</span> for statement <span class="math">(i+1,z_{0},z_{i+1})</span>. Similarly, knowledge soundness holds if for any malicious prover <span class="math">\\mathcal{P}^{*}</span> that is able to produce an accepting proof <span class="math">\\Pi_{i}</span> for statement <span class="math">(i,z_{0},z_{i})</span>, there exists a corresponding extractor <span class="math">\\mathcal{E}</span> that can produce the corresponding witnesses <span class="math">(\\omega_{0},\\ldots,\\omega_{i+1})</span>.</p>
+
+    <p class="text-gray-300">In the setting of NIVC, we extend IVC to handle a number of arbitrary polynomial-time functions <span class="math">(F_{1},\\ldots,F_{\\ell})</span>. The choice of which function <span class="math">F_{j}</span> for <span class="math">j\\in[\\ell]</span> is executed at a particular step in the incremental computation is handled by an additional polynomial-time function <span class="math">\\varphi</span>. In more detail, NIVC captures an incremental proof system for the following augmented statement: There exists <span class="math">(\\omega_{0},\\ldots,\\omega_{i-1})</span> such that on initial input <span class="math">z_{0}</span> and claimed output <span class="math">z</span>, by computing</p>
+
+    <p class="text-gray-300"><span class="math">z_{j+1}\\leftarrow F_{\\varphi(z_{j},\\omega_{j})}(z_{j},\\omega_{j})</span></p>
+
+    <p class="text-gray-300">for all <span class="math">j\\in\\{0,\\ldots,i-1\\}</span>, we have that <span class="math">z=z_{i}</span>.</p>
+
+    <p class="text-gray-300">We adapt the above succinctness, completeness and knowledge soundness definitions of IVC for the setting of NIVC. Moreover, for NIVC to be a meaningful notion, we stipulate an additional efficiency requirement: the prover’s work at each step scales only with the size of the function executed at that step. Without such a requirement, IVC immediately implies NIVC with the use of a single universal circuit that embeds all functions <span class="math">(F_{1},\\ldots,F_{\\ell})</span>.</p>
+
+    <p class="text-gray-300">Below, we formally define NIVC in the common reference string (CRS) with preprocessing model. We consider an adaptive adversary that can pick functions <span class="math">(F_{1},\\ldots,F_{\\ell})</span> and <span class="math">\\varphi</span> as well as the statement after seeing the CRS.</p>
+
+    <h6 id="sec-19" class="text-base font-medium mt-4">Definition 10 (Non-uniform IVC).</h6>
+
+    <p class="text-gray-300">A non-uniform incrementally verifiable computation (NIVC) scheme is defined by PPT algorithms <span class="math">(\\mathcal{G},\\mathcal{P},\\mathcal{V})</span> and a deterministic <span class="math">\\mathcal{K}</span> denoting the generator, the prover, the verifier, and the encoder respectively, with the following interface</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li><span class="math">\\mathcal{G}(1^{\\lambda})\\rightarrow\\mathsf{pp}</span>: on input security parameter <span class="math">\\lambda</span>, samples public parameters <span class="math">\\mathsf{pp}</span>.</li>
+
+    </ul>
+
+    <p class="text-gray-300">-</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li><span class="math">\\mathcal{K}(\\mathsf{pp}, (\\varphi, (F_1, \\ldots, F_\\ell))) \\to (\\mathsf{pk}, \\mathsf{vk})</span> : on input public parameters  <span class="math">\\mathsf{pp}</span> , a control function  <span class="math">\\varphi</span> , and functions  <span class="math">F_1, \\ldots, F_\\ell</span>  deterministically produces a prover key  <span class="math">\\mathsf{pk}</span>  and a verifier key  <span class="math">\\mathsf{vk}</span> .</li>
+
+      <li><span class="math">\\mathcal{P}(\\mathsf{pk}, (i, z_0, z_i), \\omega_i, \\Pi_i) \\to \\Pi_{i+1}</span> : on input a prover key  <span class="math">\\mathsf{pk}</span> , a counter  <span class="math">i</span> , initial input  <span class="math">z_0</span> , claimed output after  <span class="math">i</span>  applications  <span class="math">z_i</span> , a non-deterministic advice  <span class="math">\\omega_i</span> , and an NIVC proof  <span class="math">\\Pi_i</span>  attesting to  <span class="math">z_i</span> , produces a new proof  <span class="math">\\Pi_{i+1}</span>  attesting to  <span class="math">z_{i+1} = F_{\\varphi(z_i, \\omega_i)}(z_i, \\omega_i)</span> .</li>
+
+      <li><span class="math">\\mathcal{V}(\\mathsf{vk}, (i, z_0, z_i), \\Pi_i) \\to \\{0, 1\\}</span> : on input a verifier key  <span class="math">\\mathsf{vk}</span> , a counter  <span class="math">i</span> , an initial input  <span class="math">z_0</span> , a claimed output after  <span class="math">i</span>  applications  <span class="math">z_i</span> , and an NIVC proof  <span class="math">\\Pi_i</span>  attesting to  <span class="math">z_i</span> , outputs 1 if  <span class="math">\\Pi_i</span>  is accepting, 0 otherwise.</li>
+
+    </ul>
+
+    <p class="text-gray-300">An NIVC scheme  <span class="math">(\\mathcal{G},\\mathcal{K},\\mathcal{P},\\mathcal{V})</span>  satisfies following requirements.</p>
+
+    <p class="text-gray-300">(i) Perfect completeness: for any PPT adversary  <span class="math">\\mathcal{A}</span></p>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\Pr \\left[ \\begin{array}{l} \\mathcal {V} (\\mathsf {v k}, (i + 1, z _ {0}, z _ {i + 1}), \\Pi_ {i + 1}) = 1 \\end{array} \\left</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\begin{array}{l} \\mathsf {p p} \\leftarrow \\mathcal {G} (1 ^ {\\lambda}), \\\\ (\\varphi , (F _ {1}, \\ldots , F _ {\\ell}), (i, z _ {0}, z _ {i}, \\omega_ {i}, \\Pi_ {i})) \\leftarrow \\mathcal {A} (\\mathsf {p p}), \\\\ (\\mathsf {p k}, \\mathsf {v k}) \\leftarrow \\mathcal {K} (\\mathsf {p p}, (\\varphi , (F _ {1}, \\ldots , F _ {\\ell}))), \\\\ \\mathcal {V} (\\mathsf {v k}, (i, z _ {0}, z _ {i}), \\Pi_ {i}) = 1, \\\\ z _ {i + 1} \\leftarrow F _ {\\varphi (z _ {i}, \\omega_ {i})} (z _ {i}, \\omega_ {i}), \\\\ \\Pi_ {i + 1} \\leftarrow \\mathcal {P} (\\mathsf {p k}, (i, z _ {0}, z _ {i}), \\omega_ {i}, \\Pi_ {i}) \\end{array} \\right. \\right] = 1</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <p class="text-gray-300">where  <span class="math">\\ell \\geq 1</span>  and  <span class="math">\\varphi</span>  produces an element in  <span class="math">\\mathbb{Z}_{\\ell +1}^{*}</span> . Moreover,  <span class="math">\\varphi</span>  and each  <span class="math">F_{j}</span>  for  <span class="math">j\\in \\{1,\\ldots ,\\ell \\}</span>  are a polynomial-time computable function.</p>
+
+    <p class="text-gray-300">(ii) Knowledge soundness: For any constant  <span class="math">n \\in \\mathbb{N}</span> , and expected polynomial time adversaries  <span class="math">\\mathcal{P}^*</span>  there exists an expected polynomial-time extractor  <span class="math">\\mathcal{E}</span>  such that</p>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\Pr \\left[ \\begin{array}{l} z _ {n} \\neq z, \\\\ \\mathcal {V} (\\mathsf {v k}, (n, z _ {0}, z), \\varPi) = 1 \\end{array} \\left</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\begin{array}{l} \\mathsf {p p} \\leftarrow \\mathcal {G} (1 ^ {\\lambda}), \\\\ (\\varphi , (F _ {1}, \\ldots , F _ {\\ell}), (z _ {0}, z, \\varPi)) \\leftarrow \\mathcal {P} ^ {*} (\\mathsf {p p}), \\\\ (\\mathsf {p k}, \\mathsf {v k}) \\leftarrow \\mathcal {K} (\\mathsf {p p}, (\\varphi , (F _ {1}, \\ldots , F _ {\\ell}))), \\\\ (\\omega_ {0}, \\ldots , \\omega_ {n - 1}) \\leftarrow \\mathcal {E} (\\mathsf {p p}), \\\\ z _ {i + 1} \\leftarrow F _ {\\varphi (z _ {i}, \\omega_ {i})} (z _ {i}, \\omega_ {i}) \\quad \\forall i \\in \\{0, \\ldots , n - 1 \\} \\end{array} \\right. \\right] \\leq \\mathsf {n e g l} (\\lambda).</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <p class="text-gray-300">(iii) Succinctness: The size of an NIVC proof  <span class="math">\\Pi</span>  is independent of the number of iterations  <span class="math">n</span> .</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">(iv) Efficiency: The prover's space and time complexity at any step  <span class="math">i</span>  is linear in the size of the function applied at step  <span class="math">i</span> , i.e.,  $O_{\\lambda}(</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">F_{\\varphi(z_{i-1}, \\omega_{i-1})}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">)$ .</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">Remark 2 (NIVC implies IVC). Observe that if one restricts the above definition to the setting where  <span class="math">\\ell = 1</span>  and  <span class="math">\\varphi</span>  outputs 1, one recovers the definition of IVC (Section 2.1). This means that any NIVC scheme is also an IVC scheme.</p>
+
+    <p class="text-gray-300">This section describes SuperNova, a non-uniform IVC scheme designed from a non-interactive folding scheme. When instantiated with any additively-homomorphic</p>
+
+    <p class="text-gray-300">commitment scheme with succinct commitments, the scheme achieves the claimed efficiency (Lemma 4). In addition, like Nova <em>[21]</em>, SuperNova can incorporate a zkSNARK (e.g., Spartan <em>[29]</em>) to prove the knowledge of valid NIVC proofs, providing a succinct, zero-knowledge proof of knowledge of a valid NIVC proof.</p>
+
+    <p class="text-gray-300">Below, we first provide an overview of SuperNova’s NIVC scheme. We then describe SuperNova’s NIVC scheme formally and optimizations. We defer formal details of zkSNARK of valid NIVC proofs to near-term work.</p>
+
+    <h3 id="sec-21" class="text-xl font-semibold mt-8">4.1 Overview of SuperNova</h3>
+
+    <p class="text-gray-300">We intentionally overlook certain minor complications. We then address these complications before providing a formal construction.</p>
+
+    <p class="text-gray-300">Consider polynomial-time computable functions <span class="math">F_{1},\\ldots,F_{\\ell}</span> and <span class="math">\\varphi</span>. Recall that the NIVC statement <span class="math">(i,z_{0},z_{i})</span> claims the knowledge of <span class="math">(\\omega_{0},\\ldots,\\omega_{i-1})</span> such that by computing for all <span class="math">k\\in\\{0,\\ldots,i-1\\}</span></p>
+
+    <p class="text-gray-300"><span class="math">z^{\\prime}_{k+1}\\leftarrow F(z^{\\prime}_{k},\\omega_{k})</span></p>
+
+    <p class="text-gray-300">for <span class="math">z^{\\prime}_{0}=z_{0}</span> we have that <span class="math">z^{\\prime}_{i}=z_{i}</span>.</p>
+
+    <p class="text-gray-300">We now describe a single iterative step of the prover’s work. That is, we explain how the prover can take a proof <span class="math">\\Pi_{i}</span> for the NIVC statement <span class="math">(i,z_{0},z_{i})</span> and efficiently produce an updated proof <span class="math">\\Pi_{i+1}</span> for the NIVC statement <span class="math">(i+1,z_{0},z_{i+1})</span>.</p>
+
+    <p class="text-gray-300">At a high level, instead of directly proving the knowledge of satisfying witness to some prescribed <span class="math">F_{j}</span> for <span class="math">j\\in\\{1,\\ldots,\\ell\\}</span> in each step, the prover proves the knowledge of a satisfying witness to an augmented function <span class="math">F^{\\prime}_{j}</span>. The augmented function <span class="math">F^{\\prime}_{j}</span>, in addition to running <span class="math">F_{j}</span>, performs additional bookkeeping using a folding scheme to help verifiably update the NIVC proof.</p>
+
+    <p class="text-gray-300">At first glance, a straw-man approach is to have each <span class="math">F^{\\prime}_{j}</span> take as input a relaxed R1CS instance that claims the correct execution of all prior iterations and then fold that instance into a running instance using the folding scheme as stated in Lemma 1 (this is the approach taken by Nova <em>[21]</em>). However, the folding scheme for relaxed R1CS requires that both instances have the same structure (i.e., represent the same computation). In the case of standard IVC, as there is only one function that can be applied at each iterative step, this holds naturally. However, this is not the case for non-uniform IVC.</p>
+
+    <p class="text-gray-300">To address this, <span class="math">F^{\\prime}_{j}</span> instead takes a list <span class="math">\\mathsf{U}_{i}</span> of running instances, where <span class="math">\\mathsf{U}_{i}[j]</span> attests to all prior iterations of <span class="math">F^{\\prime}_{j}</span> up to <span class="math">i-1</span> steps. As such, checking all of <span class="math">\\mathsf{U}_{i}</span> is equivalent to checking <span class="math">i-1</span> steps. In addition, <span class="math">F^{\\prime}_{j}</span> takes as input a new instance <span class="math">\\mathsf{u}_{i}</span>, which claims the correctness of the <span class="math">i</span>’th step. Instead of directly checking this instance (which would be concretely expensive), <span class="math">F^{\\prime}_{j}</span> folds <span class="math">\\mathsf{u}_{i}</span> into the appropriate instance in <span class="math">\\mathsf{U}_{i}</span> according to <span class="math">\\varphi</span> to produce a new list of running instances <span class="math">\\mathsf{U}_{i+1}</span>. To claim the correctness of <span class="math">F^{\\prime}_{j}</span> itself, the prover produces a new instance <span class="math">\\mathsf{u}_{i+1}</span>.</p>
+
+    <p class="text-gray-300">We let the NIVC proof <span class="math">\\Pi_{i}</span> contain the list <span class="math">\\mathsf{U}_{i}</span>, the fresh instance <span class="math">\\mathsf{u}_{i}</span>, and the corresponding witnesses. Thus, the prover can use parts of <span class="math">\\Pi_{i}</span> as input to the appropriate function <span class="math">F^{\\prime}_{j}</span> to produce <span class="math">\\mathsf{U}_{i+1}</span> and <span class="math">\\mathsf{u}_{i+1}</span>, and separately compute the corresponding witnesses. These terms together define <span class="math">\\Pi_{i+1}</span>. At the end of the</p>
+
+    <p class="text-gray-300">iterative computation (or at any intermediate step, if necessary), the verifier can check <span class="math">i</span> steps by checking proof <span class="math">\\Pi_{i}</span> directly.</p>
+
+    <p class="text-gray-300">We now provide additional details.</p>
+
+    <p class="text-gray-300">The augmented function. The function <span class="math">F_{j}^{\\prime}</span> takes as non-deterministic input the statement so far <span class="math">(i,z_{0},z_{i})</span>, the auxiliary witness <span class="math">\\omega_{i}</span>, the index of the previously executed function <span class="math">\\mathsf{pc}_{i}</span>, a relaxed R1CS instance that claims that the step <span class="math">i</span> was executed correctly <span class="math">\\mathsf{u}_{i}</span>, and a list of <span class="math">\\ell</span> running relaxed R1CS instances <span class="math">\\mathsf{U}_{i}</span>, where for <span class="math">j\\in\\{1,\\ldots,\\ell\\}</span>, <span class="math">\\mathsf{U}_{i}[j]</span> is a relaxed R1CS instance attesting to all prior executions of of <span class="math">F_{j}^{\\prime}</span>. Function <span class="math">F_{j}^{\\prime}</span> first runs <span class="math">F_{j}</span> on input <span class="math">(z_{i},\\omega_{i})</span> to compute <span class="math">z_{i+1}</span>. As additional bookkeeping, <span class="math">F_{j}^{\\prime}</span> runs a verifier circuit that does the following.</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Checks that <span class="math">\\mathsf{U}_{i}</span> and <span class="math">\\mathsf{pc}_{i}</span> are contained in the public output of the instance <span class="math">\\mathsf{u}_{i}</span>. This enforces that <span class="math">\\mathsf{U}_{i}</span> and <span class="math">\\mathsf{pc}_{i}</span> are indeed produced by the prior step.</li>
+
+      <li>Runs the non-interactive folding scheme’s verifier to fold an instance that claims the correct execution of the previous step, <span class="math">\\mathsf{u}_{i}</span>, into <span class="math">\\mathsf{U}_{i}[\\mathsf{pc}_{i}]</span> to produce an updated list of running instances <span class="math">\\mathsf{U}_{i+1}</span>. This ensures that checking <span class="math">\\mathsf{U}_{i+1}</span> implies checking <span class="math">\\mathsf{U}_{i}</span> and <span class="math">\\mathsf{u}_{i}</span> while maintaining that <span class="math">\\mathsf{U}_{i+1}</span> does not grow in size with respect to <span class="math">\\mathsf{U}_{i}</span>.</li>
+
+      <li>Invokes the function <span class="math">\\varphi</span> on input <span class="math">(z_{i},\\omega_{i})</span> to compute <span class="math">\\mathsf{pc}_{i+1}</span>, which represents the index of the function <span class="math">F_{j}</span> currently being run. <span class="math">\\mathsf{pc}_{i+1}</span> is then sent to the next invocation of an augmented circuit (which contains a verifier circuit).</li>
+
+    </ol>
+
+    <p class="text-gray-300"><span class="math">F_{j}^{\\prime}</span> produces as public output the new statement <span class="math">(i+1,z_{0},z_{i+1})</span>, the updated list of running instances <span class="math">\\mathsf{U}_{i+1}</span>, and the updated index <span class="math">\\mathsf{pc}_{i+1}</span>.</p>
+
+    <p class="text-gray-300">Structure of a SuperNova proof. We now discuss the structure of an NIVC proof and how it can be checked. Consider an NIVC statement <span class="math">(i,z_{0},z_{i})</span>. Let the corresponding NIVC proof be <span class="math">\\Pi_{i}</span>, which consists of a vector of <span class="math">\\ell</span> instances <span class="math">\\mathsf{U}_{i}</span>, the corresponding vector of <span class="math">\\ell</span> witnesses <span class="math">\\mathsf{W}_{i}</span>, an instance that claims the correct execution of the latest iteration <span class="math">\\mathsf{u}_{i}</span>, the corresponding witness <span class="math">\\mathsf{w}_{i}</span>, and <span class="math">\\mathsf{pc}_{i}</span>.</p>
+
+    <p class="text-gray-300">Suppose, we have the following: So long as <span class="math">(\\mathsf{u}_{i},\\mathsf{w}_{i})</span> is a satisfying instance-witness pair with respect to augmented function <span class="math">F^{\\prime}_{\\mathsf{pc}_{i}}</span> and contains <span class="math">\\mathsf{U}_{i}</span> and <span class="math">\\mathsf{pc}_{i}</span> in the public output we have that checking all instances in <span class="math">\\mathsf{U}_{i}</span> implies checking all prior iterations and correct sequencing. So, the verifier can check the NIVC statement <span class="math">(i,z_{0},z_{i})</span> by checking the following: <span class="math">(\\mathsf{u}_{i},\\mathsf{w}_{i})</span> is a satisfying instance-witness pair with respect to function <span class="math">F^{\\prime}_{\\mathsf{pc}_{i}}</span>, the public IO of <span class="math">\\mathsf{u}_{i}</span> contains <span class="math">\\mathsf{U}_{i}</span> and <span class="math">\\mathsf{pc}_{i}</span>, and for each <span class="math">j\\in\\{1,\\ldots,\\ell\\}</span> check that <span class="math">(\\mathsf{U}_{i}[j],\\mathsf{W}_{i}[j])</span> is a satisfying instance-witness pair with respect to function <span class="math">F^{\\prime}_{j}</span>.</p>
+
+    <p class="text-gray-300">Updating a SuperNova proof. Given a proof <span class="math">\\Pi_{i}</span> of <span class="math">i</span> steps, the prover can efficiently produce a proof <span class="math">\\Pi_{i+1}</span> of <span class="math">i+1</span> steps. The core invariant we maintain is as follows: If checking <span class="math">\\Pi_{i}</span> indeed attests to <span class="math">i</span> steps we must have that <span class="math">\\Pi_{i+1}</span> attests to <span class="math">i+1</span> steps while maintaining that <span class="math">\\Pi_{i+1}</span> does not grow in size. Indeed, assume that checking <span class="math">\\Pi_{i}=(\\mathsf{U}_{i},\\mathsf{W}_{i},\\mathsf{u}_{i},\\mathsf{w}_{i},\\mathsf{pc}_{i})</span> is sufficient to verify the NIVC claim <span class="math">(i,z_{0},z_{i})</span>. Suppose the prover is provided as input proof <span class="math">\\Pi_{i}</span>, a claim <span class="math">(i,z_{0},z_{i})</span>, and an auxiliary witness <span class="math">\\omega_{i}</span>.</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">The prover proceeds as follows: Using the non-interactive folding scheme, the prover first folds the instance-witness pair <span class="math">(\\mathfrak{u}_{i},\\mathsf{w}_{i})</span>, which attests to the correctness of the last step into index <span class="math">\\mathsf{pc}_{i}</span> of <span class="math">\\mathsf{U}_{i}</span> and <span class="math">\\mathsf{W}_{i}</span> respectively. Let <span class="math">\\mathsf{U}_{i+1}</span> and <span class="math">\\mathsf{W}_{i+1}</span> denote the updated list of running instances and witnesses respectively. Now, by assumption, so long as <span class="math">\\mathfrak{u}_{i}</span> and contains <span class="math">\\mathsf{U}_{i}</span> and <span class="math">\\mathsf{pc}_{i}</span>, we have that that checking <span class="math">(\\mathsf{U}_{i+1},\\mathsf{W}_{i+1})</span> is equivalent to checking <span class="math">\\varPi_{i}</span> while maintaining that $</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">(\\mathsf{U}_{i+1},\\mathsf{W}_{i+1})</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">=</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">(\\mathsf{U}_{i},\\mathsf{W}_{i})</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"><span class="math">. To account for the next step of execution, the prover first computes the updated index </span>\\mathsf{pc}_{i+1}\\leftarrow\\varphi(z_{i},\\omega_{i})$. The prover then computes</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300"><span class="math">((i+1,z_{0},z_{i+1}),\\mathsf{U}_{i+1},\\mathsf{pc}_{i+1})\\leftarrow F^{\\prime}_{\\mathsf{pc}_{i+1}}(\\mathsf{U}_{i},\\mathfrak{u}_{i},\\mathsf{pc}_{i},(i,z_{0},z_{i}),\\omega_{i})</span></p>
+
+    <p class="text-gray-300">and computes the corresponding claim of correct execution <span class="math">\\mathfrak{u}_{i+1}</span> and witness <span class="math">\\mathsf{w}_{i+1}</span>. Now we have that checking <span class="math">\\mathfrak{u}_{i+1}</span> attests to the following.</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li><span class="math">F_{\\mathsf{pc}_{i+1}}</span> produces <span class="math">z_{i+1}</span> on input <span class="math">(z_{i},\\omega_{i})</span>.</li>
+
+      <li>The public IO of <span class="math">\\mathfrak{u}_{i}</span> contains <span class="math">\\mathsf{U}_{i}</span> and <span class="math">\\mathsf{pc}_{i}</span>, and therefore <span class="math">\\mathsf{U}_{i}</span> indeed attests to <span class="math">i</span> steps so long as <span class="math">\\mathfrak{u}_{i}</span> is valid and <span class="math">\\mathfrak{u}_{i}</span> is designated to be folded into <span class="math">\\mathsf{U}_{i}[\\mathsf{pc}_{i}]</span>.</li>
+
+      <li><span class="math">\\mathsf{U}_{i+1}</span> was computed by folding <span class="math">\\mathfrak{u}_{i}</span> into <span class="math">\\mathsf{U}_{i}[\\mathsf{pc}_{i}]</span> and therefore checking <span class="math">\\mathsf{U}_{i+1}</span> is equivalent to checking <span class="math">\\varPi_{i}</span>.</li>
+
+      <li><span class="math">\\mathsf{pc}_{i+1}</span> was computed correctly and therefore <span class="math">\\mathfrak{u}_{i+1}</span> is indeed designated to be checked against <span class="math">F^{\\prime}_{\\mathsf{pc}_{i+1}}</span></li>
+
+    </ol>
+
+    <p class="text-gray-300">Therefore, so long as <span class="math">\\mathfrak{u}_{i+1}</span> is valid, we have that checking <span class="math">\\mathsf{U}_{i+1}</span> attests to <span class="math">i</span> steps. Moreover, because <span class="math">\\mathfrak{u}_{i+1}</span> attests to the correctness of the latest step, checking <span class="math">\\mathfrak{u}_{i+1}</span> against <span class="math">F^{\\prime}_{\\mathsf{pc}_{i+1}}</span> is sufficient to attest to <span class="math">i+1</span> iterations. This means that checking <span class="math">\\varPi_{i+1}=(\\mathsf{U}_{i+1},\\mathsf{W}_{i+1},\\mathfrak{u}_{i+1},\\mathsf{w}_{i+1},\\mathsf{pc}_{i+1})</span> is sufficient to check the NIVC statement <span class="math">(i+1,z_{0},z_{i+1})</span>.</p>
+
+    <h4 id="sec-22" class="text-lg font-semibold mt-6">Fixing minor complications.</h4>
+
+    <p class="text-gray-300">The prior description overlooks the following minor issues. Prior work <em>[21]</em> addresses these, and we now provide an overview of these in light of the above overview.</p>
+
+    <p class="text-gray-300">First, we describe how to update a proof <span class="math">\\varPi_{i}</span> to produce a proof <span class="math">\\varPi_{i+1}</span>. However, we did not define a base case proof <span class="math">\\varPi_{0}</span> and how the prover, verifier, and each function <span class="math">F^{\\prime}_{j}</span> handles the base case. At a high level, we have <span class="math">F^{\\prime}_{j}</span> produce trivial running instances in the base case.</p>
+
+    <p class="text-gray-300">Second, the non-interactive folding scheme’s verifier run by <span class="math">F^{\\prime}_{j}</span> needs additional advice generated by the non-interactive folding scheme’s prover. To address this, the prover provides additional non-deterministic input to <span class="math">F^{\\prime}_{j}</span>.</p>
+
+    <p class="text-gray-300">Finally, there is a subtle sizing issue in the above description: in each step, because <span class="math">\\mathsf{U}_{i+1}</span> is produced as the public IO of <span class="math">F^{\\prime}_{\\mathsf{pc}_{i+1}}</span>, it must be contained in the public IO of instance <span class="math">\\mathfrak{u}_{i+1}</span>. In the next iteration, because <span class="math">\\mathfrak{u}_{i+1}</span> is folded into <span class="math">\\mathsf{U}_{i+1}[\\mathsf{pc}_{i+1}]</span>, this means that <span class="math">\\mathsf{U}_{i+1}[\\mathsf{pc}_{i+1}]</span> is at least as large as <span class="math">\\mathsf{U}_{i}</span> by the properties of the folding scheme. This means that the list of running instances grows in each step. To alleviate this issue, we have each <span class="math">F^{\\prime}_{j}</span> only produce a hash of its outputs as public output. In the subsequent step, the next augmented function takes as non-deterministic input a preimage to this hash.</p>
+
+    <p class="text-gray-300">4.2 Core construction</p>
+
+    <p class="text-gray-300">We formally describe our construction below and then prove that it meets the requirements of an NIVC scheme.</p>
+
+    <p class="text-gray-300"><strong>Construction 1 (Non-uniform IVC (NIVC))</strong>. Let <span class="math">\\mathsf{NIFS} = (\\mathsf{G},\\mathsf{K},\\mathsf{P},\\mathsf{V})</span> be the non-interactive folding scheme for committed relaxed R1CS implied by Assumption 1. Let <span class="math">\\mathsf{hash}</span> denote a cryptographic hash function.</p>
+
+    <p class="text-gray-300">Let <span class="math">\\varphi</span> denote a polynomial time function, and let <span class="math">(F_{1},\\ldots F_{\\ell})</span> denote a collection of <span class="math">\\ell</span> polynomial time functions. Without loss of generality, assume that these functions have identical input/output sizes and circuit sizes. We define a collection of augmented functions as follows (all arguments to an augmented function are provided as non-deterministic advice). There are <span class="math">\\ell</span> augmented functions, where <span class="math">F_{j}^{\\prime}</span> is hardwired with <span class="math">F_{j}</span>, <span class="math">j\\in [\\ell]</span>. Furthermore, <span class="math">F_{j}^{\\prime}</span> can be computed in polynomial time because <span class="math">F_{j}</span>, <span class="math">\\varphi</span>, and the additional bookkeeping in <span class="math">F_{j}^{\\prime}</span> can be computed in polynomial time. So, each <span class="math">F_{j}^{\\prime}</span> can be represented with committed relaxed R1CS and let <span class="math">\\mathsf{S}(F_j^{\\prime})</span> denote its structure. Let <span class="math">(\\mathfrak{u}_{\\perp},\\mathfrak{w}_{\\perp})</span> denote a trivial instance-witness pair for any of these committed relaxed R1CS structures.</p>
+
+    <div class="my-4 text-center"><span class="math-block">F _ {j} ^ {\\prime} (\\mathrm {v k}, \\mathrm {U} _ {i}, \\mathrm {u} _ {i}, \\mathrm {p c} _ {i}, (i, z _ {0}, z _ {i}), \\omega_ {i}, \\bar {T}) \\rightarrow \\mathrm {x}:</span></div>
+
+    <p class="text-gray-300">(1) Compute the next program counter <span class="math">\\mathsf{pc}_{i + 1}\\in \\mathbb{Z}_{\\ell +1}^{\\star}\\gets \\varphi (z_i,\\omega_i).</span> (2) Compute the next output <span class="math">z_{i + 1}\\gets F_j(z_i,\\omega_i)</span> (3) If <span class="math">i</span> is 0:</p>
+
+    <p class="text-gray-300">(a) Instantiate the running instance <span class="math">\\mathsf{U}_{i + 1}\\gets [\\mathfrak{u}_{\\perp}]^{\\ell}</span> (b) Check that <span class="math">z_0 = z_i</span> to ensure the statement holds in the base case.</p>
+
+    <p class="text-gray-300">Otherwise:</p>
+
+    <p class="text-gray-300">(a) Check that <span class="math">\\mathfrak{u}_i.\\mathbf{x} = \\mathrm{hash}(\\mathsf{vk},i,\\mathsf{pc}_i,z_0,z_i,\\mathsf{U}_i)</span> where <span class="math">\\mathfrak{u}_i.\\mathbf{x}</span> is <span class="math">\\mathfrak{u}_i</span>'s public IO. (b) Check that <span class="math">1 \\leq \\mathsf{pc}_i \\leq \\ell</span>. (c) Check that <span class="math">(\\mathfrak{u}_i.\\overline{E},\\mathfrak{u}_i.u) = (\\mathfrak{u}_{\\perp}.\\overline{E},1)</span> to ensure that <span class="math">\\mathfrak{u}_i</span> is an R1CS instance. (d) Set <span class="math">\\mathsf{U}_{i + 1}\\gets \\mathsf{U}_i</span> and update <span class="math">\\mathsf{U}_{i + 1}[\\mathsf{pc}_i]\\gets \\mathsf{NIFS.V}(\\mathsf{vk}[\\mathsf{pc}_i],\\mathsf{U}_i[\\mathsf{pc}_i],\\mathsf{u}_i,\\overline{T}).</span></p>
+
+    <p class="text-gray-300">(4) Output <span class="math">\\mathbf{x} \\gets \\mathrm{hash}(\\mathsf{vk}, i + 1, \\mathsf{pc}_{i + 1}, z_0, z_{i + 1}, \\mathsf{U}_{i + 1})</span>.</p>
+
+    <p class="text-gray-300">Let <span class="math">(\\mathfrak{u}_{i + 1},\\mathfrak{w}_{i + 1})\\gets \\mathrm{trace}(F_j&#x27;,(\\mathsf{vk},\\mathsf{U}_i,\\mathfrak{u}_i,\\mathsf{pc}_i,(i,z_0,z_i),\\omega_i,\\overline{T}))</span> denote a committed relaxed R1CS instance-witness pair <span class="math">(\\mathfrak{u}_{i + 1},\\mathfrak{w}_{i + 1})</span> (such that <span class="math">\\mathfrak{u}_{i + 1}.u = 1</span>, <span class="math">\\mathfrak{w}_{i + 1}.E = \\mathbf{0}</span> and <span class="math">\\mathfrak{w}_{i + 1}.r_E = 0</span>) for the execution of <span class="math">F_{j}^{\\prime}</span> on non-deterministic advice <span class="math">(\\mathsf{vk},\\mathsf{U}_i,\\mathfrak{u}_i,\\mathsf{pc}_i,(i,z_0,z_i),\\omega_i,\\overline{T})</span>. Note that the committed relaxed R1CS structure for this instance-witness pair is <span class="math">\\mathsf{S}(F_j^{\\prime})</span> where <span class="math">j = \\varphi (z_i,\\omega_i)</span>.</p>
+
+    <p class="text-gray-300">We construct a non-uniform IVC scheme <span class="math">(\\mathcal{G},\\mathcal{K},\\mathcal{P},\\mathcal{V})</span> as follows.</p>
+
+    <div class="my-4 text-center"><span class="math-block">\\mathcal {G} \\left(1 ^ {\\lambda}\\right)\\rightarrow \\mathrm {p p}: \\text {Output N I F S . G} \\left(1 ^ {\\lambda}\\right).</span></div>
+
+    <div class="my-4 text-center"><span class="math-block">\\mathcal {K} (\\mathrm {p p}, (\\varphi , (F _ {1}, \\dots , F _ {\\ell}))) \\rightarrow (\\mathrm {p k}, \\mathrm {v k}):</span></div>
+
+    <p class="text-gray-300">(1) Compute <span class="math">(\\mathsf{pk}_{\\mathsf{fs}_1},\\mathsf{vk}_{\\mathsf{fs}_1})\\gets \\mathsf{NIFS.K}(\\mathsf{pp},\\mathsf{S}(F_i&#x27;))</span> for all <span class="math">i\\in [\\ell ]</span> (2) Output <span class="math">(\\mathsf{pk},\\mathsf{vk})\\gets (((F_1,\\mathsf{pk}_{\\mathsf{fs}_1}),\\ldots ,(F_\\ell ,\\mathsf{pk}_{\\mathsf{fs}_\\ell})),((F_1,\\mathsf{vk}_{\\mathsf{fs}_1}),\\ldots ,(F_\\ell ,\\mathsf{vk}_{\\mathsf{fs}_\\ell}))).</span></p>
+
+    <p class="text-gray-300"><span class="math">\\mathcal{P}(\\mathsf{pk},(i,z_0,z_i),\\omega_i,\\Pi_i)\\to \\Pi_{i + 1}</span></p>
+
+    <p class="text-gray-300">(1) Parse <span class="math">\\Pi_{i}</span> as <span class="math">((\\mathsf{U}_i,\\mathsf{W}_i),(\\mathsf{u}_i,\\mathsf{w}_i),\\mathsf{pc}_i).</span> (2) if <span class="math">i</span> is 0:</p>
+
+    <p class="text-gray-300">(a) Compute <span class="math">(\\mathsf{U}_{i + 1},\\mathsf{W}_{i + 1},\\overline{T})\\gets ([\\mathsf{u}_{\\perp}]^{\\ell},[\\mathsf{w}_{\\perp}]^{\\ell},\\mathsf{u}_{\\perp}.\\overline{E}).</span></p>
+
+    <p class="text-gray-300">Otherwise:</p>
+
+    <p class="text-gray-300">(a) Set <span class="math">\\mathsf{U}_{i + 1}\\gets \\mathsf{U}_i,\\mathsf{W}_{i + 1}\\gets \\mathsf{W}_i.</span> (b) Update <span class="math">(\\mathsf{U}_{i + 1}[\\mathsf{pc}_i],\\mathsf{W}_{i + 1}[\\mathsf{pc}_i],\\overline{T})\\gets \\mathsf{NIFS.P}(\\mathsf{pk}[\\mathsf{pc}_i],(\\mathsf{U}_i[\\mathsf{pc}_i],\\mathsf{W}_i[\\mathsf{pc}_i]),(\\mathsf{u}_i,\\mathsf{w}_i)).</span></p>
+
+    <p class="text-gray-300">(3) Compute <span class="math">\\mathsf{pc}_{i + 1}\\in \\mathbb{Z}_{\\ell +1}^{*}\\gets \\varphi (z_{i},\\omega_{i}).</span> (4) Compute <span class="math">(\\mathsf{u}_{i + 1},\\mathsf{w}_{i + 1})\\gets \\mathsf{trace}(F_{\\mathsf{pc}_{i + 1}}^{\\prime},(\\mathsf{vk},\\mathsf{U}_i,\\mathsf{u}_i,\\mathsf{pc}_i,(i,z_0,z_i),\\omega_i,\\overline{T}))</span> (5) Output <span class="math">\\Pi_{i + 1}\\gets ((\\mathsf{U}_{i + 1},\\mathsf{W}_{i + 1}),(\\mathsf{u}_{i + 1},\\mathsf{w}_{i + 1}),\\mathsf{pc}_{i + 1})</span></p>
+
+    <p class="text-gray-300"><span class="math">\\mathcal{V}(\\mathsf{vk},(i,z_0,z_i),\\Pi_i)\\to \\{0,1\\}</span></p>
+
+    <p class="text-gray-300">If <span class="math">i</span> is 0:</p>
+
+    <p class="text-gray-300">(a) Check that <span class="math">z_{i} = z_{0}</span></p>
+
+    <p class="text-gray-300">Otherwise:</p>
+
+    <p class="text-gray-300">(a) Parse <span class="math">\\Pi_{i}</span> as <span class="math">((\\mathsf{U}_i,\\mathsf{W}_i),(\\mathsf{u}_i,\\mathsf{w}_i),\\mathsf{pc}_i).</span> (b) Check that <span class="math">\\mathsf{u}_i.\\mathsf{x} = \\mathsf{hash}(\\mathsf{vk},i,\\mathsf{pc}_i,z_0,z_i,\\mathsf{U}_i).</span> (c) Check that <span class="math">1 \\leq \\mathsf{pc}_i \\leq \\ell</span> (d) Check that <span class="math">(\\mathsf{u}_i.\\overline{E},\\mathsf{u}.u) = (\\mathsf{u}_{\\perp}.\\overline{E},1).</span> (e) <span class="math">\\forall j\\in [\\ell ]</span>, check that <span class="math">(\\mathsf{U}_i[j],\\mathsf{W}_i[j])</span> are satisfying instance-witness pairs with structure <span class="math">\\mathsf{S}(F_j^{\\prime})</span>. (f) check that <span class="math">\\mathsf{w}_i</span> is a satisfying witness to instance <span class="math">\\mathsf{u}_i</span> with structure <span class="math">\\mathsf{S}(F_{\\mathsf{pc}_i}^{\\prime})</span></p>
+
+    <h2 id="sec-23" class="text-2xl font-bold">4.3 Proofs of SuperNova's properties</h2>
+
+    <p class="text-gray-300"><strong>Lemma 2 (Completeness).</strong> Construction 1 is an NIVC scheme that satisfies perfect completeness.</p>
+
+    <p class="text-gray-300"><strong>Proof.</strong> Let <span class="math">\\mathsf{pp} \\gets \\mathcal{G}(1^{\\lambda})</span> denote the public parameters. Consider arbitrary polynomial-time functions <span class="math">(\\varphi, (F_1, \\ldots, F_\\ell))</span>, and let <span class="math">(\\mathsf{pk}, \\mathsf{vk}) \\gets \\mathcal{K}(\\mathsf{pp}, (\\varphi, \\{F_1, \\ldots, F_\\ell\\}))</span>. Consider an arbitrary statement <span class="math">(i, z_0, z_i)</span>, a witness <span class="math">\\omega_i</span>, and a proof <span class="math">\\Pi_i</span> such that</p>
+
+    <div class="my-4 text-center"><span class="math-block">\\mathcal {V} (\\mathrm {v k}, (i, z _ {0}, z _ {i}), \\Pi_ {i}) = 1. \\tag {1}</span></div>
+
+    <p class="text-gray-300">Let <span class="math">\\mathsf{pc}_{i + 1}\\gets \\varphi (z_i,\\omega_i)</span> and <span class="math">z_{i + 1}\\gets F_{\\mathsf{pc}_{i + 1}}(z_i,\\omega_i)</span>, and let</p>
+
+    <div class="my-4 text-center"><span class="math-block">\\Pi_ {i + 1} \\leftarrow \\mathcal {P} (\\mathrm {p k}, (i, z _ {0}, z _ {i}), \\omega_ {i}, \\Pi_ {i}).</span></div>
+
+    <p class="text-gray-300">We must show that</p>
+
+    <div class="my-4 text-center"><span class="math-block">\\mathcal {V} (\\mathrm {v k}, (i + 1, z _ {0}, z _ {i + 1}), \\Pi_ {i + 1}) = 1 \\tag {2}</span></div>
+
+    <p class="text-gray-300">with probability 1.</p>
+
+    <p class="text-gray-300">We show this by considering the case when <span class="math">i = 0</span> and the case when <span class="math">i &amp;gt; 0</span>.</p>
+
+    <p class="text-gray-300">18</p>
+
+    <p class="text-gray-300">Suppose that <span class="math">i = 0</span> (we refer to this case as the "base case" for ease of reference). First, we show that the prover can compute a proof <span class="math">\\Pi_{i+1}</span>. By Equation (1), we have that <span class="math">\\mathcal{V}</span> accepts <span class="math">\\Pi_i</span> on input <span class="math">(i, z_0, z_i)</span>. Because <span class="math">i = 0</span>, by the base case check of <span class="math">\\mathcal{V}</span>, we have that <span class="math">z_0 = z_i</span>. Thus, we have that the base case check of <span class="math">F_{\\mathsf{pc}_{i+1}}&#x27;</span> passes on input <span class="math">(\\mathsf{vk}, \\dots, \\mathsf{pc}_i, (i, z_0, z_i), \\omega_i, \\dots)</span>, where <span class="math">\\mathsf{pc}_{i+1} = \\varphi(z_i, \\omega_i)</span>, and <span class="math">\\dots</span> denotes an arbitrary argument. This ensures that <span class="math">\\mathcal{P}</span> can compute satisfying instance-witness pair <span class="math">(\\mathfrak{u}_{i+1}, \\mathfrak{w}_{i+1})</span> with respect to committed relaxed R1CS structure <span class="math">\\mathsf{S}(F_{\\mathsf{pc}_{i+1}}&#x27;)</span>. Then, by the base case specification of <span class="math">\\mathcal{P}</span>, we have:</p>
+
+    <div class="my-4 text-center"><span class="math-block">\\Pi_{i+1} = \\left(\\left(\\mathfrak{u}_{\\perp}, \\mathfrak{w}_{\\perp}\\right)^{\\ell}, \\left(\\mathfrak{u}_{i+1}, \\mathfrak{w}_{i+1}\\right), \\mathfrak{pc}_{i+1}\\right).</span></div>
+
+    <p class="text-gray-300">Next, we show that the verifier accepts <span class="math">\\Pi_{i+1}</span> by demonstrating that all of its checks pass. First, by the construction of <span class="math">\\mathcal{P}</span> and <span class="math">F_{\\mathsf{pc}_{i+1}}&#x27;</span>, we have that</p>
+
+    <div class="my-4 text-center"><span class="math-block">\\mathfrak{u}_{i+1} \\cdot \\mathbf{x} = \\operatorname{hash}(\\mathsf{vk}, i + 1, \\mathsf{pc}_{i+1}, z_0, F_{\\mathsf{pc}_{i+1}}(z_i, \\omega_i), [\\mathfrak{u}_{\\perp}]^{\\ell}).</span></div>
+
+    <p class="text-gray-300">Second, by the definition of <span class="math">\\varphi</span>, we have that <span class="math">1 \\leq \\mathsf{pc}_{i+1} \\leq \\ell</span>. Third, by the construction of <span class="math">\\mathcal{P}</span> (specifically, the definition of trace), we have <span class="math">\\mathsf{w}_{i+1} \\cdot E = \\mathbf{0}</span> and <span class="math">\\mathsf{w}_{i+1} \\cdot r_E = 0</span> (implying that <span class="math">\\mathfrak{u}_{i+1} \\cdot \\overline{E} = 0</span>), and <span class="math">\\mathfrak{u}_{i+1} \\cdot u = 1</span>. Fourth, by definition, the <span class="math">k</span>'th instance-witness pair in <span class="math">(\\mathfrak{u}_{\\perp}, \\mathfrak{w}_{\\perp})^{\\ell}</span> satisfies <span class="math">F_k&#x27;</span>, for all <span class="math">k \\in \\{1, \\dots, \\ell\\}</span>. Finally, we have that <span class="math">(\\mathfrak{u}_{i+1}, \\mathfrak{w}_{i+1})</span> is satisfying with respect to <span class="math">\\mathsf{S}(F_{\\mathsf{pc}_{i+1}}&#x27;)</span> from above. Therefore, we have that Equation (2) holds.</p>
+
+    <p class="text-gray-300">Now, suppose <span class="math">i &amp;gt; 0</span>. Let <span class="math">((\\mathsf{U}_i, \\mathsf{W}_i), (\\mathfrak{u}_i, \\mathfrak{w}_i), \\mathfrak{pc}_i)</span> be the result of parsing <span class="math">\\Pi_i</span>. First, we show that the prover can compute a proof <span class="math">\\Pi_{i+1}</span>. Because the verifier accepts <span class="math">\\Pi_i</span> (Equation 1), we have that <span class="math">\\mathfrak{u}_i \\cdot \\mathbf{x} = \\mathrm{hash}(\\mathsf{vk}, i, \\mathsf{pc}_i, z_0, z_i)</span> and <span class="math">(\\mathfrak{u}_i \\cdot \\overline{E}, \\mathfrak{u}_i \\cdot u) = (\\mathfrak{u}_{\\perp} \\cdot \\overline{E}, 1)</span>. As these are precisely the checks performed by <span class="math">F_{\\mathsf{pc}_{i+1}}&#x27;</span> for <span class="math">\\mathsf{pc}_{i+1} = \\varphi(z_i, \\omega_i)</span>, we have that <span class="math">\\mathcal{P}</span> can compute satisfying instance-witness pair <span class="math">(\\mathfrak{u}_{i+1}, \\mathfrak{w}_{i+1})</span> with respect to committed relaxed R1CS structure <span class="math">\\mathsf{S}(F_{\\mathsf{pc}_{i+1}}&#x27;)</span>. Then, by the construction of <span class="math">\\mathcal{P}</span>, we have</p>
+
+    <div class="my-4 text-center"><span class="math-block">\\Pi_{i+1} = \\left(\\left(\\mathrm{U}_{i+1}, \\mathrm{W}_{i+1}\\right), \\left(\\mathrm{u}_{i+1}, \\mathrm{w}_{i+1}\\right), \\mathrm{pc}_{i+1}\\right)</span></div>
+
+    <p class="text-gray-300">for some <span class="math">(\\mathsf{U}_{i+1}, \\mathsf{W}_{i+1})</span>.</p>
+
+    <p class="text-gray-300">Next, we show that the verifier accepts <span class="math">\\Pi_{i+1}</span>. First, by the construction of <span class="math">\\mathcal{P}</span> and <span class="math">F_{\\mathsf{pc}_{i+1}}&#x27;</span> we have that</p>
+
+    <div class="my-4 text-center"><span class="math-block">\\mathfrak{u}_{i+1} \\cdot \\mathbf{x} = \\operatorname{hash}(\\mathsf{vk}, i + 1, \\mathsf{pc}_{i+1}, z_0, z_{i+1}, \\mathsf{U}_{i+1}) \\tag{3}</span></div>
+
+    <p class="text-gray-300">Second, by definition of <span class="math">\\varphi</span> we have that <span class="math">1 \\leq \\mathsf{pc}_{i+1} \\leq \\ell</span>. Third, as in the base case, by the construction of <span class="math">\\mathcal{P}</span>, we have <span class="math">\\mathfrak{u}_{i+1} \\cdot \\overline{E} = 0</span> and <span class="math">\\mathfrak{u}_{i+1} \\cdot u = 1</span>. Fourth, by the construction of <span class="math">\\mathcal{P}</span>, we have for all <span class="math">k \\in [\\ell]</span> (for notational convenience ignoring that NIFS.P additionally outputs a cross-term):</p>
+
+    <div class="my-4 text-center"><span class="math-block">(\\mathsf{U}_{i+1}[k], \\mathsf{W}_{i+1}[k]) = \\begin{cases} \\text{NIFS.P}(\\mathsf{pk}[k], (\\mathsf{U}_i[k], \\mathsf{W}_i[k]), (\\mathfrak{u}_i, \\mathfrak{w}_i)) &amp;amp; \\text{if } k = \\mathsf{pc}_i \\\\ (\\mathsf{U}_i[k], \\mathsf{W}_i[k]) &amp;amp; \\text{otherwise} \\end{cases}</span></div>
+
+    <p class="text-gray-300"><span class="math">\\mathcal{V}(\\mathsf{vk},(n,z_{0},z),\\varPi)=1</span> (3)</p>
+
+    <p class="text-gray-300">Then, by the premise that the verifier accepts <span class="math">\\varPi_{i}</span>, we already have that <span class="math">(\\mathsf{U}_{i+1}[k],\\mathsf{W}_{i+1}[k])</span> is a satisfying instance-witness pair for structure <span class="math">\\mathsf{S}(F_{k})</span> for all <span class="math">k\\in\\{1,\\ldots,\\mathsf{pc}_{i}-1,\\mathsf{pc}_{i}+1,\\ldots,\\ell\\}</span>. Moreover, by the premise, <span class="math">(\\mathsf{U}_{i}[\\mathsf{pc}_{i}],\\mathsf{W}_{i}[\\mathsf{pc}_{i}])</span> and <span class="math">(\\mathsf{u}_{i},\\mathsf{w}_{i})</span> are satisfying instance-witness pairs for committed relaxed R1CS structure <span class="math">\\mathsf{S}(F_{\\mathsf{pc}_{i}})</span>. Thus, by the completeness of the underlying non-interactive folding scheme, we have that <span class="math">(\\mathsf{U}_{i+1}[\\mathsf{pc}_{i}],\\mathsf{W}_{i+1}[\\mathsf{pc}_{i}])</span> is also a satisfying instance-witness pair for structure <span class="math">\\mathsf{S}(F_{\\mathsf{pc}_{i}})</span>. Fourth, we have that <span class="math">(\\mathsf{u}_{i+1},\\mathsf{w}_{i+1})</span> is satisfying with respect to <span class="math">\\mathsf{S}(F^{\\prime}_{\\mathsf{pc}_{i+1}})</span> from above. Therefore, we have that Equation (2) holds. ∎</p>
+
+    <h6 id="sec-24" class="text-base font-medium mt-4">Lemma 3 (Knowledge soundness).</h6>
+
+    <p class="text-gray-300">Construction 1 is an NIVC scheme that satisfies knowledge soundness.</p>
+
+    <h6 id="sec-25" class="text-base font-medium mt-4">Proof.</h6>
+
+    <p class="text-gray-300">Let <span class="math">n</span> be a global constant. Consider an expected polynomial-time adversary <span class="math">\\mathcal{P}^{<em>}</span>. Suppose that <span class="math">\\mathsf{pp}\\leftarrow\\mathcal{G}(1^{\\lambda})</span>. Suppose that on input <span class="math">\\mathsf{pp}</span>, <span class="math">\\mathcal{P}^{</em>}</span> produces, for some <span class="math">\\ell\\geq 1</span>, a polynomial-time control function <span class="math">\\varphi</span> that maps into <span class="math">\\mathbb{Z}_{\\ell+1}^{*}</span>, polynomial-time functions <span class="math">(F_{1},\\ldots,F_{\\ell})</span>, an input <span class="math">z_{0}</span>, an output <span class="math">z</span>, and an NIVC proof <span class="math">\\varPi</span>. Suppose that on input <span class="math">(\\mathsf{pp},(\\varphi,\\{F_{1},\\ldots,F_{\\ell}\\}))</span>, <span class="math">\\mathcal{K}</span> produces prover key <span class="math">\\mathsf{pk}</span>, and verifier key <span class="math">\\mathsf{vk}</span>.</p>
+
+    <p class="text-gray-300">Suppose that</p>
+
+    <p class="text-gray-300"><span class="math">\\mathcal{V}(\\mathsf{vk},(n,z_{0},z),\\varPi)=1</span> (4)</p>
+
+    <p class="text-gray-300">with probability <span class="math">\\epsilon</span>. We must construct an expected polynomial-time extractor <span class="math">\\mathcal{E}</span> that on input <span class="math">(\\mathsf{pp},z_{0},z)</span>, outputs <span class="math">(\\omega_{0},\\ldots,\\omega_{n-1})</span> such that by computing</p>
+
+    <p class="text-gray-300"><span class="math">\\mathsf{pc}_{i+1}</span> <span class="math">\\leftarrow\\varphi(z_{i},\\omega_{i})</span> <span class="math">z_{i+1}</span> <span class="math">\\leftarrow F_{\\mathsf{pc}_{i+1}}(z_{i},\\omega_{i})</span></p>
+
+    <p class="text-gray-300">we have that <span class="math">z_{n}=z</span> with probability <span class="math">\\epsilon-\\mathsf{negl}(\\lambda)</span>.</p>
+
+    <p class="text-gray-300">We show inductively that we can construct an expected polynomial-time extractor <span class="math">\\mathcal{E}_{i}</span> that on input <span class="math">\\mathsf{pp}</span> outputs <span class="math">((z_{i},\\ldots,z_{n-1}),(\\omega_{i},\\ldots,\\omega_{n-1}),\\varPi_{i})</span> such for all <span class="math">j\\in\\{i,\\ldots,n-1\\}</span>, given <span class="math">\\mathsf{pc}_{j+1}\\leftarrow\\varphi(z_{j},\\omega_{j})</span>, we have that</p>
+
+    <p class="text-gray-300"><span class="math">z_{j+1}=F_{\\mathsf{pc}_{j+1}}(z_{j},\\omega_{j})</span></p>
+
+    <p class="text-gray-300">and <span class="math">z_{n}=z</span>, and that</p>
+
+    <p class="text-gray-300"><span class="math">\\mathcal{V}(\\mathsf{vk},(i,z_{0},z_{i}),\\varPi_{i})=1</span></p>
+
+    <p class="text-gray-300">with probability <span class="math">\\epsilon-\\mathsf{negl}(\\lambda)</span>. Then, because in the base case when <span class="math">i=0</span>, <span class="math">\\mathcal{V}</span> checks that <span class="math">z_{0}=z_{i}</span>, the values <span class="math">(\\omega_{0},\\ldots,\\omega_{n-1})</span> retrieved by <span class="math">\\mathcal{E}_{0}</span> are such that computing <span class="math">\\mathsf{pc}_{i+1}\\leftarrow\\varphi(z_{i},\\omega_{i})</span> and <span class="math">z_{i+1}\\leftarrow F_{\\mathsf{pc}_{i+1}}(z_{i},\\omega_{i})</span> for all <span class="math">i\\geq 0</span> gives <span class="math">z_{n}=z</span>. Thus, by setting <span class="math">\\mathcal{E}=\\mathcal{E}_{0}</span> we are done.</p>
+
+    <p class="text-gray-300">At a high level, to construct an extractor <span class="math">\\mathcal{E}_{i-1}</span>, we first assume the existence of <span class="math">\\mathcal{E}_{i}</span> that satisfies the inductive hypothesis. We then use <span class="math">\\mathcal{E}_{i}</span> to construct an adversary for the non-interactive folding scheme, which we denote as <span class="math">\\widetilde{\\mathcal{P}}_{i-1}</span>. This in turn guarantees a corresponding extractor <span class="math">\\widetilde{\\mathcal{E}}_{i-1}</span> by the knowledge soundness</p>
+
+    <p class="text-gray-300">of the non-interactive folding scheme. We then use <span class="math">\\widetilde{\\mathcal{E}}_{i-1}</span> to construct <span class="math">\\mathcal{E}_{i-1}</span> that satisfies the inductive hypothesis.</p>
+
+    <p class="text-gray-300">In the base case, for <span class="math">i=n</span>, let <span class="math">\\mathcal{E}_{n}(\\mathsf{pp})</span> output <span class="math">(\\bot,\\bot,\\Pi_{n})</span> where <span class="math">\\bot</span> represents the empty list and <span class="math">\\Pi_{n}</span> is the output of <span class="math">\\mathcal{P}^{*}(\\mathsf{pp})</span>. By the precondition (Equation (4)), <span class="math">\\mathcal{E}_{n}</span> succeeds with probability <span class="math">\\epsilon</span> in expected polynomial-time.</p>
+
+    <p class="text-gray-300">For <span class="math">i\\geq 1</span>, suppose that we can construct an expected polynomial-time extractor <span class="math">\\mathcal{E}_{i}</span> that outputs <span class="math">((z_{i},\\ldots,z_{n-1}),(\\omega_{i},\\ldots,\\omega_{n-1}))</span>, and <span class="math">\\Pi_{i}</span> that satisfies the inductive hypothesis. To construct an extractor <span class="math">\\mathcal{E}_{i-1}</span>, we first construct an adversary <span class="math">\\widetilde{\\mathcal{P}}_{i-1}</span> for the non-interactive folding scheme that outputs an adversarially chosen structure and instances to be folded followed by a folded instance-witness pair and a folding proof:</p>
+
+    <p class="text-gray-300"><span class="math">\\widetilde{\\mathcal{P}}_{i-1}(\\mathsf{pp})</span>:</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Let <span class="math">((z_{i},\\ldots,z_{n-1}),(\\omega_{i},\\ldots,\\omega_{n-1}),\\Pi_{i})\\leftarrow\\mathcal{E}_{i}(\\mathsf{pp})</span>.</li>
+
+      <li>Parse <span class="math">\\Pi_{i}</span> as <span class="math">((\\mathsf{U}_{i},\\mathsf{W}_{i}),(\\mathsf{u}_{i},\\mathsf{w}_{i}),\\mathsf{pc}_{i})</span>.</li>
+
+      <li>Parse <span class="math">\\mathsf{w}_{i}</span> to retrieve <span class="math">\\mathsf{U}_{i-1},\\mathsf{u}_{i-1},\\overline{T}_{i-1},\\mathsf{pc}_{i-1}</span>.</li>
+
+      <li>Output <span class="math">(\\mathsf{S}(F^{\\prime}_{\\mathsf{pc}_{i-1}}),(\\mathsf{U}_{i-1}[\\mathsf{pc}_{i-1}],\\mathsf{u}_{i-1}))</span> and <span class="math">((\\mathsf{U}_{i}[\\mathsf{pc}_{i-1}],\\mathsf{W}_{i}[\\mathsf{pc}_{i-1}]),\\overline{T}_{i-1})</span>.</li>
+
+    </ol>
+
+    <p class="text-gray-300">We now analyze the success probability of <span class="math">\\widetilde{\\mathcal{P}}_{i-1}</span>. Suppose that <span class="math">\\widetilde{\\mathcal{P}}_{i-1}</span> retrieves proof <span class="math">\\Pi_{i}=((\\mathsf{U}_{i},\\mathsf{W}_{i}),(\\mathsf{u}_{i},\\mathsf{w}_{i}),\\mathsf{pc}_{i})</span> as a result of running <span class="math">\\mathcal{E}_{i}</span> internally and retrieves <span class="math">(\\mathsf{U}_{i-1},\\mathsf{u}_{i-1},\\overline{T}_{i-1},\\mathsf{pc}_{i-1})</span> from parsing <span class="math">\\mathsf{w}_{i}</span>. By the inductive hypothesis, we have that <span class="math">\\mathcal{V}(\\mathsf{vk},(i,z_{0},z_{i}),\\Pi_{i})=1</span> with probability <span class="math">\\epsilon-\\mathsf{negl}(\\lambda)</span>. This implies that <span class="math">1\\leq\\mathsf{pc}_{i}\\leq\\ell</span> and that <span class="math">(\\mathsf{u}_{i},\\mathsf{w}_{i})</span> is a satisfying instance-witness pair for committed relaxed R1CS structure <span class="math">\\mathsf{S}(F^{\\prime}_{\\mathsf{pc}_{i}})</span>. Because <span class="math">\\mathcal{V}</span> ensures that <span class="math">(\\mathsf{u}_{i}.\\overline{E},\\mathsf{u}_{i}.u)=(\\overline{0},1)</span> we have that <span class="math">\\mathsf{w}_{i}</span> is indeed a satisfying assignment for <span class="math">F^{\\prime}_{\\mathsf{pc}_{i}}</span> (and not just a trivially satisfying witness). Therefore, because <span class="math">\\mathsf{pc}_{i-1}</span> was parsed from <span class="math">\\mathsf{w}_{i}</span>, by the construction of <span class="math">\\mathsf{S}(F^{\\prime}_{\\mathsf{pc}_{i}})</span>, this implies that <span class="math">1\\leq\\mathsf{pc}_{i-1}\\leq\\ell</span>. Then, by the the verifier’s checks on <span class="math">\\mathsf{U}_{i}</span> and <span class="math">\\mathsf{W}_{i}</span>, we have that <span class="math">(\\mathsf{U}_{i}[\\mathsf{pc}_{i-1}],\\mathsf{W}_{i}[\\mathsf{pc}_{i-1}])</span> is a satisfying instance-witness pair for committed relaxed R1CS structure <span class="math">\\mathsf{S}(F^{\\prime}_{\\mathsf{pc}_{i-1}})</span>. By the verifier’s checks, we additionally have that</p>
+
+    <p class="text-gray-300"><span class="math">\\mathsf{u}_{i}.\\mathsf{x}=\\mathsf{hash}(\\mathsf{vk},i,\\mathsf{pc}_{i},z_{0},z_{i},\\mathsf{U}_{i})</span></p>
+
+    <p class="text-gray-300">Then, by the construction of <span class="math">F^{\\prime}_{\\mathsf{pc}_{i}}</span> and the binding property of the hash function, we have that</p>
+
+    <p class="text-gray-300"><span class="math">\\mathsf{U}_{i}[\\mathsf{pc}_{i-1}]=\\mathsf{NIFS.V}(\\mathsf{vk}[\\mathsf{pc}_{i-1}],\\mathsf{U}_{i-1}[\\mathsf{pc}_{i-1}],\\mathsf{u}_{i-1},\\overline{T}_{i-1})</span></p>
+
+    <p class="text-gray-300">with probability <span class="math">\\epsilon-\\mathsf{negl}(\\lambda)</span>. Thus, <span class="math">\\widetilde{\\mathcal{P}}_{i-1}</span> succeeds in producing an accepting folded instance-witness pair <span class="math">(\\mathsf{U}_{i}[\\mathsf{pc}_{i-1}],\\mathsf{W}_{i}[\\mathsf{pc}_{i-1}])</span> for instances <span class="math">\\mathsf{U}_{i-1}[\\mathsf{pc}_{i-1}]</span> and <span class="math">\\mathsf{u}_{i-1}</span> with probability <span class="math">\\epsilon-\\mathsf{negl}(\\lambda)</span> in expected polynomial-time.</p>
+
+    <p class="text-gray-300">Then, by the knowledge soundness of the underlying non-interactive folding scheme, there exists an extractor <span class="math">\\widetilde{\\mathcal{E}}_{i-1}</span> that outputs satisfying witnesses for instances <span class="math">\\mathsf{U}_{i-1}[\\mathsf{pc}_{i-1}]</span> and <span class="math">\\mathsf{u}_{i-1}</span> with respect to <span class="math">\\mathsf{S}(F^{\\prime}_{\\mathsf{pc}_{i-1}})</span> with probability <span class="math">\\epsilon-\\mathsf{negl}(\\lambda)</span> in expected polynomial-time.</p>
+
+    <p class="text-gray-300">Given <span class="math">\\widetilde{\\mathcal{P}}_{i-1}</span> and <span class="math">\\widetilde{\\mathcal{E}}_{i-1}</span>, we construct an expected polynomial time extractor <span class="math">\\mathcal{E}_{i-1}</span> as follows</p>
+
+    <p class="text-gray-300"><span class="math">\\mathcal{E}_{i-1}(\\mathsf{pp})</span>:</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Run <span class="math">\\widetilde{\\mathcal{P}}_{i-1}</span> to retrieve the output <span class="math">(\\mathsf{u}_{i-1}^{\\prime},\\mathsf{u}_{i-1})</span> and retrieve</li>
+
+    </ol>
+
+    <p class="text-gray-300"><span class="math">((z_{i},\\ldots,z_{n-1}),(\\omega_{i},\\ldots,\\omega_{n-1}),\\Pi_{i})</span></p>
+
+    <p class="text-gray-300">from its internal state.</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Parse <span class="math">\\Pi_{i}</span> as <span class="math">((\\mathsf{U}_{i},\\mathsf{W}_{i}),(\\mathsf{u}_{i},\\mathsf{w}_{i}),\\mathsf{pc}_{i})</span> and parse <span class="math">\\mathsf{w}_{i}</span> to retrieve <span class="math">z_{i-1}</span>, <span class="math">\\omega_{i-1}</span>, and <span class="math">\\mathsf{pc}_{i-1}</span>.</li>
+
+      <li>Let <span class="math">(\\mathsf{w}_{i-1}^{\\prime},\\mathsf{w}_{i-1})\\leftarrow\\widetilde{\\mathcal{E}}_{i-1}(\\mathsf{pp})</span>.</li>
+
+      <li>Compute <span class="math">(\\mathsf{U}_{i-1},\\mathsf{W}_{i-1})\\leftarrow(\\mathsf{U}_{i},\\mathsf{W}_{i})</span> and update</li>
+
+    </ol>
+
+    <p class="text-gray-300"><span class="math">(\\mathsf{U}_{i-1}[\\mathsf{pc}_{i-1}],\\mathsf{W}_{i-1}[\\mathsf{pc}_{i-1}])\\leftarrow(\\mathsf{u}_{i-1}^{\\prime},\\mathsf{w}_{i-1}^{\\prime})</span></p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Let <span class="math">\\Pi_{i-1}\\leftarrow((\\mathsf{U}_{i-1},\\mathsf{W}_{i-1}),(\\mathsf{u}_{i-1},\\mathsf{w}_{i-1}),\\mathsf{pc}_{i-1})</span>.</li>
+
+      <li>Output <span class="math">((z_{i-1},\\ldots,z_{n-1}),(\\omega_{i-1},\\ldots,\\omega_{n-1}),\\Pi_{i-1})</span>.</li>
+
+    </ol>
+
+    <p class="text-gray-300">We now analyze the success probability of <span class="math">\\mathcal{E}_{i-1}</span>. Suppose that <span class="math">\\mathcal{E}_{i-1}</span> retrieves <span class="math">\\Pi_{i}=((\\mathsf{U}_{i},\\mathsf{W}_{i}),(\\mathsf{u}_{i},\\mathsf{w}_{i}),\\mathsf{pc}_{i})</span> from the internal state of <span class="math">\\widetilde{P}_{i-1}</span> and outputs</p>
+
+    <p class="text-gray-300"><span class="math">((z_{i-1},\\ldots,z_{n-1}),(\\omega_{i-1},\\ldots,\\omega_{n-1}),\\Pi_{i-1}).</span></p>
+
+    <p class="text-gray-300">Suppose that <span class="math">\\Pi_{i-1}</span> is parsed as <span class="math">((\\mathsf{U}_{i-1},\\mathsf{W}_{i-1}),(\\mathsf{u}_{i-1},\\mathsf{w}_{i-1}),\\mathsf{pc}_{i-1})</span>. We first reason that the output <span class="math">(z_{i-1},\\ldots,z_{n-1})</span> and <span class="math">(\\omega_{i-1},\\ldots,\\omega_{n-1})</span> are valid. By the inductive hypothesis, we already have that for all <span class="math">j\\in\\{i,\\ldots,n-1\\}</span>, given <span class="math">\\mathsf{pc}_{j+1}\\leftarrow\\varphi(z_{j},\\omega_{j})</span>,</p>
+
+    <p class="text-gray-300"><span class="math">z_{j+1}=F_{\\mathsf{pc}_{j+1}}(z_{j},\\omega_{j}),</span></p>
+
+    <p class="text-gray-300">and <span class="math">z_{n}=z</span>, and that <span class="math">\\mathcal{V}(\\mathsf{vk},(i,z_{0},z_{i}),\\Pi_{i})=1</span> with probability <span class="math">\\epsilon-\\mathsf{negl}(\\lambda)</span>. By the verifier’s checks, we have that <span class="math">1\\leq\\mathsf{pc}_{i}\\leq\\ell</span>, that <span class="math">(\\mathsf{u}_{i},\\mathsf{w}_{i})</span> is a non-trivial satisfying instance witness pair for <span class="math">F_{\\mathsf{pc}_{i}}^{\\prime}</span>, and that</p>
+
+    <p class="text-gray-300"><span class="math">\\mathsf{u}_{i}.\\mathsf{x}=\\mathsf{hash}(\\mathsf{vk},i,\\mathsf{pc}_{i},z_{0},z_{i},\\mathsf{U}_{i}).</span> (5)</p>
+
+    <p class="text-gray-300">Then, because <span class="math">z_{i-1}</span> and <span class="math">\\omega_{i-1}</span> were parsed from <span class="math">\\mathsf{w}_{i}</span>, by the construction of <span class="math">F_{\\mathsf{pc}_{i}}^{\\prime}</span> and the binding property of the hash function, we have</p>
+
+    <p class="text-gray-300"><span class="math">\\mathsf{pc}_{i}</span> <span class="math">=\\varphi(z_{i-1},\\omega_{i-1})</span> <span class="math">z_{i}</span> <span class="math">=F_{\\mathsf{pc}_{i}}(z_{i-1},\\omega_{i-1})</span></p>
+
+    <p class="text-gray-300">Therefore we have that <span class="math">(z_{i-1},\\ldots,z_{n-1})</span> and <span class="math">(\\omega_{i-1},\\ldots,\\omega_{n-1})</span> satisfy the inductive hypothesis with probability <span class="math">\\epsilon-\\mathsf{negl}(\\lambda)</span>.</p>
+
+    <p class="text-gray-300">Next, we argue that <span class="math">\\Pi_{i-1}</span> is valid. Because <span class="math">(\\mathsf{u}_{i},\\mathsf{w}_{i})</span> satisfies <span class="math">F_{\\mathsf{pc}_{i}}^{\\prime}</span>, and <span class="math">(\\mathsf{U}_{i-1},\\mathsf{u}_{i-1})</span> were retrieved from <span class="math">\\mathsf{w}_{i}</span>, by the binding property of the hash function, and by Equation (5), we have that</p>
+
+    <p class="text-gray-300"><span class="math">\\mathsf{u}_{i-1}.\\mathsf{x}=\\mathsf{hash}(\\mathsf{vk},i-1,\\mathsf{pc}_{i-1},z_{0},z_{i-1},\\mathsf{U}_{i-1})</span></p>
+
+    <p class="text-gray-300"><span class="math">(\\mathsf{u}_{i-1}.\\overline{E},\\mathsf{u}_{i-1}.u)=(\\overline{0},1)</span></p>
+
+    <p class="text-gray-300">By the inductive hypothesis that <span class="math">\\Pi_{i}</span> is accepting, by construction, we have that <span class="math">(\\mathsf{U}_{i-1}[k],\\mathsf{W}_{i-1}[k])</span> is a satisfying instance-witness pair for all <span class="math">k\\in\\{1,\\ldots,\\mathsf{pc}_{i-1}-1,\\mathsf{pc}_{i-1}+1,\\ldots,\\ell\\}</span>. Moreover, by the construction of <span class="math">F^{\\prime}_{\\mathsf{pc}_{i}}</span> we have that <span class="math">1\\leq\\mathsf{pc}_{i-1}\\leq\\ell</span>. Thus, we have that <span class="math">(\\mathsf{U}_{i-1}[\\mathsf{pc}_{i-1}],\\mathsf{W}_{i-1}[\\mathsf{pc}_{i-1}])</span> and <span class="math">(\\mathsf{u}_{i-1},\\mathsf{w}_{i-1})</span> are accepting instance-witness pairs with respect to structure <span class="math">\\mathsf{S}(F^{\\prime}_{\\mathsf{pc}_{i-1}})</span> with probability <span class="math">\\epsilon-\\mathsf{negl}(\\lambda)</span> due to the success probability of <span class="math">\\widetilde{\\mathcal{E}}_{i-1}</span>. Therefore, we have that</p>
+
+    <p class="text-gray-300"><span class="math">\\mathcal{V}(\\mathsf{vk},(i-1,z_{0},z_{i-1}),\\Pi_{i-1})=1</span></p>
+
+    <p class="text-gray-300">with probability <span class="math">\\epsilon-\\mathsf{negl}(\\lambda)</span>.</p>
+
+    <p class="text-gray-300">∎</p>
+
+    <h6 id="sec-26" class="text-base font-medium mt-4">Lemma 4 (Efficiency).</h6>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">When instantiated with the Pedersen commitment scheme, we have that for each <span class="math">j\\in\\{1,\\ldots,\\ell\\}</span>, $</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">F^{\\prime}_{j}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">=</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\varphi</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">+</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">F_{j}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">+o(2\\cdot\\mathsf{G}+2\\cdot\\mathsf{H}+\\mathsf{R})<span class="math">, where </span></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">F_{j}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"><span class="math"> and </span></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\varphi</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"><span class="math"> denote the number of R1CS constraints to encode functions </span>F_{j}<span class="math"> and </span>\\varphi<span class="math"> respectively, </span>\\mathsf{G}<span class="math"> is the number of constraints required to encode a group scalar multiplication, </span>\\mathsf{H}<span class="math"> is the number of constraints required to encode </span>\\mathsf{hash}<span class="math">, and </span>\\mathsf{R}<span class="math"> is the number of constraints to encode the RO </span>\\rho$.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <h6 id="sec-27" class="text-base font-medium mt-4">Proof.</h6>
+
+    <p class="text-gray-300">On input instances <span class="math">\\mathsf{U}</span> and <span class="math">\\mathsf{u}</span>, <span class="math">\\mathsf{NIFS.V}</span> computes <span class="math">\\overline{E}\\leftarrow\\mathsf{U}.\\overline{E}+r\\cdot\\overline{T}+r^{2}\\cdot\\mathsf{u}.\\overline{E}</span> and <span class="math">\\overline{W}\\leftarrow\\mathsf{U}.\\overline{W}+r\\cdot\\mathsf{u}.\\overline{W}</span>. However, by construction, <span class="math">\\mathsf{u}.\\overline{E}=\\mathsf{u}_{\\perp}.\\overline{E}=\\overline{0}</span>. So, <span class="math">\\mathsf{NIFS.V}</span> computes two group scalar multiplications, as it does not need to compute <span class="math">r^{2}\\cdot\\mathsf{u}.\\overline{E}</span>. <span class="math">\\mathsf{NIFS.V}</span> additionally invokes the RO once to obtain a random scalar. Finally, <span class="math">F^{\\prime}_{j}</span> makes two additional calls to <span class="math">\\mathsf{hash}</span> and a call to <span class="math">\\varphi</span> (details are in the description of <span class="math">F^{\\prime}_{j}</span>). ∎</p>
+
+    <h3 id="sec-28" class="text-xl font-semibold mt-8">4.4 Optimizations</h3>
+
+    <p class="text-gray-300">In the construction of <span class="math">F^{\\prime}_{j}</span> from the previous subsection, the cost of <span class="math">\\mathsf{hash}</span> scales with <span class="math">\\ell</span> since the circuit takes as non-deterministic input <span class="math">\\ell</span> running instances. However, at each invocation, the circuit updates only one of them. Thus, one can employ standard memory-checking techniques <em>[7]</em>. More specifically, by encoding Merkle proofs in a circuit <em>[10]</em>, one can reduce dependence of <span class="math">F^{\\prime}_{j}</span>’s circuit size on <span class="math">\\ell</span> from <span class="math">O_{\\lambda}(\\ell)</span> to <span class="math">O_{\\lambda}(\\log\\ell)</span>. This can be reduced to <span class="math">O_{\\lambda}(1)</span> constraints by using multiset-based offline memory checking inside a circuit <em>[22, 30]</em>.</p>
+
+    <h2 id="sec-29" class="text-2xl font-bold">Acknowledgments</h2>
+
+    <p class="text-gray-300">We thank Justin Drake, Chhi’mèd Künzang, Bryan Parno, Justin Thaler, Ioanna Tzialla, and Michael Walfish for helpful conversations and comments on a prior version of this paper. Abhiram Kothapalli was supported by a gift from Bosch, NSF Grant No. 1801369, and by the CONIX Research Center, one of six centers in JUMP, a Semiconductor Research Corporation (SRC) program sponsored by DARPA.</p>
+
+    <p class="text-gray-300">##</p>
+
+    <p class="text-gray-300">References</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>[1] Ben-Sasson, E., Chiesa, A., Genkin, D., Tromer, E.: Fast reductions from RAMs to delegatable succinct constraint satisfaction problems: Extended abstract. In: ITCS (2013)</li>
+
+      <li>[2] Ben-Sasson, E., Chiesa, A., Genkin, D., Tromer, E., Virza, M.: SNARKs for C: Verifying program executions succinctly and in zero knowledge. In: CRYPTO (Aug 2013)</li>
+
+      <li>[3] Ben-Sasson, E., Chiesa, A., Tromer, E., Virza, M.: Scalable zero knowledge via cycles of elliptic curves. In: CRYPTO (2014)</li>
+
+      <li>[4] Ben-Sasson, E., Chiesa, A., Tromer, E., Virza, M.: Succinct non-interactive zero knowledge for a von Neumann architecture. In: USENIX Security (2014)</li>
+
+      <li>[5] Bitansky, N., Canetti, R., Chiesa, A., Tromer, E.: From extractable collision resistance to succinct non-interactive arguments of knowledge, and back again. In: ITCS (2012)</li>
+
+      <li>[6] Bitansky, N., Canetti, R., Chiesa, A., Tromer, E.: Recursive composition and bootstrapping for SNARKs and proof-carrying data. In: STOC (2013)</li>
+
+      <li>[7] Blum, M., Evans, W., Gemmell, P., Kannan, S., Naor, M.: Checking the correctness of memories. In: FOCS (1991)</li>
+
+      <li>[8] Boneh, D., Bünz, B., Fisch, B.: A survey of two verifiable delay functions. Cryptology ePrint Archive, Report 2018/712 (2018)</li>
+
+      <li>[9] Braun, B.: Compiling computations to constraints for verified computation. Tech. rep., UT Austin Honors thesis HR-12-10 (Dec 2012)</li>
+
+      <li>[10] Braun, B., Feldman, A.J., Ren, Z., Setty, S., Blumberg, A.J., Walfish, M.: Verifying computations with state. In: SOSP (2013)</li>
+
+      <li>[11] Cormode, G., Mitzenmacher, M., Thaler, J.: Practical verified computation with streaming interactive proofs. In: ITCS (2012)</li>
+
+      <li>[12] Drake, J.: ZK Whiteboard Sessions – Module Fourteen: Nova Crash Course with Justin Drake. https://www.youtube.com/watch?v=SwonTtOQzAk</li>
+
+      <li>[13] Fiat, A., Shamir, A.: How to prove yourself: Practical solutions to identification and signature problems. In: CRYPTO. pp. 186–194 (1986)</li>
+
+      <li>[14] Gennaro, R., Gentry, C., Parno, B., Raykova, M.: Quadratic span programs and succinct NIZKs without PCPs. In: EUROCRYPT (2013)</li>
+
+      <li>[15] Gentry, C., Wichs, D.: Separating succinct non-interactive arguments from all falsifiable assumptions. In: STOC. pp. 99–108 (2011)</li>
+
+      <li>[16] Goldberg, L., Papini, S., Riabzev, M.: Cairo – a Turing-complete STARK-friendly CPU architecture. Cryptology ePrint Archive (2021)</li>
+
+      <li>[17] Groth, J.: On the size of pairing-based non-interactive arguments. In: EUROCRYPT (2016)</li>
+
+      <li>[18] Khovratovich, D., Maller, M., Tiwari, P.R.: Minroot: Candidate sequential function for Ethereum VDF. Cryptology ePrint Archive, Paper 2022/1626 (2022)</li>
+
+      <li>[19] Kilian, J.: A note on efficient zero-knowledge proofs and arguments (extended abstract). In: STOC (1992)</li>
+
+    </ul>
+
+    <p class="text-gray-300">[20] Kosba, A., Papadopoulos, D., Papamanthou, C., Song, D.: MIRAGE: succinct arguments for randomized algorithms with applications to universal zk-SNARKs. In: USENIX Security (2020)</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>[21] Kothapalli, A., Setty, S., Tzialla, I.: Nova: Recursive Zero-Knowledge Arguments from Folding Schemes. In: CRYPTO (2022)</li>
+
+      <li>[22] Lee, J., Nikitin, K., Setty, S.: Replicated state machines without replicated execution. In: S&P (2020)</li>
+
+      <li>[23] Lurk: https://github.com/lurk-lang</li>
+
+      <li>[24] Micali, S.: CS proofs. In: FOCS (1994)</li>
+
+      <li>[25] Ozdemir, A., Wahby, R.S., Boneh, D.: Scaling verifiable computation using efficient set accumulators. In: USENIX Security (2020)</li>
+
+      <li>[26] Parno, B., Gentry, C., Howell, J., Raykova, M.: Pinocchio: Nearly practical verifiable computation. In: S&P (May 2013)</li>
+
+      <li>[27] Pedersen, T.P.: Non-interactive and information-theoretic secure verifiable secret sharing. In: CRYPTO (1991)</li>
+
+      <li>[28] RISC ZERO: https://www.risczero.com/</li>
+
+      <li>[29] Setty, S.: Spartan: Efficient and general-purpose zkSNARKs without trusted setup. In: CRYPTO (2020)</li>
+
+      <li>[30] Setty, S., Angel, S., Gupta, T., Lee, J.: Proving the correct execution of concurrent services in zero-knowledge. In: OSDI (Oct 2018)</li>
+
+      <li>[31] Setty, S., Braun, B., Vu, V., Blumberg, A.J., Parno, B., Walfish, M.: Resolving the conflict between generality and plausibility in verified computation. In: EuroSys (Apr 2013)</li>
+
+      <li>[32] Setty, S., Vu, V., Panpalia, N., Braun, B., Blumberg, A.J., Walfish, M.: Taking proof-based verified computation a few steps closer to practicality. In: USENIX Security (Aug 2012)</li>
+
+      <li>[33] Valiant, P.: Incrementally verifiable computation or proofs of knowledge imply time/space efficiency. In: TCC. pp. 552–576 (2008)</li>
+
+      <li>[34] Wahby, R.S., Setty, S., Ren, Z., Blumberg, A.J., Walfish, M.: Efficient RAM and control flow in verifiable outsourced computation. In: NDSS (2015)</li>
+
+      <li>[35] Wesolowski, B.: Efficient verifiable delay functions. In: EUROCRYPT. pp. 379–407 (2019)</li>
+
+      <li>[36] WhiteHat, B., Gluchowski, A., HarryR, Fu, Y., Castonguay, P.: Roll_up / roll_back snark side chain ~17000 tps. https://ethresear.ch/t/roll-up-roll-back-snark-side-chain-17000-tps/3675 (Oct 2018)</li>
+
+      <li>[37] Zhang, Y., Genkin, D., Katz, J., Papadopoulos, D., Papamanthou, C.: vRAM: Faster verifiable RAM with program-independent preprocessing. In: S&P (2018)</li>
+
+    </ul>`;
+---
+
+<BaseLayout title="SuperNova: Proving universal machine executions without univ... (2022/1758)">
+  <article class="max-w-4xl mx-auto article-prose">
+    <nav class="mb-8">
+      <a href="/papers" class="text-blue-400 hover:text-blue-300">
+        &larr; Back to Papers
+      </a>
+    </nav>
+
+    <header class="mb-12">
+      <h1 class="text-3xl font-bold mb-4"
+        set:html={TITLE_HTML} />
+      <p class="text-gray-400 mb-2"
+        set:html={AUTHORS_HTML} />
+      <p class="text-gray-500 text-sm mb-4">
+        2022 &middot; eprint 2022/1758
+      </p>
+      <div class="flex gap-4 text-sm">
+        <a
+          href={EPRINT_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          class="text-blue-400 hover:text-blue-300"
+        >
+          Paper (eprint) &rarr;
+        </a>
+      </div>
+      <p class="mt-4 text-xs text-gray-500">
+        All content below belongs to the original authors. This page
+        reproduces the paper for educational purposes. Always
+        <a
+          href={EPRINT_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          class="text-blue-400 hover:text-blue-300"
+        >cite the original</a>.
+      </p>
+      <p class="mt-1 text-xs text-gray-600">
+        Converted with: {CRAWLER} &middot; {CONVERTED_DATE}
+      </p>
+    </header>
+
+    <Fragment set:html={CONTENT} />
+
+  </article>
+</BaseLayout>

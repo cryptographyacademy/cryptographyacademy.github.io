@@ -1,0 +1,677 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+
+const EPRINT_URL = 'https://eprint.iacr.org/2019/1020';
+const CRAWLER = 'mistral';
+const CONVERTED_DATE = '2026-02-16';
+const TITLE_HTML = 'Transparent Polynomial Commitment Scheme with Polylogarithmic Communication Complexity';
+const AUTHORS_HTML = 'Alexander Vlasov, Konstantin Panarin';
+
+const CONTENT = `    <p class="text-gray-300">Alexander Vlasov Matter Labs av@matterlabs.dev &Konstantin Panarin Matter Labs kp@matterlabs.dev</p>
+
+    <h6 id="sec-2" class="text-base font-medium mt-4">Abstract</h6>
+
+    <p class="text-gray-300">We introduce novel efficient and transparent construction of the polynomial commitment scheme. A polynomial commitment scheme allows one side (the prover) to commit to a polynomial of predefined degree <span class="math">d</span> with a string that can be later used by another side (the verifier) to confirm claimed evaluations of the committed polynomial at specific points. Efficiency means that communication costs of interaction between prover and verifier during the protocol are very small compared to sending the whole committed polynomial itself, and is polylogarithmic in our case. Transparency means that our scheme doesn’t require any preliminary trusted setup ceremony. We explicitly state that our polynomial commitment scheme is not hiding, although zero knowledge can be achieved at the application level in most of the cases.</p>
+
+    <p class="text-gray-300">polynomial commitments zero-knowledge proofs proximity testing</p>
+
+    <h2 id="sec-3" class="text-2xl font-bold">1 Introduction</h2>
+
+    <p class="text-gray-300">A polynomial commitment scheme is a cryptographic protocol that allows a prover to publish a value, called the commitment, which binds her to a particular polynomial without revealing it. Later, he may be asked to give the value of the committed polynomial at a specific point. Prover reveals the value alongside with some correctness proof that allows verifier to ensure that provided value is consistent with the committed polynomial.</p>
+
+    <p class="text-gray-300">Polynomial commitment and evaluation schemes are fundamental components of many novel succinct zero-knowledge protocols, e.g. Sonic (<em>[1]</em>), PLONK <em>[2]</em>. The role of polynomial evaluation schemes in such protocols is the following: secret witness is usually encoded as a univariate polynomial and verifier wish to ensure that such an encoding satisfy some polynomial relations. Prover commits to his secret witness and later verifier queries its values at some random point and checks if all relations are satisfied at those points. As those points were taken uniformly it will be highly likely that those polynomial relations are indeed satisfied at all points.</p>
+
+    <p class="text-gray-300">Our commitment scheme is based on IOP (Interactive Oracle Proof) and IOPP (IOP of Proximity) protocols, namely the FRI protocol by Eli Ben-Sasson et al. <em>[3]</em>. IOP is a model of proof system that captures the properties of both interactive and PCP proofs. Like interactive proofs they require several rounds of message exchange between the prover and verifier, and like PCP proofs the messages provided by prover are given in form of oracles (large tables) from which verifier is allowed to query only a few random bits (elements) at his disposal.</p>
+
+    <p class="text-gray-300">In this paper we consider IOPP as a black box that allows prover to convince a verifier that purported evaluations <span class="math">f:D\\rightarrow\\mathbb{F}</span> (for which the verifier has oracle access, either direct (by performing queries) or <em>simulated</em> (by performing oracle access to other functions and locally performing arithmetic operations over queried values)) came from the polynomial of degree at most <span class="math">d</span>. Rephrased, in IOPP (and FRI in particularly) verifier is tasked with distinguishing between the “good” case that <span class="math">f</span> is a polynomial of degree at most <span class="math">d</span> and the “bad” case in which <span class="math">f</span> is far in relative Hamming distance from all degree-<span class="math">d</span> polynomials. We treat FRI protocol as the black box that only requires verifier to have some interaction with a prover and an oracle access to the purported evaluations <span class="math">f:D\\rightarrow\\mathbb{F}</span>.</p>
+
+    <p class="text-gray-300">##</p>
+
+    <p class="text-gray-300">We also structure this paper in much more informal and educational style to allow interested readers to derive an intuition on the subject that is not yet well covered in many sources.</p>
+
+    <h2 id="sec-4" class="text-2xl font-bold">2 Definitions</h2>
+
+    <p class="text-gray-300">In this section, we lay out the building blocks that are necessary to describe our constructions.</p>
+
+    <h3 id="sec-5" class="text-xl font-semibold mt-8">2.1 Notation</h3>
+
+    <p class="text-gray-300">Through this paper we use the following notations:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li><span class="math">\\mathbb{F}</span> is a field</li>
+
+      <li><span class="math">D\\subset\\mathbb{F}</span> is an evaluation domain for our RS code words.</li>
+
+      <li>function <span class="math">f</span>: <span class="math">D\\to\\mathbb{F}</span></li>
+
+      <li>capital letter <span class="math">F(x)</span> is a polynomial</li>
+
+    </ul>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">- symbol $</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">_{D}<span class="math"> means evaluation on the domain </span>D$</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li><span class="math">\\hat{f}</span> is an oracle to the values of some function <span class="math">f</span> on the domain <span class="math">D</span></li>
+
+    </ul>
+
+    <h3 id="sec-6" class="text-xl font-semibold mt-8">2.2 Preliminaries</h3>
+
+    <h4 id="sec-7" class="text-lg font-semibold mt-6">Reed-Solomon Codes</h4>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">For some subset <span class="math">D</span> of a given field <span class="math">\\mathbb{F}</span> and a rate parameter <span class="math">\\rho\\in(0,1]</span>, we denote by <span class="math">\\mathsf{RS}[\\mathbb{F},D,\\rho]</span> the set of all functions <span class="math">f:D\\to\\mathbb{F}</span> that are evaluations of polynomials of degree $d<\\rho</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">D</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"><span class="math">. A <em>binary additive RS code family</em> is a code family </span>\\mathsf{RS}[\\mathbb{F},D,\\rho]<span class="math"> for which </span>\\mathbb{F}=\\mathbb{F}_{2^{m}},m\\in\\mathbb{N}<span class="math">. Moreover, the set </span>D<span class="math"> is required to be an <em>additive coset-</em> namely that it is an additive shift of some </span>\\mathbb{F}_{2}<span class="math">-linear space in </span>\\mathbb{F}_{2^{m}}<span class="math">. A <em>prime field RS code family</em> is a code family </span>\\mathsf{RS}[\\mathbb{F},D,\\rho]<span class="math"> for which </span>\\mathbb{F}=\\mathbb{F}_{q}<span class="math">, for prime </span>q<span class="math">. In this case </span>D<span class="math"> is a multiplicative subgroup of </span>F_{q}$.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <h3 id="sec-8" class="text-xl font-semibold mt-8">2.3 Interactive Oracle Proofs and IOPs of Proximity</h3>
+
+    <h4 id="sec-9" class="text-lg font-semibold mt-6">IOP</h4>
+
+    <p class="text-gray-300">Interactive Oracle Proofs (IOPs) (<em>[7]</em>) are a proof system model <span class="math">\\mathsf{S}=(\\mathsf{P},\\mathsf{V})</span> consisting of an (untrusted) prover <span class="math">\\mathsf{P}</span> and a verifier <span class="math">\\mathsf{V}</span>. Similarly to Interactive Proofs (IPs), they permit several rounds of message exchanges between <span class="math">\\mathsf{P}</span> and <span class="math">\\mathsf{V}</span>. Just like PCP proofs, they allow for messages to not be given in their entity by the prover, but as black-box oracles from which the verifier is allowed to read several bits (at their choice). On some input with length <span class="math">n</span>, we define the number of rounds <span class="math">r(n)</span> in the protocol as its <em>round complexity</em>. The query complexity <span class="math">q(n)</span> of an IOP is the total number of entries read by <span class="math">\\mathsf{V}</span>, while the proof length <span class="math">\\ell(n)</span> is the sum of all message lengths denoted in number of field elements.</p>
+
+    <h4 id="sec-10" class="text-lg font-semibold mt-6">IOPP</h4>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">An Interactive Oracle Proof of Proximity IOPP is an <span class="math">r</span>-round interactive IOP for the following problem: given a field <span class="math">\\mathbb{F}</span>, <span class="math">d\\in\\mathbb{N}</span>, <span class="math">\\delta&gt;0</span> and domain <span class="math">D\\subset\\mathbb{F}</span>, the prover is provided with the representation of some function <span class="math">f</span> and the verifier is given oracle access to its evaluation on domain D (i.e. an oracle to $f(x)</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">_{D}<span class="math">). The prover then needs to convince the verifier that </span>f</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">_{D}<span class="math"> is in fact evaluations of some degree </span>d<span class="math">-polynomial on this domain, namely that </span>f\\in C<span class="math">, where </span>C=\\mathsf{RS}[\\mathbb{F},D,\\rho=d/</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">D</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">]<span class="math"> is a family of RS-codes of degree </span>d<span class="math"> for domain </span>D<span class="math">. Let </span>\\Delta<span class="math"> be the corresponding distance measure (usually taken to be relative Hamming distance) between some </span>f<span class="math"> and </span>C$. An IOPP of proximity has the following properties:</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>First message format: the first prover message, denoted <span class="math">f^{0}</span>, is a purported codeword (evaluation of <span class="math">F(x)</span> on the domain <span class="math">D</span>)</li>
+
+    </ol>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">2. Completeness: $Pr[\\big{\\langle}P\\leftrightarrow V\\big{\\rangle}=accept\\</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\Delta(f^{0},C)=0]=1$</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <h4 id="sec-11" class="text-lg font-semibold mt-6">FRI</h4>
+
+    <p class="text-gray-300">We are interested in the problem of distinguishing between functions that are in the set <span class="math">\\mathsf{RS}[\\mathbb{F},D,\\rho]</span> and those that are at least <span class="math">\\delta</span>-far in Hamming distance from the nearest such function. To this end, we use the constructions in <em>[3]</em> <em>[6]</em>, which are state-of-the-art to the best of our knowledge. The formal statement of its performance is provided below for readers convenience.</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Fix <span class="math">\\nu&gt;0,l</span> (FRI inner parameters) and an RS code family <span class="math">\\mathsf{RS}[\\mathbb{F}_{q},D,\\rho]</span> for which $</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">D</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">=n<span class="math"> and with rate </span>\\rho=2^{-R}<span class="math">. For a given oracle </span>f:D\\to\\mathbb{F}_{q}$, there exists an IOPP with the following properties:</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Prover Complexity: <span class="math">O(n)</span> arithmetic operations over <span class="math">\\mathbb{F}</span>.</li>
+
+      <li>Verifier Complexity: <span class="math">O(\\log n)</span> arithmetic operations over <span class="math">\\mathbb{F}</span>.</li>
+
+      <li>Completeness: If <span class="math">f\\in\\mathsf{RS}[\\mathbb{F}_{q},D,\\rho]</span> and the prover is honest, then the verifier always accepts.</li>
+
+      <li>Soundness: Suppose that <span class="math">\\Delta(f,\\mathsf{RS})=\\delta&gt;0</span>, then soundness error is bounded above by:</li>
+
+    </ol>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">$\\mathsf{err}(\\delta)\\leq\\frac{3n}{</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mathbb{F}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">}+\\left(1-min\\left(\\delta,\\frac{1-3\\rho-\\frac{2^{\\nu}}{\\sqrt{n}}}{4}\\right)\\right)^{l}$</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">Later this soundness bound was greatly improved in <em>[5]</em> and <em>[6]</em>, where for small code rates our choice of <span class="math">\\delta_{0}=(1-\\rho)/2</span> will prevail for the <span class="math">min</span> function in the formula above.</p>
+
+    <h4 id="sec-12" class="text-lg font-semibold mt-6">List decoding, list size for Reed-Solomon codes</h4>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">For <span class="math">u\\in\\mathbb{F}^{D}</span>, set <span class="math">V=\\mathsf{RS}[\\mathbb{F},D,\\rho]\\subset\\mathbb{F}^{D}</span> be our RS code words, and distance parameter <span class="math">\\delta\\in[0,1]</span>, let <span class="math">List(u,V,\\delta)</span> be the set of elements in <span class="math">V</span> that are at most <span class="math">\\delta</span>-far from <span class="math">u</span> in relative Hamming distance. The code <span class="math">V</span> is said to be <span class="math">(\\delta,L)</span>-list-decodable if $</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">List(u,V,\\delta)</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\leq L<span class="math"> for all </span>u\\in\\mathbb{F}_{q}^{D}$.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">For <span class="math">D\\subseteq\\mathbb{F}</span>, we denote let <span class="math">L_{\\delta}=L(\\mathbb{F},D,d,\\delta)</span> be the maximum size of <span class="math">List(u,V,\\delta)</span> taken over all <span class="math">u\\in\\mathbb{F}^{D}</span> for $V=RS[\\mathbb{F},D,\\rho=d/</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">D</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">]$.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <h4 id="sec-13" class="text-lg font-semibold mt-6">Unique decoding radius</h4>
+
+    <p class="text-gray-300">For Reed-Solomon codes there exists a unique decoding radius <span class="math">\\delta&lt;\\frac{1-\\rho}{2}</span> such that <span class="math">L_{\\delta}\\leq 1</span>. We denote <span class="math">\\delta_{0}</span> the unique decoding radius through the rest of the paper.</p>
+
+    <h2 id="sec-14" class="text-2xl font-bold">3 Polynomial commitment schemes</h2>
+
+    <p class="text-gray-300">In this section we provide formal definitions and properties of polynomial commitment schemes.</p>
+
+    <h3 id="sec-15" class="text-xl font-semibold mt-8">3.1 Definition</h3>
+
+    <p class="text-gray-300">Polynomial commitment schemes can be formalized as a tuple of five algorithms:</p>
+
+    <p class="text-gray-300"><span class="math">\\Pi=\\left(\\text{Setup},\\text{Commit},\\text{VerifyPoly},\\text{Open},\\text{Verify}\\right)</span></p>
+
+    <h6 id="sec-16" class="text-base font-medium mt-4">Definition 1.</h6>
+
+    <p class="text-gray-300">A (transparent) polynomial commitment scheme <span class="math">\\Pi</span> is a tuple of algorithms with the following semantics:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Setup: <span class="math">(k,\\mathbb{F},d)\\mapsto Params</span>. Given security parameter <span class="math">k</span>, field <span class="math">F</span> and maximal degree <span class="math">d</span> of supported polynomials, generates scheme parameters.</li>
+
+      <li>Commit: <span class="math">(Params,\\phi(x))\\mapsto\\mathcal{C}</span>. Given a polynomial <span class="math">\\phi(x)</span> of degree <span class="math">\\leq d</span> and the generated public parameters, the prover outputs a commitment <span class="math">\\mathcal{C}</span>.</li>
+
+      <li>VerifyPoly: <span class="math">(Params,\\phi(x),\\mathcal{C})</span>. Given some polynomial, check if it is consistent with the commitment.</li>
+
+      <li>Open: (<span class="math">\\phi(x),i,Params)\\mapsto(\\phi(i),w_{i})</span> Prover is asked to open evaluation of <span class="math">\\phi(x)</span> at point <span class="math">i</span>. He returns the opening alongside with some proof of correctness <span class="math">w_{i}</span>.</li>
+
+      <li>Verify: (<span class="math">\\mathcal{C},Params,i,z,w_{i})\\mapsto(\\text{acc, rej})</span> - given polynomial commitment, evaluation point, purported value <span class="math">z=\\phi(i)</span> of committed polynomial on this point, verifier checks correctness proof and either accept or reject it.</li>
+
+    </ul>
+
+    <p class="text-gray-300">In our construction, we define a version of this scheme in which the open and verify algorithms are conducted through an IOP. Secure polynomial commitment scheme should posses additional properties:</p>
+
+    <h6 id="sec-17" class="text-base font-medium mt-4">Definition 2.</h6>
+
+    <p class="text-gray-300">A polynomial commitment scheme <span class="math">\\Pi</span> is considered secure if the following holds:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Correctness. If <span class="math">pp\\leftarrow\\text{Setup}(1^{\\kappa},d)</span> and <span class="math">\\mathcal{C}\\leftarrow\\text{Commit}(pp,\\phi(x))</span>, then <span class="math">\\forall\\phi(x)\\in\\mathbb{F}_{&lt;d}[X]</span> and <span class="math">\\forall i\\in\\mathbb{F}</span> we have that:</li>
+
+    </ul>
+
+    <p class="text-gray-300"><span class="math">\\text{Open}(pp,\\phi(x),i)\\mapsto(z,w_{i})\\Rightarrow\\text{Verify}(pp,\\mathcal{C},i,z,w_{i})=1\\cup z=\\phi(i)</span></p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Polynomial Binding. For all adversaries <span class="math">\\mathcal{A}</span> :</li>
+
+    </ul>
+
+    <p class="text-gray-300">\\[ \\Pr\\left(\\begin{array}[]{cc}\\text{VerifyPoly}(pp,\\mathcal{C},\\phi(x))=1&\\quad pp\\leftarrow\\text{Setup}(1^{\\kappa},d)\\\\ \\text{VerifyPoly}(pp,\\mathcal{C},\\phi^{{}^{\\prime}}(x))=1&\\quad(\\mathcal{C},\\phi(x),\\phi^{{}^{\\prime}}(x))\\leftarrow\\mathcal{A}(pp)\\\\ \\phi(x)\\neq\\phi^{{}^{\\prime}}(x)\\end{array}\\right)\\leq\\epsilon(\\kappa) \\]</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Evaluation Binding. For all adversaries <span class="math">\\mathcal{A}</span>:</li>
+
+    </ul>
+
+    <p class="text-gray-300">\\[ \\Pr\\left(\\begin{array}[]{ccl}\\text{Verify}(pp,\\mathcal{C},i,z_{1}^{i},w_{1}^{i})=1\\\\ \\text{Verify}(pp,\\mathcal{C},i,z_{2}^{i},w_{2}^{i})=1\\\\</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">z_{1}^{i}\\neq z_{2}^{i}\\end{array}\\right</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\begin{array}[]{c}pp\\leftarrow\\textbf{Setup}(1^{\\kappa},d)\\\\</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">(\\mathcal{C},\\langle i,z_{1}^{i},w_{1}^{i}\\rangle,\\langle i,z_{2}^{i},w_{2}^{i}\\rangle)\\leftarrow\\mathcal{A}(pp)\\end{array}\\Bigg{)} \\] <span class="math">\\leq\\epsilon(\\kappa)</span></p>
+
+    <p class="text-gray-300">The informal explanation of this properties is the following:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>polynomial binding: the commitment should perfectly binds the polynomial, i.e. once prover publish a commitment data, it would be difficult for him to find another polynomial of degree <span class="math">\\leq d</span> with the same commitment. Moreover, (and this is a very strict requirement!) publishing a commitment is indeed forces the prover to choose and fix one polynomial of degree less or equal than <span class="math">d</span>. In other words published commitment means that the prover has particular polynomial in mind (and not just random garbage function).</li>
+
+      <li>evaluation binding: If prover publishes <span class="math">z</span> as an opening at point <span class="math">i</span>, but <span class="math">z\\neq\\phi(i)</span>, then this value of <span class="math">z</span> will be with high probability rejected during the Verify step.</li>
+
+    </ul>
+
+    <p class="text-gray-300">Remark 1: We do not require our scheme to be perfectly polynomial hiding. Kate commitment (<em>[4]</em>) has perfect hiding property: opening of committed polynomial at any point doesn’t give the verifier any additional information on that polynomial (unless the verifier have collected <span class="math">k+1\\geq deg(\\phi(x))</span> openings from which the polynomial is completely derived via Lagrange interpolation). Often times hiding is achieved at the application level: in almost all zero-knowledge protocols some commit-reveal scheme is applied not to the witness polynomial directly (such witness incorporates prover’s private data) but to some "masked" polynomial, generated from witness via addition of the masking coefficients.</p>
+
+    <p class="text-gray-300">Remark 2: We’ll briefly show how Kate commitment forces prover to choose and fix some polynomial of degree <span class="math">\\leq d</span>. In Kate commitment precomputed CRS is a set of <span class="math">\\{g^{\\alpha^{k}}\\}_{k=0}^{d}</span>, where <span class="math">\\alpha</span> - unknown parameter and <span class="math">g\\in\\mathbb{G}</span> - generator of some cyclic group <span class="math">\\mathbb{G}</span> of size <span class="math">p</span>. Prover’s commitment is an element in the form <span class="math">g^{b}</span> for some <span class="math">b\\in\\mathbb{Z}_{p}</span>. Let us think how the prover may generate another commitment. If he doesn’t have capabilities of breaking discrete-log problem, the only opportunity is to choose some product of elements from <span class="math">\\{g^{\\alpha^{k}}\\}_{k=0}^{d}</span> (with repetitions). Assume <span class="math">g^{\\alpha^{k}}</span> is used <span class="math">b_{k}\\in\\mathbb{Z}_{p}</span> times, so prover’s commitment will be equal to commitment of polynomial <span class="math">\\sum_{i=0}^{d}b_{k}X^{k}\\in\\mathbb{Z}_{p}[X]</span>, and we assume it is the polynomial the prover bears in mind.</p>
+
+    <p class="text-gray-300">Remark 3: Another crucial property for us is succinctness of polynomial commitment scheme, where succinctness is measured in terms of communication complexity. Naively prover could output coefficients of the polynomial and verifier can perform the evaluation himself, but this scheme would require linear communication cost and linear verifier running time. We target communication complexity and verification time to be poly-logarithmic in <span class="math">d</span>, where <span class="math">d</span> is the degree of precommitted polynomial <span class="math">\\phi(x)</span>.</p>
+
+    <h2 id="sec-18" class="text-2xl font-bold">4 Transparent polynomial commitment scheme</h2>
+
+    <p class="text-gray-300">Following Kate et al. (<em>[4]</em>) we base our scheme on the following simple observation: if <span class="math">F(x)</span> is a polynomial of degree <span class="math">d</span>, then <span class="math">F(i)=z</span> iff <span class="math">F(x)-z=(x-i)Q(x)</span> where <span class="math">Q(x)</span> is some polynomial of degree <span class="math">d-1</span>.</p>
+
+    <h3 id="sec-19" class="text-xl font-semibold mt-8">4.1 Protocol</h3>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Roughly speaking, FRI protocol allows prover to convince a verifier that some oracle (commitment) <span class="math">\\hat{f}</span> to arbitrary function <span class="math">f</span> is <span class="math">\\delta</span>-close in a Hamming weight to evaluation of some low degree polynomial <span class="math">F(x)</span>, that is $F(x)</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">_{D}=f<span class="math">, with high probability. For a chosen </span>\\delta<span class="math"> parameter soundness error </span>\\epsilon(\\delta)<span class="math"> (that is </span>f<span class="math"> is not </span>\\delta<span class="math">-close to any low-degree polynomial </span>F(x)<span class="math"> on domain </span>D<span class="math">, but verifier accepts) is constant, once we fix initial domain, internal parameters of the FRI protocol, purported degree </span>d<span class="math">, rate parameter </span>\\rho<span class="math"> and distance </span>\\delta<span class="math">. Later we refer to such error as simply </span>\\epsilon(\\delta)$ as all other parameters are clear from the context.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Setup: <span class="math">1^{k}\\mapsto F,D,\\rho,\\nu,l</span> - given security parameter, choose field, evaluation domain, rate and FRI inner parameters.</li>
+
+    </ul>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">- Commit: given polynomial <span class="math">F(x)</span> of degree <span class="math">d</span> prover’s commitment is evaluation <span class="math">F(x)</span> on domain <span class="math">D</span> (i.e. prover gives an oracle <span class="math">\\hat{f}</span> to supposed evaluations $F(x)</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">_{D}<span class="math">). As a part of the commit phase prover and verifier are engaged in IOPP for </span>F(x)<span class="math">, so that verifier would be convinced that </span>\\hat{f}<span class="math"> is indeed at least </span>\\delta_{0}<span class="math">-close to an evaluation of some degree </span>d<span class="math"> polynomial and thus there exists a unique (we are inside unique decoding radius!) polynomial such that </span></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\hat{f},F(x)</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">_{D}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"><\\delta_{0}$. If FRI verification fails the verifier aborts the protocol.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">- VerifyPoly: Prover outputs coefficients of his polynomial <span class="math">F(x)</span> and verifier can independently recalculate $F(x)</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">_{D}<span class="math"> and check that his evaluations are </span>\\delta_{0}<span class="math">-close to </span>\\hat{f}$.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">Correctness of this scheme follows from the logic of the Kate commitment from above. Succintness stem from the fact that instead of giving <span class="math">d</span> coefficients of polynomial <span class="math">F(x)</span> prover provides <span class="math">O(log^{2}(d))</span> commitments and openings during FRI.</p>
+
+    <p class="text-gray-300">Limitations. Such polynomial commitment scheme can only be used for field <span class="math">\\mathbb{F}</span> that allow instantiating of the FRI protocol. For example, it requires a multiplicative subgroup of the proper size <span class="math">2^{k}</span> if <span class="math">\\mathbb{F}=\\mathbb{F}_{q}</span> is a prime field. That nevertheless allows a lot of practical applications. We once again emphasize that our scheme is not hiding because queries to committed values during the FRI protocol disclose information about the polynomial values at the point other than a queried point <span class="math">i</span>. Nevertheless, the number of disclosed values is <span class="math">O(log(d))</span> for a polynomial of degree <span class="math">d</span>.</p>
+
+    <h3 id="sec-20" class="text-xl font-semibold mt-8">4.2 Soundness</h3>
+
+    <p class="text-gray-300">In our scheme prover provides an oracle <span class="math">\\hat{f}</span> to supposed values of <span class="math">F(x)</span> on domain <span class="math">D</span>. From verifier’s point of view there is no structure in such an oracle. Without FRI (w.r.t to <span class="math">F(x)</span>) there is no way to guarantee that function under the oracle is an evaluation of some low-degree polynomial. Even if prover has passed FRI verification on commitment step we may only guarantee that our initial commitment was <span class="math">\\delta</span>-close to some RS-code. This situation is quite different from Kate commitment where verifier may be convinced that prover’s commitment is indeed the commitment to some unique low-degree polynomial (otherwise prover has broken SDH-assumption, see remark 2 above).</p>
+
+    <p class="text-gray-300">Polynomial binding and evaluation binding properties of our scheme follow from the reasoning below with a slight limitation that verifier can only sample <span class="math">i\\in\\mathbb{F}</span>, <span class="math">i\\notin D</span>.</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">In our case if prover passes FRI, then with high probability we may be sure that his commitment is at most <span class="math">\\delta_{0}</span>-far from the space of RS codes. As <span class="math">\\delta_{0}</span> was chosen to be the unique decoding radius, there is in fact a unique polynomial <span class="math">F(x)</span> of degree <span class="math">\\leq d</span> under the oracle <span class="math">\\hat{f}</span>, such that $\\Delta(F(x)</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">_{D},\\hat{f})\\leq\\delta_{0}<span class="math">. Then analogously to our discussion of Kate commitment scheme we assume that the polynomial that prover bears in mind is </span>F(x)<span class="math"> and this is the polynomial for which openings later will be provided. This is justified by the fact, that prover may easily obtain </span>F(x)<span class="math"> from </span>\\hat{f}<span class="math"> in </span>\\mathcal{O}(</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">D</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">^{3})$ operations via Berlekamp–Welch decoding algorithm. Uniqueness of the polynomial gives the polynomial binding property.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">Verifier ask a prover to open the committed polynomial at point <span class="math">i</span> outside <span class="math">D</span>, prover claims that corresponding opening is <span class="math">z</span>. Then verifier and prover are engaged into FRI protocol with respect to <span class="math">q(x)=\\frac{f(x)-z}{x-i}</span> of purported degree <span class="math">d-1</span>. Note, that verifier may simulate values of <span class="math">q</span> via oracles to <span class="math">f</span>.</p>
+
+    <p class="text-gray-300">At the end of FRI protocol verifier is convinced (with except for <span class="math">\\epsilon(\\delta_{0})</span> probability) that <span class="math">q(x)</span> is <span class="math">\\delta_{0}</span>-close to an evaluation of some <span class="math">d-1</span> degree polynomial <span class="math">Q(x)</span>. This means:</p>
+
+    <p class="text-gray-300"><span class="math">f(x)=z+Q(x)(x-i)\\ \\forall x\\in D\\text{ except at most }\\delta_{0}n\\text{ points}.</span></p>
+
+    <p class="text-gray-300">This means that <span class="math">H(x)=z+Q(x)(x-i)</span> is a polynomial of degree at most <span class="math">d</span> which is <span class="math">\\delta_{0}</span>-far from <span class="math">f(x)</span>. However from commit step we know that the only polynomial with such property is <span class="math">F(x)</span>. Hence <span class="math">F(x)=H(x)</span> identically:</p>
+
+    <p class="text-gray-300"><span class="math">F(x)=z+Q(x)(x-i)</span></p>
+
+    <p class="text-gray-300">Substituting <span class="math">x=i</span> on both sides we arrive at <span class="math">F(i)=z</span>. Uniqueness of the <span class="math">Q(x)</span> polynomial and a relationship <span class="math">F(x)=z+Q(x)(x-i)</span> gives evaluation binding property.</p>
+
+    <h2 id="sec-21" class="text-2xl font-bold">5 Optimizations</h2>
+
+    <p class="text-gray-300">By the application of Lemma 5.3 from <em>[6]</em> we can eliminate the first FRI check on the Commit step. If we simulate an access to the function <span class="math">q(x)=\\frac{f-z}{x-i}</span> using the existing oracle <span class="math">\\hat{f}</span> and for some unique polynomial <span class="math">Q(x)</span> of degree</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"><span class="math">d-1</span> we are convinced that $</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">q(x),Q(x)</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">_{D}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"><\\delta_{0}<span class="math">, then we can immediately reason that </span></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">f,F(x)</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">_{D}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"><\\delta_{0}<span class="math"> where </span>F(x)=Q(x)(x-i)+z$. In the original description of the protocol in a section 4.1 we require a FRI proof to be present at the commitment step solely for a purposes of identifying a unique polynomial early in the protocol - at the commitment step.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">From the implementation perspective the protocol would be the following (leaving only the important steps):</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>For a polynomial <span class="math">F(x)</span> of degree <span class="math">\\leq d</span> prover provides an oracle access to supposed evaluations of <span class="math">F(x)</span> on domain <span class="math">D</span>.</li>
+
+      <li>Vefirier samples a point <span class="math">i\\notin D</span>, <span class="math">i\\in\\mathbb{F}</span> at which he asks a prover to provide a value of the polynomial <span class="math">F(x)</span>.</li>
+
+      <li>Prover outputs a purported values <span class="math">z</span> along with a FRI proof that a function <span class="math">q(x)=\\frac{F-z}{x-i}</span> is <span class="math">\\delta_{0}</span> close to some polynomial <span class="math">Q(x)</span> of degree <span class="math">\\leq d-1</span>.</li>
+
+      <li>If FRI prove passes then verifier is convinced that under the commitment there was unique polynomial <span class="math">F(x)</span> of degree <span class="math">\\leq d</span>, such that <span class="math">F(i)=z</span>.</li>
+
+    </ul>
+
+    <h2 id="sec-22" class="text-2xl font-bold">6 Numeric estimates</h2>
+
+    <p class="text-gray-300">Here, we give exact numbers for FRI-soundness derived from the formula above, more precisely for the case we are interested in: field size is 256-bits, <span class="math">\\rho</span> = 1/16, <span class="math">d=2^{28},l=\\log d=28,\\nu=1,\\delta=\\delta_{0}=(1-\\rho)/2</span>. Then the formula gives us:</p>
+
+    <p class="text-gray-300"><span class="math">\\text{\\sf err}\\leq\\frac{3\\cdot 2^{32}}{2^{256}}+\\left(1-\\frac{1-3/16-2/2^{16}}{4}\\right)^{28}\\approx 0.00173397200919</span></p>
+
+    <p class="text-gray-300">Using an improved bound from <em>[5]</em> where FRI soundness is instead determined by our <span class="math">\\delta_{0}</span> we get</p>
+
+    <p class="text-gray-300"><span class="math">\\text{\\sf err}\\approx\\left(1-\\frac{1-1/16}{2}\\right)^{28}&lt;2^{-25}</span></p>
+
+    <p class="text-gray-300">In order to improve soundness we may repeat the FRI verification protocol as may times as needed and get multiplicative decrease in error.</p>
+
+    <h2 id="sec-23" class="text-2xl font-bold">References</h2>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>[1] Mary Maller, Sean Bowe, Markulf Kohlweiss, Sarah Meiklejohn. Sonic: Zero-Knowledge SNARKs from Linear-Size Universal and Updateable Structured Reference Strings. In Cryptology ePrint Archive, Report 2019/099</li>
+
+      <li>[2] Ariel Gabizon, Zachary J. Williamson, Oana Ciobotaru. : Permutations over Lagrange-bases for Oecumenical Noninteractive arguments of Knowledge.</li>
+
+      <li>[3] Eli Ben-Sasson, Iddo Bentov, Yinon Horesh, Michael Riabzev. Fast Reed-Solomon Interactive Oracle Proofs of Proximity.</li>
+
+      <li>[4] Aniket Kate, Gregory M. Zaverucha, Ian Goldberg. Constant-Size Commitments to Polynomials and Their Applications.</li>
+
+      <li>[5] Eli Ben-Sasson, Swastik Kopparty, and Shubhangi Saraf. Worst-case to average case reductions for the distance to a code.</li>
+
+      <li>[6] Eli Ben-Sasson, Lior Goldberg, Swastik Kopparty, Shubhangi Saraf DEEP-FRI: Sampling Outside the Box Improves Soundness.</li>
+
+      <li>[7] Eli Ben-Sasson, Alessandro Chiesa, Nicholas Spooner Interactive Oracle Proofs.</li>
+
+    </ul>`;
+---
+
+<BaseLayout title="Transparent Polynomial Commitment Scheme with Polylogarithmi... (2019/1020)">
+  <article class="max-w-4xl mx-auto article-prose">
+    <nav class="mb-8">
+      <a href="/papers" class="text-blue-400 hover:text-blue-300">
+        &larr; Back to Papers
+      </a>
+    </nav>
+
+    <header class="mb-12">
+      <h1 class="text-3xl font-bold mb-4"
+        set:html={TITLE_HTML} />
+      <p class="text-gray-400 mb-2"
+        set:html={AUTHORS_HTML} />
+      <p class="text-gray-500 text-sm mb-4">
+        2019 &middot; eprint 2019/1020
+      </p>
+      <div class="flex gap-4 text-sm">
+        <a
+          href={EPRINT_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          class="text-blue-400 hover:text-blue-300"
+        >
+          Paper (eprint) &rarr;
+        </a>
+      </div>
+      <p class="mt-4 text-xs text-gray-500">
+        All content below belongs to the original authors. This page
+        reproduces the paper for educational purposes. Always
+        <a
+          href={EPRINT_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          class="text-blue-400 hover:text-blue-300"
+        >cite the original</a>.
+      </p>
+      <p class="mt-1 text-xs text-gray-600">
+        Converted with: {CRAWLER} &middot; {CONVERTED_DATE}
+      </p>
+    </header>
+
+    <Fragment set:html={CONTENT} />
+
+  </article>
+</BaseLayout>

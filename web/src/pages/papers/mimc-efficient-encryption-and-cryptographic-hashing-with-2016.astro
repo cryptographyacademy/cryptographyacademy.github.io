@@ -1,0 +1,1471 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+
+const EPRINT_URL = 'https://eprint.iacr.org/2016/492';
+const CRAWLER = 'mistral';
+const CONVERTED_DATE = '2026-02-16';
+const TITLE_HTML = 'MiMC: Efficient Encryption and Cryptographic Hashing with Minimal Multiplicative Complexity';
+const AUTHORS_HTML = 'Martin Albrecht, Lorenzo Grassi, Christian Rechberger, Arnab Roy, Tyge Tiessen';
+
+const CONTENT = `    <p class="text-gray-300">Martin Albrecht¹, Lorenzo Grassi³, Christian Rechberger²,³, Arnab Roy², and Tyge Tiessen²</p>
+
+    <p class="text-gray-300">¹ Royal Holloway, University of London, UK martinralbrecht@googlemail.com ² DTU Compute, Technical University of Denmark, Denmark {arroy,crec,tyti}@dtu.dk ³ IAIK, Graz University of Technology, Austria {christian.rechberger,lorenzo.grassi}@iaik.tugraz.at</p>
+
+    <p class="text-gray-300">Abstract. We explore cryptographic primitives with low multiplicative complexity. This is motivated by recent progress in practical applications of secure multi-party computation (MPC), fully homomorphic encryption (FHE), and zero-knowledge proofs (ZK) where primitives from symmetric cryptography are needed and where linear computations are, compared to non-linear operations, essentially "free". Starting with the cipher design strategy "LowMC" from Eurocrypt 2015, a number of bit-oriented proposals have been put forward, focusing on applications where the multiplicative depth of the circuit describing the cipher is the most important optimization goal.</p>
+
+    <p class="text-gray-300">Surprisingly, albeit many MPC/FHE/ZK-protocols natively support operations in  <span class="math">\\mathrm{GF}(p)</span>  for large  <span class="math">p</span> , very few primitives, even considering all of symmetric cryptography, natively work in such fields. To that end, our proposal for both block ciphers and cryptographic hash functions is to reconsider and simplify the round function of the Knudsen-Nyberg cipher from 1995. The mapping  <span class="math">F(x) \\coloneqq x^3</span>  is used as the main component there and is also the main component of our family of proposals called "MiMC". We study various attack vectors for this construction and give a new attack vector that outperforms others in relevant settings.</p>
+
+    <p class="text-gray-300">Due to its very low number of multiplications, the design lends itself well to a large class of applications, especially when the depth does not matter but the total number of multiplications in the circuit dominates all aspects of the implementation. With a number of rounds which we deem secure based on our security analysis, we report on significant performance improvements in a representative use-case involving SNARKs.</p>
+
+    <p class="text-gray-300">Keywords: distributed cryptography, cryptanalysis, block ciphers, hash functions, zero knowledge</p>
+
+    <p class="text-gray-300">1 Introduction</p>
+
+    <p class="text-gray-300">Modern cryptography developed many techniques that go well beyond solving traditional confidentiality and authenticity problems in two-party communication. Secure multi-party computation (MPC), zero-knowledge proofs (ZK), and fully homomorphic encryption (FHE) are some of the most striking examples. In various applications of these three technologies, part of the circuit or function that is being evaluated is in turn a cryptographic primitive such as a PRF, a symmetric encryption scheme, or a collision resistant function.</p>
+
+    <p class="text-gray-300">In this work, we focus on a large class of such applications where the total number of field multiplications in the underlying cryptographic primitive poses the largest performance bottleneck. Examples include MPC protocols based on Yao’s garbled circuit and all ZK-proof system that we are aware of, including recent developments around SNARKs <em>[BSCG^{+}13]</em> which found practical applications, e.g., in Zerocash <em>[BCG^{+}14]</em>. This motivates the following question addressed in this work: How could a construction for a secure block cipher or a secure cryptographic hash functions look like that minimizes the number of field multiplications?</p>
+
+    <p class="text-gray-300">Earlier work on specialized designs for such applications, like LowMC <em>[ARS^{+}15]</em>, Kreyvium <em>[CCF^{+}16]</em>, or the very recent FLIP <em>[MJSC16]</em> all consider the case of Boolean multiplications and mostly focus on the depth of the resulting circuit.</p>
+
+    <p class="text-gray-300">Surprisingly, albeit many MPC/FHE/ZK-protocols natively support operations in GF(<span class="math">p</span>) for large <span class="math">p</span>, very few candidates, even considering all of symmetric cryptography, exist which natively work in such fields. Our focus in this paper is hence on multiplications in the larger fields GF(<span class="math">2^{m}</span>) and GF(<span class="math">p</span>) which is motivated as follows: As many protocols support multiplications in larger fields natively, encoding of a description in GF(<span class="math">2</span>) is cumbersome and inefficient. Whilst it is possible to do bit operations over <span class="math">\\mathbb{F}_{p}</span> using standard tricks (which turn XOR into a non-linear operation), such a conversion is expensive. Consider AES as an example: it allows for an efficient description in a variety of field sizes. This is also the reason why the bit-based LowMC, which has a lower number of AND gates, can often barely, if at all, outperform AES in actual implementations of the GMW MPC protocols, despite being much better than AES in terms of GF(<span class="math">2</span>) metrics. See <em>[ARS^{+}16, Table 6]</em> for details of the most striking example. This is also partly due to the very high number of XORs computed in LowMC resulting them to be no longer negligible.</p>
+
+    <h4 id="sec-2" class="text-lg font-semibold mt-6">Contributions and related work.</h4>
+
+    <p class="text-gray-300">The design we propose is extremely simple: A function <span class="math">F(x):=x^{3}</span> is iterated with subkey additions. This is described in detail in Section 2. In fact, our design is a simplified variant of a design by Nyberg and Knudsen <em>[KN95]</em> from the 1990s, which was aimed to demonstrate ways to achieve provable security against the then emerging differential and linear attacks, using a small number of rounds (smaller than, say, DES). However, not much later, <em>[JK97]</em> showed very efficient, even practical interpolation attacks</p>
+
+    <p class="text-gray-300">on such proposals. Indeed, our proposal resembles <span class="math">\\mathcal{PURE}</span>, a design introduced in <em>[x10]</em> in order to present their attack. We pick up this work from almost 20 years ago and study in earnest if a much higher number of rounds can make this design secure in Section 4. It turns out, perhaps surprisingly, that the required much higher number of rounds (in the order of 100s instead of 10 or less) is <em>very competitive</em> when it comes to the new application areas of symmetric cryptography that motivate this work.</p>
+
+    <p class="text-gray-300">We propose several variants of our design called MiMC: variants for GF(<span class="math">p</span>) and GF(<span class="math">2^{n}</span>) as well as variants that use the cube mapping directly or in a Feistel structure. MiMC can be used for encryption as well as for collision-resistant cryptographic hashing. See Section 2 for the basic variant in GF(<span class="math">2^{n}</span>) and Section 5 for a discussion on the other variants. MiMC is distinguished from any of the many constructions that have been proposed in this field recently to the extent that it contradicts popular belief: A recent standard textbook <em>[x13, Sect. 8.4]</em> explicitly considers such constructions as “not serious, for various reasons”.</p>
+
+    <h4 id="sec-3" class="text-lg font-semibold mt-6">Metrics.</h4>
+
+    <p class="text-gray-300">Given the wide variety of applications and protocols, no simple metric will be able to reliably predict application level performance. Issues of conversion between various field types (as the conversion between GF(2) and GF(p) mentioned above, which can be quite costly) add to the complication. Nevertheless, in order to give at least some hint towards expected performance, we will use the minimal number of multiplication to compute an output (minMULs), and the average number of multiplications needed per input bit (MULs/bit) on various designs. For the important special case of GF(2) we will use minANDs and ANDs/bit, respectively.</p>
+
+    <p class="text-gray-300">A discussion of various constructions in GF(p) and GF(2) can be found in Section 3. In the benchmarking part in Section 6.1, we will also come across the case of an extremely imbalanced LowMC-variant where this simple metric clearly fails to predict actual performance. In Appendix B we will also see that the application performance is not independent of the size of the multiplier, but for the sizes relevant for MiMC this dependence is fairly weak.</p>
+
+    <h4 id="sec-4" class="text-lg font-semibold mt-6">Implementation Results.</h4>
+
+    <p class="text-gray-300">The hashing mode for GF(<span class="math">p</span>) may prove to be particularly useful as it is the first of its kind, despite various applications in verifiable computing <em>[CFH^{+}15]</em> and applications of SNARKS like Zerocash <em>[BCG^{+}14]</em> requiring such a function. Due to a lack of an alternative, authors implemented and optimized SHA-256, which leads to a bottleneck in efficiency. We demonstrate that MiMC compares very favorably in such an application. Based on our experiments and implementations, we report a factor 10 improvement in Section 6.1. We briefly mention more direct implementations in Section 6.2 and discuss the suitability of the design for cheap (generic) protection against higher-order side-channel attacks in Section 6.3.</p>
+
+    <p class="text-gray-300">In follow-up to this work <em>[GRR^{+}16]</em>, it was found that MiMC is also a very competitive candidate as an MPC-friendly PRF. Compared to AES, benchmark results showed that MiMC has a more than 10 times higher throughput in the</p>
+
+    <p class="text-gray-300">online phase, and still about six times faster in the offline/precomputation phase in the LAN setting. Even the latency, which one could expect to be relatively high for MiMC due to its serial nature and the relatively high number of rounds, is better than the latency of AES. Note that for the AES case, this does not include conversion losses due to the application not using the AES field GF(<span class="math">2^{8}</span>), and hence the difference in real-world application settings will likely be larger.</p>
+
+    <h2 id="sec-5" class="text-2xl font-bold">2 The MiMC primitives</h2>
+
+    <p class="text-gray-300">In the following, we describe a block cipher, a permutation, and a permutation-based cryptographic hash function with a low number of multiplications in a finite field <span class="math">\\mathbb{F}_{q}</span> (alternatively GF(<span class="math">q</span>)) where <span class="math">q</span> is either a prime <span class="math">p</span> or a power of 2.</p>
+
+    <h3 id="sec-6" class="text-xl font-semibold mt-8">2.1 The block cipher</h3>
+
+    <p class="text-gray-300">In order to achieve an efficient implementation over a field <span class="math">\\mathbb{F}_{q}</span> (with <span class="math">q</span> either prime or a power of 2), i.e., to minimize computationally expensive multiplications in the field, our design operates entirely over <span class="math">\\mathbb{F}_{q}</span>, thereby avoiding S-boxes completely. More precisely, we use a permutation polynomial over <span class="math">\\mathbb{F}_{q}</span> as round function. In the following, we restrict ourselves to <span class="math">\\mathbb{F}_{2^{n}}</span> and we denote by MiMC-<span class="math">b/\\kappa</span> a keyed permutation with block size <span class="math">b</span> and key size <span class="math">\\kappa</span>. The concept however equally applies to <span class="math">\\mathbb{F}_{p}</span>, which we will discuss briefly in Section 5.</p>
+
+    <h4 id="sec-7" class="text-lg font-semibold mt-6">MiMC-<span class="math">n/n</span>.</h4>
+
+    <p class="text-gray-300">Our block cipher is constructed by iterating a round function <span class="math">r</span> times where each round consists of a key addition with the key <span class="math">k</span>, the addition of a round constant <span class="math">c_{i}\\in\\mathbb{F}_{2^{n}}</span>, and the application of a non-linear function defined as <span class="math">F(x):=x^{3}</span> for <span class="math">x\\in\\mathbb{F}_{2^{n}}</span>. For a discussion of this particular choice of polynomial and alternatives, we refer to Section 5.3. The ciphertext is finally produced by adding the key <span class="math">k</span> again to the output of the last round. Hence, the round function is described as <span class="math">F_{i}(x)=F(x\\oplus k\\oplus c_{i})</span> where <span class="math">c_{0}=c_{r}=0</span> and the encryption process is defined as</p>
+
+    <p class="text-gray-300"><span class="math">E_{k}(x)=(F_{r-1}\\circ F_{r-2}\\circ\\ldots F_{0})(x)\\oplus k.</span></p>
+
+    <p class="text-gray-300">We choose <span class="math">n</span> to be odd and the number of rounds as <span class="math">r=\\left\\lceil\\frac{n}{\\log_{2}3}\\right\\rceil</span>. The <span class="math">r-1</span> round constants are chosen as random elements from <span class="math">\\mathbb{F}_{2^{n}}</span>.</p>
+
+    <p class="text-gray-300">Note that the random constants <span class="math">c_{i}</span> do not need to be generated for every evaluation of MiMC. Instead the constants are fixed once and can be hard-coded into the implementation on either side. No extra communication is thus needed, just as with round constants in LowMC, AES, or in fact any other cipher.</p>
+
+    <p class="text-gray-300">Decryption for MiMC-<span class="math">n/n</span> can be realized analogously to encryption by reversing the order of the round constants and using <span class="math">F^{-1}(x):=x^{s}</span> with <span class="math">s=(2^{n+1}-1)/3</span> instead of <span class="math">F(x):=x^{3}</span> (the complete derivation of <span class="math">s</span> is given in Sect. 4, Lemma 1). Hence, encryption and decryption need to be implemented</p>
+
+    <p class="text-gray-300">!<a href="img-0.jpeg">img-0.jpeg</a> Fig. 1:  <span class="math">r</span>  rounds of MiMC-  <span class="math">n / n</span></p>
+
+    <p class="text-gray-300">separately. Furthermore, decryption is much more expensive than encryption. Using modes where the inverse is not needed is thus advisable. We note that for our targeted applications, such as PRFs or cryptographic hash functions, computing the inverse is usually not required. We therefore provide benchmark results only for the encryption function. The fact that the inverse has a more complex algebraic description also has a beneficial effect on security as it limits cryptanalytic approaches that try to combine the encryption and decryption direction, such as inside-out approaches.</p>
+
+    <p class="text-gray-300">MiMC-2n/n (Feistel). By using the same non-linear permutation in a Feistel network, we can process larger blocks at the cost of increasing the number of rounds by a factor of two. The round function of MiMC-2n/n is defined as following</p>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">x _ {L} \\</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">x _ {R} \\longleftarrow x _ {R} \\oplus \\left(x _ {L} \\oplus k \\oplus c _ {i}\\right) ^ {3} \\</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">x _ {L}.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <p class="text-gray-300">The round constants  <span class="math">c_{i}</span>  are again random elements of  <span class="math">\\mathbb{F}_{2^n}</span>  except for the first and last round constants which are equal to 0. In the last round, the swap operation is not applied. The number of rounds for the Feistel version is  <span class="math">r&#x27; = 2 \\cdot r = 2 \\cdot \\left\\lceil \\frac{n}{\\log_2 3} \\right\\rceil</span> , where  <span class="math">r</span>  is the number of rounds of MiMC-  <span class="math">n / n</span> .</p>
+
+    <p class="text-gray-300">Decryption for MiMC-2n/n can easily be realized by using the encryption function with reversed order of round constants, as usual for Feistel networks.</p>
+
+    <h2 id="sec-8" class="text-2xl font-bold">2.2 The permutation</h2>
+
+    <p class="text-gray-300">To construct the permutation  <span class="math">\\mathrm{MiMC}^P</span>  from the cipher MiMC as described above, we simply set the key to the all-0 string.</p>
+
+    <h2 id="sec-9" class="text-2xl font-bold">2.3 The hash function</h2>
+
+    <p class="text-gray-300">For the hash function MiMChash, we propose to use the permutation  <span class="math">\\mathrm{MiMC}^P</span>  in the sponge framework [BDPA08]. Given a permutation of size  <span class="math">n</span> , and a desired security level  <span class="math">s</span> , we can hash  <span class="math">r = n - 2s</span>  bits per call to the permutation. The MiMC permutation can be realized in both variants (Feistel and non-Feistel) by setting the key to  <span class="math">0^\\kappa</span>  where  <span class="math">\\kappa</span>  is the size of the key in bits. MiMChash- <span class="math">\\ell</span>  denotes the hash function with  <span class="math">\\ell</span>  bit output.</p>
+
+    <p class="text-gray-300">As usual, the message is first padded according to the sponge specification so that the number of message blocks is a multiple of  <span class="math">r</span>  where  <span class="math">r</span>  is the rate in</p>
+
+    <p class="text-gray-300">sponge mode. For MiMCHash-<span class="math">t</span> we use MiMC-<span class="math">n/n</span> permutation where <span class="math">n=4\\cdot t+1</span> and <span class="math">s=2\\cdot t</span>. For MiMCHash-256 we thus use a MiMC-<span class="math">n/n</span> permutation with <span class="math">n=1025</span>. The rate and the capacity are chosen as 512 and 513 respectively. This choice allows for processing the same amount of input bits as SHA-256 (512 bits) while at the same time offering collision security of 128-bits and preimage security of 256-bits, and in contrast to SHA-256 also full 256-bit 2nd-preimage security independent of the message length. We also propose MiMCHash-256b, which also offers collision resistance of 128 bits but only 128-bit security against preimage-style attacks, similar to SHAKE-256 as specified in the new SHA-3 standard. This construction makes use of a MiMC-<span class="math">n/n</span> permutation where <span class="math">n=769</span>. The rate and the capacity are chosen as 512 and 257 respectively. More generally for MiMCHash-<span class="math">t</span>b, we use the MiMC-<span class="math">n/n</span> permutation where <span class="math">n=3\\cdot t+1</span> and <span class="math">s=t+1</span>.</p>
+
+    <h2 id="sec-10" class="text-2xl font-bold">3 Related designs and comparison</h2>
+
+    <p class="text-gray-300">In this section, we give an overview of related designs, i.e. symmetric primitives which are based on arithmetic operations in some ring.</p>
+
+    <h3 id="sec-11" class="text-xl font-semibold mt-8">3.1 Knudsen-Nyberg cipher</h3>
+
+    <p class="text-gray-300">As discussed above, our design can be seen as a resurrection of a design due to Knudsen and Nyberg in <em>[x10]</em>, who proposed a DES-like cipher using a similar idea for non-linear mappings in a finite field. The Feistel round function of the 64-bit KN-cipher uses an affine mapping <span class="math">e:\\mathbb{F}_{2^{32}}\\to\\mathbb{F}_{2^{37}}</span> to first transform the 32-bit input into a 37-bit value. After addition with a 37-bit round key, the resulting 37-bit value is then input to the non-linear permutation <span class="math">g:x\\to x^{3}</span> in <span class="math">\\mathbb{F}_{2^{37}}</span>. Five bits of the output of <span class="math">g</span> are then discarded to reduce the final output again to 32 bits. In summary, one application of the round function is given as</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">$x_{L}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">x_{R}\\to x_{R}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">x_{L}\\oplus f(e(x_{R})\\oplus k_{i})$</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">where <span class="math">f</span> consists of application <span class="math">g</span> followed by discarding one bit. The KN cipher is a six-round Feistel design with six 37-bit independent round keys and is provably secure against differential attacks. However, it is vulnerable to an interpolation attack (see below) because of the low algebraic degree of the polynomial corresponding to the encryption function. The Feistel variant of our design — MiMC-<span class="math">2n/n</span> — can be easily recognized as a variant of the KN cipher, except for that we do not discard any bits (and hence always stay in the same field), add independent round constants and have a higher number of rounds. Indeed, our design more closely resembles <span class="math">\\mathcal{PURE}</span>, the cipher used in <em>[x5]</em> to demonstrate the vulnerability of the KN cipher to interpolation attacks, except for the higher number of rounds in our design. The performance of both designs essentially differs linearly in by how much we extend the number of rounds. We note that our GCD attack in Section 4.2 also extends to <span class="math">\\mathcal{PURE}</span> and allows to reduce the number of plaintext-ciphertext pairs required for a successful cryptanalysis.</p>
+
+    <p class="text-gray-300">###</p>
+
+    <p class="text-gray-300">3.2 The Pohlig-Hellman Cipher</p>
+
+    <p class="text-gray-300">The Pohlig-Hellman cipher was described in <em>[x20]</em>. Choose a prime <span class="math">p</span>. Pick <span class="math">1\\leq k\\leq p-2</span> with <span class="math">\\gcd(k,p-1)=1</span> and <span class="math">1\\leq d\\leq p-2</span> with <span class="math">d=k^{-1}\\bmod p-1</span>, with <span class="math">p</span> public and <span class="math">k</span> and <span class="math">d</span> private. To encrypt the message <span class="math">1\\leq m\\leq p-1</span> compute <span class="math">c=m^{k}\\bmod p</span>. To decrypt compute <span class="math">m=c^{d}\\bmod p</span>. Encryption and decryption take between <span class="math">\\log_{2}p</span> and <span class="math">2\\log_{2}p</span> multiplications depending on the Hamming weights of <span class="math">k</span> and <span class="math">d</span>. A key recovery attack solves the discrete logarithm problem in <span class="math">\\mathbb{F}_{p}</span>. The General Number Field Sieve solves this problem in complexity <span class="math">\\exp\\left(\\left(\\sqrt[3]{\\frac{64}{9}}+o(1)\\right)(\\ln p)^{\\frac{1}{3}}(\\ln\\ln p)^{\\frac{2}{3}}\\right)=L_{p}\\left[\\frac{1}{3},\\sqrt[3]{\\frac{64}{9}}\\right]</span>. Thus for <span class="math">n</span>-bit security, the number of multiplications required grows faster than <span class="math">O(n)</span>.</p>
+
+    <h3 id="sec-12" class="text-xl font-semibold mt-8">3.3 Naor-Reingold PRF</h3>
+
+    <p class="text-gray-300">The Naor-Reingold PRF <em>[x24]</em> is a pseudorandom function whose security can be reduced to the decisional Diffie-Hellman problem. For a given <span class="math">n\\in\\mathbb{N}</span>, primes <span class="math">p</span> and <span class="math">q</span> with <span class="math">q</span> dividing <span class="math">p-1</span>, an element <span class="math">g\\in\\mathbb{F}_{p}^{*}</span> of order <span class="math">q</span>, and <span class="math">n+1</span> elements <span class="math">a_{0},\\ldots,a_{n}\\in\\mathbb{Z}_{q}</span>, and an <span class="math">n</span>-bit input <span class="math">x_{1},\\ldots,x_{n}\\in\\mathbb{F}_{2}</span> define</p>
+
+    <p class="text-gray-300"><span class="math">f_{p,q,g,\\boldsymbol{a}}(x_{1},\\ldots,x_{n}):=g^{a_{0}}\\prod_{e_{i}=1}a_{i}</span></p>
+
+    <p class="text-gray-300">where <span class="math">(g,\\boldsymbol{a})</span> is the secret key. Evaluation of the function corresponds to one exponentiation in <span class="math">\\mathbb{F}_{p}</span> and <span class="math">n</span> multiplications in <span class="math">\\mathbb{Z}_{q}</span>. Thus it takes between <span class="math">p</span> and <span class="math">2p</span> multiplications in <span class="math">\\mathbb{F}_{p}</span>. As the security of this primitive can be reduced to the decisional Diffie-Hellman problem, just as with the Pohlig-Hellman cipher, for <span class="math">n</span> bit security the number of multiplications grows faster than <span class="math">O(n)</span>.</p>
+
+    <h3 id="sec-13" class="text-xl font-semibold mt-8">3.4 Ajtai, SWIFFT, SWIFFTX</h3>
+
+    <p class="text-gray-300">SWIFFT <em>[x17]</em> is a hash function family related to hard problems in lattices. In can be seen in the tradition of the work of Ajtai <em>[x1]</em> and was used as a building block for the SWIFFTX SHA-3 submission <em>[ADL^{+}08]</em>. The hash function consists of an application of the Number Theoretic Transform (NTT) over <span class="math">\\mathbb{Z}_{257}</span> and in dimension 64 to <span class="math">m=16</span> blocks of <span class="math">n=64</span> bits. Each such transform costs <span class="math">\\frac{1}{2}n\\log_{2}n=3\\cdot n=192</span> multiplications by a constant per 64 bits. The output of the NTT is then pointwise multiplied with 64 random fixed elements in <span class="math">\\mathbb{Z}_{257}</span>, costing another 64 multiplications. For <span class="math">m\\cdot n</span> bits of input the algorithm scales linearly in <span class="math">m</span>, so require <span class="math">mn(1+\\frac{1}{2}\\log_{2}n)</span> operations for <span class="math">m\\cdot n</span> bits of input. On modern microprocessors most of these multiplications can be avoided by using precomputed lookup tables and some specifically chosen constants. However, it is not clear that these techniques translate to our setting. Furthermore, we note that multiplication by small constants can be more efficient than general multiplications in, e.g. homomorphic encryption schemes. On the other hand, the constants in an NTT are not small a priori. Still, our analysis might be somewhat pessimistic. We note that SWIFFT itself does not fulfil standard requirements for general purpose hash functions and that SWIFFTX addresses these issues</p>
+
+    <p class="text-gray-300">by running four SWIFFT instances (increasing the number of multiplications accordingly) and by introducing an S-box.</p>
+
+    <h3 id="sec-14" class="text-xl font-semibold mt-8">3.5 SPRING</h3>
+
+    <p class="text-gray-300">SPRING <em>[BBL^{+}15]</em> is a PRF proposal with security related to the Learning with Errors (LWE) problem. Similarly, to SWIFFT this construction employs an NTT over <span class="math">\\mathbb{Z}_{257}</span>, but at dimension <span class="math">n=128</span>. This costs <span class="math">\\frac{1}{2}n\\log_{2}n=448</span> multiplications in <span class="math">\\mathbb{Z}_{257}</span>. Additional, <span class="math">k</span> multiplications in <span class="math">\\mathbb{Z}_{257}</span> are required in a post-processing step for <span class="math">k\\in\\{64,128\\}</span> being the bit size of the input to the PRF. Hence, for <span class="math">k=128</span> we expect <span class="math">576</span> multiplications in <span class="math">\\mathbb{Z}_{257}</span>. We note that these multiplications can be realized efficiently on modern CPUs, but not necessarily in the scenarios targeted in this work.</p>
+
+    <h3 id="sec-15" class="text-xl font-semibold mt-8">3.6 Comparison</h3>
+
+    <p class="text-gray-300">In Table 1 we compare MiMC with various block cipher and PRF designs. In Table 2 we compare MiMC with various cryptographic hash function proposals. In both cases, we notice a big difference between MiMC instantiations, and other designs for the two metrics that interest us: (1) the minimal number of multiplications needed to encrypt a block or at least <span class="math">n</span> bits (minMULs), and (2) the number of multiplications per encrypted bit. For the GF(<span class="math">p</span>) version of MiMC, the number of multiplications has to be multiplied by <span class="math">2</span>.</p>
+
+    <h2 id="sec-16" class="text-2xl font-bold">4 Design Rationale and Analysis of MiMC</h2>
+
+    <p class="text-gray-300">In this section we explain the design rationale of the keyed permutation and argue its security. The monomial <span class="math">x^{3}</span> serves as the non-linear layer of the block cipher. Note that we can use <span class="math">x^{3}</span> to construct the cipher iff it is a permutation monomial in the field <span class="math">\\mathbb{F}_{2^{n}}</span>. The following well known result governs the choice of the monomial and size of the field in the design of MiMC.</p>
+
+    <h6 id="sec-17" class="text-base font-medium mt-4">Proposition 1</h6>
+
+    <p class="text-gray-300">Any monomial <span class="math">x^{d}</span> is a permutation in the field <span class="math">\\mathbb{F}_{2^{n}}</span> iff <span class="math">\\gcd(d,2^{n}-1)=1</span>.</p>
+
+    <p class="text-gray-300">Hence, <span class="math">x\\to x^{3}</span> is not a permutation in <span class="math">\\mathbb{F}_{2^{n}}</span> when <span class="math">n</span> is even but only when <span class="math">n</span> is odd. In particular, choosing thus <span class="math">n=2^{t}+1</span> ensures that <span class="math">x^{3}</span> is a permutation in <span class="math">\\mathbb{F}_{2^{n}}</span>.</p>
+
+    <p class="text-gray-300">Moreover, using the previous proposition, we can compute the inverse of the non-linear permutation <span class="math">x^{3}</span> in <span class="math">\\mathbb{F}_{2^{n}}</span>.</p>
+
+    <h6 id="sec-18" class="text-base font-medium mt-4">Lemma 1</h6>
+
+    <p class="text-gray-300">Let <span class="math">n</span> an odd integer. The inverse of the non-linear function <span class="math">x^{3}</span> in <span class="math">\\mathbb{F}_{2^{n}}</span> is given by <span class="math">x^{s}</span> with <span class="math">s:=(2^{n+1}-1)/3</span>.</p>
+
+    <h6 id="sec-19" class="text-base font-medium mt-4">Proof</h6>
+
+    <p class="text-gray-300">Given <span class="math">y=x^{3}</span>, we are looking for an <span class="math">s</span> such that <span class="math">x=y^{s}</span> in <span class="math">GF(2^{n})</span>, that is <span class="math">x^{3\\cdot s}=x</span>. By Fermat’s little theorem, this is equivalent to look for an <span class="math">s</span></p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Name</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Security</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">minANDs</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">ANDs/bit</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Remarks and Reference</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">AES-128</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">128</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">5120</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">40</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">GF(2) rep. [BP12] ([BMP13])</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Simon</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">128</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">4352</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">34</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">[BSS+13]</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Noekeon</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">128</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">2048</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">16</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">[DPVAR00]</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Robin</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">128</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">3072</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">24</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">[GLSV14]</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Fantomas</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">128</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">2112</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">16.5</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">[GLSV14]</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">LowMC</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">128</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1132</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">8.85</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">[ARS+15]</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Grain-128a</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">128</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">4864 + 19 · n</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">19</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">[AHJM11]</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Trivium</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">80</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1152 + 3 · n</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">3</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">[CP08]</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Kreyvium</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">128</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1152 + 3 · n</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">3</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">[CCF+16]</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+            <td class="px-3 py-2 border-b border-gray-700">minMULs</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">MULs/bit</td>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">AES-128</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">128</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">800</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">6.25</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">GF(28) rep. [CGP+12]</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">SPRING</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">128</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">576</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">4.5</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">[BBL+15]</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Pohlig-Hellman</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">128</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">3072</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">≈ 1.5</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">[PH78,ENI13]</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">MiMC-129/129</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">129</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">82</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">0.64</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">this paper</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">MiMC-258/129</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">129</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">164</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1.28</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">this paper</td>
+
+          </tr>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">Table 1: Comparison of ciphers in encryption mode (excluding key schedule). We list the size-optimized variants. Note that in most cases multiplication refers to the field GF(2) (minANDs and ANDs/bit) whereas in MiMC and others multiplication is in a larger field(minMULs and MULs/bit). For stream ciphers we give the minANDs needed to generate  <span class="math">n</span>  bits of output.</p>
+
+    <p class="text-gray-300">such that  <span class="math">3 \\cdot s = 1</span>  (mod  <span class="math">2^n - 1</span> ). That is, there exists an integer  <span class="math">t</span>  such that  <span class="math">3 \\cdot s = 1 + t \\cdot 2^n - 1</span> . By Proposition 1, we have that  <span class="math">\\gcd(3, 2^x - 1) = 1</span>  if and only if  <span class="math">x</span>  is odd (i.e.  <span class="math">\\gcd(3, 2^x - 1) = 3</span>  if and only if  <span class="math">x</span>  is even). For  <span class="math">t = 1</span> , we obtain  <span class="math">3 \\cdot s = 2^n</span>  which is a contradiction. If  <span class="math">t</span>  is equal to 2, then  <span class="math">3 \\cdot s = 2^{n+1} - 1</span> . Since  <span class="math">n + 1</span>  is even (by hypothesis), then 3 divides  <span class="math">2^{n+1} - 1</span> . Finally, since  <span class="math">x^3</span>  is a permutation in  <span class="math">GF(2^n)</span>  for  <span class="math">n</span>  odd (by previous proposition), then the inverse is unique and is given by  <span class="math">s := (2^{n+1} - 1)/3</span> .</p>
+
+    <p class="text-gray-300">In most models of computation field multiplication is considered to be more computationally expensive than addition. However, note that squaring is a linear operation in a binary field  <span class="math">\\mathbb{F}_{2^n}</span> . Hence, if we consider the number of non-linear multiplications in a binary field then the number required to compute  <span class="math">x^3</span>  is one. In the SNARK setting, each witness variable (and possibly each constraint) is generated from a field operation more specifically from a field multiplication. As a consequence, computing  <span class="math">x^3</span>  generates two equations  <span class="math">x \\cdot x = y</span>  and  <span class="math">y \\cdot x = x^3</span> . Hence, in this setting we do not benefit from the linearity of squaring over the fields  <span class="math">\\mathbb{F}_{2^n}</span>  and computing  <span class="math">x^3</span>  costs two multiplications. However, the cost of additions in these fields is still negligible compared to that of multiplication.</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Name</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Coll. Resist.</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">minANDs</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">ANDs/bit</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Remarks and Reference</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">SHA-256</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">128</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">29000</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">56.64</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">[BCG+14])</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">SHA3-256</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">128</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">38400</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">35.29</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">[NIS14]</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">SHAKE128</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">128</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">38400</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">28.57</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">[NIS14]</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+            <td class="px-3 py-2 border-b border-gray-700">minMULs</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">MULs/bit</td>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">SWIFFTX</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">112–256</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">16384</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">8.0</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">[ADL+08]</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">MiMCHash-256</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">129</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1293</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">2.52</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">this paper</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">MiMCHash-256b</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">129</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">971</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1.89</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">this paper</td>
+
+          </tr>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">Table 2: Comparison of hash functions. We list the size-optimized variants. Note that in most cases multiplication refers to the field GF(2) (minANDs and ANDs/bit) whereas in MiMC multiplication is in a larger field (minMULs and MULs/bit).</p>
+
+    <p class="text-gray-300">Note that we can also disregard the cost of multiplication by a constant. Details on the form of equations involved in SNARK is given in Section 6.</p>
+
+    <p class="text-gray-300">We stress that although the cost of an addition is considered negligible compared to a multiplication, very large number of additions can reduce the efficiency of a design.</p>
+
+    <p class="text-gray-300">Our designs resist a variety of cryptanalysis techniques. The algebraic design principle of MiMC causes a natural concern about the security of the keyed permutation against algebraic cryptanalytic techniques. We describe several possible algebraic attacks (incl. a new "GCD" attack) against the design and analyze the resistance of the block cipher against these attacks. We also consider statistical attacks.</p>
+
+    <p class="text-gray-300">To summarize the following results, the number of rounds for the case of  <span class="math">\\mathrm{MiMC - n / n}</span>  is derived from an interpolation attack, while the number of rounds for the case of  <span class="math">\\mathrm{MiMC - 2n / n}</span>  is deduced from a Meet-in-the-Middle GCD attack.</p>
+
+    <p class="text-gray-300">Finally we discuss the case in which some restrictions are imposed (on data or memory requirements) for mounting an attack. We show that in this case it is possible to reduce the number of rounds.</p>
+
+    <p class="text-gray-300">Interpolation Attack. Interpolation attacks, introduced by Jakobsen and Knudsen [JK97], construct a polynomial corresponding to the encryption function without knowledge of the secret key. If an adversary can construct such a polynomial then for any given plaintext the corresponding cipher-text can be produced without knowledge of the secret key.</p>
+
+    <p class="text-gray-300">Let  <span class="math">E_{k}:\\mathbb{F}_{2^{n}}\\to \\mathbb{F}_{2^{n}}</span>  be an encryption function. For a randomly fixed key  <span class="math">k</span> , the polynomial  <span class="math">P(x)</span>  representing  <span class="math">E_{k}(x)</span>  can be constructed using Lagrange's</p>
+
+    <p class="text-gray-300">theorem, where <span class="math">x</span> is the indeterminate corresponding to the plaintext. If the polynomial has degree <span class="math">d</span> then we can find it using Lagrange’s formula</p>
+
+    <p class="text-gray-300"><span class="math">P(x)=\\sum_{i=1}^{d}y_{i}\\prod_{1\\leq j\\leq d,i\\neq j}\\frac{x-x_{j}}{x_{i}-x_{j}}</span></p>
+
+    <p class="text-gray-300">where <span class="math">E_{k}(x_{i})=y_{i}</span> for <span class="math">i=1,2,\\ldots d</span>.</p>
+
+    <p class="text-gray-300">This method can be extended to a key recover attack. The attack proceeds by simply guessing the key of the final round, decrypting the cipher-texts and constructing the polynomial for <span class="math">r-1</span> rounds. With one extra p/c pair, the attacker checks whether the polynomial is correct.</p>
+
+    <p class="text-gray-300">Observe that the number of unknown coefficients of the interpolation polynomial is <span class="math">d+1</span> and that the complexity of constructing a Lagrangian interpolation polynomial is <span class="math">\\mathcal{O}(d\\log d)</span> <em>[x20]</em>. Hence, setting <span class="math">d=3^{r}</span> with <span class="math">r=r_{max}\\approx n/\\log_{2}(3)</span> thwarts this attack. Note that no function mapping from <span class="math">\\mathrm{GF}(2^{n})</span> to <span class="math">\\mathrm{GF}(2^{n})</span> has degree <span class="math">\\geq 2^{n}</span>, since <span class="math">T^{2^{n}-1}\\equiv 1</span> for each <span class="math">T\\in\\mathbb{F}_{2^{n}}</span> and the degree of the interpolation polynomial does not increase for <span class="math">r&gt;r_{max}</span>.</p>
+
+    <p class="text-gray-300">By the same argument, a similar result holds for the case of the Feistel network <span class="math">\\mathrm{MiMC}\\text{-}2n/n</span>. Indeed, at each round the left hand part of the state can be described as a polynomial of the left and of the right hand part of the plaintext, with at most <span class="math">(3^{r}+1)\\cdot(3^{r-1}+1)=3^{2r-1}+3^{r}+3^{r-1}+1</span> unknown coefficients (observe that at round <span class="math">r</span>, the degree of the polynomial is at most <span class="math">3^{r}</span> in the left part of the plaintext and <span class="math">3^{r-1}</span> in the right part). In a similar way, at each round the right hand part of the state can be described as a polynomial of the left and of the right hand part of the plaintext, with at most <span class="math">(3^{r-1}+1)\\cdot(3^{r-2}+1)=3^{2r-3}+3^{r-1}+3^{r-2}+1</span> unknown coefficients Thus, the complexity of constructing this Lagrangian interpolation polynomial is approximately <span class="math">\\mathcal{O}(r\\cdot 3^{2r-3})</span>, where a function mapping from <span class="math">\\mathrm{GF}(2^{n})^{2}</span> to <span class="math">\\mathrm{GF}(2^{n})</span> has degree at most <span class="math">2^{2n}</span>. With respect to <span class="math">\\mathrm{MiMC}\\text{-}n/n</span>, it follows that it is sufficient to choose <span class="math">r=r_{max}+2\\approx n/\\log_{2}(3)+2</span> (i.e. two more rounds) to thwart this attack.</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Moreover, note that in the chosen-plaintext scenario and in the case of <span class="math">\\mathrm{MiMC}\\text{-}2n/n</span>, an attacker can reduce the degree of the interpolation polynomial using several strategies. For example, for chosen plaintexts of the form $x</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">x^{3}<span class="math"> the degree of the interpolation polynomial after </span>r<span class="math"> rounds is at most </span>2\\cdot 3^{r-1}<span class="math"> in the left part of the plaintext and </span>2\\cdot 3^{r-2}<span class="math"> in the right part, while for chosen plaintexts of the form </span>0</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">x<span class="math"> the degree of the interpolation polynomial is at most </span>3^{r-1}<span class="math"> in the left part of the plaintext and </span>3^{r-2}<span class="math"> in the right part. Thus, for this second case, the interpolation polynomial of the right part of the text depends only by the right part of the plaintexts and has degree </span>3^{r-2}<span class="math">. In order to avoid the reduced degree of the polynomial, it is sufficient to add (at least) two rounds more to the number of rounds calculated for </span>\\mathrm{MiMC}\\text{-}n/n$.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">A meet-in-the-middle variant of the interpolation attack was also proposed in <em>[x10]</em>, constructing a polynomials <span class="math">g(x)=h(y)</span> instead of one polynomial <span class="math">y=f(x)</span>. For <span class="math">\\mathrm{MiMC}\\text{-}n/n</span>, this approach does not produce an improvement due to the prohibitive degree of the inverse operation. In contrast, for <span class="math">\\mathrm{MiMC}\\text{-}2n/n</span> we have that <span class="math">g</span> and <span class="math">h</span> may have degree <span class="math">3^{r/2}</span> in the left part of the plain</p>
+
+    <p class="text-gray-300">text and <span class="math">3^{r/2-1}</span> in the right part only instead of degree <span class="math">3^r</span> and <span class="math">3^{r-1}</span> respectively. However, this lower degree comes at the price of increases computational cost. Indeed, constructing <span class="math">g</span> and <span class="math">h</span> requires solving a system of equation in <span class="math">n = 2 \\cdot (3^{r/2-1} + 1) \\cdot (3^{r/2-2} + 1)</span> unknowns costing <span class="math">\\mathcal{O}(n^\\omega) = \\mathcal{O}(3^{2 \\cdot r - 5})</span> operations, where the hidden constant is <span class="math">\\geq 1</span> and we conservatively set the linear algebra constant <span class="math">\\omega = 2</span>. The chosen plaintext variant of this attack is quite similar. As before, the idea is to choose plaintexts in which the left part is fixed. In this way, one of the two interpolation polynomial depends only on one variable, the right part of the plaintext. Thus, constructing <span class="math">g</span> and <span class="math">h</span> requires solving a system of equation in <span class="math">n = (3^{r/2-2} + 1) + (3^{r/2-1} + 1) \\cdot (3^{r/2-2} + 1)</span> unknowns costing <span class="math">\\mathcal{O}(n^2) = \\mathcal{O}(3^{2 \\cdot r - 6})</span> operations where the hidden constant is <span class="math">\\geq 1</span>. In conclusion, with respect to MiMC-<span class="math">n/n</span> and considering only the interpolation attack, it follows that it is sufficient to choose <span class="math">r = r_{max} + 3 \\approx n / \\log_2(3) + 3</span> (i.e. three more rounds) to thwart this attack. As we are going to show in the following, an higher number of rounds is requested to protect MiMC-<span class="math">2n/n</span> against the Meet-in-the-Middle GCD attack discussed in the next subsection.</p>
+
+    <p class="text-gray-300">We note that the complexity of an interpolation attack may decrease if the polynomial <span class="math">P(x)</span> is sparse for a chosen key. However, because we are adding random round constants in each round and <span class="math">x^3</span> is a permutation in <span class="math">\\mathbb{F}_{2^n}</span> by construction, our <span class="math">P(x)</span> is not expected to be sparse<span class="math">^4</span>.</p>
+
+    <p class="text-gray-300">Computing GCDs. From the description of MiMC, it is clear that factoring univariate polynomials recovers the key. However, if we are given more than one known plaintext-cipher-text pair, we can reduce the complexity further by computing a GCD of them. Denote by <span class="math">E(k,x)</span> the encryption of <span class="math">x</span> under key <span class="math">k</span>. For a pair <span class="math">(x,y) \\in \\mathbb{F}_q^2</span>, <span class="math">E(K,x) - y</span> denotes a univariate polynomial in <span class="math">\\mathbb{F}_q[K]</span> corresponding to <span class="math">(x,y)</span>. Note that in general, given plaintext/cipher text pair <span class="math">(x,y)</span>, it should be hard for a generic encryption scheme to compute the univariate polynomial <span class="math">E(K,x) - y</span> explicitly in the variable <span class="math">K</span> (i.e. the secret key). However, this is not the case of MiMC, for which the polynomial <span class="math">E(K,x) - y</span> can be always computed explicitly, and it simply corresponds to the definition of encryption process (that is, the iterative application of the cubic function). Moreover, note that this attack may also be applied to <span class="math">\\mathcal{PURE}</span>, the cipher used</p>
+
+    <p class="text-gray-300"><span class="math">^4</span> This claim is supported by our experiments. In particular, for a field <span class="math">\\mathbb{F}_{2^n}</span> and using <span class="math">x^3</span> as permutation, we observed:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>after 1 round, all terms appear (percentage: 100 %);</li>
+
+      <li>after 2 round, 8 terms appear instead of 10 (percentage: 80 %);</li>
+
+      <li>after 3 round, 19 terms appear instead of 28 (percentage: 67.86 %);</li>
+
+      <li>after 4 round, 54 terms appear instead of 82 (percentage: 65.85 %);</li>
+
+      <li>after 5 round, 161 terms appear instead of 244 (percentage: 66 %);</li>
+
+      <li>after 6 round, 531 terms appear instead of 730 (percentage: 72.74 %);</li>
+
+    </ul>
+
+    <p class="text-gray-300">and so on, where the percentage of the non-null terms continues to grow for the next rounds. For example, for the particular field <span class="math">GF(2^{17})</span>, after 10 rounds almost all the terms are non-zero.</p>
+
+    <p class="text-gray-300">12</p>
+
+    <p class="text-gray-300">in [JK97] to demonstrate the vulnerability of the KN cipher to interpolation attacks, assuming round keys are not independent but linearly derived from <span class="math">k</span>.</p>
+
+    <p class="text-gray-300">Consider now two such polynomials <span class="math">E(K, x_1) - y_1</span> and <span class="math">E(K, x_2) - y_2</span>, with <span class="math">y_1 = E(k, x_1)</span> and <span class="math">y_2 = E(k, x_2)</span> for the fixed but unknown key <span class="math">k</span>. It is clear that these polynomials share <span class="math">(K - k)</span> as a factor. Indeed, with high probability the greatest common divisor will be <span class="math">(K - k)</span>. Thus, by computing the GCD of the two polynomials, we can find the value of <span class="math">k</span>.</p>
+
+    <p class="text-gray-300">MiMC-<span class="math">n/n</span> for a known plain text <span class="math">x</span> corresponds to a polynomial having degree <span class="math">3^r</span>, where the leading monomial always has non-zero coefficient. Hence, we can recover <span class="math">k</span> with a GCD computation of two polynomials at degree <span class="math">3^r</span> (indeed, considering differences of two polynomials <span class="math">G(K, x_i) - y_i</span> reduces this degree to <span class="math">3^r - 1</span> by canceling the leading term). It is well-known that the complexity for finding the GCD of two polynomials of degree <span class="math">d</span> is <span class="math">\\mathcal{O}(d\\log^2 d)</span>. Hence, the complexity of this attack is <span class="math">\\mathcal{O}(r^2 \\cdot 3^r)</span>. For MiMC-<span class="math">n/n</span> the time complexity of this attack is higher than that of the interpolation attack.</p>
+
+    <p class="text-gray-300">More care must be taken for MiMC-<span class="math">2n/n</span>. First of all, after <span class="math">r</span> rounds the left hand part corresponds to a polynomial having degree <span class="math">3^r</span> while the right hand one corresponds to a polynomial having degree <span class="math">3^{r-1}</span> (in both cases the leading monomial always has non-zero coefficient). Moreover, in this case the meet-in-the-middle variant of this attack can be performed. That is, instead of constructing polynomials expressing ciphertexts as polynomials in the plaintext and the key, we can construct two polynomials <span class="math">G&#x27;(K, x_i)</span> and <span class="math">G&#x27;&#x27;(K, y_i)</span> expressing the state in round <span class="math">r/2</span> as a polynomial in the key and the plaintext or ciphertext respectively. Then, considering <span class="math">G&#x27;(K, x_1) - G&#x27;&#x27;(K, y_1)</span> and <span class="math">G&#x27;(K, x_2) - G&#x27;&#x27;(K, y_2)</span> we can apply a GCD attack on polynomials of degree <span class="math">3^{r/2-1}</span>, reducing the complexity to <span class="math">\\mathcal{O}(r^2 \\cdot 3^{r/2-3})</span> where the hidden constant is <span class="math">\\geq 1</span>. Hence, the number of rounds must be increased to <span class="math">r = 2 \\cdot r_{max} \\approx 2 \\cdot n / \\log_2(3)</span> to thwart this attack</p>
+
+    <p class="text-gray-300">Invariant Subfields. The algebraic structure of MiMC allows to mount a invariant subfield attack on the block cipher under a poor choice of round constants. That is, if all the round constants <span class="math">c_i</span> and the key <span class="math">k</span> are in subfield <span class="math">\\mathbb{F}_{2^m}</span> of <span class="math">\\mathbb{F}_{2^n}</span> then by choosing a plaintext <span class="math">x \\in \\mathbb{F}_{2^m}</span> an adversary can ensure that <span class="math">E_k(x) \\in \\mathbb{F}_{2^m}</span>. This attack is thwarted by picking <span class="math">n</span> to be prime. The only subfield is then <span class="math">\\mathbb{F}_2</span> such that picking constants <span class="math">\\neq 1</span> will be enough to avoid the attack.</p>
+
+    <p class="text-gray-300">5 A more detailed explanation. By definition, the complexity of the GCD attack is given by <span class="math">\\mathcal{O}((r/2 - 1)^2 \\cdot 3^{r/2 - 1})</span>. By simple calculation, observe that there exists a constant <span class="math">C \\geq 1</span> (in particular <span class="math">C \\geq 9/4</span>) such that</p>
+
+    <div class="my-4 text-center"><span class="math-block">\\left(\\frac {r}{2} - 1\\right) ^ {2} \\cdot 3 ^ {r / 2 - 1} \\leq C \\cdot r ^ {2} \\cdot 3 ^ {r / 2 - 3}</span></div>
+
+    <p class="text-gray-300">for all <span class="math">r \\geq 1</span>. It follows that if a function <span class="math">f(\\cdot)</span> is <span class="math">f(r) = \\mathcal{O}((r/2 - 1)^2 \\cdot 3^{r/2 - 1})</span> then it is also <span class="math">f(r) = \\mathcal{O}(r^2 \\cdot 3^{r/2 - 3})</span> with an hidden constant <span class="math">\\geq 1</span>. Finally, it is simple to observe that <span class="math">r^2 \\cdot 3^{r/2 - 3} \\geq 2^n</span> for <span class="math">r = 2 \\cdot r_{max} \\approx 2 \\cdot n / \\log_2(3)</span>.</p>
+
+    <p class="text-gray-300">13</p>
+
+    <p class="text-gray-300">Differential attacks. Differential cryptanalysis is one of the most widely used technique in symmetric-key cryptanalysis. The different types of cryptanalysis methods based on this technique depend on the propagation of an input difference through a given number of rounds of an iterative block cipher to yield a known output difference with high probability. The probability of the propagation often determines how many rounds can be attacked using this technique.</p>
+
+    <p class="text-gray-300">Given an input difference <span class="math">\\delta</span> and an output difference <span class="math">\\delta^{\\prime}</span>, the differential probability of the round function is given as</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">$\\mathsf{Pr}\\left(\\delta\\to\\delta^{\\prime}\\right)=</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\{x\\in\\mathbb{F}_{2^{n}}:F(x+\\delta)+F(x)=\\delta^{\\prime}\\}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">/2^{n}$ (1)</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">In our case the number of <span class="math">x</span> satisfying <span class="math">F(x+\\delta)+F(x)=\\delta^{\\prime}</span> is determined by the non-linear function <span class="math">x^{3}</span>. Hence it is enough to determine the size of the set</p>
+
+    <p class="text-gray-300"><span class="math">D=\\{x\\in\\mathbb{F}_{2^{n}}:\\left(x+\\delta\\right)^{3}+x^{3}=\\delta^{\\prime},\\delta\\neq 0\\}.</span></p>
+
+    <p class="text-gray-300">As this is a quadratic equation in <span class="math">x</span> for any, there are at most two solutions to the equation. This implies <span class="math">\\mathsf{Pr}\\left(\\delta\\to\\delta^{\\prime}\\right)\\leq\\frac{2}{2^{n}}</span>. This is sufficient to give any differential trail of at least two rounds a probability too low to be useful in an attack. A detailed analysis of the differential property of monomials of the form <span class="math">x^{2^{\\prime}+1}</span> in <span class="math">\\mathbb{F}_{2^{n}}</span> can be found in <em>[x10]</em> and in <em>[x3]</em>.</p>
+
+    <p class="text-gray-300">Linear attacks. Similar to differential attacks, linear attacks pose no threat to MiMC. Indeed, the cubic function is an <em>almost bent</em> or an <em>almost perfect nonlinear</em> (APN) function, i.e., differential 2-uniform, where an APN permutation provides the best resistance against linear and differential cryptanalysis. Thus, since its maximum square correlation is limited to <span class="math">2^{-n+1}</span> (cf. for example <em>[x1]</em> for details), any linear trail of the cubing function will have negligible potential after a few rounds.</p>
+
+    <p class="text-gray-300">Algebraic degree and higher-order differentials. As discussed above, the large number of rounds ensures that the algebraic degree of MiMC in its native field will be maximal or almost maximal. This naturally thwarts higher-order differential attacks when considering the difference as defined in the field (i.e., using the inverse of the field addition). But what happens to the degree when viewing the rounds as vectorial Boolean functions? As squaring is a linear operation in <span class="math">\\mathbb{F}_{2^{n}}</span>, it is also linear when viewed as vectorial function over <span class="math">\\mathbb{F}_{2}</span>. Cubing on the other hand introduces an additional multiplication which gives the round function an algebraic degree of 2 in every component when viewed as a vectorial Boolean function. Again, the large number of rounds should cause the degree to rise quickly and reach the limit of <span class="math">2^{n}</span> which is sufficient to thwart any higher-order differential attacks also when viewing the round function as a vectorial Boolean function.</p>
+
+    <p class="text-gray-300">Hash-specific security considerations. For usage of the MiMC permutation in the sponge mode as described in Section 2.3 we require the permutation to</p>
+
+    <p class="text-gray-300">not show non-trivial non-random behavior for up to <span class="math">2^{s}</span> input/output pairs. As specified in Section 2 the size of the permutation <span class="math">n</span> determines the number of rounds (based on the GCD attack described above). As <span class="math">2s&lt;n</span> for both MiMC-Hash-256 and MiMCHash-256b, this choices leaves us with an additional security margin, even if an hypothetical inside-out approach could double the number of rounds in an attack.</p>
+
+    <h3 id="sec-22" class="text-xl font-semibold mt-8">4.3 Additional security analysis for the case of restrictions on the complexity of the attack</h3>
+
+    <p class="text-gray-300">For simplicity, in this section we limit our discussion to MiMC-<span class="math">n/n</span>. However, it is straightforward to extend the following results to MiMC-<span class="math">2n/n</span> (where it is important to consider also the MitM variants of the attacks) or to the variants of MiMC over the prime fields.</p>
+
+    <p class="text-gray-300">In order to recover the number of rounds of MiMC-<span class="math">n/n</span> (see Sect. 4), we did not consider any restrictions on the memory and/or on the number of pairs of plaintexts/ciphertexts that are available to the attacker. Here we show that if such restrictions hold, then it is possible to decrease the total number of rounds.</p>
+
+    <h4 id="sec-23" class="text-lg font-semibold mt-6">4.3.1 Restriction on the number of plaintext/ciphertext pairs available to the attacker.</h4>
+
+    <p class="text-gray-300">First we study the case in which only <span class="math">2^{m}</span> pairs of plaintexts/ciphertexts are available to the attacker, where <span class="math">1\\leq m&lt;n</span>.</p>
+
+    <p class="text-gray-300">This restriction is not negligible for the case of the interpolation attack. Indeed, if the interpolation polynomial has degree <span class="math">3^{r}</span> after <span class="math">r</span> rounds (that is, if it has <span class="math">3^{r}+1</span> coefficients), then the attacker needs at least <span class="math">3^{r}+2</span> pairs to construct this polynomial (remember that she needs one pair to verify the guessed key). Thus, if <span class="math">2^{m}-1&lt;3^{r-1}+1</span>, the interpolation attack does not work since the attacker can not construct the interpolation polynomial. In other words, if <span class="math">2^{m}</span> pairs of plaintexts/ciphertexts are available to the attacker, then the minimum number of rounds <span class="math">r</span> is equal to:</p>
+
+    <p class="text-gray-300"><span class="math">r=1+\\left\\lfloor\\frac{\\log_{2}(2^{m}-2)}{\\log_{2}3}\\right\\rfloor\\simeq 1+\\left\\lfloor\\frac{m}{\\log_{2}3}\\right\\rfloor.</span></p>
+
+    <p class="text-gray-300">Observe that this problem doesn’t arises if the attacker has access to all possible pairs of plaintexts/ciphertexts. Indeed, remember that the maximum degree of the interpolation polynomial is <span class="math">2^{n}-2</span> since <span class="math">T^{2^{n}-1}\\equiv 1</span> for all <span class="math">T\\in\\mathbb{F}_{2^{n}}</span>, that is the maximum number of coefficients of the interpolation polynomial is <span class="math">2^{n}-1</span>. Since the attacker works in <span class="math">\\mathbb{F}_{2^{n}}</span> and she has access to all the possible pairs, then she can (theoretically) compute the interpolation polynomial.</p>
+
+    <p class="text-gray-300">Instead, note that the restriction on the number of texts available to the attacker has no influence on the GCD attacks, since two pairs are always sufficient to implement the attack. In this case, the cost of the attack remains <span class="math">r^{2}\\cdot 3^{r}</span> and we target a cost of <span class="math">2^{n}</span> so that <span class="math">r^{2}\\cdot 3^{r}\\simeq 2^{n}</span>, that is</p>
+
+    <p class="text-gray-300"><span class="math">r+2\\log_{3}(r)\\simeq n\\log_{3}(2).</span></p>
+
+    <p class="text-gray-300">Thus, we’re interested to find a good approximation to the previous equivalence. Note that when the attacker has access to all the possible pairs of texts, then the interpolation attack is more efficient than the GCD attacks (see Sect. 4), thus we are not interested to study the GCD attack in detail (indeed, in this case if MiMC is secure against the interpolation attack then it is automatically secure against the GCD attack). Instead, when the attacker has access to a limit number of pairs, then we don’t have any argumentation to do this claim a priori.</p>
+
+    <p class="text-gray-300">In order to find an approximated solution of the above equation, the idea is to use the mathematical methods provided by the Perturbation Theory. That is, the idea is to look for <span class="math">r</span> of the form <span class="math">r=n\\log_{3}(2)-\\varepsilon</span>, where <span class="math">\\varepsilon\\ll n\\log_{3}(2)</span>. By simple computation, it is simple to obtain:</p>
+
+    <p class="text-gray-300"><span class="math">r\\simeq\\bigg{\\lceil}n\\log_{3}(2)-2\\log_{3}\\big{(}n\\log_{3}2\\big{)}\\bigg{\\rceil}.</span></p>
+
+    <p class="text-gray-300">In conclusion, if only <span class="math">2^{m}</span> pairs are available (with <span class="math">m&lt;n</span>), then <span class="math">r</span> is given by:</p>
+
+    <p class="text-gray-300"><span class="math">r=\\max\\bigg{\\{}1+\\bigg{\\lfloor}\\frac{m}{\\log_{2}3}\\bigg{\\rceil},\\bigg{\\lceil}n\\log_{3}(2)-2\\log_{3}\\big{(}n\\log_{3}2\\big{)}\\bigg{\\rceil}\\bigg{\\}}.</span></p>
+
+    <p class="text-gray-300">For the particular case in which <span class="math">n=129</span>, if <span class="math">m\\leq 115</span> then <span class="math">r=74</span>, while <span class="math">r=1+\\big{\\lceil}m\\cdot\\log_{3}2\\big{\\rceil}</span> if <span class="math">m&gt;115</span>.</p>
+
+    <p class="text-gray-300">Finally, we note that if an attacker has access to a limit number of texts, then the minimum number of rounds to protect MiMC against algebraic attacks is deduced using both the GCD attack and the interpolation attack. If instead sufficiently many pairs of plaintexts/ciphertexts are available to an attacker then the interpolation attack is sufficient to deduce the minimum number of rounds.</p>
+
+    <h4 id="sec-24" class="text-lg font-semibold mt-6">3.2.2 Restriction on the memory available to the attacker.</h4>
+
+    <p class="text-gray-300">Secondly, we consider the case in which there is a restriction on the memory available to the attacker. Note that this restriction affects the interpolation attack and the GCD attack in the same way. Indeed, the problem arises if the attacker is not able to store all the coefficients of the interpolation polynomial (and similar for the GCD attack). For example, in the case of MiMC-129/129 where the number of rounds is <span class="math">82</span>, the attacker needs <span class="math">(3^{82}+1)\\cdot 129</span> bits <span class="math">\\simeq 2^{134}</span> bytes to store all the coefficients of the interpolation polynomial.</p>
+
+    <p class="text-gray-300">Thus, suppose that the attacker can store only <span class="math">2^{m}</span> coefficients, where <span class="math">2^{m}\\leq 2^{n}</span>. In MiMC-<span class="math">n/n</span>, each coefficient requires of <span class="math">n/4</span> bytes to be stored. Thus, this is equivalent to suppose that only <span class="math">n\\cdot 2^{m-2}</span> bytes are available to the attacker. Then, since the number of coefficients of the interpolation polynomial (similar for the GCD attack) depends on the number of rounds, we have the restriction that <span class="math">2^{m}\\leq 3^{r}+1</span>, that is, the number of rounds <span class="math">r</span> is given by:</p>
+
+    <p class="text-gray-300"><span class="math">r\\simeq\\big{\\lceil}\\log_{3}(2^{m}-1)\\big{\\rceil}.</span></p>
+
+    <p class="text-gray-300">For example, in the case of MiMC-129/129, suppose that only <span class="math">2^{64}</span> bytes (that is, approximately 84 exabytes or 84 million of terabytes) are available to the attacker. Then, 38 rounds are sufficient to protect MiMC-129/129 against the interpolation, the GCD and the other attacks. Time-memory trade-offs might well be possible, and we leave this as a topic for future research.</p>
+
+    <h2 id="sec-25" class="text-2xl font-bold">5 Variants</h2>
+
+    <p class="text-gray-300">In this section, we discuss two variants of MiMC. One for instantiating MiMC over prime fields and one for extending the key size to increase security.</p>
+
+    <h3 id="sec-26" class="text-xl font-semibold mt-8">5.1 MiMC over prime fields</h3>
+
+    <p class="text-gray-300">The above descriptions of MiMC can also be used to operate over prime fields i.e. a field <span class="math">\\mathbb{F}_{p}</span> where <span class="math">p</span> is prime. In that case, it needs to be assured that the cubing in the round function creates a permutation. For this, it is sufficient to require <span class="math">\\gcd(3,p-1)=1</span>.</p>
+
+    <p class="text-gray-300">Following the notation as above, we can consider MiMC-<span class="math">p/p</span> where the permutation monomial <span class="math">x^{3}</span> is defined over <span class="math">\\mathbb{F}_{p}</span>. The number of rounds for constructing the keyed permutation is <span class="math">r=\\left\\lceil\\frac{\\log p)}{\\log_{2}3}\\right\\rceil</span>. In the Feistel mode, we define MiMC-<span class="math">2p/p</span> where the round function is defined over <span class="math">\\mathbb{F}_{p}</span> and where the number of rounds is double with respect to MiMC-<span class="math">p/p</span>. In both the constructions the <span class="math">r</span> round constants are chosen as random elements in <span class="math">\\mathbb{F}_{p}</span>.</p>
+
+    <p class="text-gray-300">Our cryptanalysis from Section 4 transfers to this case except for the subfield attack which does not apply here.</p>
+
+    <h3 id="sec-27" class="text-xl font-semibold mt-8">5.2 Larger Keys</h3>
+
+    <p class="text-gray-300">Instead of considering our simple iterative construction where we add the same key in each round, we may also consider the case where we have a key which is <span class="math">\\kappa</span>-times bigger than the block size <span class="math">n</span>. In this case, we may consider an instance where we are cyclically adding <span class="math">\\kappa</span> independent keys to our rounds. Our <span class="math">i</span>-th round function then becomes:</p>
+
+    <p class="text-gray-300"><span class="math">F_{i}(x)=\\left(x\\oplus k_{i\\bmod\\kappa}\\oplus c_{i}\\right)^{3}</span></p>
+
+    <p class="text-gray-300">It is clear that differential and linear cryptanalysis are not affected by this modification if we model MiMC as a Markov cipher. However, considering a larger key size does affect algebraic attacks. In particular, a simple GCD attack is not sufficient any more to recover the keys <span class="math">k_{0},k_{1},\\ldots,k_{\\kappa-1}</span>. Instead, we may consider Resultants or Gröbner bases.</p>
+
+    <p class="text-gray-300">We consider the case where <span class="math">\\kappa=2</span>. It is well-known <em>[x1]</em> that the maximum degree reached during a Gröbner basis computation of a bivariate system of equations is <span class="math">\\leq 2\\cdot\\max\\deg(P)+1</span>, where <span class="math">\\max\\deg(P)</span> is the maximum degree of</p>
+
+    <p class="text-gray-300">our input system (i.e. <span class="math">3^{r}</span> in our case). Hence, from e.g. <em>[x1]</em>, the complexity of solving such a system of equations is</p>
+
+    <p class="text-gray-300"><span class="math">\\mathcal{O}\\left(2\\cdot 3^{r}\\cdot\\binom{2\\cdot 3^{r}+3}{2\\cdot 3^{r}+1}\\right).</span></p>
+
+    <p class="text-gray-300">Applying resultants, from <em>[x13]</em> we expect a complexity of</p>
+
+    <p class="text-gray-300"><span class="math">\\tilde{\\mathcal{O}}\\left(d^{4.69}\\right)=\\tilde{\\mathcal{O}}\\left(3^{4.69\\,r}\\right).</span></p>
+
+    <p class="text-gray-300">Conservatively, we may anticipate a meet-in-the-middle attack which would reduce the cost of either of these attacks to a square root of the above estimates.</p>
+
+    <h3 id="sec-28" class="text-xl font-semibold mt-8">5.3 Different Round Functions</h3>
+
+    <p class="text-gray-300">Considering the case <span class="math">\\mathrm{GF}(2^{n})</span>, we may consider a round function of the form</p>
+
+    <p class="text-gray-300"><span class="math">F(x)=\\left(x\\oplus k\\oplus c\\right)^{d}</span></p>
+
+    <p class="text-gray-300">for generic exponents <span class="math">d</span>. In particular, we have decided to limit our analysis to exponents of the form <span class="math">2^{t}+1</span> and <span class="math">2^{t}-1</span>, for positive integer <span class="math">t</span> (note that <span class="math">3</span> is the only number that can be written in both ways). Remember that for <span class="math">\\mathrm{MiMC}</span>-<span class="math">n/n</span>, <span class="math">d</span> has to satisfy the condition <span class="math">\\gcd(d,2^{n}-1)=1</span> in order to be a permutation, while in the case of <span class="math">\\mathrm{MiMC}</span>-<span class="math">2n/n</span> (that is, for Feistel Networks) this condition is not necessary. For further analysis, we recall the Lucas’s Theorem:</p>
+
+    <h6 id="sec-29" class="text-base font-medium mt-4">Theorem 1.</h6>
+
+    <p class="text-gray-300">For non-negative integers <span class="math">m</span> and <span class="math">n</span> and a prime <span class="math">p</span>, the following congruence relation holds:</p>
+
+    <p class="text-gray-300"><span class="math">\\binom{m}{n}\\equiv\\prod_{i=0}^{k}\\binom{m_{i}}{n_{i}}\\pmod{p},</span></p>
+
+    <p class="text-gray-300">where <span class="math">m=m_{k}p^{k}+m_{k-1}p^{k-1}+...+m_{1}p+m_{0}</span> and <span class="math">n=n_{k}p^{k}+n_{k-1}p^{k-1}+...+n_{1}p+n_{0}</span> are the base <span class="math">p</span> expansions of <span class="math">m</span> and <span class="math">n</span> respectively, using the convention that <span class="math">\\binom{m}{n}=0</span> if <span class="math">m&lt;n</span>.</p>
+
+    <p class="text-gray-300">Exponents of the form <span class="math">2^{t}+1</span> (with <span class="math">t&gt;1</span>) have the nice property that the cost to compute <span class="math">x^{2^{t}+1}</span> does not depend on <span class="math">t</span>, i.e. it requires only one multiplication (in some applications). Moreover, the degree of the resulting <span class="math">r</span>-round interpolation polynomial is <span class="math">\\left(2^{t}+1\\right)^{r}</span>, which is significantly higher than <span class="math">3^{r}</span> even for “small” <span class="math">t</span>. The major problem of this kind of exponents is that the corresponding interpolation polynomials are in general sparse. For example, using Lucas’s Theorem, it is very easy to note that just after one round the polynomial has only <span class="math">4</span> terms instead of <span class="math">2^{t}+2</span>:</p>
+
+    <p class="text-gray-300"><span class="math">\\left(x\\oplus k\\right)^{2^{t}+1}\\equiv_{2}\\left(x\\oplus k\\right)^{2^{t}}\\cdot\\left(x\\oplus k\\right)\\equiv_{2}</span> <span class="math">\\equiv_{2}\\left(x^{2^{t}}\\oplus k^{2^{t}}\\right)\\cdot\\left(x\\oplus k\\right)\\equiv_{2}\\,x^{2^{t}+1}\\oplus k\\cdot x^{2^{t}}\\oplus k^{2^{t}}\\cdot x\\oplus k^{2^{t}+1}.</span></p>
+
+    <p class="text-gray-300">Using the same technique, after <span class="math">r</span> rounds, the number of terms of the polynomial is upper bounded by <span class="math">3^{r}+1</span>, which is (much) smaller than <span class="math">(2^{t}+1)^{r}+1</span>. Note that <span class="math">3^{r}+1</span> is exact the same upper bounded obtained for the exponent <span class="math">3</span> (which corresponds to <span class="math">t=1</span>). Thus, the number of rounds to guarantee the security against the algebraic attacks doesn’t change choosing exponent of the form <span class="math">2^{t}+1</span> for <span class="math">t&gt;1</span>. That is, both from the security point of view and from the implementation one, there is no advantage to choose exponents of the form <span class="math">2^{t}+1</span> greater than <span class="math">3</span>. Similar considerations can be done also for exponents of the form <span class="math">2^{t}+2^{s}=2^{s}\\cdot(2^{t-s}+1)</span>, where <span class="math">s&lt;t</span>.</p>
+
+    <p class="text-gray-300">For this reason, coefficients of the form <span class="math">2^{t}-1</span> are more interesting. Indeed, in this case it is very easy to prove that the interpolation polynomial is not sparse:</p>
+
+    <p class="text-gray-300"><span class="math">\\left(x\\oplus k\\right)^{2^{t}-1}\\equiv_{2}\\bigoplus_{i=0}^{2^{t}-1}x^{i}\\cdot k^{2^{t}-1-i},</span></p>
+
+    <p class="text-gray-300">since</p>
+
+    <p class="text-gray-300"><span class="math">\\left({2^{t}-1\\atop i}\\right)\\equiv_{2}1\\qquad\\forall i\\in\\{0,1,\\ldots,2^{t}-1\\}.</span></p>
+
+    <p class="text-gray-300">On the other hand, in order to compute <span class="math">x^{2^{t}-1}</span>, we need more multiplications and square operations. Thus, a natural question is if it is possible to minimize the total number of multiplications necessary to compute the ciphertext choosing an exponent of the form <span class="math">2^{t}-1</span> different from <span class="math">3</span>.</p>
+
+    <p class="text-gray-300">There are different ways to compute <span class="math">g^{e}</span> where <span class="math">g\\in\\mathbb{F}_{2^{n}}</span> and <span class="math">e=2^{t}-1</span> for some <span class="math">t\\geq 2</span>, the classical algorithm being the square-and-multiply algorithm, cf. <em>[x18, Sect. 14.6]</em>. For this algorithm, the number of multiplications requested for this exponent is equal to the number of squares <span class="math">t-1</span>. In Algorithm 1, we give a slight variation of the original algorithm.</p>
+
+    <p class="text-gray-300">Data: <span class="math">g\\in\\mathbb{F}_{2^{n}}</span> and <span class="math">e=2^{t}-1</span> for some <span class="math">t\\geq 2</span> Result: <span class="math">g^{e}</span> <span class="math">g_{0}\\leftarrow g;</span> <span class="math">g_{1}\\leftarrow g^{2}\\cdot g;</span> <span class="math">A\\leftarrow 1;</span> for <em><span class="math">i</span></em> from <em>0 to <span class="math">\\lfloor t/2\\rfloor</span></em> do <span class="math">A\\leftarrow(A^{2})^{2};</span> <span class="math">A\\leftarrow A\\cdot g_{1};</span> end for if <em><span class="math">t</span></em> mod <span class="math">2\\neq 0</span> then <span class="math">A\\leftarrow A^{2};</span> <span class="math">A\\leftarrow A\\cdot g_{0};</span> end for return <span class="math">A</span>.</p>
+
+    <p class="text-gray-300">Algorithm 1 Modular exponentiation with cache</p>
+
+    <p class="text-gray-300">By simple computation, the number of multiplications for the previous algorithm is <span class="math">\\lceil t/2\\rceil</span>, while the number of squares is <span class="math">t-1</span>. Observe that with respect to the original algorithm, it requires precomputation and to store the quantity <span class="math">g^{2}\\cdot g</span>. Thus, for our purpose, this algorithm is better than the original one (for the case <span class="math">e=2^{t}-1</span>). This algorithm can be improved, but for our purpose it suffices.</p>
+
+    <p class="text-gray-300">Thus, using the previous analysis about the number of rounds, the total number of multiplications <span class="math">m</span> and of squares <span class="math">s</span> for MiMC-<span class="math">n/n</span> (analogous for MiMC-<span class="math">2n/n</span>) is</p>
+
+    <p class="text-gray-300"><span class="math">m=\\left\\lceil\\frac{t}{2}\\right\\rceil\\cdot\\left\\lceil\\frac{n}{\\log_{2}(2^{t}-1)}\\right\\rceil\\qquad s=(t-1)\\cdot\\left\\lceil\\frac{n}{\\log_{2}(2^{t}-1)}\\right\\rceil.</span></p>
+
+    <p class="text-gray-300">For example, for <span class="math">n=129</span>, the best result is obtained for <span class="math">t=4</span> (that is for the exponent <span class="math">15</span>), for which the total number of multiplications is <span class="math">66</span> (instead of <span class="math">82</span> for the exponent <span class="math">3</span>), while the number of squares is <span class="math">99</span> (instead of <span class="math">82</span> for the exponent <span class="math">3</span>).</p>
+
+    <p class="text-gray-300">Note that the sum of the total number of multiplications <span class="math">m</span> and of the total number of squares <span class="math">s</span> is almost constant for each choice of <span class="math">t</span>.</p>
+
+    <p class="text-gray-300">Finally, only for completeness, it is also possible to extend the previous analysis to the case <span class="math">GF(p)</span>. In this case, since the square operation is not linear, it counts as a multiplication. Thus, if we consider an exponent of the form <span class="math">2^{t}-1</span>, the total number of multiplications <span class="math">m</span> for MiMC-<span class="math">p/p</span> is</p>
+
+    <p class="text-gray-300"><span class="math">m=\\left(\\left\\lceil\\frac{t}{2}\\right\\rceil+t-1\\right)\\cdot\\frac{\\log(p-1)}{\\log(2^{t}-1)}.</span></p>
+
+    <p class="text-gray-300">To conclude, if the cost of a square operation is negligible with respect to the cost of a multiplication (that is, if the square operation is linear), then it is possible to minimize the total number of multiplications choosing an exponent of the form <span class="math">2^{t}-1</span> different from <span class="math">3</span>. Instead, when the number of square operations can not be ignored (as for example in the case of SNARK settings or in the <span class="math">GF(p)</span> case), the choice of an exponent of the form <span class="math">2^{t}-1</span> different from <span class="math">3</span> does not offer any advantage due to the fact that the number <span class="math">m+s</span> is almost constant.</p>
+
+    <h2 id="sec-30" class="text-2xl font-bold">6 Application and Implementation</h2>
+
+    <p class="text-gray-300">We implemented the MiMC block cipher and hash function in C++ using NTL <em>[x18]</em>. Note that we put no restriction on the irreducible polynomial to represent the finite field <span class="math">\\mathbb{F}_{2^{n}}</span> in our proposal.</p>
+
+    <p class="text-gray-300">##</p>
+
+    <p class="text-gray-300">6.1 Verifiable Computation and SNARK</p>
+
+    <p class="text-gray-300">Recently, several techniques have been proposed to achieve practical or nearly practical verifiable computation through constructions such as Pinocchio <em>[x20]</em> and zk-SNARK. A special kind of <em>Succinct Non-interactive Argument of Knowledge</em> or SNARK was proposed in 2014 to build Zerocash <em>[BCG^{+}14]</em> — a digital currency similar to Bitcoin but achieving anonymity. In <em>[BSCG^{+}13]</em> an implementation of a publicly verifiable non-interactive argument system is given.</p>
+
+    <p class="text-gray-300">The main idea of the SNARK is to provide a circuit whose satisfiability enables a verifier to check correctness of an underlying computation. In this concrete implementation, we focus on the (zk)SNARK for arithmetic circuit satisfiability. The main target of our design proposals is to improve the efficiency of (zk)SNARK when they are used as cryptographic primitives in a SNARK setting.</p>
+
+    <p class="text-gray-300">An <span class="math">\\mathbb{F}</span>-arithmetic circuit takes input from the field <span class="math">\\mathbb{F}</span> and its gates produce output in <span class="math">\\mathbb{F}</span>. Also the circuits considered here consist of bilinear gates only. Arithmetic circuit satisfiability (ACS) is defined as follows:</p>
+
+    <h6 id="sec-31" class="text-base font-medium mt-4">Definition 1.</h6>
+
+    <p class="text-gray-300">The ACS problem of an <span class="math">\\mathbb{F}</span>-arithmetic circuit <span class="math">\\mathcal{C}:\\mathbb{F}^{n}\\times\\mathbb{F}^{h}\\rightarrow\\mathbb{F}^{l}</span> is depicted by the relation <span class="math">\\mathcal{R}=\\{(x,a)\\in\\mathbb{F}^{n}\\times\\mathbb{F}^{h}:\\mathcal{C}(x,a)=0^{l}\\}</span> such that its language is <span class="math">L=\\{x\\in\\mathbb{F}^{n}:\\exists a\\in\\mathbb{F}^{h}\\operatorname{s.t}\\mathcal{C}(x,a)=0^{l}\\}</span>.</p>
+
+    <p class="text-gray-300">Since the circuit consists of bilinear gates only, we aim to minimize the number of NLM or field multiplications in our design. The addition in the field, which is the same as bitwise XOR, is a comparatively less expensive operation. The SNARK algorithm generates the proof for satisfiability of a system of <em>rank-1 quadratic constraints</em> over a finite field. This system of constraints is defined as below.</p>
+
+    <h6 id="sec-32" class="text-base font-medium mt-4">Definition 2.</h6>
+
+    <p class="text-gray-300">A system of rank-1 quadratic equations over a field <span class="math">\\mathbb{F}</span> is a sequence of tuples <span class="math">((A_{i},B_{i},C_{i}),n)</span> for <span class="math">i=1,\\ldots,N_{c}</span> and <span class="math">A_{i},B_{i},C_{i}\\in\\mathbb{F}^{1+N^{\\prime}}</span> such that <span class="math">n\\leq N^{\\prime}</span>. This system is satisfiable with an input <span class="math">x\\in\\mathbb{F}^{n}</span> if there is a witness <span class="math">w\\in\\mathbb{F}^{N^{\\prime}}</span> such that</p>
+
+    <p class="text-gray-300"><span class="math">\\langle A_{i},w\\rangle\\cdot\\langle B_{i},w\\rangle=\\langle C_{i},w\\rangle\\quad\\forall i=1,\\ldots,N_{c}</span></p>
+
+    <p class="text-gray-300">Here <span class="math">N_{c}</span> is the number of constraints and <span class="math">N^{\\prime}</span> is the number of variables.</p>
+
+    <p class="text-gray-300">The number of such constraints contributes to the efficiency of the SNARK algorithm. From the above definition it is also clear that in a SNARK setting over <span class="math">\\mathbb{F}_{2^{m}}</span> we can not ignore the squaring as linear operation.</p>
+
+    <p class="text-gray-300">MiMC in the SNARK setting. In MiMC, each round can be expressed with the following equations</p>
+
+    <p class="text-gray-300"><span class="math">X+\\underbrace{k_{i}+C_{i}}_{\\alpha}+U</span> <span class="math">=0</span> (2) <span class="math">U\\cdot U</span> <span class="math">=Y</span> (3) <span class="math">Y\\cdot U</span> <span class="math">=Z</span> (4)</p>
+
+    <p class="text-gray-300">where <span class="math">k_{i},C_{i}</span> are the round key and constants respectively. Note that the above 3 equations can be combined to form one rank-1 quadratic constraint (as in definition 2)</p>
+
+    <p class="text-gray-300"><span class="math">(X+\\alpha)(X+\\alpha+Y)=Y+Z</span> (5)</p>
+
+    <p class="text-gray-300">For the MiMCHash the round key is fixed to a constant hence <span class="math">\\alpha</span> can be treated as a constant in this equation. Note that the number of witness per round of MiMC is 2. Therefore the total number of witness for the fixed key permutation is <span class="math">2\\cdot R</span>, where <span class="math">R\\approx\\frac{n}{\\log 3}</span> is the number of rounds and <span class="math">n</span> is the block size. The witness generation requires one constant addition (XOR) and two multiplications in the corresponding field. The complexity of the prover algorithm of SNARK (appendix E in <em>[BSCG^{+}13]</em>) is dominated by <span class="math">O(N_{c}\\log N_{c})</span> where <span class="math">N_{c}</span> is the number of rank-1 constraints.</p>
+
+    <h4 id="sec-33" class="text-lg font-semibold mt-6">LowMC in the SNARK setting.</h4>
+
+    <p class="text-gray-300">In LowMC, each round consists of Sbox (3-bit), matrix multiplication (over <span class="math">\\mathbb{F}_{2}</span>), round key and constant addition (XOR). Each 3-bit Sbox application can be written as</p>
+
+    <p class="text-gray-300"><span class="math">b\\cdot c</span> <span class="math">=a+z_{1}</span> (6) <span class="math">a\\cdot(c+1)</span> <span class="math">=b+z_{2}</span> (7) <span class="math">a\\cdot(b+1)</span> <span class="math">=b+c+z_{3}</span> (8)</p>
+
+    <p class="text-gray-300">The above three equations can be combined to form 2 rank-1 constraints as following</p>
+
+    <p class="text-gray-300"><span class="math">b\\cdot c</span> <span class="math">=a+z_{1}</span> (9) <span class="math">a\\cdot(b+c)</span> <span class="math">=c+z_{2}+z_{3}</span> (10)</p>
+
+    <p class="text-gray-300">The witness generation for each Sbox requires 3 multiplications and 6 additions (out of which 2 are constant additions) over <span class="math">\\mathbb{F}_{2}</span>. In each round there are <span class="math">m</span> Sboxes. Hence per round the witness generation process will require <span class="math">3m</span> multiplications and <span class="math">6m</span> (<span class="math">2m</span> of them are constant addition) additions per round. Suppose <span class="math">N_{b}</span> is the block size of the permutation. Then there will be approximately <span class="math">(l-1)\\cdot N_{b}</span> additions over <span class="math">\\mathbb{F}_{2}</span> due to linear layer of LowMC in each round, where <span class="math">l</span> is the average number of non-zero entries in each row of the random matrix of the linear layer. Also there will be <span class="math">N_{b}</span> constant additions over <span class="math">\\mathbb{F}_{2}</span> which is due to round constant and key addition. The total number of rank-1 constraints for <span class="math">R</span> rounds of LowMC will be <span class="math">R\\cdot 2m</span></p>
+
+    <p class="text-gray-300">Note that the number of additions are much more in comparison with the number of multiplication over  <span class="math">\\mathbb{F}_2</span> .</p>
+
+    <p class="text-gray-300">Remark 1. For the MiMC permutation, the operations are performed over a larger field e.g  <span class="math">\\mathbb{F}_{2^{1025}}</span> . Indeed the cost of a single multiplication is higher in the larger field compared to a multiplication over  <span class="math">\\mathbb{F}_2</span> . Moreover, the number of additions are significantly more than the number of multiplications (see Table 3). Although in the cost model the cost of addition is much less than the cost of multiplication, very large number of additions over  <span class="math">\\mathbb{F}_2</span>  brings down the efficiency of LowMC in SNARK setting in comparison to MiMC. On the other hand, in MiMC the number of additions per round is one.</p>
+
+    <p class="text-gray-300">Experimental results. Following the libsnark [Lab] implementation we have implemented a prototype of SNARK for generating the circuit and witness for MiMC permutation for different block sizes and MiMCHash-256. One important target application of MiMC is SNARK or SNARK like algorithms. We have measured the time taken by MiMCHash for processing a single block and compared it with the time taken by SHA-256 using the libsnark implementation.</p>
+
+    <p class="text-gray-300">For processing a single block i.e. for hashing a single block message our MiMC implementation in the SNARK setting requires  <span class="math">\\approx 7.8</span>  milliseconds to generate the arithmetic circuit and witness while SHA-256 takes  <span class="math">\\approx 73</span>  milliseconds.</p>
+
+    <p class="text-gray-300">Since LowMC was designed for MPC/ZK applications we have also implemented it in the SNARK setting. A comparison of LowMC with MiMC is given in Table 3.</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">MiMC</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">LowMC</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Keccak-[1600, 24]</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+            <td class="px-3 py-2 border-b border-gray-700">R = 16</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">R = 55</td>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+            <td class="px-3 py-2 border-b border-gray-700">m = 196</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">m = 20</td>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">total time</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">7.8ms</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">90.3ms</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">271.2ms</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">75.8ms</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">constraint generation</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">6.3ms</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">13.5ms</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">9.2ms</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">65.2ms</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">witness generation</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1.5ms</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">76.8ms</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">262.0ms</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">10.6ms</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700"># addition</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">646</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">8420888</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">28894643</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">422400</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700"># multiplication</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1293</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">9408</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">3300</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">38400</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700"># rank-1 constraint</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">646</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">4704</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">2200</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">38400</td>
+
+          </tr>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">Table 3: Comparison of LowMC and MiMC with block size 1025 and the corresponding parameters for LowMC and Keccak permutation with specified parameters. For all implementations we have used the -03 optimization option of the gcc compiler. For LowMC, the number of rounds and the number of Sboxes per round are denoted as  <span class="math">R</span>  and  <span class="math">m</span>  respectively.</p>
+
+    <p class="text-gray-300">If we intend to use the LowMC permutation to construct a hash function using Sponge mode then the block size of LowMC should be 1025 bit for achieving</p>
+
+    <p class="text-gray-300">the same security level as SHA-256 or MiMCHash-256. We have implemented LowMC with the updated parameter-set v2 from<em>[ARS^{+}16]</em> with this block size and two possible choices for the parameters <span class="math">(R,m)</span>, where <span class="math">R</span> and <span class="math">m</span> are number of rounds and number of Sbox per round respectively. One is minimizing the number of rounds for the given block size and security requirements, the other one is minimizing the number of ANDs/bit. Both are derived from the round formula given in <em>[ARS^{+}16]</em>. LowMC is mainly a block cipher and the original proposal did not provide any suggestion to construct a secure hash function using the permutation. However if used in the sponge mode then the performance of the resulting hash function can be approximated by the performance of the LowMC permutation in SNARK setting.</p>
+
+    <p class="text-gray-300">We have also compared the performance of the Keccak-<em>[1600, 24]</em> <em>[NIS14]</em> permutation when used for the SHA-3 and SHAKE hash function in our SNARK setting. Note that the truncation after a Keccak permutation can be expressed as equality constraints. In fact the performance for the SHAKE128 or SHA3 are almost same as the Keccak-<em>[1600, 24]</em>. The performance comparison in the Table 3 shows that MiMC is significantly more efficient than LowMC and SHA-3 in SNARK setting.</p>
+
+    <p class="text-gray-300">For all field operations we have used the NTL library together with the gf2x library. All computations were carried out on an Intel Core i7 2.10GHz processor with 16GB memory and we took the average over <span class="math">\\approx 2000</span> repetitions. As a design with an unusual imbalance between ANDs and XORs, the comparison with LowMC variants is interesting as it gives an example where the number multiplications alone can no longer be used as a hint for the eventual performance. Where the round-minimized LowMC variant is more than 10 times slower with about 8 times more multiplications, reducing the number of ANDs in the other LowMC variant at the expense of many more rounds does not have the expected effect: The runtime grows again. The reason is the huge amount of XOR computations whose cost is clearly are no longer negligible. This shows the limits of a simplified metric that focuses on AND gates (or multiplication gates) also.</p>
+
+    <p class="text-gray-300">All implementations in C++ can be found on https://github.com/byt3bit/mimc_snark.git.</p>
+
+    <h3 id="sec-34" class="text-xl font-semibold mt-8">6.2 Direct implementation</h3>
+
+    <p class="text-gray-300">For the sake of completeness we provide a brief discussion of the complexity for the direct implementation MiMC, but stress that it has limited impact on the performance on our target platforms. Each round of MiMC-<span class="math">n/n</span> performs one multiplication in the field <span class="math">\\mathbb{F}_{2^{n}}</span>. For the considered values of <span class="math">n</span> this computation of <span class="math">x^{3}</span> becomes computationally expensive, since it is not feasible to use the efficient lookup table method even for <span class="math">n=32,64</span>.</p>
+
+    <p class="text-gray-300">The evaluation of <span class="math">x^{3}</span> can be reduced to field multiplication. Since the problem is frequently encountered in many public-key cryptographic algorithms and protocols, efficient field multiplication is a well studied area in the literature. One strategy for efficient field multiplication is to use lookup tables. Indeed, several algorithms <em>[GP97,DWBV^{+}96,HMV93]</em> are proposed in the literature which</p>
+
+    <p class="text-gray-300">use precomputed lookup tables to improve the efficiency of finite field multiplication. We briefly describe the complexity for evaluating the monomial using several algorithms from the literature.</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Number of Instructions</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Look-up Table</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"></th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+            <td class="px-3 py-2 border-b border-gray-700">XOR</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">ADD,SUB, SHIFT, AND</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">Bit size No. of Access</td>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">[HMV93]</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">2g2</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">g2(3/2 - 1/2(2b-1))</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">2b2b</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">3g2</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">[GP97]</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">6g log 3 - 8 · g + 2</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">g log 3</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">2b2b</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">3g log 3</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">[KA98]</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">4g2</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">—</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">(2b - 1)22b</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">2g2 + g</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">[Has00]</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">(1/2(g + 1)(b + 3) - 4) [n/w] (g - 1) [n/w] + 4g - 2</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">(b + d)2b</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">(g - 1) [b+d/w]</td>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+          </tr>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">Table 4: Complexities of different algorithms for implementing field multiplications</p>
+
+    <p class="text-gray-300">In all lookup-table based multiplication algorithms above,  <span class="math">b</span>  is the size of the internal data path of the processor. Any element in  <span class="math">\\mathbb{F}_{2^n}</span>  is partitioned as a collection into  <span class="math">g</span>  groups each having  <span class="math">b</span>  bits. If  <span class="math">n</span>  is not a multiple of  <span class="math">b</span>  then the most significant group will contain  <span class="math">n</span>  (mod  <span class="math">b</span> ) bits. Note that the algorithm in [HMV93] requires  <span class="math">n</span>  to be multiple of  <span class="math">b</span> . Furthermore,  <span class="math">d</span>  denotes the degree of the second highest monomial (with non-zero coefficient) in the irreducible polynomial that defines the field  <span class="math">\\mathbb{F}_{2^n}</span>  and  <span class="math">w</span>  denotes the word size of processor. The resources of a processor are optimally utilized when  <span class="math">b = w</span> . For example in a 32 bit processor two polynomials can be added using  <span class="math">\\lceil \\frac{n}{32} \\rceil</span>  XOR instructions. However choosing  <span class="math">b = w</span>  in this case increases the size of the lookup table to  <span class="math">2^5</span>  GB for the algorithms from [HMV93,GP97]. On the other hand choosing  <span class="math">b &amp;lt; w</span>  may imply lower utilization of processor's resources. The algorithm described in [Has00] proposes a better utilization of resources when a small value of  <span class="math">b</span>  is chosen to keep the size of the lookup table sufficiently small. Also, this algorithm does not require  <span class="math">n</span>  to be multiple of  <span class="math">b</span> .</p>
+
+    <p class="text-gray-300">Side-channel attacks exploit different types of physical leakage of information e.g. power consumption or EM emanations during the execution of cryptographic algorithms on a device for recovering sensitive variables (e.g. secret key). Masking is a well known technique to prevent implementations of cryptographic algorithms from such attacks. Most of the masking schemes usually protect an implementation against first-order attacks. Over the past years several higher-order side-channel attacks were proposed and demonstrated successfully against many well-known cryptographic algorithms. Higher order masking schemes are useful to protect a cryptographic algorithm against such attacks.</p>
+
+    <p class="text-gray-300">In a higher order masking scheme a sensitive variable (e.g. variables involving secret keys) is split into  <span class="math">t + 1</span>  shares where  <span class="math">t</span>  is known as the order of masking. It</p>
+
+    <p class="text-gray-300">has been shown that the complexity of side-channel attacks increases exponentially with the masking order.</p>
+
+    <p class="text-gray-300">In FSE 2012 a generic higher order masking scheme <em>[CGP^{+}12]</em> was proposed by Carlet, Goubin, Prouff, Quisquater and Rivain. For masking an S-box using CGPQR scheme we need to consider the polynomial corresponding to the S-box, which can be easily computed from the S-box table using Lagrange’s theorem in a field <span class="math">\\mathbb{F}_{2^{n}}</span>. In CGPQR masking scheme evaluation of this polynomial is protected against higher order attacks. For example, let <span class="math">x</span> be a secret variable for which we evaluate a function <span class="math">f(x)</span>. Let <span class="math">x_{0},x_{1},\\ldots,x_{t}</span> are the <span class="math">t+1</span> shares corresponding to this variable such that <span class="math">x=\\bigoplus_{i=0}^{t}x_{i}</span>. Any linear function <span class="math">\\ell(x)</span> is easy to mask since <span class="math">\\ell(x)=\\ell(x_{0})\\oplus\\ldots\\oplus\\ell(x_{t})</span>. However masking a non-linear function is not as easy as linear or affine functions.</p>
+
+    <p class="text-gray-300">The operations necessary for evaluating a polynomial in <span class="math">\\mathbb{F}_{2^{n}}</span> are addition, multiplication by a scalar, squaring and regular multiplication. For <span class="math">t</span>th order masking any affine and linear operation in <span class="math">\\mathbb{F}_{2^{n}}</span> requires <span class="math">\\mathcal{O}(t)</span> logical operations, whereas regular multiplication requires <span class="math">\\mathcal{O}(t^{2})</span> logical operations. Hence regular multiplication is significant operation in CGPQR masking scheme and its efficiency can be increased by minimizing the number of regular multiplications in a field for a cryptographic algorithm.</p>
+
+    <p class="text-gray-300">MiMC is constructed using a monomial <span class="math">x^{3}</span> in <span class="math">\\mathbb{F}_{2^{n}}</span>. Evaluation of this monomial in each round requires only one multiplication and hence is optimized for CGPQR higher order masking scheme.</p>
+
+    <h2 id="sec-36" class="text-2xl font-bold">7 Conclusions</h2>
+
+    <p class="text-gray-300">We have reconsidered a 20-year old cipher design idea, given a thorough security analysis, and demonstrated that it can be very competitive in emerging new applications of symmetric cryptography: SNARKs. It might seem that the usefulness of the design is limited to this setting, as the number of rounds is high compared to other more “traditional” designs for symmetric primitives. However there is evidence that the opposite is true, which was recently discovered in a follow-up work <em>[GRR^{+}16]</em>. Due to its very simple design and despite the high number of rounds, it also turned out to be very competitive in a very different application setting: The currently fastest known MPC protocols with security against active adversaries. This clearly shows that there is a good use-case for designs which work natively in GF(p), and we hope that MiMC can inspire more design and cryptanalysis in this direction.</p>
+
+    <h4 id="sec-37" class="text-lg font-semibold mt-6">Acknowledgements</h4>
+
+    <p class="text-gray-300">We thank Alessandro Chiesa, Eran Tromer and Madars Virza for helpful discussions on SNARKs. The work in this paper has been partially supported by the Austrian Science Fund (project P26494-N15) and by the EU H2020 project Prismacloud (grant agreement nr. 644962). Albrecht was supported by EPSRC grant EP/L018543/1 “Multilinear Maps in Cryptography”.</p>
+
+    <p class="text-gray-300">##</p>
+
+    <p class="text-gray-300">References</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>[AÅBL12] Mohamed Ahmed Abdelraheem, Martin Ågren, Peter Beelen, and Gregor Leander. On the distribution of linear biases: Three instructive examples. In Reihaneh Safavi-Naini and Ran Canetti, editors, CRYPTO 2012, volume 7417 of LNCS, pages 50–67. Springer, Heidelberg, August 2012.</li>
+
+      <li>[ADL^{+}08] Yuriy Arbitman, Gil Dogon, Vadim Lyubashevsky, Daniele Micciancio, Chris Peikert, and Alon Rosen. Swifftx: A proposal for the sha-3 standard. Submission to NIST, 2008.</li>
+
+      <li>[ÅHJM11] Martin Ågren, Martin Hell, Thomas Johansson, and Willi Meier. Grain-128a: a new version of grain-128 with optional authentication. IJWMC, 5(1):48–59, 2011.</li>
+
+      <li>[Ajt96] Miklós Ajtai. Generating hard instances of lattice problems (extended abstract). In 28th ACM STOC, pages 99–108. ACM Press, May 1996.</li>
+
+      <li>[ARS^{+}15] Martin R. Albrecht, Christian Rechberger, Thomas Schneider, Tyge Tiessen, and Michael Zohner. Ciphers for MPC and FHE. In Elisabeth Oswald and Marc Fischlin, editors, Advances in Cryptology - EUROCRYPT 2015, volume 9056 of Lecture Notes in Computer Science, pages 430–454. Springer, 2015.</li>
+
+      <li>[ARS^{+}16] Martin R. Albrecht, Christian Rechberger, Thomas Schneider, Tyge Tiessen, and Michael Zohner. Ciphers for MPC and FHE. Cryptology ePrint Archive, Report 2016, 2016. http://eprint.iacr.org/.</li>
+
+      <li>[BBL^{+}15] Abhishek Banerjee, Hai Brenner, Gaëtan Leurent, Chris Peikert, and Alon Rosen. SPRING: Fast pseudorandom functions from rounded ring products. In Carlos Cid and Christian Rechberger, editors, FSE 2014, volume 8540 of LNCS, pages 38–57. Springer, Heidelberg, March 2015.</li>
+
+      <li>[BCG^{+}14] Eli Ben-Sasson, Alessandro Chiesa, Christina Garman, Matthew Green, Ian Miers, Eran Tromer, and Madars Virza. Zerocash: Decentralized Anonymous Payments from Bitcoin. In 2014 IEEE Symposium on Security and Privacy, SP 2014, Berkeley, CA, USA, May 18-21, 2014, pages 459–474. IEEE Computer Society, 2014.</li>
+
+      <li>[BDPA08] Guido Bertoni, Joan Daemen, Michael Peeters, and Gilles Van Assche. On the indifferentiability of the sponge construction. In Nigel P. Smart, editor, Advances in Cryptology - EUROCRYPT 2008, volume 4965 of Lecture Notes in Computer Science, pages 181–197. Springer, 2008.</li>
+
+      <li>[BFS14] Magali Bardet, Jean-Charles Faugère, and Bruno Salvy. On the Complexity of the F5 Gröbner basis Algorithm. Journal of Symbolic Computation, pages 1–24, September 2014. 24 pages.</li>
+
+      <li>[BKW93] T. Becker, H. Kredel, and V. Weispfenning. Gröbner bases: a computational approach to commutative algebra. Springer-Verlag, 1993.</li>
+
+      <li>[BMP13] Joan Boyar, Philip Matthews, and René Peralta. Logic minimization techniques with applications to cryptology. Journal of Cryptology, 26(2):280–312, 2013.</li>
+
+      <li>[BP12] Joan Boyar and René Peralta. A small depth-16 circuit for the AES S-box. In Information Security and Privacy Conference (SEC), volume 376 of IFIP Advances in Information and Communication Technology, pages 287–298. Springer, 2012.</li>
+
+      <li>[BSCG^{+}13] Eli Ben-Sasson, Alessandro Chiesa, Daniel Genkin, Eran Tromer, and Madars Virza. SNARKs for C: Verifying program executions succinctly and in zero knowledge. In Ran Canetti and Juan A. Garay, editors,</li>
+
+    </ul>
+
+    <p class="text-gray-300">CRYPTO 2013, Part II, volume 8043 of LNCS, pages 90–108. Springer, Heidelberg, August 2013.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>[BSS^{+}13] Ray Beaulieu, Douglas Shors, Jason Smith, Stefan Treatman-Clark, Bryan Weeks, and Louis Wingers. The SIMON and SPECK Families of Lightweight Block Ciphers. Cryptology ePrint Archive, Report 2013/404, 2013. http://eprint.iacr.org/2013/404.</li>
+
+      <li>[Can97] Anne Canteaut. Differential cryptanalysis of Feistel ciphers and differentially <span class="math">\\delta</span>-uniform mappings. In Workshop on Selected Areas in Cryptography, SAC ’97, Workshop Record, pages 172–184, 1997.</li>
+
+      <li>[CCF^{+}16] Anne Canteaut, Sergiu Carpov, Caroline Fontaine, Tancrède Lepoint, María Naya-Plasencia, Pascal Paillier, and Renaud Sirdey. Stream ciphers: A practical solution for efficient homomorphic-ciphertext compression. In Thomas Peyrin, editor, Fast Software Encryption - 23rd International Conference, FSE 2016, Bochum, Germany, March 20-23, 2016, Revised Selected Papers, volume 9783 of Lecture Notes in Computer Science, pages 313–333. Springer, 2016.</li>
+
+      <li>[CFH^{+}15] Craig Costello, Cédric Fournet, Jon Howell, Markulf Kohlweiss, Benjamin Kreuter, Michael Naehrig, Bryan Parno, and Samee Zahur. Geppetto: Versatile verifiable computation. In 2015 IEEE Symposium on Security and Privacy, SP 2015, pages 253–270. IEEE Computer Society, 2015.</li>
+
+      <li>[CGP^{+}12] Claude Carlet, Louis Goubin, Emmanuel Prouff, Michaël Quisquater, and Matthieu Rivain. Higher-order masking schemes for s-boxes. In Anne Canteaut, editor, Fast Software Encryption - 19th International Workshop, FSE 2012, volume 7549 of Lecture Notes in Computer Science, pages 366–384. Springer, 2012.</li>
+
+      <li>[CP08] Christophe De Cannière and Bart Preneel. Trivium. In Matthew J. B. Robshaw and Olivier Billet, editors, New Stream Cipher Designs - The eSTREAM Finalists, volume 4986 of Lecture Notes in Computer Science, pages 244–266. Springer, 2008.</li>
+
+      <li>[DPVAR00] Joan Daemen, Michaël Peeters, Gilles Van Assche, and Vincent Rijmen. Nessie proposal: Noekeon. In First Open NESSIE Workshop, 2000.</li>
+
+      <li>[DWBV^{+}96] Erik De Win, Antoon Bosselaers, Servaas Vandenberghe, Peter De Gersem, and Joos Vandewalle. A fast software implementation for arithmetic operations in gf(2n). In Kwangjo Kim and Tsutomu Matsumoto, editors, Advances in Cryptology — ASIACRYPT ’96, volume 1163 of Lecture Notes in Computer Science, pages 65–76. Springer Berlin Heidelberg, 1996.</li>
+
+      <li>[ENI13] ENISA. Algorithms, key sizes and parameters report – 2013 recommendations. Technical report, European Union Agency for Network and Information Security, October 2013.</li>
+
+      <li>[GLSV14] Vicente Grosso, Gaëtan Leurent, François-Xavier Standaert, and Kerem Varici. LS-designs: Bitslice encryption for efficient masked software implementations. In Fast Software Encryption (FSE), LNCS. Springer, 2014. To appear.</li>
+
+      <li>[GP97] Jorge Guajardo and Christof Paar. Efficient algorithms for elliptic curve cryptosystems. In Jr. Kaliski, BurtonS., editor, Advances in Cryptology — CRYPTO ’97, volume 1294 of Lecture Notes in Computer Science, pages 342–356. Springer Berlin Heidelberg, 1997.</li>
+
+      <li>[GRR^{+}16] Lorenzo Grassi, Christian Rechberger, Dragos Rotaru, Peter Scholl, and Nigel P. Smart. MPC-friendly symmetric key primitives. In Edgar R.</li>
+
+    </ul>
+
+    <p class="text-gray-300">Weippl, Stefan Katzenbeisser, Christopher Kruegel, Andrew C. Myers, and Shai Halevi, editors, Proceedings of the 2016 ACM SIGSAC Conference on Computer and Communications Security, Vienna, Austria, October 24-28, 2016, pages 430–443. ACM, 2016.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>[Has00] M. Anwarul Hasan. Look-up table-based large finite field multiplication in memory constrained cryptosystems. IEEE Trans. Comput., 49(7):749–758, July 2000.</li>
+
+      <li>[HMV93] Greg Harper, Alfred Menezes, and Scott Vanstone. Public-key cryptosystems with very small key lengths. In RainerA. Rueppel, editor, Advances in Cryptology — EUROCRYPT’ 92, volume 658 of Lecture Notes in Computer Science, pages 163–173. Springer Berlin Heidelberg, 1993.</li>
+
+      <li>[JK97] Thomas Jakobsen and Lars R. Knudsen. The interpolation attack on block ciphers. In Eli Biham, editor, Fast Software Encryption, volume 1267 of Lecture Notes in Computer Science, pages 28–40. Springer Berlin Heidelberg, 1997.</li>
+
+      <li>[KA98] Cetin K. Koc and Tolga Acar. Montgomery Multiplication in GF(2k). Designs, Codes and Cryptography, 14(1):57–69, 1998.</li>
+
+      <li>[KN95] Lars R. Knudsen and Kaisa Nyberg. Provable security against a differential attack. Journal of Cryptology, 8(1):27–37, 1995.</li>
+
+      <li>[KR11] Lars R. Knudsen and Matthew Robshaw. The Block Cipher Companion. Information Security and Cryptography. Springer, 2011.</li>
+
+      <li>[Lab] SCIPR Lab. <code>libsnark. https://github.com/scipr-lab/libsnark</code>.</li>
+
+      <li>[LMPR08] Vadim Lyubashevsky, Daniele Micciancio, Chris Peikert, and Alon Rosen. SWIFFT: A modest proposal for FFT hashing. In Kaisa Nyberg, editor, FSE 2008, volume 5086 of LNCS, pages 54–72. Springer, Heidelberg, February 2008.</li>
+
+      <li>[LMS13] Romain Lebreton, Esmaeil Mehrabi, and Éric Schost. On the complexity of solving bivariate systems: the case of non-singular solutions. In Manuel Kauers, editor, International Symposium on Symbolic and Algebraic Computation, ISSAC’13, Boston, MA, USA, June 26-29, 2013, pages 251–258. ACM, 2013.</li>
+
+      <li>[MJSC16] Pierrick Méaux, Anthony Journault, François-Xavier Standaert, and Claude Carlet. Towards Stream Ciphers for Efficient FHE with Low-Noise Ciphertexts. In Marc Fischlin and Jean-Sébastien Coron, editors, EUROCRYPT 2016, volume 9665 of Lecture Notes in Computer Science, pages 311–343. Springer, 2016.</li>
+
+      <li>[MVO96] Alfred J. Menezes, Scott A. Vanstone, and Paul C. Van Oorschot. Handbook of Applied Cryptography. CRC Press, Inc., Boca Raton, FL, USA, 1st edition, 1996.</li>
+
+      <li>[NIS14] NIST. DRAFT FIPS PUB 202, SHA-3 Standard: Permutation-Based Hash and Extendable-Output Functions, 2014.</li>
+
+      <li>[NR97] Moni Naor and Omer Reingold. Number-theoretic constructions of efficient pseudo-random functions. In 38th Annual Symposium on Foundations of Computer Science, FOCS ’97, pages 458–467. IEEE Computer Society, 1997.</li>
+
+      <li>[Nyb94] Kaisa Nyberg. Differentially uniform mappings for cryptography. In Tor Helleseth, editor, Advances in Cryptology — EUROCRYPT ’93, volume 765 of Lecture Notes in Computer Science, pages 55–64. Springer Berlin Heidelberg, 1994.</li>
+
+    </ul>
+
+    <p class="text-gray-300">[PH78] Stephen C. Pohlig and Martin E. Hellman. An improved algorithm for computing logarithms over gf(p) and its cryptographic significance (corresp.). IEEE Transactions on Information Theory, 24(1):106–110, 1978.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>[PHGR16] Bryan Parno, Jon Howell, Craig Gentry, and Mariana Raykova. Pinocchio: nearly practical verifiable computation. Commun. ACM, 59(2):103–112, 2016.</li>
+
+      <li>[Sho] V. Shoup. Number theory library 5.5.2 (ntl) for c++. http://www.shoup.net/ntl/.</li>
+
+      <li>[Sto85] H-J Stoss. The complexity of evaluating interpolation polynomials. Theoretical computer science, 41:319–323, 1985.</li>
+
+    </ul>
+
+    <p class="text-gray-300">A SNARK prover algorithm</p>
+
+    <p class="text-gray-300">Here we give a brief description of the parameters chosen to implement the prover algorithm for MiMCHash-256 using the MiMC-1025/1025 permutation with a fixed key. We also briefly describe a part the prover algorithm for MiMC in a SNARK setting which requires polynomial interpolation. For a more detailed description of the SNARK algorithm we refer the readers to <em>[BSCG^{+}13]</em>.</p>
+
+    <h3 id="sec-38" class="text-xl font-semibold mt-8">A.1 Complexity of the prover algorithm</h3>
+
+    <p class="text-gray-300">Let <span class="math">S</span> be the system of rank-1 quadratic constraints as described in Definition 2 of the article with the tuples <span class="math">(A_{i},B_{i},C_{i})\\in\\mathbb{F}^{N^{\\prime}+1}</span> for <span class="math">i\\in[N]</span>. Fix an arbitrary subset <span class="math">\\mathcal{X}=\\{\\alpha_{1},\\alpha_{2},\\ldots,\\alpha_{N}\\}</span> of <span class="math">\\mathbb{F}</span> such that <span class="math">\\alpha_{i}=\\omega^{i-1}</span> for <span class="math">i\\in[N]</span> and <span class="math">\\omega</span> is the <span class="math">N</span> th root of unity. Given an input <span class="math">x\\in\\mathbb{F}^{m}</span> and witness <span class="math">w\\in\\mathbb{F}^{N^{\\prime}}</span> such that <span class="math">(x,w)\\in\\mathcal{R}</span>. The prover algorithm performs the following steps :</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Choose <span class="math">\\delta_{1},\\delta_{2},\\delta_{3}</span> independently at random from the field <span class="math">\\mathbb{F}</span></li>
+
+      <li>Construct the polynomial</li>
+
+    </ol>
+
+    <p class="text-gray-300"><span class="math">Q(z):=\\frac{F(z)G(z)-H(z)}{U(z)}</span></p>
+
+    <p class="text-gray-300">where <span class="math">U(z):=z^{N}-1</span> and <span class="math">F,G,H</span> are univariate polynomials of degree <span class="math">N</span> defined as</p>
+
+    <p class="text-gray-300"><span class="math">F(z)</span> <span class="math">=\\underbrace{F_{0}(z)+\\sum_{i=1}^{N^{\\prime}}w_{i}F_{i}(z)}_{F^{\\prime}(z)}+\\delta_{1}U(z)</span> <span class="math">G(z)</span> <span class="math">=G_{0}(z)+\\sum_{i=1}^{N^{\\prime}}w_{i}G_{i}(z)+\\delta_{2}U(z)</span> <span class="math">H(z)</span> <span class="math">=H_{0}(z)+\\sum_{i=1}^{N^{\\prime}}w_{i}H_{i}(z)+\\delta_{3}U(z)</span></p>
+
+    <p class="text-gray-300">Here <span class="math">F_{i},G_{i},H_{i}:\\mathcal{X}\\rightarrow\\mathbb{F}</span> are the Lagrange basis functions for the corresponding polynomials satisfying the following conditions</p>
+
+    <p class="text-gray-300"><span class="math">F_{i}(\\alpha_{j})=A_{j}(i),G_{i}(\\alpha_{j})=B_{j}(i),H_{i}(\\alpha_{j})=C_{j}(i)</span></p>
+
+    <p class="text-gray-300">for each <span class="math">i\\in\\{0,1,\\ldots,N^{\\prime}\\}</span> and <span class="math">j\\in[N]</span>. Note that for any input <span class="math">x</span> and witness <span class="math">w</span> if <span class="math">(x,w)\\in\\mathcal{R}</span> then <span class="math">U(z)</span> divides <span class="math">F(z)G(z)-H(z)</span>.</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Output the vector <span class="math">(1,\\delta_{1},\\delta_{2},\\delta_{3},w,q)</span> such that <span class="math">q=(q_{0},q_{1},\\ldots q_{N})</span> represents the polynomial <span class="math">Q</span></li>
+
+    </ol>
+
+    <p class="text-gray-300">Note that each of the polynomials <span class="math">F^{\\prime},G^{\\prime},H^{\\prime}</span> (hence <span class="math">F,G,H</span>) can be computed using an inverse FFT which has a complexity <span class="math">O(N\\log N)</span>. Next a multiplicative coset <span class="math">\\mathcal{Y}:=\\gamma\\mathcal{X}</span> of <span class="math">\\mathcal{X}=\\{\\alpha_{1},\\ldots\\alpha_{N}\\}</span> is chosen such that <span class="math">\\gamma\\in\\mathbb{F}-\\mathcal{X}</span>. The polynomial <span class="math">Q(z)</span> is computed in two steps</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Evaluate <span class="math">Q^{\\prime}(z):=\\frac{F^{\\prime}(z)G^{\\prime}(z)-H^{\\prime}(z)}{U(z)}</span> on <span class="math">\\mathcal{Y}</span> point-by-point using the evaluations of <span class="math">F^{\\prime},G^{\\prime},H^{\\prime},U</span> on <span class="math">\\mathcal{Y}</span></li>
+
+      <li>Compute <span class="math">Q^{\\prime}(z)</span> using inverse FFT and compute <span class="math">Q(z):=Q^{\\prime}(z)+\\delta_{2}F^{\\prime}(z)+\\delta_{2}G^{\\prime}(z)+\\delta_{1}\\delta_{2}U(z)-\\delta_{3}</span>.</li>
+
+    </ul>
+
+    <p class="text-gray-300">The first step out of the above two takes <span class="math">O(N)</span> field operations and the inverse FFT has the complexity <span class="math">O(N\\log N)</span>.</p>
+
+    <h3 id="sec-39" class="text-xl font-semibold mt-8">A.2 Parameters for MiMCHash-256</h3>
+
+    <h4 id="sec-40" class="text-lg font-semibold mt-6">Over <span class="math">\\mathbb{F}_{2^{n}}</span></h4>
+
+    <p class="text-gray-300">We describe the parameter choices for <span class="math">n=1025</span>. The hash function constructed over this particular field promises the same level of security as SHA-256. For processing a single block we use the MiMC-1025/1025 over <span class="math">\\mathbb{F}_{2^{1025}}</span>. The two constraints in each round of MiMC permutation can be combined to obtain a single rank one quadratic constraint. Hence we get approximately <span class="math">1025/\\log(3)\\approx 646</span> constraints from the permutation together plus an additional constraint for compression function making the total number of constraints 647. Note that each round introduces two variables in the constraints hence the number of witness is 1293 where <span class="math">w_{1}=x\\in\\mathbb{F}_{2^{1025}}</span> is the input to the hash function and <span class="math">w\\in\\left(\\mathbb{F}_{2^{1025}}\\right)^{1293}</span>.</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">In the prover algorithm the number of constraints <span class="math">N</span> should be such that the principal <span class="math">N</span>-th root exists in <span class="math">\\mathbb{F}_{2^{1025}}</span>. To satisfy this condition we choose <span class="math">N=1801</span> (since 1801 divides $</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mathbb{F}_{2^{1025}}^{*}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"><span class="math">). This is the smallest number which divides the order of the multiplicative group corresponding to the finite field and also greater than 647. We add 1154 dummy constraints of the form </span>0.X_{i}=0<span class="math"> to make the total number of constraint 1801. Note that although the complexity of the prover algorithm depends on the number of constraints (or number of multiplications) for a specific algorithm the number of constraints may not be feasible choice for the FFT algorithm. In such case the complexity actually depends on the best possible choice of the multiplicative subgroup of </span>\\mathbb{F}_{2^{n}}^{*}$.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">This is not only applicable to MiMC or MiMCHash but a feature of the SNARK algorithm. In <em>[BSCG^{+}13]</em> a finite field <span class="math">\\mathbb{F}_{p}</span> is chosen in such way that <span class="math">p-1</span> is of the form <span class="math">2^{t}\\cdot q</span>.</p>
+
+    <h4 id="sec-41" class="text-lg font-semibold mt-6">Over <span class="math">\\mathbb{F}_{p}</span></h4>
+
+    <p class="text-gray-300">When we use MiMC-<span class="math">p/p</span> over <span class="math">\\mathbb{F}_{p}</span> for some prime <span class="math">p</span> (with 1025 or more bits) to construct the hash function we have the option of choosing <span class="math">p</span> such that <span class="math">p-1=2^{l}\\cdot q</span>. However this yields a very large prime number <span class="math">p</span>. For <span class="math">\\approx 1025</span> bit security of the keyed permutation it is enough to have <span class="math">1025/\\log(3)\\approx 646</span> rounds. Hence the number of witness will be 1293 in this case for processing a single block. Instead of choosing such large prime we can choose <span class="math">p</span> such that <span class="math">p-1</span> has a prime factor closed to and greater than 1293.</p>
+
+    <p class="text-gray-300">In order to find out how the performance of the implementation changes with different-sized multipliers we performed a number of experiments which we detail here. The result is that the runtime grows very slowly, i.e. when moving from a 100-bit multiplication to a 800-bit multiplication the runtime less than doubles.</p>
+
+    <p class="text-gray-300">We experimented with different block sizes of the MiMC permutation in the SNARK setting, and always adjusted the required number of rounds accordingly. The time taken by the SNARK implementation for processing one block of input for different block sizes (and hence round numbers) is shown in Figure 2.</p>
+
+    <p class="text-gray-300">!<a href="img-1.jpeg">img-1.jpeg</a> Fig. 2: Time vs. Blocksize for a SNARK implementation of MiMC</p>
+
+    <p class="text-gray-300">The increment of time with the block size (and hence round numbers) for SNARK implementation of MiMC appears to be almost linear. We also experimented by fixing the number of rounds of MiMC for different block sizes to a constant value, and observed the time taken to process a single block by the SNARK implementation. The result of this experiment is given in Figure 3 and shows that there is only a very slow increase in the runtime with increased block size (and hence size of the multiplier). The implementations in  <span class="math">\\mathrm{C}++</span>  can be found on https://github.com/byt3bit/mimc_snark.git.</p>
+
+    <p class="text-gray-300">Remark 2. For LowMC, in the constraint generation routine we only store the proper rank-1 constraints which are produced from the multiplications, as de</p>
+
+    <p class="text-gray-300">scribed in definition 2. Note that the additions from the linear layer can be viewed as special rank-1 constraints where  <span class="math">B_{i} = (1,0,\\dots,0)</span>  for the  <span class="math">i</span> th constraint. We do not store these constraints. However, during the witness generation process these additions contribute to the complexity of the SNARK algorithm. The rank-1 constraints are necessary for the prover algorithm (see appendix E in [BSCG+13]) in SNARK. Saving the constraints corresponding to the linear layers of the LowMC will only increase the constraint generation time in Table 3. We point out that this issue does not arise for MiMC in the SNARK setting.</p>
+
+    <p class="text-gray-300">!<a href="img-2.jpeg">img-2.jpeg</a> Fig. 3: Time vs. Blocksize, where the number of rounds is fixed to 700 for all block sizes</p>`;
+---
+
+<BaseLayout title="MiMC: Efficient Encryption and Cryptographic Hashing with Mi... (2016/492)">
+  <article class="max-w-4xl mx-auto article-prose">
+    <nav class="mb-8">
+      <a href="/papers" class="text-blue-400 hover:text-blue-300">
+        &larr; Back to Papers
+      </a>
+    </nav>
+
+    <header class="mb-12">
+      <h1 class="text-3xl font-bold mb-4"
+        set:html={TITLE_HTML} />
+      <p class="text-gray-400 mb-2"
+        set:html={AUTHORS_HTML} />
+      <p class="text-gray-500 text-sm mb-4">
+        2016 &middot; eprint 2016/492
+      </p>
+      <div class="flex gap-4 text-sm">
+        <a
+          href={EPRINT_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          class="text-blue-400 hover:text-blue-300"
+        >
+          Paper (eprint) &rarr;
+        </a>
+      </div>
+      <p class="mt-4 text-xs text-gray-500">
+        All content below belongs to the original authors. This page
+        reproduces the paper for educational purposes. Always
+        <a
+          href={EPRINT_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          class="text-blue-400 hover:text-blue-300"
+        >cite the original</a>.
+      </p>
+      <p class="mt-1 text-xs text-gray-600">
+        Converted with: {CRAWLER} &middot; {CONVERTED_DATE}
+      </p>
+    </header>
+
+    <Fragment set:html={CONTENT} />
+
+  </article>
+</BaseLayout>

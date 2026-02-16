@@ -1,0 +1,2021 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+
+const EPRINT_URL = 'https://eprint.iacr.org/2023/552';
+const CRAWLER = 'mistral';
+const CONVERTED_DATE = '2026-02-16';
+const TITLE_HTML = 'Customizable constraint systems for succinct arguments';
+const AUTHORS_HTML = 'Srinath Setty, Justin Thaler, Riad Wahby';
+
+const CONTENT = `    <p class="text-gray-300">Srinath Setty Justin Thaler Riad Wahby</p>
+
+    <h2 id="sec-2" class="text-2xl font-bold">Abstract</h2>
+
+    <p class="text-gray-300">This paper introduces <em>customizable constraint system (CCS)</em>, a generalization of R1CS that can simultaneously capture R1CS, Plonkish, and AIR without overheads. Unlike existing descriptions of Plonkish and AIR, CCS is not tied to any particular proof system. Furthermore, we observe that the linear-time polynomial IOP for R1CS in Spartan (CRYPTO 20) extends easily to CCS, and when combined with a polynomial commitment scheme, it yields a family of SNARKs for CCS, which we refer to as <em>SuperSpartan</em>. SuperSpartan supports high-degree constraints without its prover incurring cryptographic costs that scale with the degree of constraints (only field operations scale with the constraint degree). Moreover, as in Spartan, it does not employ superlinear-time and hard-to-distribute operations such as FFTs. Similar properties were achieved for Plonkish by HyperPlonk (EUROCRYPT 23) via a different route. However, it is unclear how to prove CCS instances (or even R1CS instances) with HyperPlonk (or Plonk itself), without overheads. Furthermore, unlike HyperPlonk, SuperSpartan can prove uniform instances of CCS (including AIR) without requiring a linear-time preprocessing for the verifier, and for those instances, SuperSpartan provides “free” addition gates.</p>
+
+    <p class="text-gray-300">SuperSpartan for AIR is the first SNARK for AIR with a linear-time prover, transparent and sublinear-time pre-processing, polylogarithmic proof size, and plausible post-quantum security. In particular, SuperSpartan for AIR provides a faster prover than existing transparent SNARKs for AIR (which are sometimes referred to as STARKs).</p>
+
+    <h2 id="sec-3" class="text-2xl font-bold">1 Introduction</h2>
+
+    <p class="text-gray-300">A succinct non-interactive argument of knowledge (SNARK) <em>[x14, x16, x11, x2]</em> allows an untrusted prover <span class="math">\\mathcal{P}</span> to prove the knowledge of a witness <span class="math">w</span> satisfying some property. For example, <span class="math">w</span> could be a pre-image of a designated value <span class="math">y</span> of a cryptographic hash function <span class="math">h</span>, i.e., a <span class="math">w</span> such that <span class="math">h(w)=y</span>. A trivial proof is for <span class="math">\\mathcal{P}</span> to send <span class="math">w</span> to the verifier <span class="math">\\mathcal{V}</span>, who directly checks that <span class="math">w</span> satisfies the claimed property. A SNARK achieves the same, but with better verification costs (and proof sizes). Succinct means that verifying a proof is exponentially faster than checking the witness directly (this also implies that proofs are exponentially smaller than the size of the statement proven).</p>
+
+    <p class="text-gray-300">When SNARKs are used in practice, they are typically applied to prove the correct execution of programs (e.g., verifiable computation), possibly in zero-knowledge. Furthermore, SNARKs are built using protocols that perform certain probabilistic checks, so to apply SNARKs to program executions, one must express the execution of a program in a specific form that is amenable to probabilistic checking (e.g., as arithmetic circuits). Many deployed systems include circuits that are written and optimized by hand <em>[x10]</em>. There is also a long line of academic research <em>[SVP+12, SBV+13, x15, BFR+13, WSR+15, SAGL18, x17, x18]</em> and industrial work (e.g., zokrates, circom, noir, zinc, cairo) to build automated tools that transform programs expressed in a high level languages into circuits.</p>
+
+    <p class="text-gray-300">There are several generalizations of arithmetic circuits, which we refer to as <em>intermediate representations</em> (IRs), that are in use today: rank-one constraint system (R1CS), algebraic intermediate representation (AIR), and Plonkish. We provide more precise definitions of these generalizations of arithmetic circuits in Section 2. Of</p>
+
+    <p class="text-gray-300">*Microsoft Research</p>
+
+    <p class="text-gray-300">†a16z crypto research and Georgetown University</p>
+
+    <p class="text-gray-300">‡Carnegie Mellon University</p>
+
+    <p class="text-gray-300">†Plonkish is sometimes also referred to as constraint systems with "custom gates" or as RAPs (short for randomized AIR with pre-processing) or as TurboPLONK/UltraPLONK.</p>
+
+    <p class="text-gray-300">these three generalizations of arithmetic circuits, many practitioners apparently prefer Plonkish. Unlike AIR, it does not require circuits to be uniform, and unlike R1CS, it supports constraints with degree larger than two. As a result of this expressiveness, Plonkish can represent certain program executions more succinctly than R1CS or AIR. On the other hand, the prover may incur a higher per-gate (or per-constraint) cost to prove Plonkish. For many applications of interest, savings from reduced circuit sizes might outweigh the prover’s cost of supporting more expressive gates.</p>
+
+    <p class="text-gray-300">As a result, Plonkish is often considered to be substantially different from, and superior to, R1CS. Furthermore, it is widely believed that, to support Plonkish, one must build on the the Plonk proof system <em>[x10]</em>, though one may change the underlying building blocks for better efficiency. Indeed, this is the approach taken in recent work called HyperPlonk <em>[x4]</em>. As elaborated upon later, HyperPlonk closely adheres to the proof system underlying Plonk, but it replaces “gadgets” for “zero checks”, “permutation checks”, and “product checks” based on univariate polynomials with equivalent gadgets based on multilinear polynomials <em>[x21, x23]</em>. The motivation for this replacement is that these gadgets based on multilinear polynomials employ the <em>sum-check protocol</em> <em>[x17]</em>, which has a unique cost profile for the prover (e.g., it can be implemented with a linear-time prover <em>[x24, x25]</em>).</p>
+
+    <h3 id="sec-4" class="text-xl font-semibold mt-8">1.1 Our contributions</h3>
+
+    <h5 id="sec-5" class="text-base font-semibold mt-4">CCS.</h5>
+
+    <p class="text-gray-300">We introduce a new generalization of R1CS that we call <em>Customizable Constraint Systems</em> (CCS). We show that CCS simultaneously generalizes Plonkish, AIR, and R1CS, in the sense that there are essentially costless reductions from instances of each of these IRs to equivalent CCS instances. In Appendix B, we define a natural extension of CCS that additionally allows lookup operations against read-only tables/memories.</p>
+
+    <p class="text-gray-300">Prior descriptions of Plonkish are typically closely tied to how the Plonk proof system internally works (e.g., “Plonkish circuits” are typically described in terms of gate checks, copy checks, permutation checks, etc. and the Plonk proof system is a set of gadgets to prove these types of checks). In contrast, the description of CCS is clearly separated from how it actually gets proven. Indeed, similar to R1CS itself, our definition of CCS involves only matrix-vector products, Hadamard (i.e., entry-wise) vector products, and summation. We hope that this clarifies that Plonkish, like AIR, R1CS, and circuits themselves, is an intermediate representation that can be efficiently proven by many different proof systems, not only variants of Plonk.</p>
+
+    <p class="text-gray-300">Similarly, descriptions of AIR satisfiability (e.g., <em>[x1, x26, x27]</em>) are often tied to the proof systems used to prove satisfiability of the AIR, and thereby explicitly involve cyclic subgroups of a finite field, cosets thereof, univariate polynomials, etc. We give a definition of AIR that involves only matrix-vector products, Hadamard products, and summation, clearly separating the definition of the AIR from the proof system used to prove its satisfiability.</p>
+
+    <p class="text-gray-300">We hope that our definitions of these IRs and the associated transformations to CCS further clarifies the relationship between Plonkish, AIR, and R1CS.</p>
+
+    <h5 id="sec-6" class="text-base font-semibold mt-4">SNARKs for CCS.</h5>
+
+    <p class="text-gray-300">We describe SNARKs for CCS. Our technical contribution amounts to observing that several polynomial IOPs for CCS are essentially already known from prior polynomial IOPs for R1CS, and when combined with a polynomial commitment scheme, they yield SNARKs for R1CS. In particular, we describe generalizations of existing polynomial IOPs for R1CS, namely Spartan <em>[x25]</em> and Marlin <em>[CHM^{+}20]</em>. We refer to these generalizations as SuperSpartan and SuperMarlin respectively. Of these, we find SuperSpartan to achieve a particularly compelling cost profile: the prover’s cryptographic costs do not scale with the degree of constraints, and as in Spartan, it does not employ superlinear-time and hard-to-parallelize operations such as FFTs. As noted above, a similar cost profile was recently achieved by HyperPlonk <em>[x4]</em> via a different route.</p>
+
+    <h6 id="sec-7" class="text-base font-medium mt-4">Remark 1.</h6>
+
+    <p class="text-gray-300">While we show that known polynomial IOPs for R1CS (Spartan’s and Marlin’s) extend easily to handle CCS, it is not clear how to extend—without asymptotic overheads—known polynomial IOPs for Plonkish (Plonk’s and Hyperplonk’s) to handle CCS (or even R1CS!). The primary issue is that Plonk and HyperPlonk are restricted to a specific type of linear constraints (which are sometimes referred to as “copy constraints”) that can only enforce equality between a pair of values in the satisfying assignment. In contrast,</p>
+
+    <p class="text-gray-300">both Spartan and Marlin have machinery (via a so-called <em>sparse polynomial commitment</em> scheme, see, e.g., <em>[x23, Sections 10.3.2 and 16.2]</em> for an exposition) to handle general linear constraints. Furthermore, when SuperSpartan is applied to uniform instances of CCS, including CCS instances arising from AIR and data-parallel variants of CCS (see §5), SuperSpartan provides “free” addition gates (i.e., the prover’s cryptographic work is independent of the number of addition operations in the CCS instance), a property analogous to that enjoyed by prior SNARKs for R1CS that require a per-circuit trusted setup <em>[x11, x13]</em>.</p>
+
+    <h6 id="sec-8" class="text-base font-medium mt-4">Remark 2.</h6>
+
+    <p class="text-gray-300">Spartan’s and SuperSpartan’s polynomial IOP are <em>interactive oracle protocols</em> <em>[x3]</em>, a proof model that is a <em>predecessor</em> of and simpler than (polynomial) IOPs. In the interactive oracle protocol model of Babai et al. <em>[x3]</em>, the verifier has access to certain oracles from the prover, in the form of functions or polynomials, that it can query, but otherwise the prover and the verifier engage in an interactive proof (a closely related proof model is interactive PCPs <em>[x18]</em> where the prover’s oracle is a PCP). In particular, in an interactive oracle protocol, no oracles are sent during the interaction.</p>
+
+    <h4 id="sec-9" class="text-lg font-semibold mt-6">SNARKs for uniform CCS (including AIR).</h4>
+
+    <p class="text-gray-300">We also describe how SuperSpartan can prove “uniform” circuits (in particular, all AIR instances) while providing a succinct verifier without requiring any preprocessing. Achieving this relies on a more novel technical contribution: the verifier has to evaluate certain multilinear polynomials that capture the “wiring” of the circuit (or more generally, CCS instance) under consideration. Allowing a preprocessing phase would let the verifier commit to those polynomials in an offline phase and then have the prover prove their evaluations during the online phase. We observe that for instances of CCS arising from AIR, the verifier can accomplish this in logarithmic time <em>without</em> any preprocessing. Theorem 2 provides details. This ensures that SuperSpartan’s verifier runs in logarithmic time (plus the time necessary to verify a single evaluation proof from the polynomial commitment scheme). We thereby achieve SNARKs for AIR with a novel cost profile. Perhaps most notably, by instantiating SuperSpartan with the Orion’s polynomial commitment scheme, we obtain the first SNARK for AIR with a polylogarithmic time verifier and linear-time prover. If SuperSpartan uses the predecessor of Orion <em>[x29]</em>, called Brakedown <em>[GLS^{+}21]</em>, we obtain a <em>field-agnostic</em> SNARK with linear-time prover, but proofs that are of size square root in the size of the witness to the AIR instance.</p>
+
+    <p class="text-gray-300">Although HyperPlonk <em>[x5]</em> provides a SNARK for AIR, it inherently requires a circuit-dependent preprocessing phase of time linear in the circuit size, which is exponentially larger than the verifier time of SuperSpartan for AIR. This preprocessing algorithm is referred to as the <em>indexer</em> in HyperPlonk and in earlier works that make use of such preprocessing <em>[CHM^{+}20, x6]</em>.</p>
+
+    <h2 id="sec-10" class="text-2xl font-bold">2 Customizable constraint system (CCS)</h2>
+
+    <h4 id="sec-11" class="text-lg font-semibold mt-6">R1CS and CCS.</h4>
+
+    <p class="text-gray-300">R1CS is an NP-complete problem implicit in quadratic arithmetic programs (QAPs) <em>[x11]</em>. An R1CS instance comprises a set of <span class="math">m</span> constraints, with a vector <span class="math">z</span> over <span class="math">\\mathbb{F}</span> said to <em>satisfy</em> the instance if it satisfies all <span class="math">m</span> constraints. The term “rank-1” means that the constraints should have a specific form. Specifically, each constraint asserts that the product of two specified linear combinations of the entries of <span class="math">z</span> equals a third linear combination of those entries. One typically also requires that the trailing entries of <span class="math">z</span> equal some public input (i.e., an input known to both the prover and verifier) followed by a constant of one.</p>
+
+    <p class="text-gray-300">Typically, an R1CS instance is split into a fixed “structure” that describes constraints and an “instance” consisting only of the public input. Such a decomposition allows instance-independent preprocessing, which in turn allows the verifier runtime to be succinct in the size of the structure. Definition 2.1 provides details.</p>
+
+    <p class="text-gray-300">Below, we use <span class="math">\\mathbb{F}</span> to denote a finite field. Furthermore, we use the convention that vector indexes begin with 1.</p>
+
+    <h6 id="sec-12" class="text-base font-medium mt-4">Definition 2.1 (R1CS).</h6>
+
+    <p class="text-gray-300">An R1CS structure <span class="math">\\mathcal{S}</span> consists of size bounds <span class="math">m,n,N,\\ell\\in\\mathbb{N}</span> where <span class="math">n&gt;\\ell</span>, and three matrices <span class="math">A,B,C\\in\\mathbb{F}^{m\\times n}</span> with at most <span class="math">N=\\Omega(\\max(m,n))</span> non-zero entries in total. An R1CS instance consists of public input <span class="math">x\\in\\mathbb{F}^{\\ell}</span>. An R1CS witness consists of a vector <span class="math">w\\in\\mathbb{F}^{n-\\ell-1}</span>. An R1CS structure-instance tuple <span class="math">(\\mathcal{S},x)</span> is satisfied by an R1CS witness <span class="math">w</span> if</p>
+
+    <p class="text-gray-300"><span class="math">(A\\cdot z)\\circ(B\\cdot z)-C\\cdot z=\\mathbf{0},</span> (1)</p>
+
+    <p class="text-gray-300">where</p>
+
+    <p class="text-gray-300"><span class="math">\\mathcal{S}_{R1CS}=\\{0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,}\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;\\;</span></p>
+
+    <p class="text-gray-300">where <span class="math">z=(w,1,x)\\in\\mathbb{F}^{n}</span>, <span class="math">\\cdot</span> is a matrix-vector multiplication operation, <span class="math">\\circ</span> is the Hadamard (i.e., entry-wise) product between vectors, and <span class="math">\\mathbf{0}</span> is an <span class="math">m</span>-sized vector with entries equal to the the additive identity in <span class="math">\\mathbb{F}</span>.</p>
+
+    <p class="text-gray-300">We now provide a generalization of R1CS, which we refer to as CCS.</p>
+
+    <h6 id="sec-13" class="text-base font-medium mt-4">Definition 2.2 (CCS).</h6>
+
+    <p class="text-gray-300">A CCS structure <span class="math">\\mathcal{S}</span> consists of:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>size bounds <span class="math">m,n,N,\\ell,t,q,d\\in\\mathbb{N}</span> where <span class="math">n&gt;\\ell</span>;</li>
+
+      <li>a sequence of matrices <span class="math">M_{0},\\ldots,M_{t-1}\\in\\mathbb{F}^{m\\times n}</span> with at most <span class="math">N=\\Omega(\\max(m,n))</span> non-zero entries in total;</li>
+
+      <li>a sequence of <span class="math">q</span> multisets <span class="math">[S_{0},\\ldots,S_{q-1}]</span>, where an element in each multiset is from the domain</li>
+
+    </ul>
+
+    <p class="text-gray-300"><span class="math">\\{0,\\ldots,t-1\\}</span></p>
+
+    <p class="text-gray-300">and the cardinality of each multiset is at most <span class="math">d</span>.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>a sequence of <span class="math">q</span> constants <span class="math">[c_{0},\\ldots,c_{q-1}]</span>, where each constant is from <span class="math">\\mathbb{F}</span>.</li>
+
+    </ul>
+
+    <p class="text-gray-300">A CCS instance consists of public input <span class="math">x\\in\\mathbb{F}^{\\ell}</span>. A CCS witness consists of a vector <span class="math">w\\in\\mathbb{F}^{n-\\ell-1}</span>. A CCS structure-instance tuple <span class="math">(\\mathcal{S},x)</span> is satisfied by a CCS witness <span class="math">w</span> if</p>
+
+    <p class="text-gray-300"><span class="math">\\sum_{i=0}^{q-1}c_{i}\\cdot\\bigcirc_{j\\in S_{i}}M_{j}\\cdot z=\\mathbf{0},</span> (2)</p>
+
+    <p class="text-gray-300">where</p>
+
+    <p class="text-gray-300"><span class="math">z=(w,1,x)\\in\\mathbb{F}^{n},</span> (3)</p>
+
+    <p class="text-gray-300"><span class="math">M_{j}\\cdot z</span> denotes matrix-vector multiplication, <span class="math">\\bigcirc</span> denotes the Hadamard product between vectors, and <span class="math">\\mathbf{0}</span> is an <span class="math">m</span>-sized vector with entries equal to the the additive identity in <span class="math">\\mathbb{F}</span>.</p>
+
+    <h4 id="sec-14" class="text-lg font-semibold mt-6">CCS+.</h4>
+
+    <p class="text-gray-300">We provide a natural extension of CCS, which we refer to as CCS+, that additionally allows specifying lookup operations (in the constraint system) against read-only tables (Definition B.1).</p>
+
+    <h3 id="sec-15" class="text-xl font-semibold mt-8">2.1 Representing R1CS with CCS</h3>
+
+    <p class="text-gray-300">Recall that an <em>NP checker</em> is an algorithm that takes as input an NP instance and an NP witness, and checks if the witness satisfies the instance. We use the runtime of such a checker to assess the efficiency of our transformations. Note that this also acts as a proxy for size overheads (e.g., of the CCS witness transformed from an R1CS witness).</p>
+
+    <h6 id="sec-16" class="text-base font-medium mt-4">Lemma 1 (R1CS to CCS transformation).</h6>
+
+    <p class="text-gray-300">Given an R1CS structure <span class="math">\\mathcal{S}_{R1CS}=(m,n,N,\\ell,A,B,C)</span> there exists a CCS structure <span class="math">\\mathcal{S}_{CCS}</span> such that for any instance <span class="math">\\mathcal{I}_{R1CS}=x</span> and witness <span class="math">w_{R1CS}=w</span>, the tuple <span class="math">(\\mathcal{S}_{CCS},x)</span> is satisfied by <span class="math">w</span> if and only if <span class="math">(\\mathcal{S}_{R1CS},x)</span> is satisfied by <span class="math">w</span>. In fact, the transformation from <span class="math">\\mathcal{S}_{R1CS}</span> to <span class="math">\\mathcal{S}_{CCS}</span> runs in <em>constant</em> time. The natural NP checker’s time to verify that the tuple <span class="math">((\\mathcal{S}_{CCS},x),w)</span> satisfies Equation (2) is identical to the natural NP checker’s time to verify that the tuple <span class="math">((\\mathcal{S}_{R1CS},x),w)</span> satisfies Equation (1) .</p>
+
+    <h6 id="sec-17" class="text-base font-medium mt-4">Proof.</h6>
+
+    <p class="text-gray-300">Let <span class="math">\\mathcal{S}_{\\mathrm{CCS}}=(m,n,N,\\ell,t,q,d,[M_{0},M_{1},M_{2}],[S_{1},S_{2}],[c_{1},c_{2}])</span>, where <span class="math">m,n,N,\\ell</span> are from <span class="math">\\mathcal{S}_{\\mathrm{R1CS}}</span>, and <span class="math">t=3,q=2,d=2</span>, <span class="math">M_{0}=A,M_{1}=B,M_{2}=C</span>, <span class="math">S_{1}=\\{0,1\\},S_{2}=\\{2\\}</span>, and <span class="math">c_{0}=1,c_{1}=-1</span>. Here, <span class="math">A,B,C</span> are the constraint matrices from <span class="math">\\mathcal{S}_{\\mathrm{R1CS}}</span>. By inspection, it is easy to see that the tuple <span class="math">(\\mathcal{S}_{\\mathrm{CCS}},x)</span> is satisfied by <span class="math">w</span> if and only if <span class="math">(\\mathcal{S}_{\\mathrm{R1CS}},x)</span> is satisfied by <span class="math">w</span>.</p>
+
+    <p class="text-gray-300">The asserted bounds on the NP checker’s time are immediate from the construction. ∎</p>
+
+    <h3 id="sec-18" class="text-xl font-semibold mt-8">2.2 Representing Plonkish with CCS</h3>
+
+    <p class="text-gray-300">We first recall the Plonkish constraint system, and then provide a transformation from Plonkish to CCS.</p>
+
+    <h6 id="sec-19" class="text-base font-medium mt-4">Definition 2.3 (Plonkish).</h6>
+
+    <p class="text-gray-300">A Plonkish structure <span class="math">\\mathcal{S}</span> consists of:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>size bounds <span class="math">m,n,\\ell,t,q,d,e\\in\\mathbb{N}</span>;</li>
+
+      <li>a multivariate polynomial <span class="math">g</span> in <span class="math">t</span> variables, where <span class="math">g</span> is expressed as a sum of <span class="math">q</span> monomials and each monomial has a total degree at most <span class="math">d</span>;</li>
+
+      <li>a vector of constants called <em>selectors</em> <span class="math">s\\in\\mathbb{F}^{e}</span>; and</li>
+
+      <li>a set of <span class="math">m</span> constraints. Each constraint <span class="math">i</span> is specified via a vector <span class="math">T_{i}</span> of length <span class="math">t</span>, with entries in the range <span class="math">\\{0,\\ldots,n+e-1\\}</span>. <span class="math">T_{i}</span> is interpreted as specifying <span class="math">t</span> entries of a purported satisfying assignment <span class="math">z</span> to feed into <span class="math">g</span>.</li>
+
+    </ul>
+
+    <p class="text-gray-300">A Plonkish instance consists of public input <span class="math">x\\in\\mathbb{F}^{\\ell}</span>. A Plonkish witness consists of a vector <span class="math">w\\in\\mathbb{F}^{n-\\ell}</span>. A Plonkish structure-instance tuple <span class="math">(\\mathcal{S},x)</span> is satisfied by a Plonkish witness <span class="math">w</span> if:</p>
+
+    <p class="text-gray-300"><span class="math">\\text{for all }i\\in\\{0,\\ldots,m-1\\},\\ g(z[T_{i}[1]],\\ldots,z[T_{i}[t]])=0,</span> (4)</p>
+
+    <p class="text-gray-300">where</p>
+
+    <p class="text-gray-300"><span class="math">z=(w,x,s)\\in\\mathbb{F}^{n+e}.</span> (5)</p>
+
+    <h6 id="sec-20" class="text-base font-medium mt-4">Remark 3.</h6>
+
+    <p class="text-gray-300">Plonkish is often specified with a combination of gate constraints and copy constraints, where a copy constraint enforces that a particular pair of elements in the satisfying assignment hold the same value. Our definition of Plonkish provided above eschews copy constraints by essentially using a “deduplicated” version of the satisfying assignment whose length is shorter than a Plonkish satisfying assignment by the number of copy constraints. This may entail a substantially faster prover in SNARKs for CCS than Plonkish, because the prover bottleneck is often cryptographically committing to the the satisfying assignment.</p>
+
+    <h6 id="sec-21" class="text-base font-medium mt-4">Remark 4.</h6>
+
+    <p class="text-gray-300">A Plonkish instance typically consists of <em>multiple</em> multivariate polynomials <span class="math">g</span>, say, <span class="math">g_{0},\\ldots,g_{k-1}</span>, rather than just one. However, in practice, by using a single polynomial <span class="math">g</span> in conjunction with <span class="math">\\log k</span> selectors <span class="math">s</span> to “turn on” or “turn off” terms of <span class="math">g</span>, to emulate one of the different possible polynomials <span class="math">g_{0},\\ldots,g_{k-1}</span>. The total degree of <span class="math">g</span> is at most <span class="math">\\log k</span> plus the maximum total degree amongst <span class="math">g_{0},\\ldots,g_{k-1}</span>.</p>
+
+    <h6 id="sec-22" class="text-base font-medium mt-4">Lemma 2 (Plonkish to CCS transformation).</h6>
+
+    <p class="text-gray-300">Given a Plonkish structure <span class="math">\\mathcal{S}_{\\text{Plonkish}}=(m,n,\\ell,t,q,d,e,g,T,s)</span> there exists a CCS structure <span class="math">\\mathcal{S}_{\\text{CCS}}</span> such that the following holds. For any instance <span class="math">\\mathcal{I}_{\\text{Plonkish}}=x</span> and any witness vector <span class="math">w_{\\text{Plonkish}}=w</span>, the tuple <span class="math">(\\mathcal{S}_{\\text{CCS}},x)</span> is satisfied by <span class="math">w</span> if and only if <span class="math">(\\mathcal{S}_{\\text{Plonkish}},x)</span> is satisfied by <span class="math">w</span>. The natural NP checker’s time to verify the tuple <span class="math">((\\mathcal{S}_{\\text{CCS}},x),w)</span> is identical to the NP checker’s time to verify the tuple <span class="math">((\\mathcal{S}_{\\text{Plonkish}},x),w)</span> that evaluates <span class="math">g</span> monomial-by-monomial when checking that Equation (4) holds.</p>
+
+    <h6 id="sec-23" class="text-base font-medium mt-4">Proof.</h6>
+
+    <p class="text-gray-300">Let <span class="math">w_{\\text{CCS}}=w_{\\text{Plonkish}}</span> and <span class="math">\\mathcal{I}_{\\text{CCS}}=\\mathcal{I}_{\\text{Plonkish}}</span>.</p>
+
+    <p class="text-gray-300">Let <span class="math">\\mathcal{S}_{\\text{CCS}}=(m,n,N,\\ell,t,q,d,[M_{0},\\ldots,M_{t-1}],[S_{0},\\ldots,S_{q-1}],[c_{0},\\ldots,c_{q-1}])</span>, where <span class="math">m,n,\\ell,t,q,d</span> are from <span class="math">\\mathcal{S}_{\\text{Plonkish}}</span>. We now specify the remaining entries in <span class="math">\\mathcal{S}_{\\text{CCS}}</span>.</p>
+
+    <p class="text-gray-300"><em>Deriving</em> <span class="math">M_{0},\\ldots,M_{t-1}</span>, and <span class="math">N</span>. Recall that <span class="math">g</span> in <span class="math">\\mathcal{S}_{\\text{Plonkish}}</span> is a multivariate polynomial in <span class="math">t</span> variables. Furthermore the vectors <span class="math">T_{0},\\ldots,T_{m-1}</span> in <span class="math">\\mathcal{S}_{\\text{Plonkish}}</span> specify indexes into a vector of size <span class="math">n+e</span> (indexed from <span class="math">0</span>), where the trailing <span class="math">e</span> entries are provided by the selector constants <span class="math">s</span> in <span class="math">\\mathcal{S}_{\\text{Plonkish}}</span>.</p>
+
+    <p class="text-gray-300">Unless set to a specific value below, any entry in <span class="math">M_{0},\\ldots,M_{t-1}\\in\\mathbb{F}^{m\\times n}</span> holds the additive identity <span class="math">0</span> of <span class="math">\\mathbb{F}</span>. There is a row for each constraint in <span class="math">\\mathcal{S}_{\\text{Plonkish}}</span>, so, it suffices to specify how the <span class="math">i</span>th row of these matrices is set. For all <span class="math">j\\in\\{0,1,\\ldots,t-1\\}</span>, let <span class="math">k_{j}=T_{i}[j]</span>.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>If <span class="math">k_{j}\\geq n</span>, we set <span class="math">M_{j}[i][0]=s[k_{j}-n]</span>. Here, note that <span class="math">0</span> indexes the entry of vector <span class="math">z</span> in Equation (3) that is fixed to <span class="math">1</span>.</li>
+
+      <li>Otherwise, we set <span class="math">M_{j}[i][k_{j}]=1</span>.</li>
+
+    </ul>
+
+    <p class="text-gray-300">We set <span class="math">\\mathcal{S}_{\\text{CCS}}.N</span> to be the total number of non-zero entries in <span class="math">M_{0},\\ldots,M_{t-1}</span>.</p>
+
+    <p class="text-gray-300"><em>Deriving</em> <span class="math">S_{0},\\ldots,S_{q-1}</span>, and <span class="math">c_{0},\\ldots,c_{q-1}</span>. Recall that <span class="math">g</span> is a multivariate polynomial in <span class="math">t</span> variables with <span class="math">q</span> monomials where the degree of each monomial is at most <span class="math">d</span>. For <span class="math">i\\in\\{0,1,\\ldots,q-1\\}</span>, set <span class="math">c_{i}</span> to the coefficient</p>
+
+    <p class="text-gray-300">of the <span class="math">i</span>th monomial of <span class="math">g</span>. For <span class="math">i\\in\\{0,1,\\ldots,q-1\\}</span>, if the <span class="math">i</span>th monomial contains a variable <span class="math">j</span>, where <span class="math">j\\in\\{0,1,\\ldots,t-1\\}</span>, add <span class="math">j</span> to multiset <span class="math">S_{i}</span> with multiplicity equal to the degree of the variable.</p>
+
+    <p class="text-gray-300">By inspection, the tuple <span class="math">(\\mathcal{S}_{\\text{CCS}},\\mathcal{I}_{\\text{CCS}})</span> is satisfied by <span class="math">w_{\\text{CCS}}</span> if and only if <span class="math">(\\mathcal{S}_{\\text{Plonkish}},\\mathcal{I}_{\\text{Plonkish}})</span> is satisfied by <span class="math">w_{\\text{Plonkish}}</span>. Finally, the asserted bounds on the NP checker’s time are immediate from the construction. ∎</p>
+
+    <h6 id="sec-24" class="text-base font-medium mt-4">Remark 5.</h6>
+
+    <p class="text-gray-300">When transforming Plonkish specified with gate constraints and copy constraints (see remark 3) to CCS, the size of the CCS witness is shorter than the Plonkish witness by the number of copy constraints.</p>
+
+    <h6 id="sec-25" class="text-base font-medium mt-4">Remark 6.</h6>
+
+    <p class="text-gray-300">The NP-checker for Plonkish that evaluates <span class="math">g</span> in <span class="math">O(qd)</span> time by proceeding monomial-by-monomial may be sub-optimal, as some polynomials <span class="math">g</span> may have a faster evaluation procedure. Even in this situation, our reduction from Plonkish to CCS may not introduce overheads that are relevant to SNARK prover time. This is because while the number of <em>field operations</em> performed by our prover in our SNARK for CCS grows with <span class="math">q</span>, the amount of cryptographic operations (i.e., the number of field elements that must be cryptographically committed) is independent of <span class="math">q</span>. Often, it is the cryptographic work that is the runtime bottleneck for the SNARK prover.</p>
+
+    <h6 id="sec-26" class="text-base font-medium mt-4">Remark 7.</h6>
+
+    <p class="text-gray-300">For CCS arising from Plonkish, certain sparse matrices in the CCS structure have the property that for a sparse matrix <span class="math">M</span> in the CCS structure, there exists a fixed vector <span class="math">v\\in\\mathbb{F}^{n}</span> such that <span class="math">M\\cdot z=v</span> for any satisfying assignment <span class="math">z\\in\\mathbb{F}^{n}</span>. Specifically, such matrices arise in our Plonkish to CCS transformation when encoding “selectors” in Plonkish. For such matrices, SNARKs for CCS such as SuperSpartan can commit to <span class="math">v</span> instead of <span class="math">M</span> in the preprocessing phase. Furthermore, at the time of proving, the prover can use <span class="math">v</span> in place of <span class="math">M\\cdot z</span> (this minimizes the complexity and costs associated with sparse polynomial commitment schemes).</p>
+
+    <h6 id="sec-27" class="text-base font-medium mt-4">Remark 8.</h6>
+
+    <p class="text-gray-300">Plonkish instances often implement algorithms that use randomized fingerprinting techniques (e.g., to check that various vectors are permutations of each other). This requires the prover to cryptographically commit to a witness vector before learning the randomness in the fingerprinting procedure used to check the witness’ correctness. The Plonkish instance merely implements the randomized checking procedure. Our formulation of CCS and SNARKs for it are easily adapted to handle such randomized procedures. See <em>[x23, §6.6.2]</em> for discussion and how such constraint systems can be viewed as arising from interactive reductions to circuit satisfiability problems.</p>
+
+    <h3 id="sec-28" class="text-xl font-semibold mt-8">2.3 Representing AIR with CCS</h3>
+
+    <p class="text-gray-300">We first recall the AIR constraint system, and then provide a transformation from AIR to CCS. WLOG, we assume that the AIR constraint system uses a public input.</p>
+
+    <h6 id="sec-29" class="text-base font-medium mt-4">Definition 2.4 (AIR).</h6>
+
+    <p class="text-gray-300">An AIR structure <span class="math">\\mathcal{S}</span> consists of:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>size bounds <span class="math">m,t,q,d\\in\\mathbb{N}</span>, where <span class="math">t</span> is even;</li>
+
+      <li>a multivariate polynomial <span class="math">g</span> in <span class="math">t</span> variables, where <span class="math">g</span> is expressed as a sum of <span class="math">q</span> monomials and each monomial has total degree at most <span class="math">d</span>.</li>
+
+    </ul>
+
+    <p class="text-gray-300">An AIR instance consists of public input and output <span class="math">x\\in\\mathbb{F}^{t}</span>. An AIR witness consists of a vector <span class="math">w\\in\\mathbb{F}^{(m-1)\\cdot t/2}</span>. Let</p>
+
+    <p class="text-gray-300"><span class="math">z=(x[..t/2],w,x[t/2+1..])\\in\\left(\\mathbb{F}^{t/2}\\right)^{m+1},</span> (6)</p>
+
+    <p class="text-gray-300">and <span class="math">x[..t/2],x[t/2+1..]\\in\\mathbb{F}^{t/2}</span> refer to the first half and second half of <span class="math">x</span>. Let us index the <span class="math">m+1</span> “rows” of <span class="math">z</span> as <span class="math">0,1,\\ldots,m</span>. An AIR structure-instance tuple <span class="math">(\\mathcal{S},x)</span> is satisfied by an AIR witness <span class="math">w</span> if:</p>
+
+    <p class="text-gray-300"><span class="math">\\text{for all }i\\in\\{1,\\ldots,m\\},\\ g(z[(i-1)\\cdot t/2+1],\\ldots,z[i\\cdot t/2],z[i\\cdot t/2+1],\\ldots,z[(i+1)\\cdot t/2])=0.</span> (7)</p>
+
+    <p class="text-gray-300">######</p>
+
+    <p class="text-gray-300">Intuition for Definition 2.4 and comparison to prior definitions of AIR. Conceptually, the AIR assignment <span class="math">z</span> consists of <span class="math">m + 1</span> rows each with <span class="math">t/2</span> columns, and Definition 2.4 requires that the "constraint polynomial" <span class="math">g</span> evaluates to zero when evaluated on every pair of adjacent rows of <span class="math">z</span>, i.e., rows <span class="math">i - 1</span> and <span class="math">i</span> for <span class="math">i = 1, \\ldots, m</span>. The first row of <span class="math">z</span>, namely the first <span class="math">t/2</span> entries of <span class="math">x</span>, should be thought of as the public input to the computation. The last row of <span class="math">z</span>, namely the last <span class="math">t/2</span> entries of <span class="math">x</span>, should be thought of as the claimed public output of the computation.</p>
+
+    <p class="text-gray-300">Each of the <span class="math">t/2</span> columns of <span class="math">z</span> are often viewed as the "execution trace" of a specific register when a CPU is run for <span class="math">m</span> steps. The constraint polynomial <span class="math">g</span> then takes as input the state of the machine's registers at two adjacent steps <span class="math">i - 1</span> and <span class="math">i</span> and checks that the value assigned to the registers at step <span class="math">i</span> correctly follows by applying the CPU for one step starting in the state given by row <span class="math">i - 1</span> of <span class="math">z</span>.</p>
+
+    <p class="text-gray-300">Handling many AIR constraint polynomials rather than 1. To represent the constraints capturing a single step of a CPU, typically many polynomials <span class="math">g</span> will be needed, say <span class="math">g_{1},\\ldots ,g_{k}</span>. In practice, <span class="math">k</span> may be in the many dozens to hundreds [GPR21, BGtRZt23]. There is, however, a straightforward and standard randomized reduction from AIR with <span class="math">k &amp;gt; 1</span> constraint polynomials to AIR with a single constraint polynomial <span class="math">g</span>: the verifier picks a random <span class="math">r\\in \\mathbb{F}</span> and sends it to the prover, and the prover replaces <span class="math">g_{1},\\ldots ,g_{k}</span> with the single constraint polynomial</p>
+
+    <div class="my-4 text-center"><span class="math-block">g := \\sum_ {i = 0} ^ {k - 1} r ^ {i} \\cdot g _ {i}. \\tag {8}</span></div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">If Equation (7) holds for all <span class="math">g_1, \\ldots, g_k</span> in place of <span class="math">g</span>, then with probability 1 over the choice of <span class="math">r</span> the same will hold for the random linear combination <span class="math">g</span>. Meanwhile, if Equation (7) fails to hold for any <span class="math">g_i</span> then with probability at least $1 - (k - 1) /</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mathbb{F}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"><span class="math">, it will fail to hold for the random linear combination </span>g$.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">Comparison to previous definitions of AIR. As discussed in the introduction, many prior works have defined AIR instances in a manner tailored to the proof systems typically used to prove their satisfiability, sometimes called STARKs [BBHR19b, Sta21, BSCKL23]. These definitions index rows of the witness vector <span class="math">z</span> by powers <span class="math">h^i</span> of a generator <span class="math">h</span> of a cyclic subgroup <span class="math">G</span> of <span class="math">\\mathbb{F}</span>, with <span class="math">h^i</span> indexing the <span class="math">i</span>'th row of <span class="math">z</span>. Our definition of AIR is essentially equivalent to these definitions, though we naturally index rows of <span class="math">z</span> by integers <span class="math">\\{0, \\ldots, m - 1\\}</span>. One difference is that prior definitions of AIR allow each constraint polynomial to be coupled with an associated subset of rows, such that the constraint is only required to hold for rows in that subset. The subset must be a subgroup of <span class="math">G</span>, which in practice limits one to "periodic" constraints, meaning the constraint applies to every <span class="math">k</span>'th row where <span class="math">k</span> is a power of 2. Our SNARKs in this work are easily modified to support such periodic constraints (see Remark 11).</p>
+
+    <p class="text-gray-300">Lemma 3 (AIR to CCS transformation). Given an AIR structure <span class="math">\\mathcal{S}_{AIR} = (m, t, q, d, g)</span>, instance <span class="math">\\mathcal{I}_{AIR} = x</span>, and witness <span class="math">w_{AIR} = w</span>, there exists a CCS structure <span class="math">\\mathcal{S}_{CCS}</span> such that the tuple <span class="math">(\\mathcal{S}_{CCS}, x)</span> is satisfied by <span class="math">w</span> if and only if <span class="math">(\\mathcal{S}_{AIR}, x)</span> is satisfied by <span class="math">w</span>. The natural NP checker's time to verify the tuple <span class="math">((\\mathcal{S}_{CCS}, x), w)</span> is identical to the runtime of the NP checker that evaluates <span class="math">g</span> monomial-by-monomial when checking that <span class="math">((\\mathcal{S}_{AIR}, x), w)</span> satisfies Equation (7).</p>
+
+    <p class="text-gray-300">Proof. Let <span class="math">w_{\\mathrm{CCS}} = w_{\\mathrm{AIR}}</span> and <span class="math">\\mathcal{I}_{\\mathrm{CCS}} = \\mathcal{I}_{\\mathrm{AIR}}</span>.</p>
+
+    <p class="text-gray-300">Let <span class="math">\\mathcal{S}_{\\mathrm{CCS}} = (m,n,N,\\ell ,t,q,d,[M_0,\\ldots ,M_{t - 1}],[S_0,\\ldots ,S_{q - 1}],[c_0,\\ldots ,c_{q - 1}])</span>, where <span class="math">m,t,q,d</span> are from <span class="math">\\mathcal{S}_{\\mathrm{AIR}}</span>. We now specify the remaining entries in <span class="math">\\mathcal{S}_{\\mathrm{CCS}}</span>.</p>
+
+    <p class="text-gray-300">Deriving <span class="math">\\ell</span> and <span class="math">n</span>. Let <span class="math">\\ell \\gets t / 2</span> and <span class="math">n \\gets m \\cdot t / 2</span>.</p>
+
+    <p class="text-gray-300">Deriving <span class="math">M_0, \\ldots, M_{t-1}</span>, and <span class="math">N</span>. Recall that <span class="math">g</span> in <span class="math">\\mathcal{S}_{\\mathrm{AIR}}</span> is a multivariate polynomial in <span class="math">t</span> variables.</p>
+
+    <p class="text-gray-300">Unless set to a specific value below, any entry in <span class="math">M_0,\\ldots ,M_{t - 1}\\in \\mathbb{F}^{m\\times n}</span> equals 0, the additive identity of <span class="math">\\mathbb{F}</span>. There is a CCS row for each of the <span class="math">m</span> constraints in <span class="math">\\mathcal{S}_{\\mathrm{AIR}}</span>, so, if we index the CCS rows by <span class="math">\\{0,\\dots ,m - 1\\}</span>, it suffices to specify how the <span class="math">i</span>th row of these matrices is set, for <span class="math">i = 0,\\dots ,m - 1</span>. We consider three cases. For all <span class="math">j\\in \\{0,1\\dots ,t - 1\\}</span>, let <span class="math">k_{j} = i\\cdot t / 2 + j</span>.</p>
+
+    <p class="text-gray-300">7</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">- If <span class="math">i=0</span> and <span class="math">j&lt;t/2</span>, we set $M_{j}[i][j+</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">w_{\\mathrm{AIR}}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">]=1$.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>If <span class="math">i=m-1</span> and <span class="math">j\\geq t/2</span>, we set</li>
+
+    </ul>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">$M_{j}[i][j+</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">w_{\\mathrm{AIR}}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">+t/2]=1.$</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Otherwise, we set <span class="math">M_{j}[i][k_{j}]=1</span>.</li>
+
+    </ul>
+
+    <p class="text-gray-300">Conceptually, the third case ensures that the <span class="math">i</span>’th CCS constraint applies the polynomial <span class="math">g</span> to the variables in rows <span class="math">i</span> and <span class="math">i+1</span> of the AIR witness <span class="math">w_{\\mathrm{AIR}}</span>. The first two cases address a nuisance that the vector <span class="math">z</span> for AIR (Equation (6)) has the public input (first half of <span class="math">x</span>) in the first “row” of <span class="math">z</span> and the public output (second half of <span class="math">x</span>) as the final “row” of <span class="math">z</span>, while the corresponding vector <span class="math">z=(w,x,1)</span> for CCS (Equation (3)) has the entirety of <span class="math">x</span> after <span class="math">w</span>. Specifically, the first case addresses that in CCS the first half of <span class="math">x</span> comes immediately after <span class="math">w</span>, and ensures the zero’th CCS constraint applies <span class="math">g</span> to the first half of <span class="math">x</span> and the first row of <span class="math">w</span>. The second case addresses that in CCS the second half of <span class="math">x</span> begins <span class="math">t/2</span> locations after <span class="math">w</span> and ensures that the final CCS constraint applies <span class="math">g</span> to the final row of <span class="math">w</span> and the second half of <span class="math">x</span>.</p>
+
+    <p class="text-gray-300">We set <span class="math">\\mathcal{S}_{\\mathrm{CCS}}.N</span> to be the total number of non-zero entries in <span class="math">M_{0},\\ldots,M_{t-1}</span>.</p>
+
+    <p class="text-gray-300"><em>Deriving <span class="math">S_{0},\\ldots,S_{q-1}</span>, and <span class="math">c_{0},\\ldots,c_{q-1}</span>.</em> Recall that <span class="math">g</span> is a multivariate polynomial in <span class="math">t</span> variables with <span class="math">q</span> monomials where the degree of each monomial is at most <span class="math">d</span>. For <span class="math">i\\in\\{0,1,\\ldots,q-1\\}</span>, set <span class="math">c_{i}</span> to the coefficient of the <span class="math">i</span>th monomial of <span class="math">g</span>. For <span class="math">i\\in\\{0,1,\\ldots,q-1\\}</span>, if the <span class="math">i</span>th monomial contains a variable <span class="math">j</span>, where <span class="math">j\\in\\{0,1,\\ldots,t-1\\}</span>, add <span class="math">j</span> to multiset <span class="math">S_{i}</span> with multiplicity equal to the degree of the variable.</p>
+
+    <p class="text-gray-300">By inspection, the tuple <span class="math">(\\mathcal{S}_{\\mathrm{CCS}},\\mathcal{I}_{\\mathrm{CCS}})</span> is satisfied by <span class="math">w_{\\mathrm{CCS}}</span> if and only if <span class="math">(\\mathcal{S}_{\\mathrm{AIR}},\\mathcal{I}_{\\mathrm{AIR}})</span> is satisfied by <span class="math">w_{\\mathrm{AIR}}</span>. Finally, the asserted bounds on the NP checker’s time are immediate from the construction. ∎</p>
+
+    <p class="text-gray-300">As with Remark 6, the NP-checker for AIR that evaluates <span class="math">g</span> in <span class="math">O(qd)</span> time by proceeding monomial-by-monomial may be sub-optimal, as some polynomials <span class="math">g</span> may have a faster evaluation procedure. Even in this situation, our reduction from AIR to CCS may not not introduce overheads that are relevant to SNARK prover time, because the cryptographic work performed by the SNARK prover (i.e., number of field elements that are cryptographically committed) does not grow with <span class="math">q</span>, only the number of field operations do.</p>
+
+    <h6 id="sec-30" class="text-base font-medium mt-4">Remark 9.</h6>
+
+    <p class="text-gray-300">The CCS instances arising from the AIR <span class="math">\\to</span> CCS of Lemma 3 have public input <span class="math">x\\in\\mathbb{F}^{t}</span> that is much shorter than the witness <span class="math">w\\in\\mathbb{F}^{(m-1)t/2}</span> (unless <span class="math">m\\leq 3</span>). As discussed later, in the proof of Theorem 1 and Section 5, it will eventually be convenient to treat <span class="math">x</span> as having length (one less than) that of <span class="math">w</span> by padding <span class="math">x</span> with zeros. This ensures that the length <span class="math">n</span> of the CCS vector <span class="math">z</span> (Equation (3)), as well as length of the AIR witness <span class="math">w</span> and vector <span class="math">(1,x)</span>, can all be powers of <span class="math">2</span>. This is important for avoiding pre-processing costs for the verifier when our SNARK for AIR is applied to the CCS instances arising from the AIR <span class="math">\\to</span> CCS transformation of Lemma 3 (see Section 5). As discussed later (see the paragraph on having the verifier evaluate <span class="math">\\widetilde{z}</span> efficiently in the proof of Theorem 1), this padding technique does <em>not</em> result in a verifier that runs in time linear in <span class="math">m</span> and <span class="math">n</span>, and in fact does not increase the verifier’s time by more than an additive constant.</p>
+
+    <h2 id="sec-31" class="text-2xl font-bold">3 Preliminaries</h2>
+
+    <h3 id="sec-32" class="text-xl font-semibold mt-8">3.1 Multilinear extensions</h3>
+
+    <p class="text-gray-300">An <span class="math">\\ell</span>-variate polynomial <span class="math">p\\colon\\mathbb{F}^{\\ell}\\to\\mathbb{F}</span> is said to be <em>multilinear</em> if <span class="math">p</span> has degree at most one in each variable. Let <span class="math">f\\colon\\{0,1\\}^{\\ell}\\to\\mathbb{F}</span> be any function mapping the <span class="math">\\ell</span>-dimensional Boolean hypercube to a field <span class="math">\\mathbb{F}</span>. A polynomial <span class="math">g\\colon\\mathbb{F}^{\\ell}\\to\\mathbb{F}</span> is said to <em>extend</em> <span class="math">f</span> if <span class="math">g(x)=f(x)</span> for all <span class="math">x\\in\\{0,1\\}^{\\ell}</span>. It is well-known that for any <span class="math">f\\colon\\{0,1\\}^{\\ell}\\to\\mathbb{F}</span>, there is a unique <em>multilinear</em> polynomial <span class="math">\\widetilde{f}\\colon\\mathbb{F}\\to\\mathbb{F}</span> that extends <span class="math">f</span>. The polynomial <span class="math">\\widetilde{f}</span> is referred to as the <em>multilinear extension</em> (MLE) of <span class="math">f</span>.</p>
+
+    <p class="text-gray-300">A particular multilinear extension that arises frequently in the design of interactive proofs is the <span class="math">\\widetilde{\\mathsf{eq}}</span> is the MLE of the function <span class="math">\\mathsf{eq}:\\{0,1\\}^{s}\\times\\{0,1\\}^{s}\\to\\mathbb{F}</span> defined as follows:</p>
+
+    <p class="text-gray-300">\\[ \\mathsf{eq}(x,e)=\\begin{cases}1&\\text{if }x=e\\\\ 0&\\text{otherwise.}\\end{cases} \\]</p>
+
+    <p class="text-gray-300">######</p>
+
+    <p class="text-gray-300">An explicit expression for <span class="math">\\widetilde{\\mathsf{eq}}</span> is:</p>
+
+    <div class="my-4 text-center"><span class="math-block">\\widetilde{\\mathsf{eq}}(x, e) = \\prod_{i=1}^{s} \\left(x_i e_i + (1 - x_i)(1 - e_i)\\right). \\tag{9}</span></div>
+
+    <p class="text-gray-300">Indeed, one can easily check that the right hand side of Equation (9) is a multilinear polynomial, and that if evaluated at any input <span class="math">(x, e) \\in \\{0, 1\\}^s \\times \\{0, 1\\}^s</span>, it outputs 1 if <span class="math">x = e</span> and 0 otherwise. Hence, the right hand side of Equation (9) is the unique multilinear polynomial extending <span class="math">\\mathsf{eq}</span>. Equation (9) implies that <span class="math">\\widetilde{\\mathsf{eq}}(r_1, r_2)</span> can be evaluated at any point <span class="math">(r_1, r_2) \\in \\mathbb{F}^s \\times \\mathbb{F}^s</span> in <span class="math">O(s)</span> time.</p>
+
+    <p class="text-gray-300"><strong>Multilinear extensions of vectors.</strong> Given a vector <span class="math">u \\in \\mathbb{F}^m</span>, we will often refer to the <em>multilinear extension of <span class="math">u</span></em> and denote this multilinear polynomial by <span class="math">\\widetilde{u}</span>. <span class="math">\\widetilde{u}</span> is obtained by viewing <span class="math">u</span> as a function mapping <span class="math">\\{0,1\\}^{\\log m} \\to \\mathbb{F}</span> in the natural way: the function interprets its <span class="math">(\\log m)</span>-bit input <span class="math">(i_0, \\ldots, i_{\\log m-1})</span> as the binary representation of an integer <span class="math">i</span> between 0 and <span class="math">m-1</span>, and outputs <span class="math">u_i</span>. <span class="math">\\widetilde{u}</span> is defined to be the multilinear extension of this function.</p>
+
+    <p class="text-gray-300"><strong>Lagrange interpolation.</strong> An explicit expression for the MLE of any function is given by the following standard lemma (see [Tha20, Lemma 3.6]).</p>
+
+    <p class="text-gray-300"><strong>Lemma 4.</strong> Let <span class="math">f\\colon \\{0,1\\}^{\\ell} \\to \\mathbb{F}</span> be any function. Then the following multilinear polynomial <span class="math">\\widetilde{f}</span> extends <span class="math">f</span>:</p>
+
+    <div class="my-4 text-center"><span class="math-block">\\widetilde{f}(x_0, \\dots, x_{\\ell-1}) = \\sum_{w \\in \\{0,1\\}^{\\ell}} f(w) \\cdot \\chi_w(x_0, \\dots, x_{\\ell-1}), \\tag{10}</span></div>
+
+    <p class="text-gray-300">where, for any <span class="math">w = (w_0, \\ldots, w_{\\ell-1})</span>, <span class="math">\\chi_w(x_0, \\ldots, x_{\\ell-1}) \\coloneqq \\prod_{i=0}^{\\ell} (x_i w_i + (1 - x_i)(1 - w_i))</span>. Equivalently, <span class="math">\\chi_w(x_0, \\ldots, x_{\\ell-1}) = \\widetilde{\\mathsf{eq}}(x_0, \\ldots, x_{\\ell-1}, w_0, \\ldots, w_{\\ell-1})</span>.</p>
+
+    <p class="text-gray-300">The polynomials <span class="math">\\{\\chi_w\\colon w\\in \\{0,1\\}^\\ell \\}</span> are called the <em>Lagrange basis polynomials</em> for <span class="math">\\ell</span>-variate multilinear polynomials. The evaluations <span class="math">\\{\\widetilde{f}(w)\\colon w\\in \\{0,1\\}^\\ell \\}</span> are sometimes called the coefficients of <span class="math">\\widetilde{f}</span> in the <em>Lagrange basis</em>, terminology that is justified by Equation (10).</p>
+
+    <p class="text-gray-300"><strong>The sum-check protocol.</strong> Let <span class="math">g</span> be some <span class="math">\\ell</span>-variate polynomial defined over a finite field <span class="math">\\mathbb{F}</span>. The purpose of the sum-check protocol is to prove to provide the verifier with the following sum:</p>
+
+    <div class="my-4 text-center"><span class="math-block">H := \\sum_{b \\in \\{0,1\\}^{\\ell}} g(b). \\tag{11}</span></div>
+
+    <p class="text-gray-300">To compute <span class="math">H</span> unaided, the verifier would have to evaluate <span class="math">g</span> at all <span class="math">2^{\\ell}</span> points in <span class="math">\\{0,1\\}^{\\ell}</span> and sum the results. The sum-check protocol allows the verifier to offload this hard work to the prover. It consists of <span class="math">\\ell</span> rounds, one per variable of <span class="math">g</span>. In round <span class="math">i</span>, the prover sends a message consisting of <span class="math">d_i</span> field elements, where <span class="math">d_i</span> is the degree of <span class="math">g</span> in its <span class="math">i</span>'th variable, and the verifier responds with a single (randomly chosen) field element. If the prover is honest, this polynomial (in the single variable <span class="math">X_i</span>) is</p>
+
+    <div class="my-4 text-center"><span class="math-block">\\sum_{(b_{i+1}, \\dots, b_{\\ell-1}) \\in \\{0,1\\}^{\\ell-i}} g(r_0, \\dots, r_{i-1}, X_i, b_{i+1}, \\dots, b_{\\ell-1}). \\tag{12}</span></div>
+
+    <p class="text-gray-300">Here, we are indexing both the rounds of the sum-check protocol and the variables of <span class="math">g</span> starting from zero (i.e., indexing them by <span class="math">\\{0,1,\\ldots,\\ell-1\\}</span>), and <span class="math">r_0,\\ldots,r_{i-1}</span> are random field elements chosen by the verifier across rounds <span class="math">0,\\ldots,i-1</span> of the protocol.</p>
+
+    <p class="text-gray-300">3 Throughout this manuscript, we consider any field addition or multiplication to require constant time.</p>
+
+    <p class="text-gray-300">4 All logarithms in this paper are to base 2.</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Scheme</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Commit Size</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Proof Size</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">V time</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Commit time</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">P time</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Brakedown-PC</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">H</td>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+            <td class="px-3 py-2 border-b border-gray-700">O(√N·λ)</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">F</td>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+            <td class="px-3 py-2 border-b border-gray-700">O(√N·λ) F</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">O(N) F</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">O(N) F</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Orion-PC</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">H</td>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+            <td class="px-3 py-2 border-b border-gray-700">O(λ log2 N)</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">H</td>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+            <td class="px-3 py-2 border-b border-gray-700">O(λ log2 N) H</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">O(N) F</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">O(N) F</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Hyrax-PC</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">O(√N)</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">G</td>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+            <td class="px-3 py-2 border-b border-gray-700">O(√N)</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">G</td>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+            <td class="px-3 py-2 border-b border-gray-700">O(√N) G</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">O(N) G</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">O(N) F</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Dory-PC</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">GT</td>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+            <td class="px-3 py-2 border-b border-gray-700">O(log N)</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">GT</td>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+            <td class="px-3 py-2 border-b border-gray-700">O(log N) GT</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">O(N) G1</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">O(N) F</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">KZG + Gemini</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1 G1</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">O(log N) G1</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">O(log N) G1</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">O(N) G1</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">O(N) G1</td>
+
+          </tr>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">Figure 1: Costs of polynomial commitment schemes, for  <span class="math">\\ell</span> -variate multilinear polynomials over  <span class="math">\\mathbb{F}</span> , with  <span class="math">N = 2^{\\ell}</span> .  <span class="math">\\mathcal{P}</span>  time refers to the time to compute evaluation proofs. PST [PST13, ZGK+17] achieves similar performance as the costs depicted for "KZG + Gemini". Orion-PC dominates Virgo [ZXZS20]. In addition to the reported  <span class="math">O(N)</span>  field operations, Hyrax-PC and Dory-PC require roughly  <span class="math">O(N^{1/2})</span>  cryptographic work to compute evaluation proofs.  <span class="math">\\mathbb{F}</span>  refers to a finite field,  <span class="math">\\mathbb{H}</span>  refers to a collision-resistant hash,  <span class="math">\\mathbb{G}</span>  refers to a cryptographic group where DLOG is hard, and  <span class="math">(\\mathbb{G}_1, \\mathbb{G}_2, \\mathbb{G}_T)</span>  refer to pairing-friendly groups. Columns with a suffix of "size" depict to the number of elements of a particular type, and columns with a suffix of "time" depict the number of operations (e.g., field multiplications or the size of multi-exponentiations). Orion-PC also requires  <span class="math">O(\\sqrt{N})</span>  (transparent) pre-processing time for the verifier; the pre-processing phase depends only on the size of the  <span class="math">\\ell</span> -variate multilinear polynomial being committed.</p>
+
+    <p class="text-gray-300">The verifier's runtime is  <span class="math">O\\left(\\sum_{i=1}^{\\ell} d_i\\right)</span> , plus the time required to evaluate  <span class="math">g</span>  at a single point  <span class="math">r \\in \\mathbb{F}^\\ell</span> . In the typical case that  <span class="math">d_i = O(1)</span>  for each round  <span class="math">i</span> , this means the total verifier time is  <span class="math">O(\\ell)</span> , plus the time required to evaluate  <span class="math">g</span>  at a single point  <span class="math">r \\in \\mathbb{F}^\\ell</span> . This is exponentially faster than the  <span class="math">2^\\ell</span>  time that would generally be required for the verifier to compute  <span class="math">H</span> . See [AB09, Chapter 8] or [Tha20, §4.1] for details.</p>
+
+    <p class="text-gray-300">SNARKs We adapt the definition provided in [KST22].</p>
+
+    <p class="text-gray-300">Definition 3.1. Consider a relation  <span class="math">\\mathcal{R}</span>  over public parameters, structure, instance, and witness tuples. A non-interactive argument of knowledge for  <span class="math">\\mathcal{R}</span>  consists of PPT algorithms  <span class="math">(\\mathcal{G},\\mathcal{P},\\mathcal{V})</span>  and deterministic  <span class="math">\\mathcal{K}</span> , denoting the generator, the prover, the verifier and the encoder respectively with the following interface.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li><span class="math">\\mathcal{G}(1^{\\lambda})\\to \\mathfrak{pp}</span> : On input security parameter  <span class="math">\\lambda</span> , samples public parameters  <span class="math">\\mathfrak{pp}</span> .</li>
+
+      <li><span class="math">\\mathcal{K}(\\mathsf{pp},\\mathsf{s})\\to (pk,\\mathsf{vk})</span> : On input structure  <span class="math">\\mathsf{s}</span> , representing common structure among instances, outputs the prover key  <span class="math">pk</span>  and verifier key  <span class="math">\\mathsf{vk}</span> .</li>
+
+      <li><span class="math">\\mathcal{P}(pk, u, w) \\to \\pi</span> : On input instance  <span class="math">u</span>  and witness  <span class="math">w</span> , outputs a proof  <span class="math">\\pi</span>  proving that  <span class="math">(\\mathsf{pp}, \\mathsf{s}, u, w) \\in \\mathcal{R}</span> .</li>
+
+      <li><span class="math">\\mathcal{V}(\\mathsf{vk}, u, \\pi) \\to \\{0, 1\\}</span> : On input the verifier key  <span class="math">\\mathsf{vk}</span> , instance  <span class="math">u</span> , and a proof  <span class="math">\\pi</span> , outputs 1 if the instance is accepting and 0 otherwise.</li>
+
+    </ul>
+
+    <p class="text-gray-300">A non-interactive argument of knowledge satisfies completeness if for any PPT adversary  <span class="math">\\mathcal{A}</span></p>
+
+    <div class="my-4 text-center"><span class="math-block">\\Pr \\left[ \\begin{array}{l l} &amp;amp; \\mathsf {p p} \\leftarrow \\mathcal {G} (1 ^ {\\lambda}), \\\\ \\mathcal {V} (\\mathsf {v k}, u, \\pi) = 1 &amp;amp; (\\mathsf {s}, (u, w)) \\leftarrow \\mathcal {A} (\\mathsf {p p}), \\\\ &amp;amp; (\\mathsf {p p}, \\mathsf {s}, u, w) \\in \\mathcal {R}, \\\\ &amp;amp; (p k, \\mathsf {v k}) \\leftarrow \\mathcal {K} (\\mathsf {p p}, \\mathsf {s}), \\\\ &amp;amp; \\pi \\leftarrow \\mathcal {P} (p k, u, w) \\end{array} \\right] = 1.</span></div>
+
+    <p class="text-gray-300">A non-interactive argument of knowledge satisfies knowledge soundness if for all PPT adversaries  <span class="math">\\mathcal{A}</span>  there exists a PPT extractor  <span class="math">\\mathcal{E}</span>  such that for all randomness  <span class="math">\\rho</span></p>
+
+    <div class="my-4 text-center"><span class="math-block">\\Pr \\left[ \\begin{array}{l l} &amp;amp; \\mathsf {p p} \\leftarrow \\mathcal {G} (1 ^ {\\lambda}), \\\\ \\mathcal {V} (\\mathsf {v k}, u, \\pi) = 1, &amp;amp; (\\mathsf {s}, u, \\pi) \\leftarrow \\mathcal {A} (\\mathsf {p p}; \\rho), \\\\ (\\mathsf {p p}, \\mathsf {s}, u, w) \\notin \\mathcal {R} &amp;amp; (p k, \\mathsf {v k}) \\leftarrow \\mathcal {K} (\\mathsf {p p}, \\mathsf {s}), \\\\ &amp;amp; w \\leftarrow \\mathcal {E} (\\mathsf {p p}, \\rho) \\end{array} \\right] = \\mathrm {n e g l} (\\lambda).</span></div>
+
+    <p class="text-gray-300">A non-interactive argument of knowledge is succinct if the verifier's time to check the proof  <span class="math">\\pi</span>  and the size of the proof  <span class="math">\\pi</span>  are at most polylogarithmic in the size of the statement proven.</p>
+
+    <h4 id="sec-33" class="text-lg font-semibold mt-6">Polynomial commitment scheme</h4>
+
+    <p class="text-gray-300">We adapt the definition from <em>[x1]</em>. A polynomial commitment scheme for multilinear polynomials is a tuple of four protocols <span class="math">\\mathsf{PC}=(\\mathsf{Gen},\\mathsf{Commit},\\mathsf{Open},\\mathsf{Eval})</span>:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li><span class="math">\\mathsf{pp}\\leftarrow\\mathsf{Gen}(1^{\\lambda},\\ell)</span>: takes as input <span class="math">\\ell</span> (the number of variables in a multilinear polynomial); produces public parameters <span class="math">\\mathsf{pp}</span>.</li>
+
+      <li><span class="math">\\mathcal{C}\\leftarrow\\mathsf{Commit}(\\mathsf{pp},g)</span>: takes as input a <span class="math">\\ell</span>-variate multilinear polynomial over a finite field <span class="math">g\\in\\mathbb{F}[\\ell]</span>; produces a commitment <span class="math">\\mathcal{C}</span>.</li>
+
+      <li><span class="math">b\\leftarrow\\mathsf{Open}(\\mathsf{pp},\\mathcal{C},g)</span>: verifies the opening of commitment <span class="math">\\mathcal{C}</span> to the <span class="math">\\ell</span>-variate multilinear polynomial <span class="math">g\\in\\mathbb{F}[\\ell]</span>; outputs <span class="math">b\\in\\{0,1\\}</span>.</li>
+
+      <li><span class="math">b\\leftarrow\\mathsf{Eval}(pp,\\mathcal{C},r,v,\\ell,g)</span> is a protocol between a PPT prover <span class="math">\\mathcal{P}</span> and verifier <span class="math">\\mathcal{V}</span>. Both <span class="math">\\mathcal{V}</span> and <span class="math">\\mathcal{P}</span> hold a commitment <span class="math">\\mathcal{C}</span>, the number of variables <span class="math">\\ell</span>, a scalar <span class="math">v\\in\\mathbb{F}</span>, and <span class="math">r\\in\\mathbb{F}^{\\ell}</span>. <span class="math">\\mathcal{P}</span> additionally knows a <em>ell</em>-variate multilinear polynomial <span class="math">g\\in\\mathbb{F}[\\ell]</span>. <span class="math">\\mathcal{P}</span> attempts to convince <span class="math">\\mathcal{V}</span> that <span class="math">g(r)=v</span>. At the end of the protocol, <span class="math">\\mathcal{V}</span> outputs <span class="math">b\\in\\{0,1\\}</span>.</li>
+
+    </ul>
+
+    <h6 id="sec-34" class="text-base font-medium mt-4">Definition 3.2.</h6>
+
+    <p class="text-gray-300">A tuple of four protocols (<span class="math">\\mathsf{Gen},\\mathsf{Commit},\\mathsf{Open},\\mathsf{Eval}</span>) is an extractable polynomial commitment scheme for multilinear polynomials over a finite field <span class="math">\\mathbb{F}</span> if the following conditions hold.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Completeness. For any <span class="math">\\ell</span>-variate multilinear polynomial <span class="math">g\\in\\mathbb{F}[\\ell]</span>,</li>
+
+    </ul>
+
+    <p class="text-gray-300">\\[ \\Pr\\left\\{\\begin{array}[]{c}\\mathsf{pp}\\leftarrow\\mathsf{Gen}(1^{\\lambda},\\ell);\\,\\mathcal{C}\\leftarrow\\mathsf{Commit}(\\mathsf{pp},g):\\\\ \\mathsf{Eval}(\\mathsf{pp},\\mathcal{C},r,v,\\ell,g)=1\\wedge v=g(r)\\end{array}\\right\\}\\geq 1-\\mathrm{negl}(\\lambda) \\]</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Binding. For any PPT adversary <span class="math">\\mathcal{A}</span>, size parameter <span class="math">\\ell\\geq 1</span>,</li>
+
+    </ul>
+
+    <p class="text-gray-300">\\[ \\Pr\\left\\{\\begin{array}[]{c}\\mathsf{pp}\\leftarrow\\mathsf{Gen}(1^{\\lambda},\\ell);\\,\\left(\\mathcal{C},g_{0},g_{1}\\right)=\\mathcal{A}(\\mathsf{pp});\\\\ b_{0}\\leftarrow\\mathsf{Open}(\\mathsf{pp},\\mathcal{C},g_{0});\\,b_{1}\\leftarrow\\mathsf{Open}(\\mathsf{pp},\\mathcal{C},g_{1}):\\\\ b_{0}=b_{1}\\neq 0\\wedge g_{0}\\neq g_{1}\\end{array}\\right\\}\\leq\\mathrm{negl}(\\lambda) \\]</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Knowledge soundness. <span class="math">\\mathsf{Eval}</span> is a succinct argument of knowledge for the following NP relation given <span class="math">\\mathsf{pp}\\leftarrow\\mathsf{Gen}(1^{\\lambda},\\ell)</span>.</li>
+
+    </ul>
+
+    <p class="text-gray-300"><span class="math">\\mathcal{R}_{\\mathsf{Eval}}(\\mathsf{pp})=\\{\\langle(\\mathcal{C},r,v),(g)\\rangle:g\\in\\mathbb{F}[\\mu]\\wedge g(r)=v\\wedge\\mathsf{Open}(pp,\\mathcal{C},g)=1\\}</span></p>
+
+    <h3 id="sec-35" class="text-xl font-semibold mt-8">3.2 Polynomial IOPs and polynomial commitments</h3>
+
+    <p class="text-gray-300">Modern SNARKs are constructed by combining a type of interactive protocol called a <em>polynomial IOP</em> <em>[x1]</em> with a cryptographic primitive called a <em>polynomial commitment scheme</em> <em>[x12]</em>. The combination yields a succinct <em>interactive</em> argument, which can then be rendered non-interactive via the Fiat-Shamir transformation <em>[x7]</em>, yielding a SNARK.</p>
+
+    <p class="text-gray-300">Roughly, a polynomial IOP is an interactive protocol where, in one or more rounds, the prover may “send” to the verifier a very large polynomial <span class="math">g</span>. Because <span class="math">g</span> is so large, one does not wish for the verifier to read a complete description of <span class="math">g</span>. Instead, in any efficient polynomial IOP, the verifier only “queries” <span class="math">g</span> at one point (or a handful of points). This means that the only information the verifier needs about <span class="math">g</span> to check that the prover is behaving honestly is one (or a few) evaluations of <span class="math">g</span>.</p>
+
+    <p class="text-gray-300">In turn, a polynomial commitment scheme enables an untrusted prover to succinctly <em>commit</em> to a polynomial <span class="math">g</span>, and later provide to the verifier any evaluation <span class="math">g(r)</span> for a point <span class="math">r</span> chosen by the verifier, along with a proof that the returned value is indeed consistent with the committed polynomial. Essentially, a polynomial commitment scheme is exactly the cryptographic primitive that one needs to obtain a succinct argument from a polynomial IOP. Rather than having the prover send a large polynomial <span class="math">g</span> to the verifier as in the polynomial IOP, the argument system prover instead cryptographically commits to <span class="math">g</span> and later reveals any evaluations of <span class="math">g</span> required by the verifier to perform its checks.</p>
+
+    <p class="text-gray-300">Whether or not a SNARK requires a trusted setup, as well as whether or not it is plausibly post-quantum secure, is determined by the polynomial commitment scheme used. If the polynomial commitment scheme does</p>
+
+    <p class="text-gray-300">not require a trusted setup, neither does the resulting SNARK, and similarly if the polynomial commitment scheme is plausibly binding against quantum adversaries, then the SNARK is plausibly post-quantum sound.</p>
+
+    <p class="text-gray-300">SuperSpartan can make use of any commitment schemes for <em>multilinear</em> polynomials <span class="math">g</span>. Here an <span class="math">\\ell</span>-variate multilinear polynomial <span class="math">g\\colon\\mathbb{F}^{\\ell}\\to\\mathbb{F}</span> is a polynomial of degree at most one in each variable. A brief summary of the multilinear polynomial commitment schemes that are most relevant to this work is provided in Figure 3.1. All of the schemes in the figure, except for KZG-based scheme, are transparent; Brakedown-PC and Orion-PC are plausibly post-quantum secure.</p>
+
+    <h2 id="sec-36" class="text-2xl font-bold">4 SuperSpartan’s polynomial IOP for CCS</h2>
+
+    <p class="text-gray-300">This section describes SuperSpartan’s polynomial IOP for CCS. It is a straightforward generalization of polynomial IOP for R1CS in Spartan <em>[x21]</em>. Appendix C describes a natural extension of SuperSpartan’s polynomial IOP to additionally handle CCS+ (i.e., CCS with lookup operations).</p>
+
+    <p class="text-gray-300">As per Definition 2.2, suppose we are given a CCS structure-instance tuple with size bounds</p>
+
+    <p class="text-gray-300"><span class="math">((m,n,\\ell,t,q,d),(M_{0},\\ldots,M_{t-1},s_{0},\\ldots,s_{q-1}),x).</span></p>
+
+    <p class="text-gray-300">For simplicity, we describe our protocol assuming <span class="math">m</span> and <span class="math">n</span> are powers of two (if this is not the case, we can pad each matrix <span class="math">M_{i}</span> and the witness vector <span class="math">z</span> with zeros to extend <span class="math">m</span> and <span class="math">n</span> to a power of 2 without increasing the prover or verifier’s time in the SNARKs resulting from the protocol below).</p>
+
+    <p class="text-gray-300">Interpret the matrices <span class="math">M_{0},\\ldots,M_{t-1}</span> as functions mapping domain <span class="math">\\{0,1\\}^{\\log m}\\times\\{0,1\\}^{\\log n}</span> to <span class="math">\\mathbb{F}</span> in the natural way. That is, an input in <span class="math">\\{0,1\\}^{\\log m}\\times\\{0,1\\}^{\\log n}</span> is interpreted as the binary representation of an index <span class="math">(i,j)\\in\\{0,1,\\ldots,m-1\\}\\times\\{0,1,\\ldots,n-1\\}</span>, and the function outputs the <span class="math">(i,j)</span>’th entry of the matrix.</p>
+
+    <h6 id="sec-37" class="text-base font-medium mt-4">Theorem 1 (A generalization of <em>[x21]</em> from R1CS to CCS).</h6>
+
+    <p class="text-gray-300">For any finite field <span class="math">\\mathbb{F}</span>, there exists a polynomial IOP for <span class="math">\\mathcal{R}_{\\text{CCS}}</span>, with the following parameters, where <span class="math">m\\times n</span> denotes the dimensionality of the CCS coefficient matrices, and <span class="math">N</span> denotes the total number of non-zero entries across all of the matrices:</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">- soundness error is $O((t+d)\\log m)/</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mathbb{F}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">$</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>round complexity is <span class="math">O(\\log m+\\log n)</span>;</li>
+
+      <li>communication complexity is <span class="math">O(d\\log m+\\log n)</span> elements of <span class="math">\\mathbb{F}</span>;</li>
+
+      <li>at the start of the protocol, the prover sends a single <span class="math">(\\log m-1)</span>-variate multilinear polynomial <span class="math">\\widetilde{W}</span>, and the verifier has a query access to <span class="math">t</span> additional <span class="math">2\\log m</span>-variate multilinear polynomials <span class="math">\\widetilde{M}_{0},\\ldots,\\widetilde{M}_{t-1}</span>;</li>
+
+      <li>the verifier makes a single evaluation query to each of the polynomials <span class="math">\\widetilde{W}</span>, <span class="math">\\widetilde{M}_{0},\\ldots,\\widetilde{M}_{t-1}</span>, and otherwise performs <span class="math">O(dq+d\\log m+\\log n)</span> operations over <span class="math">\\mathbb{F}</span>;</li>
+
+      <li>the prescribed prover performs <span class="math">O(N+tm+qmd\\log^{2}d)</span> operations over <span class="math">\\mathbb{F}</span> to compute its messages over the course of the polynomial IOP (and to compute answers to the verifier’s four queries to <span class="math">\\widetilde{W},\\widetilde{M}_{0},\\ldots,\\widetilde{M}_{t-1}</span>).</li>
+
+    </ul>
+
+    <h6 id="sec-38" class="text-base font-medium mt-4">Remark 10.</h6>
+
+    <p class="text-gray-300">The <span class="math">O(qmd\\log^{2}d)</span> field operations term in the prover’s runtime from Theorem 1 involves using FFTs to multiply together <span class="math">d</span> different degree-1 polynomials. FFTs are only practical over some finite fields. Moreover, in CCS/AIR/Plonkish instances that arise in practice, <span class="math">d</span> rarely, if ever, exceeds 100 and is often as low as 5 or even 2 <em>[x10, x1]</em>. Hence, these <span class="math">O(d\\log^{2}d)</span>-time FFT algorithms will typically be much slower than the naive <span class="math">O(d^{2})</span>-time algorithm for multiplying together <span class="math">d</span> degree-1 polynomials. Using Karatsuba’s algorithm in place of FFTs would also yield a sub-quadratic-in-<span class="math">d</span> time algorithm that works over any field.</p>
+
+    <h6 id="sec-39" class="text-base font-medium mt-4">Proof of Theorem 1.</h6>
+
+    <p class="text-gray-300">For a CCS structure and instance, <span class="math">\\mathcal{I}=(M_{0},\\ldots,M_{t-1},s_{0},\\ldots,s_{q-1},x)</span> and a purported witness <span class="math">W</span>, let <span class="math">Z=(W,1,x)</span>. As explained prior to the theorem statement, we can interpret <span class="math">M_{0},\\ldots,M_{t-1}</span></p>
+
+    <p class="text-gray-300">as functions mapping <span class="math">\\{0,1\\}^{\\log m}\\times\\{0,1\\}^{\\log n}</span> to <span class="math">\\mathbb{F}</span>, and similarly we interpret <span class="math">Z</span> and <span class="math">(1,x)</span> as functions with the following respective signatures in the same manner: <span class="math">\\{0,1\\}^{\\log n}\\to\\mathbb{F}</span> and <span class="math">\\{0,1\\}^{\\log(n)-1}\\to\\mathbb{F}</span>.</p>
+
+    <h4 id="sec-40" class="text-lg font-semibold mt-6">Having the verifier evaluate <span class="math">\\widetilde{Z}</span> efficiently.</h4>
+
+    <p class="text-gray-300">Let us first assume that the CCS witness <span class="math">W</span> and <span class="math">(1,x)</span> both have the same length <span class="math">n/2</span>. Then it is easy to check that the MLE <span class="math">\\widetilde{Z}</span> of <span class="math">Z</span> satisfies</p>
+
+    <p class="text-gray-300"><span class="math">\\widetilde{Z}(X_{0},\\ldots,X_{\\log n-1})=(1-X_{0})\\cdot\\widetilde{W}(X_{1},\\ldots,X_{\\log n-1})+X_{0}\\cdot\\widetilde{(1,x)}(X_{1},\\ldots,X_{\\log n-1})</span> (13)</p>
+
+    <p class="text-gray-300">Indeed, the right hand side of Equation (13) is a multilinear polynomial, and it is easily checked that <span class="math">\\widetilde{Z}(x_{0},\\ldots,x_{\\log n-1})=Z(x_{0},\\ldots,x_{\\log n-1})</span> for all <span class="math">x_{0},\\ldots,x_{\\log n-1})\\in\\{0,1\\}^{\\log n}</span> (since the first <span class="math">n/2</span> of the evaluations of <span class="math">Z</span> are given by <span class="math">W</span> and the rest are given by the vector <span class="math">(1,x)</span>). Hence, the right hand side of Equation (13) must be the unique multilinear extension of <span class="math">Z</span>.</p>
+
+    <p class="text-gray-300">If the length of <span class="math">(1,x)</span> is less than that of <span class="math">W</span> (as is the case in the CCS instances resulting from the AIR <span class="math">\\to</span> CCS transformation of Lemma 3), we replace <span class="math">x</span> with a padded vector <span class="math">v</span> that appends zeros to <span class="math">x</span> until it has the same length as <span class="math">W</span> (and we henceforth use <span class="math">n</span> to denote twice the length of this padded vector). Replacing <span class="math">(1,x)</span> with the padded vector does increase the time required for the verifier to compute <span class="math">\\widetilde{(1,x)}(X_{1},\\ldots,X_{\\log n-1})</span> by more than an <em>additive</em> <span class="math">O(\\log n)</span> field operations. For example, if the unpadded vector <span class="math">(1,x)</span> has length <span class="math">2^{\\ell}</span>, it is easy to check that the padded vector of length <span class="math">n/2</span> has multilinear extension equal to</p>
+
+    <p class="text-gray-300"><span class="math">(X_{1},\\ldots,X_{\\log(n)-1})\\mapsto(1-X_{\\ell+1})\\cdot(1-X_{\\ell+2})\\cdot\\cdots\\cdot(1-X_{\\log(n)-1})\\cdot\\widetilde{(1,x)}(X_{1},\\ldots,X_{\\ell}).</span></p>
+
+    <p class="text-gray-300">Indeed, this is a multilinear polynomial that agrees with the padded vector <span class="math">(1,x)</span> at all inputs <span class="math">(x_{1},\\ldots,x_{\\log(n)-1})\\in\\{0,1\\}^{\\log(n)-1}</span>, and hence must equal the unique multilinear polynomial extending the padded vector.</p>
+
+    <h4 id="sec-41" class="text-lg font-semibold mt-6">The protocol.</h4>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Have the verifier pick <span class="math">\\tau\\in\\mathbb{F}^{\\log m}</span> at random. Similar to <em>[x23, Theorem 4.1]</em>, checking if <span class="math">(\\mathcal{I},W)\\in\\mathcal{R}_{\\mathrm{CCS}}</span> is equivalent, except for a soundness error of $\\log m/</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mathbb{F}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"><span class="math"> over the choice of </span>\\tau\\in\\mathbb{F}^{\\log m}$, to checking if the following identity holds:</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300"><span class="math">0\\overset{?}{=}\\left(\\sum_{a\\in\\{0,1\\}^{\\log m}}\\widetilde{eq}(\\tau,a)\\cdot\\sum_{i=0}^{q-1}c_{i}\\cdot\\prod_{j\\in S_{i}}\\left(\\sum_{y\\in\\{0,1\\}^{\\log n}}\\widetilde{M}_{j}(a,y)\\cdot\\widetilde{Z}(y)\\right)\\right)</span> (14)</p>
+
+    <p class="text-gray-300">where recall from Section 3.1 that <span class="math">\\widetilde{eq}</span> is the MLE of <span class="math">eq:\\{0,1\\}^{\\log m}\\times\\{0,1\\}^{\\log m}\\to\\mathbb{F}</span>:</p>
+
+    <p class="text-gray-300">\\[ eq(a,e)=\\begin{cases}1&\\text{if }a=e\\\\ 0&\\text{otherwise}.\\end{cases} \\]</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">That is, if <span class="math">(\\mathcal{I},W)\\in\\mathcal{R}_{\\mathrm{CCS}}</span>, then Equation (14) holds with probability <span class="math">1</span> over the choice of <span class="math">\\tau</span>, and if <span class="math">(\\mathcal{I},W)\\not\\in\\mathcal{R}_{\\mathrm{CCS}}</span>, then Equation (14) holds with probability at most $O(\\log m/</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mathbb{F}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">)<span class="math"> over the random choice of </span>\\tau$.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">Consider computing the right hand side of Equation (14) by applying the sum-check protocol to the polynomial</p>
+
+    <p class="text-gray-300"><span class="math">g(a)\\coloneqq\\widetilde{eq}(\\tau,a)\\cdot\\sum_{i=0}^{q-1}c_{i}\\prod_{j\\in S_{i}}\\left(\\sum_{y\\in\\{0,1\\}^{\\log m}}\\widetilde{M}_{j}(a,y)\\cdot\\widetilde{Z}(y)\\right).</span></p>
+
+    <p class="text-gray-300">From the verifier’s perspective, this reduces the task of computing the right hand side of Equation (14) to the task of evaluating <span class="math">g</span> at a random input <span class="math">r_{a}\\in\\mathbb{F}^{\\log m}</span>. Note that the verifier can evaluate <span class="math">\\widetilde{eq}(\\tau,r_{a})</span> unassisted in <span class="math">O(\\log m)</span> field operations, as it is easily checked (see Equation (9)) that</p>
+
+    <p class="text-gray-300"><span class="math">\\widetilde{eq}(\\tau,r_{a})=\\prod_{i=1}^{\\log m}\\left(\\tau_{i}r_{a,i}+(1-\\tau_{i})(1-r_{a,i})\\right).</span></p>
+
+    <p class="text-gray-300">With <span class="math">\\widetilde{eq}(\\tau, r_a)</span> in hand, <span class="math">g(r_a)</span> can be computed in <span class="math">O(dq)</span> time given the following <span class="math">t</span> quantities for <span class="math">i \\in \\{0, 1, \\ldots, t-1\\}</span>:</p>
+
+    <div class="my-4 text-center"><span class="math-block">\\sum_{y \\in \\{0, 1\\}^{\\log n}} \\widetilde{M}_i(r_a, y) \\cdot \\widetilde{Z}(y).</span></div>
+
+    <p class="text-gray-300">These <span class="math">t</span> quantities can be computed by applying the sum-check protocol <span class="math">t</span> more times in parallel, once to each of the following polynomials, where <span class="math">i \\in \\{0, 1, \\ldots, t-1\\}</span> (to reduce communication costs by a factor of <span class="math">t</span>, pick a random <span class="math">\\gamma \\in \\mathbb{F}</span> and take linear combination with weights given by <span class="math">[\\gamma^0, \\ldots, \\gamma^{t-1}]</span>):</p>
+
+    <div class="my-4 text-center"><span class="math-block">\\widetilde{M}_i(r_a, y) \\cdot \\widetilde{Z}(y).</span></div>
+
+    <p class="text-gray-300">To perform the verifier's final check in this invocation of the sum-check protocol, it suffices for the verifier to evaluate each of the above <span class="math">t</span> polynomials at the random vector <span class="math">r_y</span>, which means it suffices for the verifier to evaluate <span class="math">\\widetilde{M}_i(r_a, r_y)</span>. These evaluations can be obtained via the verifier's assumed query access to <span class="math">\\widetilde{M}_0, \\ldots, \\widetilde{M}_{t-1}</span>. <span class="math">\\widetilde{Z}(r_y)</span> can be obtained from one query to <span class="math">\\widetilde{W}</span> and one query to <span class="math">(\\widetilde{1, x})</span> via Equation (13).</p>
+
+    <p class="text-gray-300">In summary, we have the following polynomial IOP:</p>
+
+    <p class="text-gray-300"><strong>Completeness.</strong> Perfect completeness follows from perfect completeness of the sum-check protocol and the fact that Equation (14) holds with probability 1 over the choice of <span class="math">\\tau</span> if <span class="math">(\\mathcal{I}, W) \\in \\mathcal{R}_{\\mathrm{CCS}}</span>.</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"><strong>Soundness.</strong> Applying a standard union bound to the soundness error introduced by probabilistic check in Equation (14) with the soundness error of the sum-check protocol [LFKN90], we conclude that the soundness error for the depicted polynomial IOP as at most $O\\left(\\left(d \\cdot \\log m + t + \\log n\\right)\\right) /</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mathbb{F}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">$.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300"><strong>Round and communication complexity.</strong> The sum-check protocol is applied twice. In the first invocation of sum-check (Line 3a of Figure 2), the polynomial to which the sum-check protocol is applied has degree at most <span class="math">d</span> in each of its <span class="math">\\log m</span> variables. In the remaining invocation of sum-check, the polynomial to which sum-check is applied has degree at most 2 in each of its <span class="math">\\log n</span> variables. Hence, the round complexity of the polynomial IOP is <span class="math">\\log m + \\log n</span> and the total communication is <span class="math">O(d \\log m + \\log n)</span> field elements. <span class="math">^8</span></p>
+
+    <p class="text-gray-300"><strong>Verifier time.</strong> The asserted bounds on the verifier's runtime are immediate from the verifier's runtime in the sum-check protocol, and the fact that <span class="math">\\widetilde{eq}</span> can be evaluated at any input <span class="math">(\\tau, r_a) \\in \\mathbb{F}^{2\\log m}</span> in <span class="math">O(\\log m)</span> field operations.</p>
+
+    <p class="text-gray-300"><strong>Prover Time.</strong> Straightforward adaption of the linear-time Spartan prover [Set20] (which uses prior techniques for linear-time sum-checks [Tha13], see also [Tha20, Section 7.5.2] for an exposition), establishes that the honest prover in the polynomial IOP for CCS can be implemented in <span class="math">O(N + tm + qmd\\log^2 d)</span> <span class="math">\\mathbb{F}</span>-ops. Here, recall that <span class="math">N</span> denotes the number of non-zero entries in total across the constraint matrices <span class="math">M_0,\\ldots,M_{t-1}</span>. This includes the time required to compute <span class="math">\\widetilde{M}_i(r_a,r_y)</span> for all <span class="math">i \\in \\{0,1,\\dots,t-1\\}</span> (i.e., to compute answers to the verifier's queries to the polynomials <span class="math">\\widetilde{M}_i</span>, and <span class="math">\\widetilde{Z}</span>).</p>
+
+    <p class="text-gray-300">These costs can be summarized as follows. In the first invocation of sum-check, the prover devotes work to the following tasks.</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"><span class="math">^6</span>As with Footnote 2, using powers-of-<span class="math">\\gamma</span> as the coefficients of the random linear combination adds soundness error $(t - 1) /</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mathbb{F}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"><span class="math"> to the polynomial IOP. One can instead choose </span>t<span class="math"> independent random coefficients from </span>\\mathbb{F}<span class="math">, which would add soundness error just </span>1 /</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mathbb{F}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">$.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"><span class="math">^7</span>The additive term $t /</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mathbb{F}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"><span class="math"> can be removed from the soundness error by replacing the </span>t<span class="math"> powers of </span>\\gamma<span class="math"> in Step (c) of the polynomial IOP with </span>t<span class="math"> random field elements, see Footnote 6. This increases the communication cost from the verifier to the prover by </span>t - 1$ field elements.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300"><span class="math">^8</span>When compiled into a SNARK, this communication can be independent of <span class="math">d</span> by using a polynomial commitment scheme.</p>
+
+    <p class="text-gray-300">14</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li><span class="math">\\mathcal{P}\\to \\mathcal{V}</span>  : a  <span class="math">(\\log (n) - 1)</span>  -variate multilinear polynomial  <span class="math">\\widetilde{W}</span>  as an oracle.</li>
+
+      <li><span class="math">\\mathcal{V}\\to \\mathcal{P}</span>  ..  <span class="math">\\tau \\in_{R}\\mathbb{F}^{\\log m}</span></li>
+
+      <li><span class="math">\\mathcal{V} \\leftrightarrow \\mathcal{P}</span> : run the sum-check reduction described in the prose above. This entails:</li>
+
+    </ol>
+
+    <p class="text-gray-300">(a)  <span class="math">\\mathcal{V}\\leftrightarrow \\mathcal{P}</span>  : Apply the sum-check protocol to</p>
+
+    <div class="my-4 text-center"><span class="math-block">g (a) := \\widetilde {e q} (\\tau , a) \\cdot \\sum_ {i = 0} ^ {q - 1} c _ {i} \\prod_ {j \\in S _ {i}} \\left(\\sum_ {y \\in \\{0, 1 \\} ^ {\\log n}} \\widetilde {M} _ {j} (a, y) \\cdot \\widetilde {Z} (y)\\right) \\tag {15}</span></div>
+
+    <p class="text-gray-300">to compute the following quantity, and confirm it equals 0:</p>
+
+    <div class="my-4 text-center"><span class="math-block">\\sum_ {b \\in \\{0, 1 \\} ^ {\\log m}} g (b).</span></div>
+
+    <p class="text-gray-300">This reduces checking the task of computing the right hand side of Equation (14) to the task of computing  <span class="math">g(r_{a})</span>  for a random input  <span class="math">r_a\\in \\mathbb{F}^s</span> .</p>
+
+    <p class="text-gray-300">(b)  <span class="math">\\mathcal{V}\\to \\mathcal{P}</span>  : choose a random  <span class="math">\\gamma \\in \\mathbb{F}</span>  and send  <span class="math">\\gamma</span>  to  <span class="math">\\mathcal{P}</span> (c)  <span class="math">\\mathcal{V}\\leftrightarrow \\mathcal{P}</span>  Apply the sum-check protocol a second time, to compute</p>
+
+    <div class="my-4 text-center"><span class="math-block">\\sum_ {i = 0} ^ {t - 1} \\sum_ {y \\in \\{0, 1 \\} ^ {\\log n}} \\gamma^ {i} \\cdot \\widetilde {M _ {i}} (r _ {a}, y) \\cdot \\widetilde {Z} (y),</span></div>
+
+    <p class="text-gray-300">and confirm that the result is consistent with the claimed value of  <span class="math">g(r_{a})</span> .</p>
+
+    <p class="text-gray-300">The above sum-check reduction reduces the check in Equation (14) to checking if the following hold, where  <span class="math">r_a, r_y</span>  are respectively vectors in  <span class="math">\\mathbb{F}^{\\log m}</span>  and  <span class="math">\\mathbb{F}^{\\log n}</span>  chosen at random by the verifier over the course of the two invocations of the sum-check protocol above:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li><span class="math">\\forall i\\in \\{0,1,\\dots ,t - 1\\}</span> <span class="math">\\widetilde{M}_i(r_a,r_y)\\stackrel {?}{=}v_i</span>  , and</li>
+
+      <li><span class="math">\\widetilde{Z}(r_y) \\stackrel{?}{=} v_Z</span> .</li>
+
+    </ul>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li><span class="math">\\mathcal{V}</span> :</li>
+
+    </ol>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>check if  <span class="math">\\forall i\\in \\{0,1,\\dots ,t - 1\\}</span> <span class="math">\\widetilde{M}_i(r_x,r_y)\\stackrel {?}{=}v_i</span>  , with one query to  <span class="math">\\widetilde{M_i}</span></li>
+
+      <li>check if  <span class="math">\\widetilde{Z}(r_y) \\stackrel{?}{=} v_Z</span>  by checking if:  <span class="math">v_Z = (1 - r_y[1]) \\cdot v_W + r_y[1] \\cdot (\\widehat{x, 1})(r_y[2..])</span> , where  <span class="math">r_y[2..]</span>  refers to a slice of  <span class="math">r_y</span>  without the first element of  <span class="math">r_y</span> , and  <span class="math">v_W \\gets \\widetilde{W}(r_y[2..])</span>  via an oracle query (see Equation (13)).</li>
+
+    </ul>
+
+    <p class="text-gray-300">Figure 2: Pseudocode for our polynomial IPCP for CCS (Definition 2.2).</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li><span class="math">O(N)</span> time is devoted to the field operations required to compute <span class="math">M_{i}\\cdot Z</span> for <span class="math">i=0,1,\\ldots,t-1</span>. Denote the <span class="math">j</span>th such vector by <span class="math">u_{j}</span>, and recall that the first invocation of the sum-check protocol is applied to the polynomial</li>
+
+    </ul>
+
+    <p class="text-gray-300"><span class="math">g(a)\\coloneqq\\widetilde{eq}(\\tau,a)\\cdot\\sum_{i=0}^{q-1}\\prod_{s\\in S_{i}}\\widetilde{u}_{s}(a).</span></p>
+
+    <p class="text-gray-300">Per Equation (12), the prescribed prover message in round <span class="math">j</span> of the sum-check protocol is the degree-<span class="math">(d+1)</span> univariate polynomial <span class="math">h_{j}</span> where</p>
+
+    <p class="text-gray-300"><span class="math">h_{j}(c)\\!=\\!\\sum_{\\left(a_{j+1},a_{j+2},\\ldots,a_{\\log(m)-1}\\right)\\!\\in\\{0,1\\}^{\\log(m)-j-1}}\\widetilde{\\mathsf{eq}}(\\tau,r_{0},\\ldots,r_{j-1},c,a_{j+1},\\ldots,a_{\\log m})\\sum_{i=0}^{q-1}\\prod_{s\\in S_{i}}\\widetilde{u}_{s}(r_{0},\\ldots,r_{j-1},c,a_{j+1},\\ldots,a_{\\log(m)-1}).</span></p>
+
+    <p class="text-gray-300">Here, <span class="math">r_{1},\\ldots,r_{j-1}</span> are random field elements chosen by the verifier in rounds <span class="math">1,2,\\ldots,j-1</span>.</p>
+
+    <p class="text-gray-300">Given the <span class="math">t</span> vectors <span class="math">u_{0},\\ldots,u_{t-1}</span>, each of length <span class="math">m</span>, linear-time sum-check techniques <em>[x10, x27]</em> can implement the prover in the first invocation of sum-check in time <span class="math">O(tm+qd\\log m)</span> as follows.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li><span class="math">O(tm)</span> total time (following standard techniques <em>[x10, x27]</em>) suffices to compute the following set of evaluations across all rounds <span class="math">j</span> of this first invocation of the sum-check protocol:</li>
+
+    </ul>
+
+    <p class="text-gray-300"><span class="math">\\left\\{\\widetilde{u}_{s}(r_{0},\\ldots,r_{j-1},b)\\colon s\\in\\{0,\\ldots,t-1\\},b\\in\\{0,1\\}^{\\log(m)-j}\\right\\}.</span></p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li><span class="math">O(m)</span> total time (following standard techniques <em>[x10, x27]</em>) suffices to compute the following set of evaluations across all rounds <span class="math">j</span> of this first invocation of the sum-check protocol:</li>
+
+    </ul>
+
+    <p class="text-gray-300"><span class="math">\\left\\{\\widetilde{eq}(\\tau,r_{0},\\ldots,r_{j-1},b)\\colon b\\in\\{0,1\\}^{\\log(m)-j}\\right\\}.</span></p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Given the evaluations computed in the two bullet points above, the task of computing <span class="math">h_{j}</span> amounts to the task of repeatedly computing the product of at most <span class="math">(d+1)</span> degree-<span class="math">1</span> univariate polynomials over <span class="math">\\mathbb{F}</span>, and summing the results. Here, the relevant univariate polynomials in a single variable <span class="math">X</span> are</li>
+
+    </ul>
+
+    <p class="text-gray-300"><span class="math">\\widetilde{u}_{s}(r_{0},\\ldots,r_{j-1},X,a_{j+1},\\ldots,a_{\\log(m)-1})</span></p>
+
+    <p class="text-gray-300">and</p>
+
+    <p class="text-gray-300"><span class="math">\\widetilde{eq}(\\tau,r_{0},\\ldots,r_{j-1},X,b^{\\prime})</span></p>
+
+    <p class="text-gray-300">as <span class="math">(a_{j+1},\\ldots,a_{\\log(m)-1})</span> and <span class="math">b^{\\prime}</span> range over <span class="math">\\{0,1\\}^{\\log(m)-j-1}</span>.</p>
+
+    <p class="text-gray-300">This is because, in order to specify a degree<span class="math">-1</span> univariate polynomial, it suffices to evaluate that polynomial at the inputs <span class="math">\\{0,1\\}</span> (or any two other elements from <span class="math">\\mathbb{F}</span> for that matter), and for each of the relevant degree-<span class="math">1</span> polynomials, the evaluations at inputs <span class="math">\\{0,1\\}</span> can be computed in <span class="math">O(1)</span> time from the quantities in the two bullet points above.</p>
+
+    <p class="text-gray-300">The number of such products to be computed is</p>
+
+    <p class="text-gray-300"><span class="math">O\\left(\\sum_{j=1}^{\\log m}(m/2^{j})\\cdot q\\right)=O(mq),</span></p>
+
+    <p class="text-gray-300">as in round <span class="math">j</span> there is one such product for each tuple</p>
+
+    <p class="text-gray-300"><span class="math">(a_{j+1},\\ldots,a_{\\log(m)-1})\\in\\{0,1\\}^{\\log(m)-j-1}</span></p>
+
+    <p class="text-gray-300">and multiset <span class="math">S_{i}</span> (i.e., there are <span class="math">(m/2^{j})\\cdot q</span> such products to compute in total in round <span class="math">j</span>). The task of multiplying <span class="math">d</span> degree-<span class="math">1</span> polynomials is reducible to the well-known task in the computer algebra</p>
+
+    <p class="text-gray-300">literature of computing so-called sub-product trees, which can be done in <span class="math">O(d\\log^{2}d)</span> field operations if the field supports FFTs of length up to <span class="math">d</span>. The claimed runtime bound for the prover in the first sum-check instance follows.</p>
+
+    <p class="text-gray-300">The second sum-check invocation applies sum-check to the <span class="math">(\\log n)</span>-variate polynomial</p>
+
+    <p class="text-gray-300"><span class="math">\\sum_{i=0}^{t-1}\\gamma^{i}\\cdot\\widetilde{M}_{i}(r_{a},y)\\cdot\\widetilde{Z}(y),</span></p>
+
+    <p class="text-gray-300">which has degree at most <span class="math">2</span> in each variable. Standard linear-time-sum-check techniques <em>[x10, x38]</em> can implement the prover in this protocol in <span class="math">O(N+t)</span> time.</p>
+
+    <p class="text-gray-300">∎</p>
+
+    <h2 id="sec-42" class="text-2xl font-bold">5 Avoiding pre-processing for uniform IRs</h2>
+
+    <p class="text-gray-300">This section shows how to avoid preprocessing of circuit structure (to achieve succinct verification costs) for CCS instances with a “uniform” structure (e.g., a circuit with many copies of the same sub-circuit). In particular, we show that, for uniform CCS instances, the verifier can evaluate the multilinear extension polynomials <span class="math">\\widetilde{M}_{0},\\ldots,\\widetilde{M}_{t-1}</span> at any desired point in time logarithmic in the number of rows and columns of these matrices. We describe this for CCS instances arising from the AIR-to-CCS transformation of Lemma 3. We also discuss the case of “SIMD CCS”, a natural extension of “SIMD R1CS” <em>[x37]</em> that captures data-parallel computations.</p>
+
+    <h3 id="sec-43" class="text-xl font-semibold mt-8">5.1 The multilinear extension of the “adding <span class="math">1</span> in binary” function.</h3>
+
+    <p class="text-gray-300">Recall that we can index integers in <span class="math">\\{0,1,\\ldots,D-1\\}</span> via their binary representation in the natural way, with the integer <span class="math">k-1</span> represented by the all-<span class="math">1</span>s vector and the integer <span class="math">0</span> indexed by the all-<span class="math">0</span>s vector. In this indexing, let us think of the right-most bit as the low-order bit of the binary representation.</p>
+
+    <p class="text-gray-300">For a bit-vector <span class="math">i\\in\\{0,1\\}^{\\log D}</span>, let <span class="math">\\mathsf{to-Int}(i)=\\sum_{j=0}^{\\log D-1}i_{j}\\cdot 2^{j}</span> denote the integer that <span class="math">i</span> represents. Similarly, for an integer <span class="math">\\kappa\\in\\{0,1,\\ldots,t-1\\}</span>, let <span class="math">\\mathsf{bin}(\\kappa)</span> denote the natural binary representation of <span class="math">j</span>. The number of bits in <span class="math">\\mathsf{bin}(\\kappa)</span> will always be clear from context.</p>
+
+    <p class="text-gray-300">Define the function</p>
+
+    <p class="text-gray-300"><span class="math">\\mathsf{next}(i,j)\\colon\\{0,1\\}^{\\log D}\\times\\{0,1\\}^{\\log D}\\to\\{0,1\\}</span></p>
+
+    <p class="text-gray-300">which takes as input two bit-vectors <span class="math">i</span> and <span class="math">j</span> and outputs <span class="math">1</span> if and only if <span class="math">i</span> and <span class="math">j</span> represent integers <span class="math">I=\\mathsf{to-Int}(i)</span> and <span class="math">J=\\mathsf{to-Int}(j)</span> such that <span class="math">J=I+1</span>. One can think of this function as “adding <span class="math">1</span> in binary”: it takes as input two bit-vectors and indicates whether the second is obtained by adding <span class="math">1</span> to (the integer represented) by the first. Note that if <span class="math">i</span> is the all-<span class="math">1</span>s vector, then <span class="math">(i,j)=0</span> for all <span class="math">j\\in\\{0,1\\}^{\\log D}</span>.</p>
+
+    <h6 id="sec-44" class="text-base font-medium mt-4">Theorem 2.</h6>
+
+    <p class="text-gray-300">For any point <span class="math">(r_{x},r_{y})\\in\\mathbb{F}^{\\log D}\\times\\mathbb{F}^{\\log D}</span>, <span class="math">\\widetilde{\\mathsf{next}}(r_{x},r_{y})</span> can be evaluated in logarithmic time.</p>
+
+    <h6 id="sec-45" class="text-base font-medium mt-4">Proof.</h6>
+
+    <p class="text-gray-300">We give an explicit expression for <span class="math">\\widetilde{\\mathsf{next}}</span>. Specifically:</p>
+
+    <p class="text-gray-300"><span class="math">\\widetilde{\\mathsf{next}}(x_{1},\\ldots,x_{\\log D},y_{1},\\ldots,y_{\\log D})=h(x_{1},\\ldots,x_{\\log D},y_{1},\\ldots,y_{\\log D})+g(x_{1},\\ldots,x_{\\log D},y_{1},\\ldots,y_{\\log D})</span> (16)</p>
+
+    <p class="text-gray-300">where</p>
+
+    <p class="text-gray-300"><span class="math">h(x_{1},\\ldots,x_{\\log D},y_{1},\\ldots,y_{\\log D})=(1-x_{\\log D})\\cdot y_{\\log D}\\cdot\\widetilde{\\mathsf{eq}}(x_{1},\\ldots,x_{\\log D-1},y_{1},\\ldots,y_{\\log D-1})</span></p>
+
+    <p class="text-gray-300">and</p>
+
+    <p class="text-gray-300"><span class="math">g(x_{1},\\ldots,x_{\\log D},y_{1},\\ldots,y_{\\log D})</span></p>
+
+    <p class="text-gray-300"><span class="math">\\sum_{k=1}^{\\log D-1}\\left(\\prod_{i=0}^{k-1}x_{\\log D-i}(1-y_{\\log D-i})\\right)\\cdot(1-x_{\\log D-k})\\cdot y_{\\log D-k}\\cdot\\widetilde{\\mathsf{eq}}\\left(x_{1},\\ldots,x_{\\log D-k-1},y_{1},\\ldots,y_{\\log D-k-1}\\right).</span></p>
+
+    <p class="text-gray-300">Indeed, both <span class="math">h</span> and <span class="math">g</span> are multilinear polynomials, so to confirm that <span class="math">h+g</span> equals the unique multilinear extension of <span class="math">\\mathsf{next}</span>, it suffices to show that <span class="math">h(x,y)+g(x,y)=\\mathsf{next}(x,y)</span> for all <span class="math">(x,y)\\in\\{0,1\\}^{\\log D}\\times\\{0,1\\}^{\\log D}</span>. We break the analysis into three cases.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>If <span class="math">x_{\\log D}=0</span> then <span class="math">g(x,y)=0</span> because of the vector <span class="math">x_{\\log D}</span> appearing in the first term of the product in the definition of <span class="math">g</span>. Meanwhile, <span class="math">h(x,y)=1</span> if and only if <span class="math">y_{\\log D}=1</span> and the first <span class="math">\\log D-1</span> bits of <span class="math">x</span> and <span class="math">y</span> match. In other words, if <span class="math">x_{\\log D}=0</span> then <span class="math">g(x,y)+h(x,y)</span> equals <span class="math">1</span> if and only if <span class="math">y</span> is the binary representation of <span class="math">\\mathsf{to\\text{-}int}(x)+1</span>.</li>
+
+      <li>If <span class="math">x_{\\log D}=1</span>, then let <span class="math">k\\geq 1</span> be the smallest value such that <span class="math">x_{\\log D-k}=0</span> assuming such a <span class="math">k</span> exists. Then <span class="math">h(x,y)=0</span> because of the factor <span class="math">(1-x_{\\log D})</span> appearing in its definition. Moreover, in this case <span class="math">y</span> is the binary representation of <span class="math">\\mathsf{to\\text{-}int}(x)+1</span> if and only if <span class="math">y_{\\log D}=y_{\\log D-1}=\\cdots=y_{\\log D-(k-1)}=0</span>, <span class="math">y_{\\log D-k}=1</span> and</li>
+
+    </ul>
+
+    <p class="text-gray-300"><span class="math">(y_{1},\\ldots,y_{\\log D-(k+1)})=(x_{1},\\ldots,x_{\\log D-(k+1)}).</span></p>
+
+    <p class="text-gray-300">For this <span class="math">y</span>, <span class="math">g(x,y)=1</span>, because the <span class="math">k</span>’th term of the sum in the definition of <span class="math">g</span> evaluates to <span class="math">1</span> while all other terms evaluate to <span class="math">0</span>. Meanwhile, for all other <span class="math">y^{\\prime}\\in\\{0,1\\}^{\\log D}</span>, <em>all</em> terms of the sum defining <span class="math">g</span> evaluate to <span class="math">0</span>.</p>
+
+    <p class="text-gray-300">In other words, for all <span class="math">(x,y)\\in\\{0,1\\}^{\\log D}\\times\\{0,1\\}^{\\log D}</span> such that <span class="math">x_{\\log D}=1</span>,</p>
+
+    <p class="text-gray-300">\\[ g(x,y)+h(x,y)=\\begin{cases}0+1\\text{ if }y\\text{ is the binary representation of }\\mathsf{to\\text{-}int}(x)+1\\\\ 0+0\\text{ otherwise.}\\end{cases} \\]</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>The final case is that <span class="math">x_{\\log D}</span> is the all ones vector. In this case, it is easily checked that, regardless of the value of <span class="math">y</span>, <span class="math">h(x,y)=0</span> and every term in the sum defining <span class="math">g(x,y)</span> is also <span class="math">0</span>.</li>
+
+    </ul>
+
+    <p class="text-gray-300">In each of the three cases above, we have shown that <span class="math">h(x,y)+g(x,y)</span> equals <span class="math">1</span> if <span class="math">y</span> is the binary representation of <span class="math">\\mathsf{to\\text{-}int}(x)+1</span>, and equals <span class="math">0</span> otherwise. Hence, <span class="math">h(x,y)+g(x,y)=\\mathsf{next}(x,y)</span>.</p>
+
+    <p class="text-gray-300">We now explain that Expression (16) can be evaluated at any point <span class="math">(r_{x},r_{y})\\in\\mathbb{F}^{\\log D}\\times\\mathbb{F}^{\\log D}</span> in <span class="math">O(\\log D)</span> time. It is easy to see that <span class="math">h(r_{x},r_{y})</span> can be evaluated in <span class="math">O(\\log D)</span> time. It is also clear that each term of the sum defining <span class="math">g</span> can be evaluated at <span class="math">(r_{x},r_{y})</span> in <span class="math">O(\\log D)</span> time. Since there are <span class="math">O(\\log D)</span> terms of the sum, that immediately implies an upper bound of <span class="math">O(\\log D^{2})</span> time in total.</p>
+
+    <p class="text-gray-300">However, using the fact that adjacent terms of the sum involve almost identical factors, the runtime can be reduced to <span class="math">O(\\log m)</span>. For example, if <span class="math">v(k)</span> denotes the value of the <span class="math">k</span>’th term of the sum, then</p>
+
+    <p class="text-gray-300"><span class="math">v(2)=v(1)\\cdot x_{\\log D-1}(1-y_{\\log D-1})\\left((1-x_{\\log D-1})y_{\\log D-1}\\right)^{-1}(1-x_{\\log D-2})y_{\\log D-2}\\widetilde{\\mathsf{eq}}(x_{\\log D-2},y_{\\log D-2})^{-1}.</span></p>
+
+    <p class="text-gray-300">This ensures that <span class="math">v(i)</span> can be computed in constant amortized time given <span class="math">v(i-1)</span> for each <span class="math">i\\in\\{2,3,\\ldots,\\log D\\}</span>. (A batch inversion algorithm is used to compute all necessary field inversions across all terms of the sum with a single field inversion and <span class="math">O(\\log D)</span> multiplications). This means <span class="math">O(\\log D)</span> total total time suffices to evaluate all terms. ∎</p>
+
+    <h3 id="sec-46" class="text-xl font-semibold mt-8">5.2 CCS instances arising from AIR</h3>
+
+    <h4 id="sec-47" class="text-lg font-semibold mt-6">Notation for this section.</h4>
+
+    <p class="text-gray-300">Throughout this section, <span class="math">m</span> denotes the corresponding AIR parameter, so that the AIR witness vector <span class="math">w</span> is in <span class="math">\\mathbb{F}^{(m-1)\\cdot t/2}</span> and the AIR vector <span class="math">z</span> (Equation (6)) is in <span class="math">\\mathbb{F}^{(m+1)\\cdot t/2}</span>. This means that <span class="math">m</span> also denotes the number of rows in the CCS matrices <span class="math">M_{0},\\ldots,M_{t-1}</span> arising from the AIR <span class="math">\\to</span> CCS transformation of Lemma 3. However, ws discussed shortly, in this section we assume <span class="math">m-1</span> is a power of <span class="math">2</span>, and we will be padding <span class="math">M_{0},\\ldots,M_{t-1}</span> with all-zero-rows to ensure their number of rows is a power of <span class="math">2</span></p>
+
+    <p class="text-gray-300">(this padding does not increase prover or verifier time in SuperSpartan). This means that the number of rows in the padded matrix will not be <span class="math">m</span>, but rather <span class="math">2(m - 1)</span>.</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Let $v =</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">w_{\\mathrm{AIR}}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">= (m - 1) \\cdot t / 2<span class="math">. Recall that for CCS instances arising from Lemma 3 (after padding </span>(1, x)<span class="math"> to have length </span>v<span class="math">, so that </span>z = (w_{\\mathrm{AIR}}, 1, x)<span class="math"> has length </span>2v = n<span class="math">, see Remark 9), the length of the witness vector </span>z<span class="math"> is </span>n = (m - 1) \\cdot t<span class="math">. Hence, we can think of </span>z<span class="math"> as itself a matrix, with </span>2(m - 1)<span class="math"> rows and </span>t / 2<span class="math"> columns. We consider </span>m - 1<span class="math"> and </span>t<span class="math"> to be powers of 2 throughout this section. We also pad the matrices </span>M_0, \\ldots, M_{t-1}<span class="math"> with </span>m - 1<span class="math"> all 0-zeros rows to ensure that they have </span>2(m - 1)<span class="math"> rows, which is a power of 2. Hence, the multilinear extensions </span>\\widetilde{M}_0, \\ldots, \\widetilde{M}_{t-1}$ are functions mapping the domain</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="my-4 text-center"><span class="math-block">\\mathbb {F} ^ {1 + \\log (m - 1)} \\times \\mathbb {F} ^ {\\log (n)} = \\mathbb {F} ^ {1 + \\log (m - 1)} \\times \\mathbb {F} ^ {\\log (m - 1) + \\log (t) - 1} = \\mathbb {F} ^ {\\log (m - 1) + \\log (t)}</span></div>
+
+    <p class="text-gray-300">to <span class="math">\\mathbb{F}</span></p>
+
+    <p class="text-gray-300">Recall from the proof of Lemma 3 that for each <span class="math">j \\in \\{0,1,2,\\ldots ,t - 1\\}</span> and <span class="math">i \\in \\{0,1,\\dots ,m - 1\\}</span>, the following holds:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>First, that</li>
+
+    </ul>
+
+    <div class="my-4 text-center"><span class="math-block">M _ {j} [ i ] [ k ] = 1 \\text { if } k = i \\cdot t / 2 + j, \\tag {17}</span></div>
+
+    <p class="text-gray-300">unless <span class="math">i = 0</span> and <span class="math">j &amp;lt; t / 2</span> or <span class="math">i = m - 1</span> and <span class="math">j \\geq t / 2</span>. These last two cases are as follows:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>If <span class="math">i = 0</span> and <span class="math">j &amp;lt; t / 2</span>, then</li>
+
+    </ul>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">M _ {j} [ i ] [ j + \\left</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">w _ {\\mathrm {A I R}} \\right</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">] = 1. \\tag {18}</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>If <span class="math">i = m - 1</span> and <span class="math">j \\geq t / 2</span>, then</li>
+
+    </ul>
+
+    <div class="my-4 text-center"><span class="math-block">M _ {j} [ i ] [ j + m \\cdot t / 2 ] = 1. \\tag {19}</span></div>
+
+    <p class="text-gray-300">All entries of <span class="math">M_{j}</span> not considered in any of the cases above are 0.</p>
+
+    <p class="text-gray-300">For <span class="math">k \\in \\{0,1\\}^{\\log n}</span>, write <span class="math">k = (k_0, k_1, \\ldots, k_{\\log(n) - 1})</span>. We can break the bits of <span class="math">k</span> into three pieces, say <span class="math">(k_r, k_h, k_c)</span> with <span class="math">k_r \\in \\{0,1\\}^{\\log(m - 1)}</span>, <span class="math">k_h \\in \\{0,1\\}</span>, and <span class="math">k_c \\in \\{0,1\\}^{\\log(t) - 1}</span>. We think of <span class="math">k_h</span> as specifying the high-order bit of a "row" of <span class="math">z</span> (essentially indicating whether or not the row is one of the first <span class="math">m - 1</span> rows of <span class="math">z</span>) and <span class="math">k_c</span> as specifying the column of <span class="math">z</span> (of which there are <span class="math">t / 2</span>).</p>
+
+    <p class="text-gray-300">Let <span class="math">(j_0, \\ldots, j_{\\log(t) - 1})</span> denote the binary representation <span class="math">\\mathsf{bin}(j)</span> of <span class="math">j \\in \\{0, 1, \\ldots, t - 1\\}</span> with <span class="math">j_{\\log(t) - 1}</span> equal to the high-order bit. Let <span class="math">j&#x27; = \\mathsf{to-int}(j_0, \\ldots, j_{\\log(t) - 2})</span> denote the integer represented by <span class="math">j</span> with its high-order bit removed.</p>
+
+    <p class="text-gray-300">A clean expression for <span class="math">\\widetilde{M}_j</span>. We claim that <span class="math">\\widetilde{M}_j(i, (k_r, k_h, k_c))</span> equals the sum of the following four terms:</p>
+
+    <div class="my-4 text-center"><span class="math-block">j _ {\\log (t) - 1} \\left(1 - k _ {h}\\right) \\cdot \\widetilde {\\operatorname {n e x t}} (i, \\left(k _ {r}, 0\\right)) \\cdot \\widetilde {\\operatorname {e q}} \\left(\\left(j _ {0}, \\dots , j _ {\\log (t) - 2}\\right), k _ {c}\\right) \\tag {20}</span></div>
+
+    <div class="my-4 text-center"><span class="math-block">(1 - j _ {\\log (t) - 1}) \\left(1 - k _ {h}\\right) \\cdot \\widetilde {\\operatorname {e q}} (i, \\left(k _ {r}, 0\\right)) \\cdot \\widetilde {\\operatorname {e q}} \\left(\\left(j _ {0}, \\dots , j _ {\\log (t) - 2}\\right), k _ {c}\\right) \\tag {21}</span></div>
+
+    <div class="my-4 text-center"><span class="math-block">\\begin{array}{l} \\left(1 - j _ {\\log (t) - 1}\\right) \\cdot k _ {h} \\cdot \\widetilde {\\operatorname {e q}} (i, \\operatorname {b i n} (m - 1)) \\cdot \\widetilde {\\operatorname {e q}} \\left(k _ {r}, \\operatorname {b i n} (m - 1)\\right) \\cdot \\widetilde {\\operatorname {e q}} \\left(j _ {0}, \\dots , j _ {\\log (t) - 2}, k _ {c}\\right) \\\\ + j _ {\\log (t) - 1} \\cdot k _ {h} \\cdot \\widetilde {\\operatorname {e q}} (i, \\operatorname {b i n} (m - 1)) \\cdot \\widetilde {\\operatorname {e q}} \\left(k _ {r}, \\operatorname {b i n} (1)\\right) \\cdot \\widetilde {\\operatorname {e q}} \\left(j _ {0}, \\dots , j _ {\\log (t) - 2}, k _ {c}\\right) \\tag {22} \\\\ \\end{array}</span></div>
+
+    <div class="my-4 text-center"><span class="math-block">\\begin{array}{l} - \\left(1 - j _ {\\log (t) - 1}\\right) \\cdot \\left(1 - k _ {h}\\right) \\cdot \\widetilde {\\operatorname {e q}} (i, \\operatorname {b i n} (0)) \\cdot \\widetilde {\\operatorname {e q}} \\left(k _ {r}, \\operatorname {b i n} (0)\\right) \\cdot \\widetilde {\\operatorname {e q}} \\left(\\left(j _ {0}, \\dots , j _ {\\log (t) - 2}\\right), k _ {c}\\right) \\\\ + \\left(1 - j _ {\\log (t) - 1}\\right) \\cdot k _ {h} \\cdot \\widetilde {\\operatorname {e q}} (i, \\operatorname {b i n} (0)) \\cdot \\widetilde {\\operatorname {e q}} \\left(k _ {r}, \\operatorname {b i n} (0)\\right) \\cdot \\widetilde {\\operatorname {e q}} \\left(\\left(j _ {0}, \\dots , j _ {\\log (t) - 2}\\right), k _ {c}\\right) \\tag {23} \\\\ \\end{array}</span></div>
+
+    <p class="text-gray-300">In Equation (23) above, <span class="math">\\mathsf{bin}(0)</span> refers to the all-zeros vector of length <span class="math">1 + \\log(m - 1)</span> or <span class="math">\\log(m - 1)</span> as appropriate.</p>
+
+    <p class="text-gray-300">19</p>
+
+    <p class="text-gray-300">.</p>
+
+    <h4 id="sec-48" class="text-lg font-semibold mt-6">Analyzing the sum of Expressions (20)-(23).</h4>
+
+    <p class="text-gray-300">To show that the sum of the above four expressions equals <span class="math">\\widetilde{M}_{j}\\left(i,(k_{r},k_{h},k_{c})\\right)</span>, we must establish that the sum of Expressions (20)-(23) is a multilinear polynomial in <span class="math">(i,k)</span> that agrees with <span class="math">M_{j}</span> at all inputs in</p>
+
+    <p class="text-gray-300"><span class="math">\\{0,1\\}^{\\log(m-1)}\\times\\{0,1\\}\\times\\{0,1\\}^{\\log n}\\to\\{0,1\\}.</span></p>
+
+    <p class="text-gray-300">This will establish that it equals the unique multilinear extension of <span class="math">M_{j}(i,k)</span>. Clearly, Expressions (20)-(23) are multilinear in the variables <span class="math">i</span> and <span class="math">k</span>, so we turn to showing that <span class="math">M_{j}(i,k)</span> equals the sum of the above four expressions when <span class="math">(i,k)\\in\\{0,1\\}^{\\log m}\\times\\{0,1\\}^{\\log n}</span>.</p>
+
+    <p class="text-gray-300">For <span class="math">i\\in\\{0,1\\}^{\\log(m-1)}\\times\\{0\\}</span>, Expression (20) equals <span class="math">1</span> if and only if the high-order bit of <span class="math">j</span> is <span class="math">1</span> (i.e., <span class="math">j\\geq t/2</span>), <span class="math">\\mathsf{to\\text{-}int}(k_{r})=\\mathsf{to\\text{-}int}(i)+1</span> and <span class="math">j^{\\prime}=\\mathsf{to\\text{-}int}(k_{c})</span>. This means that</p>
+
+    <p class="text-gray-300"><span class="math">\\mathsf{to\\text{-}int}(k_{r},k_{c})=\\left(\\mathsf{to\\text{-}int}(i)+1\\right)\\cdot t/2+j^{\\prime}=i\\cdot(t/2)+j.</span></p>
+
+    <p class="text-gray-300">This precisely matches Equation (17) in this case.</p>
+
+    <p class="text-gray-300">Meanwhile, Expression (20) equals <span class="math">1</span> for <span class="math">i\\in\\{0,1\\}^{\\log(m-1)}\\times\\{0\\}</span> if and only if the high-order bit of <span class="math">j</span> is <span class="math">0</span> (i.e., <span class="math">j\\leq t/2</span>), <span class="math">k_{r}=i</span> and <span class="math">j^{\\prime}=\\mathsf{to\\text{-}int}(k_{c})</span>. This means that</p>
+
+    <p class="text-gray-300"><span class="math">\\mathsf{to\\text{-}int}(k_{r},k_{c})=\\mathsf{to\\text{-}int}(i)\\cdot t/2+j^{\\prime}=\\mathsf{to\\text{-}int}(i)\\cdot t/2+j.</span></p>
+
+    <p class="text-gray-300">This precisely matches Equation (17), unless <span class="math">i=\\mathbf{0}</span> and <span class="math">j&lt;t/2</span>, which is a special case.</p>
+
+    <p class="text-gray-300">Expressions (22) and (23) “correct” the behavior of (the sum of) Equations (20) and (21) when <span class="math">\\mathsf{to\\text{-}int}(i)=m-1</span> and when <span class="math">\\mathsf{to\\text{-}int}(i)=0</span>.</p>
+
+    <p class="text-gray-300">Specifically, Equation (22) maps <span class="math">(i,k)\\in\\{0,1\\}^{1+\\log(m-1)}\\times\\{0,1\\}^{\\log n}</span> to <span class="math">1</span> in the following two cases (otherwise it maps <span class="math">(i,k)</span> to <span class="math">0</span>):</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>If <span class="math">\\mathsf{to\\text{-}int}(i)=m-1</span>, <span class="math">j&lt;t/2</span>, and <span class="math">\\mathsf{to\\text{-}int}(k)=(m-1)t/2+j</span>.</li>
+
+      <li>If <span class="math">\\mathsf{to\\text{-}int}(i)=m-1</span>, <span class="math">j\\geq t/2</span>, and <span class="math">\\mathsf{to\\text{-}int}(k)=mt/2+j</span>.</li>
+
+    </ul>
+
+    <p class="text-gray-300">This precisely matches the behavior of Equation (17) and (19) in these two cases.</p>
+
+    <p class="text-gray-300">Equation (23) maps <span class="math">(i,k)\\in\\{0,1\\}^{1+\\log(m-1)}\\times\\{0,1\\}^{\\log n}</span> to a non-zero value only in the following two cases:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>It maps <span class="math">(i,k)</span> to <span class="math">-1</span> if <span class="math">\\mathsf{to\\text{-}int}(i)=0</span>, <span class="math">j&lt;t/2</span>, and <span class="math">\\mathsf{to\\text{-}int}(k)=j</span>,</li>
+
+      <li>It maps <span class="math">(i,k)</span> to <span class="math">1</span> if <span class="math">\\mathsf{to\\text{-}int}(i)=0</span>, <span class="math">j&lt;t/2</span>, and <span class="math">\\mathsf{to\\text{-}int}(k)=(m-1)t/2+j</span>.</li>
+
+    </ul>
+
+    <p class="text-gray-300">The first case “cancels” the <span class="math">+1</span> evaluation that Expression (21) takes when <span class="math">\\mathsf{to\\text{-}int}(i)=0</span>, <span class="math">j&lt;t/2</span> and <span class="math">\\mathsf{to\\text{-}int}(k)=j</span>. The second case matches the behavior of Expression (18).</p>
+
+    <h4 id="sec-49" class="text-lg font-semibold mt-6">Evaluating Expressions (20)-(23) in logarithmic time.</h4>
+
+    <p class="text-gray-300">By Theorem 2 and Equation (9), the right hand side of Equations (20)-(23) can be computed in time <span class="math">O(\\log(n)+\\log(m))</span> for any <span class="math">(i,(k_{r},k_{h},k_{c}))\\in\\mathbb{F}^{\\log(m)}\\times\\mathbb{F}^{\\log n}</span>.</p>
+
+    <h6 id="sec-50" class="text-base font-medium mt-4">Remark 11 (Handling periodic constraints).</h6>
+
+    <p class="text-gray-300">We sketch how SuperSpartan can support periodic AIR constraints if desired. Suppose that an AIR constraint should be applied to rows <span class="math">i</span> and <span class="math">i+1</span> only if <span class="math">i</span> is an integer multiple of some designated power of <span class="math">2</span>, say <span class="math">2^{\\eta}</span>. One can still apply the AIR <span class="math">\\to</span> CCS transformation of Lemma 3. In the protocol for CCS of Figure 2, one can change Equation (15) to:</p>
+
+    <p class="text-gray-300"><span class="math">g(a)\\coloneqq\\widetilde{eq}(\\tau,a)\\cdot\\left(\\prod_{\\ell=0}^{\\eta-1}(1-a_{\\ell})\\right)\\sum_{i=0}^{q-1}\\prod_{j\\in S_{i}}\\left(\\sum_{y\\in\\{0,1\\}^{\\log n}}\\widetilde{M}_{j}(a,y)\\cdot\\widetilde{Z}(y)\\right)</span> (24)</p>
+
+    <p class="text-gray-300">Here, we have inserted the product <span class="math">\\prod_{\\ell=0}^{\\eta-1}(1-a_{\\ell})</span>, which ensures that <span class="math">g(a)=0</span> whenever <span class="math">a</span> is the binary representation of an integer that is <em>not</em> a multiple of <span class="math">2^{\\eta}</span>. The insertion of this product increases the proof size and verifier time by at most <span class="math">\\eta</span> field elements and <span class="math">O(\\eta)</span> field operations.</p>
+
+    <p class="text-gray-300">Recall that the AIR <span class="math">\\rightarrow</span> CCS transformation of Lemma 3 assumed there was only one AIR constraint, but that any number of AIR constraints can be handled via the standard “random linear combination of constraints” technique captured in Equation (8), which reduces <span class="math">k</span> constraints <span class="math">g_{1},\\ldots,g_{k}</span> to the following single constraint:</p>
+
+    <p class="text-gray-300"><span class="math">\\sum_{i=0}^{k-1}r^{i}\\cdot g_{i}.</span></p>
+
+    <p class="text-gray-300">If one or more AIR constraints are periodic, then we think of each AIR constraint <span class="math">g_{i}</span> as taking as input <span class="math">\\log m</span> extra variables <span class="math">(a_{1},\\ldots,a_{\\log m})</span> corresponding to the “low-order” <span class="math">\\eta</span> bits of the “CCS row index”, and we replace any periodic AIR constraint <span class="math">g_{i}</span> with period <span class="math">2^{\\eta}</span> with</p>
+
+    <p class="text-gray-300"><span class="math">\\left(\\prod_{\\ell=0}^{\\eta-1}(1-a_{\\ell})\\right)\\cdot g_{i}.</span></p>
+
+    <p class="text-gray-300">The method described in Equation (24) above corresponds to this technique when there is just a single AIR constraint (so no random linear combination of constraints is taken). An equivalent way to describe the technique is to imagine that we apply the protocol of Figure 2 separately to each constraint <span class="math">g_{1},\\ldots,g_{k}</span> (with Equation (15) changed to (24) for any constraint with period <span class="math">\\eta</span>) but rather than applying the sum-check protocol <span class="math">k</span> separate times to <span class="math">k</span> different polynomials, we apply the sum-check protocol just once, to a random linear combination of the polynomials.</p>
+
+    <h3 id="sec-51" class="text-xl font-semibold mt-8">5.3 Avoiding preprocessing for SIMD CCS</h3>
+
+    <p class="text-gray-300">Tzialla et al. <em>[x21]</em> describe a natural extension of R1CS where the same circuit is applied over <span class="math">\\beta</span> different witnesses and public inputs. SIMD R1CS enforces input/output consistency checks across neighboring instances (e.g., the input to instance <span class="math">i</span> must be the output of instance <span class="math">i-1</span>). The computational model is therefore closely analogous to AIR, except that each sequential step is specified with R1CS. Note that in the absence of such input/output consistency checks are omitted, SIMD R1CS captures data-parallel circuits <em>[x19, WJB^{+}17, WTS^{+}18]</em>. Additionally, Tzialla et al. <em>[x21]</em> describe an extension of Spartan <em>[x23]</em>, called Phalanx, to prove SIMD R1CS.</p>
+
+    <h5 id="sec-52" class="text-base font-semibold mt-4">Costs of Phalanx.</h5>
+
+    <p class="text-gray-300">For <span class="math">\\beta</span> copies of R1CS with <span class="math">m\\times n</span> matrices with at most <span class="math">N</span> non-zero entries and <span class="math">\\ell</span> public inputs and outputs, the verifier’s work is <span class="math">O(N+\\log\\beta)</span> field operations plus the time to verify an evaluation proof for a <span class="math">\\log\\left(\\beta\\cdot(n-\\ell-1)\\right)</span>-variate multilinear polynomial encoding <span class="math">\\beta</span> witnesses. If preprocessing is allowed, which incurs <span class="math">O(N)</span> field and cryptographic operations, the verifier’s work drops to the cost of verifying polynomial evaluation proofs for a constant number of <span class="math">O(\\log N)</span>-variate committed multilinear polynomials.</p>
+
+    <p class="text-gray-300">For proving input/output consistency checks, they describe an approach that either requires <span class="math">O(\\beta\\cdot\\ell)</span> field operations for the verifier, or the verifier incurs the cost of verifying a polynomial evaluation proof for a committed <span class="math">O(\\log\\left(\\beta\\cdot\\ell\\right))</span>-variate multilinear polynomial (the latter option requires a preprocessing work of <span class="math">O(\\beta\\cdot\\ell)</span> field and cryptographic operations).</p>
+
+    <h5 id="sec-53" class="text-base font-semibold mt-4">SIMD CCS and SuperSpartan for SIMD CCS.</h5>
+
+    <p class="text-gray-300">There is a natural definition of SIMD CCS analogous to SIMD R1CS. Furthermore, SuperSpartan can be extended to prove those instances. In addition, to prove the input/output consistency checks, by using the fact that <span class="math">\\overline{\\textsf{next}}</span> can be evaluated in logarithmic time (Theorem 2), the verifier’s work is <span class="math">O(\\log\\left(\\beta\\cdot\\ell\\right))</span> without requiring any preprocessing—an exponential improvement over Phalanx’s cost to verify input/output consistency without any preprocessing. We leave a full description of these details to the near-term future work.</p>
+
+    <h2 id="sec-54" class="text-2xl font-bold">6 Compiling the polynomial IOP for CCS to SNARKs for CCS</h2>
+
+    <p class="text-gray-300">This section compiles our polynomial IOP for CCS into a SNARK using various polynomial commitment schemes for multilinear polynomials. Unless the CCS instance is structured in the sense of Section 5, this</p>
+
+    <p class="text-gray-300">requires a polynomial commitment scheme that can efficiently handle sparse multilinear polynomials <span class="math">\\widetilde{M}_i</span>, meaning that the time to commit to the polynomial and compute an evaluation proof is proportional to the number of inputs <span class="math">x \\in \\{0,1\\}^\\ell</span> for the appropriate value of <span class="math">\\ell</span>, such that <span class="math">\\widetilde{M}_i(x) \\neq 0</span>. Here, we use the compiler from Spartan [Set20], which transforms any of the multilinear polynomial commitment schemes listed in Figure 3.1 into ones that meet this requirement.</p>
+
+    <p class="text-gray-300">The following theorem captures our result.</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"><strong>Theorem 3.</strong> Assuming that $</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mathbb{F}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">= 2^{\\Theta(\\lambda)}$ there exists a family of preprocessing SNARKs for CCS with efficiency characteristics depicted in Figures 3 and 4.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300"><strong>Proof.</strong> From applying [BFS20, Theorem 8] to the polynomial IOP for CCS in Theorem 1 using a sparse polynomial commitment obtained by applying [GLS+21, Theorem 3] to polynomial commitment schemes listed in Figure 3.1, there exists a public-coin interactive argument for <span class="math">\\mathcal{R}_{\\mathrm{R1CS}}</span> with witness-extended emulation. Applying the Fiat-Shamir transform [FS86] to the public-coin interactive argument results in the claimed SNARKs for CCS.</p>
+
+    <p class="text-gray-300">If the CCS instance is not uniform (Section 5) the verifier<span class="math">^{10}</span>, in a preprocessing step, commits to <span class="math">t(\\log(m) + \\log(n))</span>-variate polynomials <span class="math">\\widetilde{M}_0, \\ldots, \\widetilde{M}_{t-1}</span> that evaluate to a non-zero value at most <span class="math">N</span> locations over the Boolean hypercube <span class="math">\\{0,1\\}^{\\log m + \\log(n)}</span>.</p>
+
+    <p class="text-gray-300">The prover: (1) commits to a <span class="math">O(\\log n)</span>-variate polynomial <span class="math">\\widetilde{Z}</span>; (2) participates in the sum-check protocol in the polynomial IOP in Theorem 1 (which costs <span class="math">O(N + d \\cdot t \\cdot m + qtd\\log^2 d)</span> F-ops); (3) proves evaluations of the <span class="math">(\\log n)</span>-variate multilinear polynomial <span class="math">\\widetilde{Z}</span>; and (4) If the CCS instance is not uniform (Section 5) proves one evaluation each of the <span class="math">t</span> different <span class="math">(\\log m + \\log n)</span>-variate multilinear polynomials <span class="math">\\widetilde{M}_0, \\ldots, \\widetilde{M}_{t-1}</span> committed during the preprocessing step (each of these polynomials is evaluated at the same point <span class="math">(r_a, r_y) \\in \\mathbb{F}^{\\log m} \\times \\mathbb{F}^{\\log n}</span> (see Figure 2). Note that many polynomial commitment schemes have effective batching procedures that enable these <span class="math">t</span> evaluations to be proven and verified with the same cost as a single evaluation to a single committed polynomial.</p>
+
+    <p class="text-gray-300">The verifier to verify a proof: (1) participates in the sum-check protocol in the polynomial IOP in Theorem 1 (which costs <span class="math">O(d \\cdot q + d\\log m + \\log n)</span> F-ops); (2) verifies the proofs of evaluations of one <span class="math">(\\log(n))</span>-variate committed multilinear polynomial; (3) If the CCS instance is uniform in the sense of Section 5, the verifier evaluates <span class="math">\\widetilde{M}_0, \\ldots, \\widetilde{M}_{t-1}</span> on its on, each at a random point <span class="math">(r_a, r_y)</span>, which by Section 5 can be done in <span class="math">O(t \\cdot (\\log n + \\log m))</span> time. If the CCS instance is non-uniform, then the verifier checks the evaluation proofs provided by the prover for each of <span class="math">\\widetilde{M}_0(r_a, r_y), \\ldots, \\widetilde{M}_{t-1}(r_a, r_y)</span> provided by the prover. Again, many polynomial commitment schemes have effective batching procedures that enable these <span class="math">t</span> evaluations to be verified with the same cost as a single evaluation to a single committed polynomial.</p>
+
+    <p class="text-gray-300">Finally, the proof size is the sum of the proof sizes from the sum-check protocol in the polynomial IOP from Theorem 1 and the evaluation proof sizes from polynomial commitment schemes.</p>
+
+    <p class="text-gray-300">We note that SNARKs based on polynomial IOPs and polynomial commitments can be easily extended to handle customizable constraints, where gates compute high-degree multivariate polynomials. (Unfortunately, it is not clear how to extend linear-PCP-based SNARKs [GGPR13, Gro16] to support higher degree constraints due to the way they use bilinear pairings, which restrict the verifier's check to be a degree-2 polynomial evaluation.) Furthermore, polynomial IOPs that already handle R1CS can easily be extended to support CCS: Appendix A describes how to extend Marlin [CHM+20] to obtain SuperMarlin.</p>
+
+    <p class="text-gray-300">However, the resulting SNARKs (including Plonk applied to Plonkish) have cryptographic costs that grow with the size <span class="math">d</span> of the CCS multi-sets <span class="math">S_0, \\ldots, S_{t-1}</span> (in the language of Plonkish, with the degree <span class="math">d</span> of the</p>
+
+    <p class="text-gray-300"><span class="math">^{10}</span>The party that commits to <span class="math">\\widetilde{M}_0, \\ldots, \\widetilde{M}_t</span> in pre-processing is often referred to as the <em>indexer</em> in the literature. The important point is that these commitments must be computed honestly for the resulting pre-processing SNARK to be sound. The pre-processing commitment procedure is transparent if the polynomial commitment scheme used is transparent.</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">commitment scheme</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">preprocessing time</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">prover time</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">proof size</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">verifier time</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Brakedown-PC</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">O(N) F</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">O(N) F</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">O(tλ) H</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">O(t√N·λ) H</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+            <td class="px-3 py-2 border-b border-gray-700">O(N) H</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">O(N) H</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">O(√N·λ+d log m) F</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">O(dq+d log m) F</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Orion-PC</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">O(N) F</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">O(N) F</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">O(tλ log2 N) H</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">O(tλ log2 N) H</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+            <td class="px-3 py-2 border-b border-gray-700">O(N) H</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">O(N) H</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">O(d log m) F</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">O(dq+d log m) F</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Dory-PC</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">O(N) G1</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">O(N) G1</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">O(log N) G1</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">O(log N) G1</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+            <td class="px-3 py-2 border-b border-gray-700">O(d log m) F</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">O(dq+d log m) F</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">KZG + Gemini</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">O(N) G1</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">O(N) G1</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">O(log N) G1</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">O(log N) G1</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+            <td class="px-3 py-2 border-b border-gray-700">O(d log m) F</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">O(dq+d log m) F</td>
+
+          </tr>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">Figure 3: SuperSpartan family of SNARKs for non-uniform instances of CCS. We obtain a separate SNARK for each choice of the polynomial commitment scheme. The prover time listed is in addition to the  <span class="math">O(N + tm + qmd\\log^2 d)</span>  field operations required to implement the two invocations of the sum-check protocol in SuperSpartan. The KZG+Gemini commitment scheme also involves a trusted setup to produce an SRS of size  <span class="math">O(N)</span> . Recall that  <span class="math">N</span>  denotes the number of non-zero entries across all CCS matrices  <span class="math">M_0, \\ldots, M_{t-1}</span> ,  <span class="math">m</span>  denotes the number of rows and  <span class="math">n</span>  the number of columns in each matrix,  <span class="math">q</span>  denotes the number of multi-sets  <span class="math">S_0, \\ldots, S_{q-1}</span> , and  <span class="math">d</span>  denotes the maximum size of any multiset  <span class="math">S_i</span> .</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">commitment scheme</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">preprocessing time (circuit-independent)</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">prover time</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">proof size</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">verifier time</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Brakedown-PC</td>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+            <td class="px-3 py-2 border-b border-gray-700">O(n) F</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">O(λ) H</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">O(√n·λ) H</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+            <td class="px-3 py-2 border-b border-gray-700">O(n) H</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">O(√n·λ+d log m) F</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">O(dq+d log m) F</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Orion-PC</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">O(√n) F</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">O(n) F</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">O(λ log2 n) H</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">O(λ log2 n) H</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+            <td class="px-3 py-2 border-b border-gray-700">O(√n) H</td>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+            <td class="px-3 py-2 border-b border-gray-700">O(d log m) F</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">O(dq+d log m) F</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Dory-PC</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">O(√n) G1</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">O(n) G1</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">O(log n) G1</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">O(log n) G1</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+            <td class="px-3 py-2 border-b border-gray-700">O(d log m) F</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">O(dq+d log m) F</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">KZG + Gemini</td>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+            <td class="px-3 py-2 border-b border-gray-700">O(n) G1</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">O(log n) G1</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">O(log n) G1</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+            <td class="px-3 py-2 border-b border-gray-700">O(d log m) F</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">O(dq+d log m) F</td>
+
+          </tr>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">Figure 4: SuperSpartan family of SNARKs for uniform instances of CCS (e.g., those arising from the AIR  <span class="math">\\rightarrow</span>  CCS transformation of Lemma 3). We obtain a separate SNARK, one for each choice of the polynomial commitment scheme. The prover time listed is in addition to the  <span class="math">O(N + tm + qmd\\log^2 d)</span>  field operations required to implement the two invocations of the sum-check protocol in SuperSpartan. The KZG+Gemini commitment scheme also involves a trusted setup to produce an SRS of size  <span class="math">O(n)</span> . Recall that  <span class="math">N</span>  denotes the number of non-zero entries across all CCS matrices  <span class="math">M_0,\\ldots ,M_{t - 1}</span> ,  <span class="math">m</span>  denotes the number of rows and  <span class="math">n</span>  the number of columns in each matrix,  <span class="math">q</span>  denotes the number of multi-sets  <span class="math">S_0,\\dots ,S_{q - 1}</span> . and  <span class="math">d</span>  denotes the maximum size of any multiset  <span class="math">S_{i}</span> .</p>
+
+    <p class="text-gray-300">polynomial constraints). This is because SNARKs such as Marlin and Plonk have the prover commit to a "quotient polynomial" whose degree grows with  <span class="math">d</span> , making it unattractive to use Plonk or SuperMarlin to prove constraint systems with larger values of  <span class="math">d</span>  (e.g.,  <span class="math">d &amp;gt; 5</span> ). Furthermore, the cryptographic costs for the prover (and for pre-processing) in these SNARKs also grows with the number  <span class="math">t</span>  of CCS constraint matrices  <span class="math">M_0, \\ldots, M_{t-1}</span>  and the number of rows in these matrices.</p>
+
+    <p class="text-gray-300">The above prover cost profiles are in contrast to SuperSpartan (and Hyperplonk), where only the prover's finite field operations, and not the cryptographic operations, grows with the degree  <span class="math">d</span> . Moreover, in the case of uniform CCS instances, SuperSpartan's prover's cryptographic work does not grow with the number of constraint matrices  <span class="math">t</span>  or the number of rows  <span class="math">m</span> , only with the number of columns  <span class="math">n</span> .</p>
+
+    <p class="text-gray-300">References</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>[AB09] Sanjeev Arora and Boaz Barak. Computational complexity: a modern approach. Cambridge University Press, 2009.</li>
+
+      <li>[BBHR19a] Eli Ben-Sasson, Iddo Bentov, Yinon Horesh, and Michael Riabzev. Scalable zero knowledge with no trusted setup. In Proceedings of the International Cryptology Conference (CRYPTO), 2019.</li>
+
+      <li>[BBHR19b] Eli Ben-Sasson, Iddo Bentov, Yinon Horesh, and Michael Riabzev. Scalable zero knowledge with no trusted setup. In Alexandra Boldyreva and Daniele Micciancio, editors, Advances in Cryptology - CRYPTO 2019 - 39th Annual International Cryptology Conference, Santa Barbara, CA, USA, August 18-22, 2019, Proceedings, Part III, volume 11694 of Lecture Notes in Computer Science, pages 701–732. Springer, 2019.</li>
+
+      <li>[BCCT12] Nir Bitansky, Ran Canetti, Alessandro Chiesa, and Eran Tromer. From extractable collision resistance to succinct non-interactive arguments of knowledge, and back again. In Proceedings of the Innovations in Theoretical Computer Science (ITCS), 2012.</li>
+
+      <li>[BCHO22] Jonathan Bootle, Alessandro Chiesa, Yuncong Hu, and Michele Orru. Gemini: Elastic snarks for diverse environments. In Proceedings of the International Conference on the Theory and Applications of Cryptographic Techniques (EUROCRYPT), 2022.</li>
+
+      <li>[BCR^{+}19] Eli Ben-Sasson, Alessandro Chiesa, Michael Riabzev, Nicholas Spooner, Madars Virza, and Nicholas P. Ward. Aurora: Transparent succinct arguments for R1CS. In Proceedings of the International Conference on the Theory and Applications of Cryptographic Techniques (EUROCRYPT), 2019.</li>
+
+      <li>[bel] bellman. https://crates.io/crates/bellman.</li>
+
+      <li>[BFL92] L. Babai, L. Fortnow, and C. Lund. Non-deterministic exponential time has two-prover interactive protocols. 2(4), December 1992.</li>
+
+      <li>[BFR^{+}13] Benjamin Braun, Ariel J. Feldman, Zuocheng Ren, Srinath Setty, Andrew J. Blumberg, and Michael Walfish. Verifying computations with state. In Proceedings of the ACM Symposium on Operating Systems Principles (SOSP), 2013.</li>
+
+      <li>[BFS20] Benedikt Bünz, Ben Fisch, and Alan Szepieniec. Transparent SNARKs from DARK compilers. In Proceedings of the International Conference on the Theory and Applications of Cryptographic Techniques (EUROCRYPT), 2020.</li>
+
+      <li>[BGtRZt23] Jeremy Bruestle, Paul Gafni, and the RISC Zero team. RISC Zero zkVM: Scalable, Transparent Arguments of RISC-V. 2023. Available at https://www.risczero.com/proof-system-in-detail.pdf.</li>
+
+      <li>[BSCKL23] Eli Ben-Sasson, Dan Carmon, Swastik Kopparty, and David Levit. Scalable and transparent proofs over all large fields, via elliptic curves: (ECFFT Part II). In Theory of Cryptography: 20th International Conference, TCC 2022, Chicago, IL, USA, November 7–10, 2022, Proceedings, Part I, pages 467–496. Springer, 2023.</li>
+
+      <li>[BSS08] Eli Ben-Sasson and Madhu Sudan. Short PCPs with polylog query complexity. SIAM J. Comput., 38(2):551–607, May 2008.</li>
+
+      <li>[CBBZ23] Binyi Chen, Benedikt Bünz, Dan Boneh, and Zhenfei Zhang. Hyperplonk: Plonk with linear-time prover and high-degree custom gates. In Proceedings of the International Conference on the Theory and Applications of Cryptographic Techniques (EUROCRYPT), 2023.</li>
+
+      <li>[CHM^{+}20] Alessandro Chiesa, Yuncong Hu, Mary Maller, Pratyush Mishra, Noah Vesely, and Nicholas Ward. Marlin: Preprocessing zkSNARKs with universal and updatable SRS. In Proceedings of the International Conference on the Theory and Applications of Cryptographic Techniques (EUROCRYPT), 2020.</li>
+
+    </ul>
+
+    <p class="text-gray-300">-</p>
+
+    <p class="text-gray-300">[COS20] Alessandro Chiesa, Dev Ojha, and Nicholas Spooner. Fractal: Post-quantum and transparent recursive proofs from holography. In Proceedings of the International Conference on the Theory and Applications of Cryptographic Techniques (EUROCRYPT), 2020.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>[CTY12] Graham Cormode, Justin Thaler, and Ke Yi. Verifying computations with streaming interactive proofs. Proceedings of the VLDB Endowment, 5(1):25, 2012.</li>
+
+      <li>[FS86] Amos Fiat and Adi Shamir. How to prove yourself: Practical solutions to identification and signature problems. In Proceedings of the International Cryptology Conference (CRYPTO), pages 186–194, 1986.</li>
+
+      <li>[GGPR13] Rosario Gennaro, Craig Gentry, Bryan Parno, and Mariana Raykova. Quadratic span programs and succinct NIZKs without PCPs. In Proceedings of the International Conference on the Theory and Applications of Cryptographic Techniques (EUROCRYPT), 2013.</li>
+
+      <li>[GLS^{+}21] Alexander Golovnev, Jonathan Lee, Srinath Setty, Justin Thaler, and Riad S. Wahby. Brakedown: Linear-time and post-quantum snarks for r1cs, 2021.</li>
+
+      <li>[GPR21] Lior Goldberg, Shahar Papini, and Michael Riabzev. Cairo–a turing-complete stark-friendly cpu architecture. Cryptology ePrint Archive, 2021.</li>
+
+      <li>[Gro16] Jens Groth. On the size of pairing-based non-interactive arguments. In Proceedings of the International Conference on the Theory and Applications of Cryptographic Techniques (EUROCRYPT), 2016.</li>
+
+      <li>[GW11] Craig Gentry and Daniel Wichs. Separating succinct non-interactive arguments from all falsifiable assumptions. In Proceedings of the ACM Symposium on Theory of Computing (STOC), pages 99–108, 2011.</li>
+
+      <li>[GW20] Ariel Gabizon and Zachary J Williamson. plookup: A simplified polynomial protocol for lookup tables. 2020.</li>
+
+      <li>[GWC19] Ariel Gabizon, Zachary J. Williamson, and Oana Ciobotaru. PLONK: Permutations over Lagrange-bases for oecumenical noninteractive arguments of knowledge. ePrint Report 2019/953, 2019.</li>
+
+      <li>[Kil92] Joe Kilian. A note on efficient zero-knowledge proofs and arguments (extended abstract). In Proceedings of the ACM Symposium on Theory of Computing (STOC), 1992.</li>
+
+      <li>[KR08] Yael Tauman Kalai and Ran Raz. Interactive PCP. In Proceedings of the International Colloquium on Automata, Languages and Programming (ICALP), pages 536–547, 2008.</li>
+
+      <li>[KST22] Abhiram Kothapalli, Srinath Setty, and Ioanna Tzialla. Nova: Recursive Zero-Knowledge Arguments from Folding Schemes. In Proceedings of the International Cryptology Conference (CRYPTO), 2022.</li>
+
+      <li>[KZG10] Aniket Kate, Gregory M. Zaverucha, and Ian Goldberg. Constant-size commitments to polynomials and their applications. In Proceedings of the International Conference on the Theory and Application of Cryptology and Information Security (ASIACRYPT), pages 177–194, 2010.</li>
+
+      <li>[LFKN90] Carsten Lund, Lance Fortnow, Howard Karloff, and Noam Nisan. Algebraic methods for interactive proof systems. In Proceedings of the IEEE Symposium on Foundations of Computer Science (FOCS), October 1990.</li>
+
+      <li>[LNS20] Jonathan Lee, Kirill Nikitin, and Srinath Setty. Replicated state machines without replicated execution. In Proceedings of the IEEE Symposium on Security and Privacy (S&P), 2020.</li>
+
+      <li>[Mic94] Silvio Micali. CS proofs. In Proceedings of the IEEE Symposium on Foundations of Computer Science (FOCS), 1994.</li>
+
+      <li>[OWB20] Alex Ozdemir, Riad S. Wahby, and Dan Boneh. Scaling verifiable computation using efficient set accumulators, 2020.</li>
+
+    </ul>
+
+    <p class="text-gray-300">[PGHR13] Bryan Parno, Craig Gentry, Jon Howell, and Mariana Raykova. Pinocchio: Nearly practical verifiable computation. In Proceedings of the IEEE Symposium on Security and Privacy (S&P), May 2013.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>[PST13] Charalampos Papamanthou, Elaine Shi, and Roberto Tamassia. Signatures of correct computation. In Theory of Cryptography Conference (TCC), 2013.</li>
+
+      <li>[SAGL18] Srinath Setty, Sebastian Angel, Trinabh Gupta, and Jonathan Lee. Proving the correct execution of concurrent services in zero-knowledge. In Proceedings of the USENIX Symposium on Operating Systems Design and Implementation (OSDI), October 2018.</li>
+
+      <li>[SBV^{+}13] Srinath Setty, Benjamin Braun, Victor Vu, Andrew J. Blumberg, Bryan Parno, and Michael Walfish. Resolving the conflict between generality and plausibility in verified computation. In Proceedings of the ACM European Conference on Computer Systems (EuroSys), April 2013.</li>
+
+      <li>[Set20] Srinath Setty. Spartan: Efficient and general-purpose zkSNARKs without trusted setup. In Proceedings of the International Cryptology Conference (CRYPTO), 2020.</li>
+
+      <li>[SL20] Srinath Setty and Jonathan Lee. Quarks: Quadruple-efficient transparent zkSNARKs. Cryptology ePrint Archive, Report 2020/1275, 2020.</li>
+
+      <li>[Sta21] StarkWare. ethSTARK Documentation. Cryptology ePrint Archive, Paper 2021/582, 2021. https://eprint.iacr.org/2021/582.</li>
+
+      <li>[SVP^{+}12] Srinath Setty, Victor Vu, Nikhil Panpalia, Benjamin Braun, Andrew J. Blumberg, and Michael Walfish. Taking proof-based verified computation a few steps closer to practicality. In Proceedings of the USENIX Security Symposium, August 2012.</li>
+
+      <li>[Tha13] Justin Thaler. Time-optimal interactive proofs for circuit evaluation. In Proceedings of the International Cryptology Conference (CRYPTO), 2013.</li>
+
+      <li>[Tha20] Justin Thaler. Proofs, arguments, and zero-knowledge. http://people.cs.georgetown.edu/jthaler/ProofsArgsAndZK.html, 2020.</li>
+
+      <li>[TKPS22] Ioanna Tzialla, Abhiram Kothapalli, Bryan Parno, and Srinath Setty. Transparency dictionaries with succinct proofs of correct operation. In Proceedings of the Network and Distributed System Security Symposium (NDSS), 2022.</li>
+
+      <li>[WJB^{+}17] Riad S. Wahby, Ye Ji, Andrew J. Blumberg, Abhi Shelat, Justin Thaler, Michael Walfish, and Thomas Wies. Full accounting for verifiable outsourcing. In Proceedings of the ACM Conference on Computer and Communications Security (CCS), 2017.</li>
+
+      <li>[WSR^{+}15] Riad S. Wahby, Srinath Setty, Zuocheng Ren, Andrew J. Blumberg, and Michael Walfish. Efficient RAM and control flow in verifiable outsourced computation. In Proceedings of the Network and Distributed System Security Symposium (NDSS), 2015.</li>
+
+      <li>[WTS^{+}18] Riad S. Wahby, Ioanna Tzialla, Abhi Shelat, Justin Thaler, and Michael Walfish. Doubly-efficient zkSNARKs without trusted setup. In Proceedings of the IEEE Symposium on Security and Privacy (S&P), 2018.</li>
+
+      <li>[XZS22] Tiancheng Xie, Yupeng Zhang, and Dawn Song. Orion: Zero knowledge proof with linear prover time. In Proceedings of the International Cryptology Conference (CRYPTO), 2022.</li>
+
+      <li>[ZGK^{+}17] Yupeng Zhang, Daniel Genkin, Jonathan Katz, Dimitrios Papadopoulos, and Charalampos Papamanthou. vSQL: Verifying arbitrary SQL queries over dynamic outsourced databases. In Proceedings of the IEEE Symposium on Security and Privacy (S&P), 2017.</li>
+
+      <li>[ZXZS20] Jiaheng Zhang, Tiancheng Xie, Yupeng Zhang, and Dawn Song. Transparent polynomial delegation and its applications to zero knowledge proof. In Proceedings of the IEEE Symposium on Security and Privacy (S&P), 2020.</li>
+
+    </ul>
+
+    <p class="text-gray-300">A SuperMarlin</p>
+
+    <p class="text-gray-300">In this section, we sketch a variant of Marlin <em>[CHM^{+}20]</em> that applies to CCS. Our presentation borrows substantially from the presentation of Marlin for R1CS in <em>[x23, Chapter 10]</em>.</p>
+
+    <p class="text-gray-300">For simplicity, we assume that the number of rows <span class="math">m</span> and columns <span class="math">n</span> in the CCS matrices <span class="math">M_{0},\\ldots,M_{t-1}</span> are equal. We also assume that there is a multiplicative subgroup <span class="math">H</span> of <span class="math">\\mathbb{F}</span> of size exactly <span class="math">n</span> (say, <span class="math">H</span> is the set of all <span class="math">n</span>’th roots of unity, so that the so-called <em>vanishing polynomial</em> for <span class="math">H</span> is <span class="math">\\mathbb{Z}_{H}(x)=x^{n}-1</span>. This polynomial maps all entries of <span class="math">H</span> to <span class="math">0</span> and no other entries of <span class="math">\\mathbb{F}</span> to <span class="math">0</span>.</p>
+
+    <p class="text-gray-300">For <span class="math">M_{0},\\ldots,M_{t}</span> let <span class="math">z_{M_{i}}</span> denote <span class="math">M_{i}\\cdot z</span>, which is a vector in <span class="math">\\mathbb{F}^{n}</span>, and let <span class="math">\\hat{z}_{M_{i}}</span> be the associated univariate low-degree extension polynomial. That is, indexing the <span class="math">n</span> entries of <span class="math">\\hat{z}_{M_{i}}</span> by the <span class="math">n</span> elements of <span class="math">H</span> using any natural bijection, <span class="math">\\hat{z}_{M_{i}}</span> is the unique polynomial of degree at most <span class="math">n-1</span> such that <span class="math">\\hat{z}_{M_{i}}(h)=(z_{M_{i}})_{h}</span> for all <span class="math">h\\in H</span>.</p>
+
+    <p class="text-gray-300">We describe the protocol as a polynomial IOP, whereby each message from prover to verifier specifies a univariate polynomial of degree at most <span class="math">O(n)</span>. In the associated SNARK, the prover will <em>commit</em> to each such polynomial with a polynomial commitment scheme, and each time the verifier needs to evaluate a committed polynomial at a point, the prover will provide the evaluation along with a proof that the returned evaluation is consistent with the committed polynomial.</p>
+
+    <h4 id="sec-56" class="text-lg font-semibold mt-6">The polynomial IOP.</h4>
+
+    <p class="text-gray-300">To check that indeed</p>
+
+    <p class="text-gray-300"><span class="math">\\sum_{i=0}^{q-1}c_{i}\\cdot\\bigcirc_{j\\in S_{i}}M_{j}\\cdot z=\\mathbf{0},</span> (25)</p>
+
+    <p class="text-gray-300">the verifier must confirm two properties. First:</p>
+
+    <p class="text-gray-300"><span class="math">\\text{for all }h\\in H,\\sum_{i=0}^{q-1}c_{i}\\cdot\\prod_{j\\in S_{i}}\\hat{z}_{M_{i}}(h)=\\mathbf{0}.</span> (26)</p>
+
+    <p class="text-gray-300">Second:</p>
+
+    <p class="text-gray-300"><span class="math">\\text{for all }h\\in H,\\text{ and }i=0,\\ldots,t-1,\\ \\hat{z}_{M_{i}}(h)=\\sum_{j\\in H}M_{h,j}\\cdot\\hat{z}(j).</span> (27)</p>
+
+    <p class="text-gray-300">Equation (27) ensures that for each <span class="math">i=0,\\ldots,t-1</span>, <span class="math">z_{M_{i}}=M_{i}\\cdot z</span>. Assuming this to be so, Equation (26) confirms that Equation (25) holds.</p>
+
+    <p class="text-gray-300">The prover sends <span class="math">t</span> degree-<span class="math">n</span> polynomials <span class="math">\\hat{z}</span>, <span class="math">\\hat{z}_{M_{0}},\\ldots,\\hat{z}_{M_{t-1}}</span>, the (univariate) low-degree extensions of <span class="math">z</span> and <span class="math">z_{M_{0}},\\ldots,z_{M_{t-1}}</span>.</p>
+
+    <h4 id="sec-57" class="text-lg font-semibold mt-6">Checking Equation (26).</h4>
+
+    <p class="text-gray-300">A standard fact (see <em>[x10]</em>, or <em>[x23, Lemma 9.3]</em> for an exposition) implies that the first check is equivalent to the existence of a polynomial <span class="math">h^{*}</span> of degree at most <span class="math">d\\cdot n</span> such that</p>
+
+    <p class="text-gray-300"><span class="math">\\sum_{i=0}^{q-1}c_{i}\\cdot\\prod_{j\\in S_{i}}\\hat{z}_{M_{i}}(X)=h^{*}(X)\\cdot\\mathbb{Z}_{H}(X).</span> (28)</p>
+
+    <p class="text-gray-300">The prover sends the quotient polynomial <span class="math">h^{*}</span>. The verifier probabilistically checks that Equation (28) holds by choosing a random <span class="math">r\\in\\mathbb{F}</span> and confirming that</p>
+
+    <p class="text-gray-300"><span class="math">\\sum_{i=0}^{q-1}c_{i}\\cdot\\prod_{j\\in S_{i}}\\hat{z}_{M_{i}}(r)=h^{*}(r)\\cdot\\mathbb{Z}_{H}(r).</span> (29)</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">This requires querying the committed polynomials <span class="math">\\hat{z}_{M_{0}},\\ldots,\\hat{z}_{M_{t-1}}</span> and <span class="math">h^{*}</span> at <span class="math">r</span>; the verifier can evaluate <span class="math">\\mathbb{Z}_{H}(r)</span> on its own in logarithmic time because <span class="math">\\mathbb{Z}_{H}(r)</span> is sparse. Since all of the messages sent by the prover are polynomials of degree at most <span class="math">n-1</span>, up to soundness error $2n/</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mathbb{F}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"><span class="math"> over the choice of </span>r<span class="math">, if Equation (29) holds at </span>r$ then it is safe for the verifier to believe that Equation (28) holds, and hence also Equation (26).</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <h4 id="sec-58" class="text-lg font-semibold mt-6">Checking Equation (27).</h4>
+
+    <p class="text-gray-300">The check that Expression (27) holds leverages interaction. Fix <span class="math">M_{i}</span> for some <span class="math">i=0,\\ldots,t=1</span> for the remainder of the paragraph. Let <span class="math">\\hat{M}_{i}(X,Y)</span> denote the bivariate low-degree extension of the matrix <span class="math">M</span>, interpreted in the natural manner as a function <span class="math">M_{i}(x,y)\\colon H\\times H\\to\\mathbb{F}</span> via <span class="math">M_{i}(x,y)=M_{x,y}</span>. That is, <span class="math">\\hat{M}_{i}(x,y)</span> is the unique bivariate polynomial of degree at most <span class="math">n</span> in each variable that extends <span class="math">M_{i}</span>. Since <span class="math">\\hat{z}_{M_{i}}</span> is the <em>unique</em> extension of <span class="math">z_{M_{i}}</span> of degree less than <span class="math">n</span>, it is easily seen that Equation (27) holds for all <span class="math">h\\in H</span> if and only if the following equality holds as formal polynomials:</p>
+
+    <p class="text-gray-300"><span class="math">\\hat{z}_{M_{i}}(X)=\\sum_{j\\in H}\\hat{M}_{i}(X,j)\\hat{z}(j).</span> (30)</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Since any two distinct polynomials of degree at most <span class="math">n</span> can agree on at most <span class="math">n</span> inputs, if the verifier chooses <span class="math">r^{\\prime}</span> at random from <span class="math">\\mathbb{F}</span>, then up to soundness error $n/</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mathbb{F}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"><span class="math"> over the choice of </span>r^{\\prime}$, Equation (27) holds if and only if</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300"><span class="math">\\hat{z}_{M_{i}}(r^{\\prime})=\\sum_{j\\in H}\\hat{M}(r^{\\prime},j)\\hat{z}(j).</span> (31)</p>
+
+    <p class="text-gray-300">The verifier checks Equation (31) by sending <span class="math">r^{\\prime}</span> to the prover and proceeding as follows. Let</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">$q(Y)=\\hat{M}_{i}(r^{\\prime},Y)\\hat{z}(Y)-\\hat{z}_{M_{i}}(r^{\\prime})\\cdot</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">^{-1},$</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">so that the validity of Equation (31) is equivalent to <span class="math">\\sum_{j\\in H}q(Y)=0</span>. The verifier requests that the prover establish that <span class="math">\\sum_{j\\in H}q(Y)=0</span> by applying the so-called univariate sum-check protocol <em>[BCR^{+}19]</em> (see <em>[x23, Chapter 10]</em> for an exposition).</p>
+
+    <p class="text-gray-300">At the end of the univariate sum-check protocol applied to <span class="math">q</span>, the verifier needs to evaluate <span class="math">q</span> at a randomly chosen point <span class="math">r^{\\prime\\prime}</span>. Clearly this can be done in a constant number of field operations if the verifier is given <span class="math">\\hat{z}(r^{\\prime\\prime})</span>, <span class="math">\\hat{z}_{M_{i}}(r^{\\prime})</span>, and <span class="math">\\hat{M}_{i}(r^{\\prime},r^{\\prime\\prime})</span>. The first two evaluations, <span class="math">\\hat{z}(r^{\\prime\\prime})</span> and <span class="math">\\hat{z}_{M_{i}}(r^{\\prime})</span>, can be obtained with one query each to the polynomials <span class="math">\\hat{z}</span> and <span class="math">\\hat{z}_{M_{i}}</span>.</p>
+
+    <p class="text-gray-300">Our description above omits two details: how the univariate sum-check protocol works, and how the bivariate polynomials <span class="math">\\hat{M}_{i}(X,Y)</span> can be committed by an honest party in pre-processing, and evaluation proofs computed, in time proportional to the number of non-zero entries rather than the total number of entries (i.e., a sparse polynomial commitment scheme for bivariate polynomials under the assumption that the commitment is computed honestly). We direct the interested reader to Marlin <em>[CHM^{+}20]</em> or <em>[x23, Chapter 10]</em> for details of both. Various concrete optimizations are also possible, using, e.g., efficient batching properties of evaluation queries to polynomials committed with homomorphic polynomial commitment schemes such as KZG commitments <em>[x17]</em>.</p>
+
+    <h2 id="sec-59" class="text-2xl font-bold">Appendix B CCS+: CCS with lookup operations</h2>
+
+    <p class="text-gray-300">This section describes an extension to CCS that additionally supports “lookup gates”. In a nutshell, we allow a lookup table (a set of values from <span class="math">\\mathbb{F}</span>) to specified as part of the CCS+ structure and a set lookup operations (indexes into the satisfying assignment <span class="math">z</span>), with the constraint that the values in the satisfying assignment at those specified locations are contained in the lookup table.</p>
+
+    <p class="text-gray-300">As a concrete example, suppose that the lookup table is <span class="math">T=\\{0,1,\\ldots,2^{32}-1\\}</span>, and suppose that certain variables in the constraint system must be range constrained to be in the range <span class="math">[0,2^{32}-1]</span>. The lookup operations in CCS+ can be used to specify which variables must be contained table and thereby enforce the desired range constraints.</p>
+
+    <h6 id="sec-60" class="text-base font-medium mt-4">Remark 12.</h6>
+
+    <p class="text-gray-300">In the definition below, for simplicity, we allow a single table, but it easily extends to the case of multiple tables. In particular, the lookup operation now becomes a tuple where the first entry in the tuple specifies the table and the second entry specifies the index into the satisfying assignment.</p>
+
+    <h6 id="sec-61" class="text-base font-medium mt-4">Definition B.1 (CCS+).</h6>
+
+    <p class="text-gray-300">A CCS+ structure <span class="math">\\mathcal{S}</span> consists of:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>size bounds <span class="math">m,n,N,\\ell,t,q,d\\in\\mathbb{N}</span> where <span class="math">n&gt;\\ell</span>;</li>
+
+      <li>a sequence of matrices <span class="math">M_{0},\\ldots,M_{t-1}\\in\\mathbb{F}^{m\\times n}</span> with at most <span class="math">N=\\Omega(\\max(m,n))</span> non-zero entries in total;</li>
+
+      <li>a sequence of <span class="math">q</span> multisets <span class="math">[S_{0},\\ldots,S_{q-1}]</span>, where an element in each multiset is from the domain</li>
+
+    </ul>
+
+    <p class="text-gray-300"><span class="math">\\{0,\\ldots,t-1\\}</span></p>
+
+    <p class="text-gray-300">and the cardinality of each multiset is at most <span class="math">d</span>.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>a sequence of <span class="math">q</span> constants <span class="math">[c_{0},\\ldots,c_{q-1}]</span>, where each constant is from <span class="math">\\mathbb{F}</span>.</li>
+
+      <li>a lookup table <span class="math">T</span>, where <span class="math">T</span> is a set of values from <span class="math">\\mathbb{F}</span>.</li>
+
+      <li>a sequence of lookup operations <span class="math">L</span>, where each entry in <span class="math">L</span> is in the range <span class="math">[n]</span>.</li>
+
+    </ul>
+
+    <p class="text-gray-300">A CCS+ instance consists of public input <span class="math">x\\in\\mathbb{F}^{\\ell}</span>. A CCS+ witness consists of a vector <span class="math">w\\in\\mathbb{F}^{n-\\ell-1}</span>. A CCS+ structure-instance tuple <span class="math">(\\mathcal{S},x)</span> is satisfied by a CCS+ witness <span class="math">w</span> if, for each lookup operation <span class="math">o</span> in <span class="math">L</span>, <span class="math">z[o]\\in T</span>, and moreover</p>
+
+    <p class="text-gray-300"><span class="math">\\sum_{i=0}^{q-1}c_{i}\\cdot\\bigcirc_{j\\in S_{i}}M_{j}\\cdot z=\\mathbf{0}.</span></p>
+
+    <p class="text-gray-300">Here, <span class="math">z=(w,1,x)\\in\\mathbb{F}^{n}</span>, <span class="math">M_{j}\\cdot z</span> denotes matrix-vector multiplication, <span class="math">\\bigcirc</span> denotes the Hadamard product between vectors, and <span class="math">\\mathbf{0}</span> is an <span class="math">m</span>-sized vector with entries equal to the the additive identity in <span class="math">\\mathbb{F}</span>.</p>
+
+    <h2 id="sec-62" class="text-2xl font-bold">Appendix C SuperSpartan+: Extending SuperSpartan to handle CCS+</h2>
+
+    <p class="text-gray-300">This section sketches how to extend SuperSpartan to handle CCS+. We leave it to the near-term future work to formalize this construction and provide a security analysis.</p>
+
+    <p class="text-gray-300">Suppose there is a polynomial IOP for lookup operations, which means the following. The verifier has oracle access to two polynomials: (1) a polynomial <span class="math">\\widetilde{T}</span> that encodes the table <span class="math">T</span>; and (2) a polynomial that encodes values claimed to be in the table <span class="math">\\widetilde{a}</span>. The polynomial IOP for lookup operations convinces the verifier that values in the second polynomial are contained in the table encoded by the first polynomial. There are many examples of such polynomial IOPs in the literature (e.g., polynomial IOPs that underlie lookup arguments such as plookup <em>[x11]</em>). Furthermore, SuperSpartan’s polynomial IOP for CCS (or any polynomial IOP for R1CS) can also provide a polynomial IOP for lookup operations: create a CCS structure-instance takes as non-deterministic input the two polynomials noted above and checks the desired lookup relation on the provided inputs (e.g., with randomized fingerprinting techniques).</p>
+
+    <p class="text-gray-300">Given a polynomial IOP for lookup operations, we can then easily extend the SuperSpartan’s polynomial IOP for CCS to handle CCS+.</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Given lookup operations <span class="math">L</span> in the CCS+ structure, there exists a sparse matrix $M_{L}\\in\\mathbb{F}^{</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">L</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\times n}<span class="math">, where </span>\\forall i\\in[</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">L</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">]<span class="math">, </span>M_{L}[i][L[i]]=1<span class="math"> (all other entries of </span>M_{L}<span class="math"> are set to </span>0<span class="math">). Suppose that the verifier has oracle access to </span>\\widetilde{M_{L}}<span class="math">. In the context of a SNARK, </span>\\widetilde{M_{L}}<span class="math"> is committed in the preprocessing phase in addition to other sparse matrices in the CCS structure. If </span>\\widetilde{M_{L}}<span class="math"> is structured, the commitment can be omitted, as the verifier will be able, on its own, to evaluate </span>\\widetilde{M_{L}}$ at any desired point in logarithmic time.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">We now discuss modifications to SuperSpartan’s polynomial IOP. In the first message sent by the prover in SuperSpartan’s polynomial IOP, in addition to the witness polynomial <span class="math">\\widetilde{w}</span>, the prover sends a polynomial <span class="math">\\widetilde{a}</span> claimed to be the MLE of the vector <span class="math">M_{L}\\cdot z</span>, where <span class="math">z=(w,1,x)</span>. The prover and the verifier use an invocation of the sum-check protocol to check that the claimed relationship <span class="math">M_{L}\\cdot z=a</span> indeed holds. SuperSpartan+’s polynomial IOP then invokes the polynomial IOP for lookup operations to confirm that entries in <span class="math">a</span> are contained in the table <span class="math">T</span>. Completeness and soundness follow from the completeness and soundness of the sum-check protocol and of the polynomial IOP for lookup operations.</p>`;
+---
+
+<BaseLayout title="Customizable constraint systems for succinct arguments (2023/552)">
+  <article class="max-w-4xl mx-auto article-prose">
+    <nav class="mb-8">
+      <a href="/papers" class="text-blue-400 hover:text-blue-300">
+        &larr; Back to Papers
+      </a>
+    </nav>
+
+    <header class="mb-12">
+      <h1 class="text-3xl font-bold mb-4"
+        set:html={TITLE_HTML} />
+      <p class="text-gray-400 mb-2"
+        set:html={AUTHORS_HTML} />
+      <p class="text-gray-500 text-sm mb-4">
+        2023 &middot; eprint 2023/552
+      </p>
+      <div class="flex gap-4 text-sm">
+        <a
+          href={EPRINT_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          class="text-blue-400 hover:text-blue-300"
+        >
+          Paper (eprint) &rarr;
+        </a>
+      </div>
+      <p class="mt-4 text-xs text-gray-500">
+        All content below belongs to the original authors. This page
+        reproduces the paper for educational purposes. Always
+        <a
+          href={EPRINT_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          class="text-blue-400 hover:text-blue-300"
+        >cite the original</a>.
+      </p>
+      <p class="mt-1 text-xs text-gray-600">
+        Converted with: {CRAWLER} &middot; {CONVERTED_DATE}
+      </p>
+    </header>
+
+    <Fragment set:html={CONTENT} />
+
+  </article>
+</BaseLayout>

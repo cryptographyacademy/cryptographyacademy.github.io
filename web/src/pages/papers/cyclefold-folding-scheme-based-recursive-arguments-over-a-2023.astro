@@ -1,0 +1,1771 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+
+const EPRINT_URL = 'https://eprint.iacr.org/2023/1192';
+const CRAWLER = 'mistral';
+const CONVERTED_DATE = '2026-02-16';
+const TITLE_HTML = 'CycleFold: Folding-scheme-based recursive arguments over a cycle of elliptic curves';
+const AUTHORS_HTML = 'Abhiram Kothapalli, Srinath Setty';
+
+const CONTENT = `    <p class="text-gray-300">Abhiram Kothapalli Carnegie Mellon University [ Abhiram Kothapalli Carnegie Mellon University ] Srinath Setty Microsoft Research</p>
+
+    <h6 id="sec-2" class="text-base font-medium mt-4">Abstract</h6>
+
+    <p class="text-gray-300">This paper introduces CycleFold, a new and conceptually simple approach to instantiate folding-scheme-based recursive arguments over a cycle of elliptic curves, for the purpose of realizing incrementally verifiable computation (IVC). Existing approach to solve this problem originates from BCTV (CRYPTO’14) who describe their approach for a SNARK-based recursive argument, and it was adapted by Nova (CRYPTO’22) to a folding-scheme-based recursive argument. A downside of this approach is that it represents a folding scheme verifier as a circuit on both curves in the cycle. (e.g., with Nova, this requires <span class="math">\\approx</span>10,000 multiplication gates on both curves in the cycle).</p>
+
+    <p class="text-gray-300">CycleFold’s starting point is the observation that folding-scheme-based recursive arguments can be efficiently instantiated without a cycle of elliptic curves—except for a few scalar multiplications in their verifiers (2 in Nova, 1 in HyperNova, and 3 in ProtoStar). Accordingly, CycleFold uses the second curve in the cycle to merely represent a single scalar multiplication (<span class="math">\\approx</span>1,000–1,500 multiplication gates). CycleFold then folds invocations of that tiny circuit on the first curve in the cycle. This is nearly an order of magnitude improvement over the prior state-of-the-art in terms of circuit sizes on the second curve. CycleFold is particularly beneficial when instantiating folding-scheme-based recursive arguments over “half pairing” cycles (e.g., BN254/Grumpkin) as it keeps the circuit on the non-pairing-friendly curve minimal. The running instance in a CycleFold-based recursive argument consists of an instance on the first curve and a tiny instance on the second curve. Both instances can be proven using a zkSNARK defined over the scalar field of the first curve.</p>
+
+    <p class="text-gray-300">On the conceptual front, with CycleFold, an IVC construction and nor its security proof has to explicitly reason about the cycle of elliptic curves. Finally, due to its simplicity, CycleFold-based recursive argument can be more easily be adapted to support parallel proving with the so-called “binary tree” IVC.</p>
+
+    <p class="text-gray-300">##</p>
+
+    <p class="text-gray-300">1 Introduction</p>
+
+    <p class="text-gray-300">Incrementally verifiable computation (IVC) <em>[x18]</em> is a powerful cryptographic primitive that allows a prover to produce a proof of the correct execution of a “long running” computation in an incremental fashion. For example, it enables the following: The prover takes as input a proof <span class="math">\\pi_{i}</span> proving the the first <span class="math">i</span> steps of its computation and then update it to produce a proof <span class="math">\\pi_{i+1}</span> proving the correct execution of the first <span class="math">i+1</span> steps. Crucially, the prover’s work to update the proof does not depend on the number of steps executed thus far, and the verifier’s work to verify a proof does not grow with the number of steps executed thus far. IVC has received recent, renewed interest as it enables a wide variety of applications in decentralized settings including verifiable delay functions <em>[x1, x23]</em>, succinct blockchains <em>[x11]</em>, rollups <em>[WGH^{+}18,LNS20, x15]</em>, verifiable state machines <em>[x21]</em>, and proofs of machine executions (e.g., EVM, RISC-V).</p>
+
+    <p class="text-gray-300">Early realizations of IVC <em>[x18, x2]</em> rely on recursive versions of succinct non-interactive arguments of knowledge (SNARKs) <em>[x13, x16, x12, x3]</em>. At an incremental step <span class="math">i</span>, the prover produces a SNARK proving that it has correctly applied a step of the specified computation using the output of step <span class="math">i-1</span> and that the SNARK verifier <em>represented as a circuit</em> has accepted a SNARK from step <span class="math">i-1</span> <em>[x2, x3]</em>. These works require representing the SNARK verifier as a circuit. To reduce the size of the SNARK verifier when encoded as a circuit, <em>[x2]</em> use a <em>2-cycle of elliptic curves</em>: a 2-cycle of elliptic curves is a pair of elliptic curves <span class="math">(E_{1},E_{2})</span> such that the scalar field of <span class="math">E_{1}</span> equals the base field of <span class="math">E_{2}</span> (i.e., the field over which points in <span class="math">E_{2}</span> are defined over) and vice versa (Section 1.1 provides details on how a 2-cycle of elliptic curves is used and how they help with concrete efficiency).</p>
+
+    <p class="text-gray-300">A flurry of works <em>[x4, x5, x1, x6, x7, x10, x11]</em> reduce reliance on SNARKs to construct IVC, culminating in the so-called <em>folding schemes</em> <em>[x12]</em>, a primitive that is sufficient to construct IVC. A folding scheme reduces the task of checking two NP instances with the same “structure” (e.g., circuit description) into the task of checking a single NP instance. Naturally, a folding scheme is simpler and is generally far more efficient than a SNARK. Recent IVC schemes based on folding schemes include Nova <em>[x12]</em>, HyperNova <em>[x13]</em>, and ProtoStar <em>[x2]</em>. Although these recent works replace SNARKs with folding schemes, the blueprint of <em>[x2]</em> remains the only solution to instantiate them efficiently on a cycle of elliptic curves. Indeed, an implementation of Nova <em>[x14]</em> adapts BCTV’s approach <em>[x2]</em> to the context of folding-scheme-based recursive arguments. This still requires representing the verifier of a folding scheme as a circuit on <em>both</em> curves in the cycle.</p>
+
+    <h3 id="sec-3" class="text-xl font-semibold mt-8">1.1 Details of the prior state-of-the-art</h3>
+
+    <p class="text-gray-300">We first recall the 2-cycle approach to instantiate SNARK-based recursive arguments in <em>[x2]</em>. We then describe how Nova adapts this approach to the context of folding-scheme-based recursive arguments.</p>
+
+    <p class="text-gray-300">The 2-cycle approach in [BCTV14a]. The starting point for [BCTV14a] is a pairing-based SNARK (e.g., [PGHR13,BCTV14b]) instantiated over a pairing-friendly elliptic curve <span class="math">E</span>. The proof system can prove constraint systems defined over <span class="math">E</span>'s scalar field. Furthermore, verifying a proof requires a handful of pairing operations, which are naturally represented as operations over <span class="math">E</span>'s base field.</p>
+
+    <p class="text-gray-300">Let <span class="math">(\\Pi_1, \\Pi_2)</span> denote two SNARK schemes (such as [PGHR13,BCTV14b]) defined respectively over <span class="math">(E_1, E_2)</span>. In particular, <span class="math">\\Pi_1</span> can "natively" (i.e., without field emulation) prove constraint systems (e.g., R1CS) defined over the scalar field of <span class="math">E_1</span> and <span class="math">\\Pi_2</span> can prove constraint systems defined over the scalar field of <span class="math">E_2</span>. Naturally, proofs produced by <span class="math">\\Pi_1</span> can be efficiently verified by a constraint system supported by <span class="math">\\Pi_2</span> and vice versa. This is because the algorithm to verify proofs produced by <span class="math">\\Pi_1</span> involves operations over <span class="math">E_1</span>'s base field, which, by design, equals the scalar field of <span class="math">E_2</span>. (When the fields do not match, one would need to emulate arithmetic of the desired field using another field, which entails significant costs in terms of the number of gates necessary to perform basic operations such as additions and multiplications over the desired field.) In other words, the constraint system supported by <span class="math">\\Pi_2</span> can efficiently encode the SNARK verifier of <span class="math">\\Pi_1</span>.</p>
+
+    <p class="text-gray-300">To realize IVC, at step <span class="math">i</span>, in [BCTV14a], the prover proceeds as follows (for ease of exposition, we ignore the base case of <span class="math">i = 0</span>).</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Using <span class="math">\\Pi_1</span>, the prover produces a SNARK <span class="math">\\pi_i^{(1)}</span> that proves that it has executed the step <span class="math">i</span> of the desired computation and has successfully verified a SNARK <span class="math">\\pi_{i-1}^{(2)}</span> from step <span class="math">i-1</span>.</li>
+
+      <li>Using <span class="math">\\Pi_2</span>, the prover produces a SNARK <span class="math">\\pi_i^{(2)}</span> that it knows a SNARK <span class="math">\\pi_i^{(1)}</span> and has successfully verified it.</li>
+
+    </ol>
+
+    <p class="text-gray-300">Note that <span class="math">\\pi_i^{(2)}</span> is the IVC proof at the end of step <span class="math">i</span>. At step <span class="math">i + 1</span>, the prover starts with <span class="math">\\pi_i^{(2)}</span> and repeats the above procedure for the <span class="math">(i + 1)</span>th step of the computation. A key take-away is that this approach requires representing the SNARK verifier as a circuit on both curves in the cycle.</p>
+
+    <p class="text-gray-300">Nova's instantiation over a 2-cycle of elliptic curves. The Nova library [nov] adapts [BCTV14a]'s blueprint to the context of folding schemes, and obtains a concretely-efficient implementation of Nova [KST22]. Its approach is to essentially replace "SNARK verifier" with a "non-interactive folding scheme verifier". Specifically, an NP instance defined over the scalar field of the first curve can be efficiently folded using a circuit defined over the scalar field of the second curve and vice versa. Different from [BCTV14a], Nova's IVC proof is a set of instances and witnesses defined over both curves in the cycle rather than a single SNARK.</p>
+
+    <p class="text-gray-300">[BCTV14a] uses cycles of elliptic curves where both curves are pairing-friendly as they use pairing-based SNARKs to realize IVC. Unfortunately, such cycles of pairing-friendly elliptic curves require field sizes to be much larger than ordinary elliptic curves to achieve a "standard" 128 bits of security.</p>
+
+    <p class="text-gray-300">Nova additionally uses the public IO of circuits to track folded NP instances. A recent work <em>[x20]</em> provides a rigorous and detailed description of Nova’s instantiation on a 2-cycle of elliptic curves and proves its security. This work also exposes a vulnerability in the original implementation (which is now fixed).</p>
+
+    <p class="text-gray-300">Overall, Nova’s approach, like in <em>[x3]</em>, still requires representing a verifier (which happens to be the the non-interactive folding scheme verifier) as a circuit on <em>both</em> curves in the cycle of curves. For Nova <em>[x17]</em>, which provides the most efficient folding scheme verifier in the literature, the circuit defined over the second curve in the cycle is <span class="math">\\approx</span>10,000 multiplication gates.</p>
+
+    <h6 id="sec-4" class="text-base font-medium mt-4">Remark 1</h6>
+
+    <p class="text-gray-300">HyperNova <em>[x16]</em> and ProtoStar <em>[x4]</em> improve upon Nova, in terms of the degree of constraints supported and the costs incurred for supporting higher degree constraints. At the time this paper was written, there were no public implementations of these schemes, with support for recursion. Based on their reported efficiency, we expect their verifier circuit sizes to be at least as large as Nova’s verifier circuit. Thus, if HyperNova or ProtoStar are implemented over a 2-cycle of elliptic curves using the approach used in Nova’s implementation, they would require about 10,000 multiplication gates on <em>both</em> curves in the cycle, to encode their verifier circuits.</p>
+
+    <h3 id="sec-5" class="text-xl font-semibold mt-8">1.2 Our approach in a nutshell: CycleFold</h3>
+
+    <p class="text-gray-300">CycleFold’s starting point is the observation that folding-scheme-based recursive arguments (e.g., Nova, HyperNova, ProtoStar) can be efficiently instantiated <em>without</em> a cycle of elliptic curves—except for a few elliptic scalar multiplication operations (2 in Nova, 1 in HyperNova, 3 in ProtoStar) in their verifier circuits that must be handled with “wrong” field arithmetic (or non-native arithmetic). We further observe that this scalar multiplication operation can be <em>verifiably delegated</em> to the second curve with the following approach. We first represent the desired scalar multiplication operation as a circuit over the scalar field of the second curve. Crucially, this avoids non-native arithmetic for computing the scalar multiplication operation (as there is no need for field emulation). Then, by employing Nova’s folding scheme verifier on the first curve, we fold that scalar multiplication circuit satisfiability instance into a running instance.</p>
+
+    <p class="text-gray-300">Figure 1 depicts an overview of CycleFold’s approach.</p>
+
+    <p class="text-gray-300">Note that CycleFold can be viewed as employing a 2-cycle of elliptic curves at a <em>different</em> level of abstraction than <em>[x3]</em> or its adaptation in Nova <em>[x17, x21, x22]</em>. Specifically, with CycleFold, the 2-cycle of elliptic curves is used at the level of a folding scheme. In particular, the specific way the 2-cycle of elliptic curves is used ensures that the folding scheme verifier <em>can</em> be efficiently represented as a circuit with a <em>single</em> curve in the cycle. Accordingly, the resulting IVC scheme nor its</p>
+
+    <p class="text-gray-300">!<a href="img-0.jpeg">img-0.jpeg</a> Fig. 1. Two incremental steps in HyperNova's recursive argument instantiated with CycleFold.  <span class="math">E_{1}</span>  represents the first curve in the elliptic curve cycle, and  <span class="math">E_{2}</span>  represents the second curve in the cycle.  <span class="math">\\mathsf{u}_i</span>  attests to the computation at step  <span class="math">i</span>  and  <span class="math">\\mathsf{U}_i</span>  attests to all prior steps of the computation.  <span class="math">\\mathsf{U}_{\\mathsf{EC},i}</span>  attests to all prior steps of the outsourced elliptic curve operations.  <span class="math">C_{\\mathsf{EC}}</span>  is a circuit which computes the outsourced elliptic curve operations on  <span class="math">E_{2}</span> .  <span class="math">\\mathsf{u}_i</span>  and  <span class="math">\\mathsf{U}_i</span>  are parsed to retrieve inputs for circuit  <span class="math">C_{\\mathsf{EC}}</span>  (represented with a dotted line).  <span class="math">\\mathsf{u}_{\\mathsf{EC},i}</span>  represents the correct execution of  <span class="math">C_{\\mathsf{EC}}</span> . The main computation on each step additionally runs the HyperNova folding scheme verifier (which folds claims regarding the main computation) by taking as auxiliary advice the result of the elliptic curve operation (read from  <span class="math">\\mathsf{u}_{\\mathsf{EC},i}</span> ). The main computation additionally runs the Nova folding scheme verifier which folds claims about the outsourced elliptic curve operation.  <span class="math">\\mathsf{u}_{i+1}</span>  represents the correctness of the latest step and  <span class="math">(\\mathsf{U}_i, \\mathsf{U}_{\\mathsf{EC},i})</span>  represents the correctness of all prior steps and outsourced computations.</p>
+
+    <p class="text-gray-300">proof of security has to reason about the 2-cycle of elliptic curves. Indeed, when we apply CycleFold to HyperNova, we apply it at the level of a folding scheme.</p>
+
+    <p class="text-gray-300">A preliminary design. CycleFold employs a 2-cycle of elliptic curves  <span class="math">(E_1, E_2)</span> , but it instantiates a folding-scheme-based recursive argument (e.g., HyperNova) as if there is only a single elliptic curve  <span class="math">E_1</span>  (e.g., on BN254). This means that the folding-scheme verifier is represented as a circuit, say  <span class="math">C_{\\mathsf{V}}</span> , on the scalar field of  <span class="math">E_1</span> . For the case of HyperNova [KS23],  <span class="math">C_{\\mathsf{V}}</span>  performs finite field and hash operations, and a single scalar multiplication (more precisely, a scalar multiplication followed by a point addition). The finite field and hashing operations in  <span class="math">C_{\\mathsf{V}}</span>  are over  <span class="math">E_1</span> 's scalar field so they are represented efficiently in  <span class="math">E_1</span> 's scalar field. However, the scalar multiplication and point addition operations require arithmetic over  <span class="math">E_1</span> 's base field. Naively, one can perform those operations with non-native arithmetic inside  <span class="math">C_{\\mathsf{V}}</span> . Unfortunately, this strategy will result in  <span class="math">C_{\\mathsf{V}}</span>  containing a million multiplication gates or more.</p>
+
+    <p class="text-gray-300">We now discuss how CycleFold avoids the non-native arithmetic to compute a scalar multiplication and a point addition—without using the 2-cycle approach of [BCTV14a] or its adaptation in Nova [KST22,nov,NBS23].</p>
+
+    <p class="text-gray-300">A "co-processor" circuit over the scalar field of  <span class="math">\\mathbf{E}_2</span> . CycleFold creates a circuit  <span class="math">C_{\\mathsf{EC}}</span>  defined over the scalar field of the second curve in the cycle  <span class="math">E_2</span></p>
+
+    <p class="text-gray-300">(e.g., on Grumpkin). <span class="math">C_{\\mathsf{EC}}</span> performs the desired scalar multiplication and a point addition operation. Furthermore, the public IO of <span class="math">C_{\\mathsf{EC}}</span> contains the inputs and outputs of the scalar multiplication and point addition operation. Since <span class="math">C_{\\mathsf{EC}}</span> is defined over the scalar field of <span class="math">E_{2}</span>, which is the base field of <span class="math">E_{1}</span> since <span class="math">(E_{1},E_{2})</span> is a 2-cycle of elliptic curves. As a result, <span class="math">C_{\\mathsf{EC}}</span> does not require non-native arithmetic to compute the desired scalar multiplication and point addition. In particular, the size <span class="math">C_{\\mathsf{EC}}</span> is concretely small (e.g., with <span class="math">\\approx</span>1,000–1,500 multiplication gates).</p>
+
+    <p class="text-gray-300">Closing the loop. Instead of performing a scalar multiplication and a point addition with non-native arithmetic (which as noted above is untenable), the verifier circuit <span class="math">C_{\\mathsf{V}}</span> takes as non-deterministic input, among other things, a circuit satisfiability instance <span class="math">u_{\\mathsf{EC}}</span> (i.e., the public IO and a commitment to a purported satisfying witness to an instance of <span class="math">C_{\\mathsf{EC}}</span>). In addition to performing the rest of folding scheme verifier’s work, <span class="math">C_{\\mathsf{V}}</span> simply consumes the claimed output from the public IO of <span class="math">u_{\\mathsf{EC}}</span> after checking that inputs to the scalar multiplication and point addition match its desired inputs. <span class="math">C_{\\mathsf{V}}</span> then folds <span class="math">u_{\\mathsf{EC}}</span> into a running instance, using Nova’s folding scheme.</p>
+
+    <h6 id="sec-6" class="text-base font-medium mt-4">Remark 2</h6>
+
+    <p class="text-gray-300">HyperNova’s verifier circuit <span class="math">C_{\\mathsf{V}}</span> defined over <span class="math">E_{1}</span>’s scalar field performs <span class="math">\\approx</span>10,000 multiplication gates (to encode Nova’s verifier circuit on <span class="math">E_{1}</span> to fold <span class="math">u_{\\mathsf{EC}}</span>), in addition to performing the rest of operations HyperNova’s verifier circuit. We believe that this trade-off is beneficial in the context of half-pairing cycles as CycleFold effectively “moves” gates from the second curve in the cycle (which is not pairing-friendly) to the first curve in the cycle (which is pairing-friendly).</p>
+
+    <h6 id="sec-7" class="text-base font-medium mt-4">Remark 3</h6>
+
+    <p class="text-gray-300">For simplicity, we assume that the circuit satisfiability instance <span class="math">u_{\\mathsf{EC}}</span> is encoded with R1CS and we use Nova’s folding scheme to fold <span class="math">u_{\\mathsf{EC}}</span> into a running instance. One can customize the shape of <span class="math">C_{\\mathsf{EC}}</span> (since this circuit only performs simple elliptic curve operations) to lower its size and still use Nova’s folding scheme (recent work <em>[x14]</em> demonstrates that Nova’s folding scheme generalizes to arbitrary degree-2 constraints). One may also use higher-degree constraints, but this may entail higher costs than 10,000 multiplication gates on <span class="math">E_{1}</span> (see the above remark).</p>
+
+    <p class="text-gray-300">Summary. CycleFold’s approach to instantiate a folding-scheme based recursive argument (e.g., HyperNova) results in a substantially smaller circuit on the second curve in the cycle. Specifically, <span class="math">C_{\\mathsf{EC}}</span> defined over <span class="math">E_{2}</span>’s scalar field is <span class="math">\\approx</span>1,000–1,500 gates (without any customization), which is nearly an order of magnitude improvement over having a folding scheme verifier circuit on the second curve in the cycle.</p>
+
+    <p class="text-gray-300">At the “end” or at any point during an incremental computation, the running instance consists of a circuit defined over the scalar field of <span class="math">E_{1}</span> as well as a tiny relaxed R1CS instance (defined over the scalar field of <span class="math">E_{2}</span>) encoding a single scalar multiplication operation. The prover can prove <em>both</em> instances using a zkSNARK (e.g., Spartan) defined over the scalar field of <span class="math">E_{1}</span></p>
+
+    <p class="text-gray-300">Applying CycleFold to Nova and ProtoStar. The text above focuses on HyperNova, but CycleFold is not limited to HyperNova and it can be used to instantiate existing and new folding-scheme-based recursive arguments (e.g., Nova, ProtoStar). Unlike HyperNova, Nova’s verifier circuit performs two scalar multiplications and ProtoStar’s verifier circuit performs 3 scalar multiplications. When applying CycleFold, there are two options. First, <span class="math">u_{\\mathsf{EC}}</span> can perform all the desired scalar multiplications (which increases the size of the circuit defined over <span class="math">E_{2}</span> by <span class="math">3\\times</span> in the case of ProtoStar), but it keeps the additional multiplication gates required on <span class="math">E_{1}</span> to be <span class="math">\\approx</span>10,000 (as we make a single invocation of Nova’s folding scheme verifier). Second, <span class="math">u_{\\mathsf{EC}}</span> performs only a single scalar multiplication (which keeps the circuit defined over <span class="math">E_{2}</span> minimal), but, in the case of ProtoStar, it requires 3 invocations of Nova’s folding scheme verifier (so an additional <span class="math">\\approx</span>30,000 multiplication gates on <span class="math">E_{1}</span>).</p>
+
+    <p class="text-gray-300">Comparison with Goblin Plonk <em>[x27]</em>. Goblin Plonk supports recursive proof composition in Plonk-type proof systems. It is instantiated over a 2-cycle of elliptic curves. Unlike BCTV14’s approach, the second curve in the cycle is used to represent an “instruction machine” that can be invoked by the circuit on the first curve and when invoked performs the requested operation and places the results in a table (which is more like a read-write memory); the table can be read by the circuit on the first curve. Compared to CycleFold, there are downsides to this approach. First, the size of the table grows linearly with the number of recursive steps. In other words, the size of the recursive proof and the time to verify it grows with the number of recursive steps, which can be prohibitive for “long running” computations. Because of this, Goblin Plonk’s approach does not lead to an IVC scheme. Note that if one wishes to compress a Goblin Plonk proof into a succinct proof, the prover must verify the correctness of the table entries, which can be expensive. Second, Goblin Plonk relies on complex machinery (e.g., to handle tables). In contrast, CycleFold provides an IVC scheme as the statement defined over the second curve in the cycle is limited to a single circuit encoding a scalar multiplication and a point addition. Furthermore, CycleFold does not require any table machinery to leverage the second curve in the cycle.</p>
+
+    <h3 id="sec-8" class="text-xl font-semibold mt-8">1.3 An organization of the rest of the paper</h3>
+
+    <p class="text-gray-300">We provide the necessary preliminaries in Section 2 and Appendix A. In Section 3, we describe CycleFold applied to HyperNova <em>[x18]</em>. We formalize this as a new folding scheme over a cycle of curves where the second curve performs delegated scalar multiplication and point addition operations. We prove the security of this modified scheme. We leave it to the future work to formalize CycleFold a compiler from any folding scheme described over a single curve to a folding scheme that uses a cycle to delegate certain operations. Finally, if we substitute this folding scheme in HyperNova’s IVC (Construction 3, Section 6.1 in <em>[x16]</em>), we obtain an IVC scheme instantiated over 2-cycle of elliptic curves via CycleFold.</p>
+
+    <p class="text-gray-300">##</p>
+
+    <p class="text-gray-300">We use  <span class="math">\\lambda</span>  to denote the security parameter and  <span class="math">\\mathbb{F}</span>  to denote a finite field (e.g., the prime field  <span class="math">\\mathbb{F}_p</span>  for a large prime  <span class="math">p</span> ). We use  <span class="math">\\mathrm{negl}(\\lambda)</span>  to denote a negligible function in  <span class="math">\\lambda</span> . Throughout the paper, the depicted asymptotics depend on  <span class="math">\\lambda</span> , but we elide this for brevity. We use "PPT algorithms" to refer to probabilistic polynomial time algorithms. For relations  <span class="math">\\mathcal{R}_1</span>  and  <span class="math">\\mathcal{R}_2</span> , we define the relation  <span class="math">\\mathcal{R}_1 \\times \\mathcal{R}_2</span>  as  <span class="math">((u_1, u_2), (w_1, w_2)) \\in \\mathcal{R}_1 \\times \\mathcal{R}_2</span>  if and only if  <span class="math">(u_1, w_1) \\in \\mathcal{R}_1</span>  and  <span class="math">(u_2, w_2) \\in \\mathcal{R}_2</span> . We write  <span class="math">\\mathbb{F}^d[X_1, \\ldots, X_n]</span>  to denote multivariate polynomials over field  <span class="math">\\mathbb{F}</span>  in the variables  <span class="math">X_1, \\ldots, X_n</span>  with degree bound  <span class="math">d</span>  for each variable. We omit the superscript if there is no degree bound.</p>
+
+    <p class="text-gray-300">Additional preliminaries are in Appendix A.</p>
+
+    <p class="text-gray-300">For a non-deterministic polynomial-time function  <span class="math">F</span> , an incrementally verifiable computation (IVC) scheme enables a prover to efficiently update a proof  <span class="math">\\Pi_i</span>  that attests to the claim that  <span class="math">z_i = F^{(i)}(z_0)</span>  to a proof  <span class="math">\\Pi_{i+1}</span>  (of the same size as  <span class="math">\\Pi_i</span> ) that attests to the claim that  <span class="math">z_{i+1} = F^{(i+1)}(z_0)</span> . Below, we formally define IVC.</p>
+
+    <p class="text-gray-300">Definition 1 (Incrementally verifiable computation (IVC)). An incrementally verifiable computation (IVC) scheme is defined by PPT algorithms  <span class="math">(\\mathcal{G},\\mathcal{P},\\mathcal{V})</span>  and deterministic  <span class="math">\\kappa</span>  denoting the generator, the prover, the verifier, and the encoder respectively, with the following interface</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li><span class="math">\\mathcal{G}(1^{\\lambda})\\to \\mathfrak{pp}</span> : on input security parameter  <span class="math">\\lambda</span> , samples public parameters  <span class="math">\\mathfrak{pp}</span> .</li>
+
+      <li><span class="math">\\mathcal{K}(\\mathfrak{pp}, F) \\to (\\mathfrak{pk}, \\mathsf{vk})</span> : on input public parameters  <span class="math">\\mathfrak{pp}</span> , and polynomial-time function  <span class="math">F</span> , deterministically produces a prover key  <span class="math">\\mathfrak{pk}</span>  and a verifier key  <span class="math">\\mathsf{vk}</span> .</li>
+
+      <li><span class="math">\\mathcal{P}(\\mathsf{pk}, (i, z_0, z_i), \\omega_i, \\Pi_i) \\to \\Pi_{i+1}</span> : on input a prover key  <span class="math">\\mathsf{pk}</span> , a counter  <span class="math">i</span> , an initial input  <span class="math">z_0</span> , a claimed output after  <span class="math">i</span>  iterations  <span class="math">z_i</span> , a non-deterministic advice  <span class="math">\\omega_i</span> , and an IVC proof  <span class="math">\\Pi_i</span>  attesting to  <span class="math">z_i</span> , produces a new proof  <span class="math">\\Pi_{i+1}</span>  attesting to  <span class="math">z_{i+1} = F(z_i, \\omega_i)</span> .</li>
+
+      <li><span class="math">\\mathcal{V}(\\mathsf{vk}, (i, z_0, z_i), \\Pi_i) \\to \\{0, 1\\}</span> : on input a verifier key  <span class="math">\\mathsf{vk}</span> , a counter  <span class="math">i</span> , an initial input  <span class="math">z_0</span> , a claimed output after  <span class="math">i</span>  iterations  <span class="math">z_i</span> , and an IVC proof  <span class="math">\\Pi_i</span>  attesting to  <span class="math">z_i</span> , outputs 1 if  <span class="math">\\Pi_i</span>  is accepting, and 0 otherwise.</li>
+
+    </ul>
+
+    <p class="text-gray-300">An IVC scheme  <span class="math">(\\mathcal{G},\\mathcal{K},\\mathcal{P},\\mathcal{V})</span>  satisfies the following requirements.</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Perfect Completeness: For any PPT adversary  <span class="math">\\mathcal{A}</span></li>
+
+    </ol>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\operatorname * {P r} \\left[ \\begin{array}{l} \\mathcal {V} (\\mathsf {v k}, (i + 1, z _ {0}, z _ {i + 1}), \\Pi_ {i + 1}) = 1 \\end{array} \\left</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\begin{array}{l} \\mathsf {p p} \\leftarrow \\mathcal {G} (1 ^ {\\lambda}), \\\\ F, (i, z _ {0}, z _ {i}, \\Pi_ {i}) \\leftarrow \\mathcal {A} (\\mathsf {p p}), \\\\ (\\mathsf {p k}, \\mathsf {v k}) \\leftarrow \\mathcal {K} (\\mathsf {p p}, F), \\\\ z _ {i + 1} \\leftarrow F (z _ {i}, \\omega_ {i}), \\\\ \\mathcal {V} (\\mathsf {v k}, i, z _ {0}, z _ {i}, \\Pi_ {i}) = 1, \\\\ \\Pi_ {i + 1} \\leftarrow \\mathcal {P} (\\mathsf {p k}, (i, z _ {0}, z _ {i}), \\omega_ {i}, \\Pi_ {i}) \\end{array} \\right. \\right. \\right]</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <p class="text-gray-300">where  <span class="math">F</span>  is a polynomial-time computable function.</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Knowledge Soundness: Consider constant  <span class="math">n \\in \\mathbb{N}</span> . For all expected polynomial-time adversaries  <span class="math">\\mathcal{P}^*</span>  there exists an expected polynomial-time extractor  <span class="math">\\mathcal{E}</span>  such that over all randomness  <span class="math">r</span></li>
+
+    </ol>
+
+    <div class="my-4 text-center"><span class="math-block">\\Pr \\left[ \\begin{array}{l l} &amp;amp; \\mathsf {p p} \\leftarrow \\mathcal {G} (1 ^ {\\lambda}), \\\\ z _ {n} = z \\text {w h e r e} &amp;amp; (F, (z _ {0}, z _ {i}), \\Pi) \\leftarrow \\mathcal {P} ^ {*} (\\mathsf {p p}, \\mathsf {r}), \\\\ z _ {i + 1} \\leftarrow F (z _ {i}, \\omega_ {i}) &amp;amp; (\\mathsf {p k}, \\mathsf {v k}) \\leftarrow \\mathcal {K} (\\mathsf {p p}, F), \\\\ \\forall i \\in \\{0, \\ldots , n - 1 \\} &amp;amp; \\mathcal {V} (\\mathsf {v k}, (n, z _ {0}, z), \\Pi) = 1, \\\\ &amp;amp; (\\omega_ {0}, \\ldots , \\omega_ {n - 1}) \\leftarrow \\mathcal {E} (\\mathsf {p p}, \\mathsf {r}) \\end{array} \\right] \\approx 1.</span></div>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Succinctness: The size of an IVC proof  <span class="math">\\Pi</span>  is independent of the number of iterations  <span class="math">n</span> .</li>
+
+    </ol>
+
+    <p class="text-gray-300">A folding scheme [KST22] for a relation  <span class="math">\\mathcal{R}</span>  is a protocol between a prover and verifier in which the prover and the verifier reduce the task of checking two instances in  <span class="math">\\mathcal{R}</span>  with the same structure into the task of checking a single instance in  <span class="math">\\mathcal{R}</span> . Kothapalli and Setty [KS23] introduce a generalization of folding schemes, which they refer to as multi-folding schemes. A multi-folding scheme is defined with respect to a pair of relations  <span class="math">(\\mathcal{R}_1,\\mathcal{R}_2)</span>  and size parameters  <span class="math">\\mu</span>  and  <span class="math">\\nu</span> . It is an interactive protocol between a prover and a verifier in which the prover and the verifier reduce the task of checking a collection of  <span class="math">\\mu</span>  instances in  <span class="math">\\mathcal{R}_1</span>  with structure  <span class="math">\\mathsf{s}_1</span>  and a collection of  <span class="math">\\nu</span>  instances in  <span class="math">\\mathcal{R}_2</span>  with structure  <span class="math">\\mathsf{s}_2</span>  into the task of checking a single instance in  <span class="math">\\mathcal{R}_1</span>  with structure  <span class="math">\\mathsf{s}_1</span> —as long as  <span class="math">\\mathsf{s}_1</span>  and  <span class="math">\\mathsf{s}_2</span>  satisfy a predicate compat (e.g., compat might require that  <span class="math">\\mathsf{s}_1 = \\mathsf{s}_2</span> ).</p>
+
+    <p class="text-gray-300">Below, we provide a formal definition of multi-folding schemes.</p>
+
+    <p class="text-gray-300">Definition 2 (Multi-folding schemes). Consider relations  <span class="math">\\mathcal{R}_1</span>  and  <span class="math">\\mathcal{R}_2</span>  over public parameters, structure, instance, and witness tuples, a predicate compat that structures for instances in  <span class="math">\\mathcal{R}_1</span>  and  <span class="math">\\mathcal{R}_2</span>  must satisfy, and size parameters  <span class="math">\\mu, \\nu \\in \\mathbb{N}</span> . A multi-folding scheme for  <span class="math">(\\mathcal{R}_1, \\mathcal{R}_2, \\text{compat}, \\mu, \\nu)</span>  consists of a PPT generator algorithm  <span class="math">\\mathcal{G}</span> , a deterministic encoder algorithm  <span class="math">\\mathcal{K}</span> , and a pair of PPT algorithms  <span class="math">\\mathcal{P}</span>  and  <span class="math">\\mathcal{V}</span>  denoting the prover and the verifier respectively, with the following interface:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li><span class="math">\\mathcal{G}(1^{\\lambda})\\to \\mathsf{pp}</span> : on input security parameter  <span class="math">\\lambda</span> , samples public parameters  <span class="math">\\mathsf{pp}</span> .</li>
+
+      <li><span class="math">\\mathcal{K}(\\mathsf{pp},(\\mathsf{s}_1,\\mathsf{s}_2))\\to (\\mathsf{pk},\\mathsf{vk})</span> : on input pp, and structures  <span class="math">\\mathsf{s}_1</span>  and  <span class="math">\\mathsf{s}_2</span>  among the instances to be folded, outputs a prover key pk and a verifier key vk.</li>
+
+      <li><span class="math">\\mathcal{P}(\\mathsf{pk},(\\mathsf{u}_1,\\mathsf{w}_1),(\\mathsf{u}_2,\\mathsf{w}_2))\\to (\\mathsf{u},\\mathsf{w})</span> : on input a vector of instances  <span class="math">\\mathbf{u}_1</span>  in  <span class="math">\\mathcal{R}_1</span>  of size  <span class="math">\\mu</span>  with structure  <span class="math">\\mathsf{s}_1</span>  and a vector of instances  <span class="math">\\mathbf{u}_2</span>  in  <span class="math">\\mathcal{R}_2</span>  of size  <span class="math">\\nu</span>  with structure  <span class="math">\\mathsf{s}_2</span> , and corresponding witness vectors  <span class="math">\\mathbf{w}_1</span>  and  <span class="math">\\mathbf{w}_2</span>  outputs a folded instance-witness pair  <span class="math">(\\mathsf{u},\\mathsf{w})</span>  in  <span class="math">\\mathcal{R}_1</span>  with structure  <span class="math">\\mathsf{s}_1</span> .</li>
+
+      <li><span class="math">\\mathcal{V}(\\mathsf{vk},(\\mathsf{u}_1,\\mathsf{u}_2))\\to \\mathsf{u}</span> : on input a vector of instances  <span class="math">\\mathbf{u}_1</span>  and a vector of instances  <span class="math">\\mathbf{u}_2</span>  outputs a new instance  <span class="math">\\mathsf{u}</span> .</li>
+
+    </ul>
+
+    <p class="text-gray-300">Let  <span class="math">\\langle \\mathcal{P},\\mathcal{V}\\rangle</span>  denote the interaction between  <span class="math">\\mathcal{P}</span>  and  <span class="math">\\mathcal{V}</span> . We treat  <span class="math">\\langle \\mathcal{P},\\mathcal{V}\\rangle</span>  as a function that takes as input  <span class="math">((\\mathsf{pk},\\mathsf{vk}),(\\vec{u_1},\\vec{w_1}),(\\vec{u_2},\\vec{w_2}))</span>  and runs the interaction on prover input  <span class="math">(\\mathsf{pk},(\\vec{u_1},\\vec{w_1}),(\\vec{u_2},\\vec{w_2}))</span>  and verifier input  <span class="math">(\\mathsf{vk},(\\vec{u_1},\\vec{u_2}))</span> . At the end of interaction  <span class="math">\\langle \\mathcal{P},\\mathcal{V}\\rangle</span>  outputs  <span class="math">(u,w)</span>  where  <span class="math">u</span>  is the verifier's output folded instance, and  <span class="math">w</span>  is the prover's output folded witness.</p>
+
+    <p class="text-gray-300">Let  <span class="math">\\mathcal{R}^{(n)}</span>  be the relation such that  <span class="math">(\\mathsf{pp},\\mathsf{s},\\vec{\\mathsf{u}},\\vec{\\mathsf{w}})\\in \\mathcal{R}^{(n)}</span>  if and only if  <span class="math">(\\mathsf{pp},\\mathsf{s},\\vec{\\mathsf{u}}_i,\\vec{\\mathsf{w}}_i)\\in \\mathcal{R}</span>  for all  <span class="math">i\\in [n]</span> . A multi-folding scheme for  <span class="math">(\\mathcal{R}_1,\\mathcal{R}_2,\\mu ,\\nu)</span>  satisfies the following requirements.</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Perfect Completeness: For all PPT adversaries  <span class="math">\\mathcal{A}</span> , we have that</li>
+
+    </ol>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\operatorname * {P r} \\left[ \\begin{array}{l} (\\mathsf {p p}, \\mathsf {s} _ {1}, \\mathsf {u}, \\mathsf {w}) \\in \\mathcal {R} _ {1} \\left</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\begin{array}{l} \\mathsf {p p} \\leftarrow \\mathcal {G} (1 ^ {\\lambda}), \\\\ ((\\mathsf {s} _ {1}, \\mathsf {s} _ {2}), (\\vec {\\mathsf {u}} _ {1} ^ {\\prime}, \\vec {\\mathsf {u}} _ {2} ^ {\\prime}), (\\vec {\\mathsf {w}} _ {1}, \\vec {\\mathsf {w}} _ {2})) \\leftarrow \\mathcal {A} (\\mathsf {p p}), \\\\ \\mathsf {c o m p a t} (\\mathsf {s} _ {1}, \\mathsf {s} _ {2}) = \\mathsf {t r u e}, \\\\ (\\mathsf {p p}, \\mathsf {s} _ {1}, \\vec {\\mathsf {u}} _ {1} ^ {\\prime}, \\vec {\\mathsf {w}} _ {1}) \\in \\mathcal {R} _ {1} ^ {(\\mu)}, (\\mathsf {p p}, \\mathsf {s} _ {2}, \\vec {\\mathsf {u}} _ {2} ^ {\\prime}, \\vec {\\mathsf {w}} _ {2}) \\in \\mathcal {R} _ {2} ^ {(\\nu)}, \\\\ (\\mathsf {p k}, \\mathsf {v k}) \\leftarrow \\mathcal {K} (\\mathsf {p p}, \\mathsf {s} _ {1}, \\mathsf {s} _ {2}), \\\\ (u, w) \\leftarrow \\langle \\mathcal {P}, \\mathcal {V} \\rangle ((\\mathsf {p k}, \\mathsf {v k}), (\\vec {\\mathsf {u}} _ {1} ^ {\\prime}, \\vec {\\mathsf {u}} _ {2} ^ {\\prime}), (\\vec {\\mathsf {w}} _ {1}, \\vec {\\mathsf {w}} _ {2})) \\end{array} \\right] = 1.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Knowledge Soundness: For any expected polynomial-time adversaries  <span class="math">\\mathcal{A}</span>  and  <span class="math">\\mathcal{P}^*</span>  there is an expected polynomial-time extractor  <span class="math">\\mathcal{E}</span>  such that over all randomness  <span class="math">r</span></li>
+
+    </ol>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\begin{array}{l} \\Pr \\left[ \\begin{array}{l} (\\mathsf {p p}, \\mathsf {s} _ {1}, \\vec {\\mathsf {u}} _ {1} ^ {\\prime}, \\vec {\\mathsf {w}} _ {1}) \\in \\mathcal {R} _ {1} ^ {(\\mu)}, \\left</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\begin{array}{l} \\mathsf {p p} \\leftarrow \\mathcal {G} (1 ^ {\\lambda}), \\\\ ((\\mathsf {s} _ {1}, \\mathsf {s} _ {2}), (\\vec {\\mathsf {u}} _ {1} ^ {\\prime}, \\vec {\\mathsf {u}} _ {2} ^ {\\prime}), \\mathsf {s t}) \\leftarrow \\mathcal {A} (\\mathsf {p p}, \\mathsf {r}), \\\\ (\\mathsf {p p}, \\mathsf {s} _ {2}, \\vec {\\mathsf {u}} _ {2} ^ {\\prime}, \\vec {\\mathsf {w}} _ {2}) \\in \\mathcal {R} _ {2} ^ {(\\nu)} \\end{array} \\right</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\begin{array}{l} \\text {c o m p a t} (\\mathsf {s} _ {1}, \\mathsf {s} _ {2}) = \\text {t r u e}, \\\\ (\\vec {\\mathsf {w}} _ {1}, \\vec {\\mathsf {w}} _ {2}) \\leftarrow \\mathcal {E} (\\mathsf {p p}, \\mathsf {r}) \\end{array} \\right] \\approx \\\\ \\Pr \\left[ \\begin{array}{c} \\mathsf {p p} \\leftarrow \\mathcal {G} (1 ^ {\\lambda}), \\\\ ((\\mathsf {s} _ {1}, \\mathsf {s} _ {2}), (\\vec {\\mathsf {u}} _ {1} ^ {\\prime}, \\vec {\\mathsf {u}} _ {2} ^ {\\prime}), \\mathsf {s t}) \\leftarrow \\mathcal {A} (\\mathsf {p p}, \\mathsf {r}), \\\\ \\mathsf {c o m p a t} (\\mathsf {s} _ {1}, \\mathsf {s} _ {2}) = \\mathsf {t r u e}, \\\\ (\\mathsf {p k}, \\mathsf {v k}) \\leftarrow \\mathcal {K} (\\mathsf {p p}, (\\mathsf {s} _ {1}, \\mathsf {s} _ {2}))), \\\\ (u, w) \\leftarrow \\langle \\mathcal {P} ^ {*}, \\mathcal {V} \\rangle ((\\mathsf {p k}, \\mathsf {v k}), (\\vec {\\mathsf {u}} _ {1} ^ {\\prime}, \\vec {\\mathsf {u}} _ {2} ^ {\\prime}), \\mathsf {s t}) \\end{array} \\right] \\\\ \\end{array}</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Efficiency: The communication costs and  <span class="math">\\mathcal{V}</span> 's computation are lower in the case where  <span class="math">\\mathcal{V}</span>  participates in the multi-folding scheme and then checks a witness sent by  <span class="math">\\mathcal{P}</span>  for the folded instance than the case where  <span class="math">\\mathcal{V}</span>  checks witnesses sent by  <span class="math">\\mathcal{P}</span>  for each of the original instances.</li>
+
+    </ol>
+
+    <p class="text-gray-300">A multi-folding scheme is secure in the random oracle model if the above requirements hold when all parties are provided access to a random oracle.</p>
+
+    <p class="text-gray-300">Definition 3 (Non-interactive). A multi-folding scheme  <span class="math">(\\mathcal{G},\\mathcal{K},\\mathcal{P},\\mathcal{V})</span>  is noninteractive if the interaction between  <span class="math">\\mathcal{P}</span>  and  <span class="math">\\mathcal{V}</span>  consists of a single message from  <span class="math">\\mathcal{P}</span>  to  <span class="math">\\mathcal{V}</span> . This single message is denoted as  <span class="math">\\mathcal{P}</span> 's output and as  <span class="math">\\mathcal{V}</span> 's input.</p>
+
+    <p class="text-gray-300">Definition 4 (Public coin). A multi-folding scheme  <span class="math">(\\mathcal{G},\\mathcal{K},\\mathcal{P},\\mathcal{V})</span>  is called public coin if all the messages sent from  <span class="math">\\mathcal{V}</span>  to  <span class="math">\\mathcal{P}</span>  are sampled from a uniform distribution.</p>
+
+    <p class="text-gray-300">2.3 Committed Relaxed R1CS</p>
+
+    <p class="text-gray-300">R1CS is an NP-complete problem implicit in the work of Gennero, Gentry, Parno, and Raykova <em>[x10]</em>. For completeness we formally define R1CS in Appendix A.7. Below, we recall its folding-friendly variant, committed relaxed R1CS <em>[x22]</em>.</p>
+
+    <h6 id="sec-12" class="text-base font-medium mt-4">Definition 5 (Committed relaxed R1CS)</h6>
+
+    <p class="text-gray-300">Consider a finite field <span class="math">\\mathbb{F}</span> and a commitment scheme Commit over <span class="math">\\mathbb{F}</span>. Let the public parameters consist of size bounds <span class="math">m,n,\\ell\\in\\mathbb{N}</span> where <span class="math">m&gt;\\ell</span>, and commitment parameters <span class="math">\\mathsf{pp}_{W}</span> and <span class="math">\\mathsf{pp}_{E}</span> for vectors of size <span class="math">m</span> and <span class="math">m-\\ell-1</span> respectively. The committed relaxed R1CS structure consists of sparse matrices <span class="math">A,B,C\\in\\mathbb{F}^{m\\times m}</span> with at most <span class="math">n=\\Omega(m)</span> non-zero entries in each matrix. A committed relaxed R1CS instance is a tuple <span class="math">(\\overline{E},u,\\overline{W},\\mathsf{x})</span>, where <span class="math">\\overline{E}</span> and <span class="math">\\overline{W}</span> are commitments, <span class="math">u\\in\\mathbb{F}</span>, and <span class="math">\\mathsf{x}\\in\\mathbb{F}^{\\ell}</span> are public inputs and outputs. An instance <span class="math">(\\overline{E},u,\\overline{W},\\mathsf{x})</span> is satisfied by a witness <span class="math">(E,r_{E},W,r_{W})\\in(\\mathbb{F}^{m},\\mathbb{F},\\mathbb{F}^{m-\\ell-1},\\mathbb{F})</span> if <span class="math">\\overline{E}=\\text{Commit}(\\mathsf{pp}_{E},E,r_{E})</span>, <span class="math">\\overline{W}=\\text{Commit}(\\mathsf{pp}_{W},W,r_{W})</span>, and <span class="math">(A\\cdot Z)\\circ(B\\cdot Z)=u\\cdot(C\\cdot Z)+E</span>, where <span class="math">Z=(W,\\mathsf{x},u)</span>.</p>
+
+    <h3 id="sec-13" class="text-xl font-semibold mt-8">2.4 Customizable constraint systems (CCS)</h3>
+
+    <p class="text-gray-300">Setty et al. <em>[x29]</em> recently introduced customizable constraint systems (CCS), a constraint system that simultaneously generalizes R1CS, Plonkish, and AIR without overheads. We first recall its definition and then describe variants that sections ahead will show are amenable to constructing multi-folding schemes. The definitions below are characterized by a finite field <span class="math">\\mathbb{F}</span>, but we leave this implicit.</p>
+
+    <h6 id="sec-14" class="text-base font-medium mt-4">Definition 6 (CCS <em>[x29]</em>)</h6>
+
+    <p class="text-gray-300">We define the customizable constraint system (CCS) relation <span class="math">\\mathcal{R}_{\\mathsf{CCS}}</span> as follows. Let the public parameter consists of size bounds <span class="math">m,n,N,\\ell,t,q,d\\in\\mathbb{N}</span> where <span class="math">n&gt;\\ell</span>.</p>
+
+    <p class="text-gray-300">An <span class="math">\\mathcal{R}_{\\mathsf{CCS}}</span> structure <span class="math">\\mathsf{s}</span> consists of:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>a sequence of matrices <span class="math">M_{1},\\ldots,M_{t}\\in\\mathbb{F}^{m\\times n}</span> with at most <span class="math">N=\\Omega(\\max(m,n))</span> non-zero entries in total;</li>
+
+      <li>a sequence of <span class="math">q</span> multisets <span class="math">[S_{1},\\ldots,S_{q}]</span>, where an element in each multiset is from the domain <span class="math">\\{1,\\ldots,t\\}</span> and the cardinality of each multiset is at most <span class="math">d</span>.</li>
+
+      <li>a sequence of <span class="math">q</span> constants <span class="math">[c_{1},\\ldots,c_{q}]</span>, where each constant is from <span class="math">\\mathbb{F}</span>.</li>
+
+    </ul>
+
+    <p class="text-gray-300">An <span class="math">\\mathcal{R}_{\\mathsf{CCS}}</span> instance consists of public input <span class="math">\\mathsf{x}\\in\\mathbb{F}^{\\ell}</span>. An <span class="math">\\mathcal{R}_{\\mathsf{CCS}}</span> witness consists of a vector <span class="math">w\\in\\mathbb{F}^{n-\\ell-1}</span>. An <span class="math">\\mathcal{R}_{\\mathsf{CCS}}</span> structure-instance tuple <span class="math">(\\mathsf{s},x)</span> is satisfied by an <span class="math">\\mathcal{R}_{\\mathsf{CCS}}</span> witness <span class="math">w</span> if</p>
+
+    <p class="text-gray-300"><span class="math">\\sum_{i=1}^{q}c_{i}\\cdot\\bigcirc_{j\\in S_{i}}M_{j}\\cdot z=\\mathbf{0},</span></p>
+
+    <p class="text-gray-300">where <span class="math">z=(w,1,\\mathsf{x})\\in\\mathbb{F}^{n}</span>, <span class="math">M_{j}\\cdot z</span> denotes matrix-vector multiplication, <span class="math">\\bigcirc</span> denotes the Hadamard product between vectors, and <span class="math">\\mathbf{0}</span> is an <span class="math">m</span>-sized vector with entries equal to the the additive identity in <span class="math">\\mathbb{F}</span>.</p>
+
+    <p class="text-gray-300">######</p>
+
+    <p class="text-gray-300">Consider a CCS structure <span class="math">\\mathsf{s}_{\\mathrm{CCS}} = (m,n,N,\\ell ,t,q,d,[M_1,\\ldots ,M_t],[S_1,\\ldots ,S_t],[c_1,\\ldots ,c_t])</span>.</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Let <span class="math">s = \\log m</span> and <span class="math">s&#x27; = \\log n</span>. We interpret each <span class="math">M_i</span> (for <span class="math">i \\in [t]</span>) as functions with the following signature: <span class="math">\\{0,1\\}^s \\times \\{0,1\\}^{s&#x27;} \\to \\mathbb{F}</span>. For <span class="math">i \\in [t]</span>, let <span class="math">\\widetilde{M}_i</span> denote the MLE of <span class="math">M_i</span> i.e., <span class="math">\\widetilde{M}_i</span> is the unique multilinear polynomial in <span class="math">\\log m + \\log n</span> variables such that <span class="math">\\forall x \\in \\{0,1\\}^s, y \\in \\{0,1\\}^{s&#x27;}</span>, <span class="math">\\widetilde{M}_i(x,y) = M_i(x,y)</span>. Similarly, for a purported witness <span class="math">w \\in \\mathbb{F}^{n - \\ell - 1}</span> let <span class="math">\\widetilde{w}</span> denote the unique MLE of <span class="math">w</span> viewed as a function. WLOG, below, we let $</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">w</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">= \\ell + 1$.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300"><strong>Definition 7 (Committed CCS).</strong> Let <span class="math">PC = (\\text{Gen}, \\text{Commit}, \\text{Open}, \\text{Eval})</span> denote an additively-homomorphic polynomial commitment scheme for multilinear polynomials over a finite field <span class="math">\\mathbb{F}</span>.</p>
+
+    <p class="text-gray-300">We define the committed customizable constraint system (CCCS) relation <span class="math">\\mathcal{R}_{\\mathrm{CCCS}}</span> as follows. Let the public parameter consists of size bounds <span class="math">m, n, N, \\ell, t, q, d \\in \\mathbb{N}</span> where <span class="math">n = 2 \\cdot (\\ell + 1)</span> and <span class="math">\\mathsf{pp} \\gets \\mathsf{Gen}(1^{\\lambda}, s&#x27; - 1)</span>. Let <span class="math">s = \\log m</span> and <span class="math">s&#x27; = \\log n</span>.</p>
+
+    <p class="text-gray-300">An <span class="math">\\mathcal{R}_{\\mathrm{CCCS}}</span> structure <span class="math">\\mathsf{s}</span> consists of:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>a sequence of sparse multilinear polynomials in <span class="math">s + s&#x27;</span> variables <span class="math">\\widetilde{M}_1, \\ldots, \\widetilde{M}_t</span> such that they evaluate to a non-zero value in at most <span class="math">N = \\Omega(m)</span> locations over the Boolean hypercube <span class="math">\\{0,1\\}^s \\times \\{0,1\\}^{s&#x27;}</span>;</li>
+
+      <li>a sequence of <span class="math">q</span> multisets <span class="math">[S_1, \\ldots, S_q]</span>, where an element in each multiset is from the domain <span class="math">\\{1, \\ldots, t\\}</span> and the cardinality of each multiset is at most <span class="math">d</span>;</li>
+
+      <li>a sequence of <span class="math">q</span> constants <span class="math">[c_1, \\ldots, c_q]</span>, where each constant is from <span class="math">\\mathbb{F}</span>.</li>
+
+    </ul>
+
+    <p class="text-gray-300">An <span class="math">\\mathcal{R}_{\\mathrm{CCCS}}</span> instance is <span class="math">(C, \\mathsf{x})</span>, where <span class="math">C</span> is a commitment to a multilinear polynomial in <span class="math">s&#x27; - 1</span> variables and <span class="math">\\mathsf{x} \\in \\mathbb{F}^{\\ell}</span>. An <span class="math">\\mathcal{R}_{\\mathrm{CCCS}}</span> witness consists of a multilinear polynomial <span class="math">\\widetilde{w}</span> in <span class="math">s&#x27; - 1</span> variables. An <span class="math">\\mathcal{R}_{\\mathrm{CCCS}}</span> structure-instance tuple is satisfied by an <span class="math">\\mathcal{R}_{\\mathrm{CCCS}}</span> witness if <span class="math">\\text{Commit}(\\mathsf{pp}, \\widetilde{w}) = C</span> and if <span class="math">\\forall x \\in \\{0,1\\}^s</span>,</p>
+
+    <div class="my-4 text-center"><span class="math-block">\\sum_{i = 1}^{q} c_{i} \\cdot \\left(\\Pi_{j \\in S_{i}} \\left(\\sum_{y \\in \\{0, 1\\}^{\\log m}} \\widetilde{M}_{j}(x, y) \\cdot \\widetilde{z}(y)\\right)\\right) = 0,</span></div>
+
+    <p class="text-gray-300">where <span class="math">\\widetilde{z}</span> is an <span class="math">s&#x27;</span>-variate multilinear polynomial such that <span class="math">\\widetilde{z}(x) = (\\widetilde{w, 1, x})(x)</span> for all <span class="math">x \\in \\{0, 1\\}^{s&#x27;}</span>.</p>
+
+    <p class="text-gray-300"><strong>Definition 8 (Linearized committed CCS).</strong> Let <span class="math">PC = (\\text{Gen}, \\text{Commit}, \\text{Open}, \\text{Eval})</span> denote an additively-homomorphic polynomial commitment scheme for multilinear polynomials over a finite field <span class="math">\\mathbb{F}</span>.</p>
+
+    <p class="text-gray-300">We define the linearized committed customizable constraint system (LCCS) relation <span class="math">\\mathcal{R}_{\\mathrm{LCCS}}</span> as follows. Let the public parameter consists of size bounds</p>
+
+    <p class="text-gray-300"><span class="math">m,n,N,\\ell,t,q,d\\in\\mathbb{N}</span> where <span class="math">n=2\\cdot(\\ell+1)</span> and <span class="math">\\mathsf{pp}\\leftarrow\\mathsf{Gen}(1^{\\lambda},s^{\\prime}-1)</span>. Let <span class="math">s=\\log m</span> and <span class="math">s^{\\prime}=\\log n</span>.</p>
+
+    <p class="text-gray-300">An <span class="math">\\mathcal{R}_{\\mathsf{LCCCS}}</span> structure <span class="math">\\mathsf{s}</span> consists of:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>a sequence of sparse multilinear polynomials in <span class="math">s+s^{\\prime}</span> variables <span class="math">\\widetilde{M}_{1},\\ldots,\\widetilde{M}_{t}</span> such that they evaluate to a non-zero value in at most <span class="math">N=\\Omega(m)</span> locations over the Boolean hypercube <span class="math">\\{0,1\\}^{s}\\times\\{0,1\\}^{s^{\\prime}}</span>;</li>
+
+      <li>a sequence of <span class="math">q</span> multisets <span class="math">[S_{1},\\ldots,S_{q}]</span>, where an element in each multiset is from the domain <span class="math">\\{1,\\ldots,t\\}</span> and the cardinality of each multiset is at most <span class="math">d</span>.</li>
+
+      <li>a sequence of <span class="math">q</span> constants <span class="math">[c_{1},\\ldots,c_{q}]</span>, where each constant is from <span class="math">\\mathbb{F}</span>.</li>
+
+    </ul>
+
+    <p class="text-gray-300">An <span class="math">\\mathcal{R}_{\\mathsf{LCCCS}}</span> instance is <span class="math">(C,u,\\mathsf{x},r,v_{1},\\ldots,v_{t})</span>, where <span class="math">u\\in\\mathbb{F}</span>, <span class="math">\\mathsf{x}\\in\\mathbb{F}^{\\ell}</span>, <span class="math">r\\in\\mathbb{F}^{s}</span>, <span class="math">v_{i}\\in\\mathbb{F}</span> for all <span class="math">i\\in[t]</span>, and <span class="math">C</span> is a commitment to a multilinear polynomial in <span class="math">s^{\\prime}-1</span> variables. An <span class="math">\\mathcal{R}_{\\mathsf{LCCCS}}</span> witness is a multilinear polynomial <span class="math">\\widetilde{w}</span> in <span class="math">s^{\\prime}-1</span> variables.</p>
+
+    <p class="text-gray-300">An <span class="math">\\mathcal{R}_{\\mathsf{LCCCS}}</span> structure-instance tuple is satisfied by an <span class="math">\\mathcal{R}_{\\mathsf{LCCCS}}</span> witness if <span class="math">\\mathsf{Commit}(\\mathsf{pp},\\widetilde{w})=C</span> and if for all <span class="math">i\\in[t]</span>, <span class="math">v_{i}=\\sum_{y\\in\\{0,1\\}^{s^{\\prime}}}\\widetilde{M}_{i}(r,y)\\cdot\\widetilde{z}(y)</span>, where <span class="math">\\widetilde{z}</span> is an <span class="math">s^{\\prime}</span>-variate multilinear polynomial such that <span class="math">z(x)=\\widetilde{(w,u,\\mathsf{x})}(x)</span> for all <span class="math">x\\in\\{0,1\\}^{s^{\\prime}}</span>.</p>
+
+    <h2 id="sec-17" class="text-2xl font-bold">3 A multi-folding scheme for CCS over a cycle of curves</h2>
+
+    <p class="text-gray-300">This section describes a multi-folding scheme for CCS, instantiated over a cycle of elliptic curves. Our construction and proof strategy build upon HyperNova <em>[x10]</em>.</p>
+
+    <p class="text-gray-300">Let <span class="math">(E_{1},E_{2})</span> denote a 2-cycle of elliptic curves, where each curve in the cycle can be used as cryptographic group (i.e. the discrete logarithm problem is hard). Let <span class="math">\\mathbb{F}_{p}</span> and <span class="math">\\mathbb{F}_{q}</span> respectively denote the scalar field and the base field of <span class="math">E_{1}</span>. Naturally, <span class="math">\\mathbb{F}_{q}</span> and <span class="math">\\mathbb{F}_{p}</span> respectively denote the scalar field and the base field of <span class="math">E_{2}</span>.</p>
+
+    <p class="text-gray-300">We provide a multi-folding scheme for <span class="math">\\mathcal{R}_{1}=\\mathcal{R}_{\\mathsf{LCCCS}}\\times\\mathcal{R}_{\\mathsf{CRR1CS}}</span> with structure <span class="math">\\mathsf{s}_{1}</span> and <span class="math">\\mathcal{R}_{2}=\\mathcal{R}_{\\mathsf{CCCS}}</span> with structure <span class="math">\\mathsf{s}_{2}</span>, when <span class="math">(\\mathsf{s}_{1},\\mathsf{s}_{2})</span> satisfy the <span class="math">\\mathsf{compat}</span> predicate defined below. Here, <span class="math">\\mathcal{R}_{\\mathsf{LCCCS}}</span> and <span class="math">\\mathcal{R}_{\\mathsf{CCCS}}</span> are both defined over <span class="math">\\mathbb{F}_{p}</span> (i.e., the scalar field of <span class="math">E_{1}</span>) and <span class="math">\\mathcal{R}_{\\mathsf{CRR1CS}}</span> is defined over <span class="math">\\mathbb{F}_{q}</span> (i.e., the scalar field of <span class="math">E_{2}</span>).</p>
+
+    <p class="text-gray-300">To keep the description of the multi-folding scheme simple, we describe and prove the case of <span class="math">\\mu=\\nu=1</span>. However, both the construction and proofs easily generalize to the case of arbitrary values of <span class="math">\\mu</span> and <span class="math">\\nu</span>. In particular, the generalized version simply uses more powers of a random challenge when combining claims.</p>
+
+    <p class="text-gray-300">A high-level overview. Our goal is to instantiate a folding scheme (e.g., HyperNova’s folding scheme) on a cycle of elliptic curves.</p>
+
+    <p class="text-gray-300">Suppose that the prover and the verifier are given as input a tuple consisting of a linearized committed CCS instance and a committed relaxed R1CS instance <span class="math">(\\mathsf{U}_{\\mathsf{LCCCS}},\\mathsf{U}_{\\mathsf{CRR1CS}})</span>, and a committed CCS instance <span class="math">\\mathsf{u}_{\\mathsf{CCCS}}</span>. The prover additionally takes as input witnesses <span class="math">(\\mathsf{W}_{\\mathsf{LCCCS}},\\mathsf{W}_{\\mathsf{CRR1CS}})</span> and <span class="math">\\mathsf{w}_{\\mathsf{CCCS}}</span>.</p>
+
+    <p class="text-gray-300">HyperNova’s folding scheme verifier folds the committed CCS instance <span class="math">\\mathsf{u}_{\\mathsf{CCCS}}</span> into the the linearized committed CCS instance <span class="math">\\mathsf{U}_{\\mathsf{LCCCS}}</span> to produce a new linearized</p>
+
+    <p class="text-gray-300">committed CCS instance <span class="math">\\mathsf{U}_{\\mathsf{LCCCS}}^{\\prime}</span>. Internally, this involves finite field and hash operations. In addition, it involves one scalar multiplication and point addition. In particular, provided commitment <span class="math">C_{1}</span> in the linearized committed CCS instance <span class="math">\\mathsf{U}_{\\mathsf{LCCCS}}</span> and commitment <span class="math">C_{2}</span> in the committed CCS instance <span class="math">\\mathsf{u}_{\\mathsf{CCCS}}</span>, the HyperNova verifier, picks a random challenge <span class="math">\\rho</span>, and computes</p>
+
+    <p class="text-gray-300"><span class="math">C^{\\prime}\\leftarrow C_{1}+\\rho\\cdot C_{2}.</span></p>
+
+    <p class="text-gray-300">Unfortunately, this computation makes it inefficient to represent the HyperNova verifier over the same curve that represents the computations that it verifies. To address this, we modify the HyperNova verifier to take the resulting value <span class="math">C^{\\prime}</span> as non-deterministic advice. Of course, this advice must be verified.</p>
+
+    <p class="text-gray-300">To do so, the prover generates a relaxed R1CS instance that represents the random linear combination during the HyperNova folding protocol. In more detail, let <span class="math">\\mathsf{s}_{\\mathsf{EC}}=(A,B,C)</span> denote a committed relaxed R1CS structure defined over <span class="math">F_{q}</span>. Its public IO consists of <span class="math">(\\rho,C_{1},C_{2},C^{\\prime})</span>, where <span class="math">\\rho\\in\\mathbb{F}_{p},C_{1}\\in E_{1},C_{2}\\in E_{1},C^{\\prime}\\in E_{1}</span>. This constraint system enforces that <span class="math">C^{\\prime}=C_{1}+\\rho\\cdot C_{2}</span>, where <span class="math">+</span> is the elliptic curve point addition and <span class="math">\\cdot</span> is the elliptic curve scalar multiplication operation in <span class="math">E_{1}</span>. Since <span class="math">F_{q}</span> is the base field of <span class="math">E_{1}</span>, <span class="math">\\mathsf{s}_{\\mathsf{EC}}</span> computes the required point addition and scalar multiplication operations “natively” with a concise set of constraints (i.e., without the “wrong field” arithmetic).</p>
+
+    <p class="text-gray-300">We modify the HyperNova verifier to read the inputs and outputs of this relaxed R1CS instance (rather than computing the random linear combination itself). Instead of directly checking this instance, it is folded into a running relaxed R1CS instance using the folding scheme underlying Nova <em>[x10]</em>. Note that this auxiliary computation is represented on the second curve in the cycle. Thus, the Nova verifier can be natively represented over the first curve alongside the rest of the HyperNova verifier.</p>
+
+    <p class="text-gray-300">Putting everything together, we achieve a folding scheme that takes a committed CCS instance and folds it into a linearized CCS instance and a relaxed R1CS instance to produce a new linearized CCS instance and a relaxed R1CS instance.</p>
+
+    <p class="text-gray-300">Construction 1 (A multi-folding scheme for CCS). We construct a multi-folding scheme for <span class="math">(\\mathcal{R}_{1}=\\mathcal{R}_{\\mathsf{LCCCS}}\\times\\mathcal{R}_{\\mathsf{CRR1CS}},\\mathcal{R}_{2}=\\mathcal{R}_{\\mathsf{CCCS}},\\mathsf{compat},\\mu=1,\\nu=1)</span>, where <span class="math">\\mathsf{compat}</span> is defined as follows.</p>
+
+    <p class="text-gray-300"><span class="math">\\mathsf{compat}(\\mathsf{s}_{1},\\mathsf{s}_{2})\\to\\{\\mathsf{true},\\mathsf{false}\\}</span></p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Parse <span class="math">\\mathsf{s}_{1}</span> as <span class="math">(\\mathsf{s}_{\\mathsf{LCCCS}},\\mathsf{s}_{\\mathsf{RR1CS}})</span></li>
+
+      <li>Check that <span class="math">\\mathsf{s}_{\\mathsf{LCCCS}}=\\mathsf{s}_{2}</span> and <span class="math">\\mathsf{s}_{\\mathsf{RR1CS}}=\\mathsf{s}_{\\mathsf{EC}}</span></li>
+
+    </ol>
+
+    <p class="text-gray-300">Let <span class="math">\\mathsf{PC}=(\\mathsf{Gen},\\mathsf{Commit},\\mathsf{Open},\\mathsf{Eval})</span> denote an additively-homomorphic polynomial commitment scheme for multilinear polynomials over <span class="math">\\mathbb{F}_{p}</span>. Let <span class="math">\\mathsf{VC}=(\\mathsf{Gen},\\mathsf{Commit},\\mathsf{Open})</span> denote an additively-homomorphic commitment scheme with succinct commitments for vectors over <span class="math">\\mathbb{F}_{q}</span> (§A.1).</p>
+
+    <p class="text-gray-300">We define the generator and the encoder as follows.</p>
+
+    <p class="text-gray-300"><span class="math">\\mathcal{G}(1^{\\lambda})\\to \\mathsf{pp}</span></p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Sample size bounds <span class="math">m, n, N, \\ell, t, q, d \\in \\mathbb{N}</span> with <span class="math">n = 2 \\cdot (\\ell + 1)</span></li>
+
+      <li><span class="math">\\mathsf{pp}_{\\mathsf{PC}} \\gets \\mathsf{PC.Gen}(1^{\\lambda}, \\log n - 1)</span></li>
+
+    </ol>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">3. $\\mathsf{pp}_{\\mathsf{VC}} \\gets \\mathsf{VC.Gen}(1^{\\lambda},</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mathsf{s}_{\\mathsf{EC}}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">)<span class="math">, where </span></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mathsf{s}_{\\mathsf{EC}}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"><span class="math"> is the maximum among the number of constraints or the number of witness variables in </span>\\mathsf{s}_{\\mathsf{EC}}$.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300"><span class="math">\\mathcal{K}(\\mathsf{pp},(([\\widetilde{M}_1,\\ldots ,\\widetilde{M}_t],[S_1,\\ldots ,S_q],[c_1,\\ldots ,c_q]))</span> <span class="math">(A,B,C))\\to (\\mathsf{pk},\\mathsf{vk})</span>:</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li><span class="math">\\mathsf{pk} \\gets (\\mathsf{pp},(([\\widetilde{M}_1, \\ldots, \\widetilde{M}_t], [S_1, \\ldots, S_q], [c_1, \\ldots, c_q])), (A, B, C))</span></li>
+
+      <li><span class="math">\\mathsf{vk} \\gets \\bot</span></li>
+
+      <li>Output <span class="math">(\\mathsf{pk}, \\mathsf{vk})</span></li>
+
+    </ol>
+
+    <p class="text-gray-300">The verifier <span class="math">\\mathcal{V}</span> takes a tuple consisting of a linearized committed CCS instance and a committed relaxed R1CS instance <span class="math">(\\mathsf{U}_{\\mathsf{LCCS}}, \\mathsf{U}_{\\mathsf{CRR1CS}})</span>, where <span class="math">\\mathsf{U}_{\\mathsf{LCCS}} = (C_1, u, \\mathsf{x}_1, r_x, v_1, \\ldots, v_t)</span> and <span class="math">\\mathsf{U}_{\\mathsf{CRR1CS}} = (\\overline{E}_1, u_1, \\overline{W}_1, x_1)</span>, and a committed CCS instance <span class="math">\\mathsf{u}_{\\mathsf{CCS}} = (C_2, \\mathsf{x}_2)</span>. The prover <span class="math">\\mathcal{P}</span>, in addition to these instances, takes witnesses to all instances, <span class="math">\\mathsf{W}_{\\mathsf{LCCS}} = \\widetilde{w}_1</span>, <span class="math">\\mathsf{W}_{\\mathsf{CRR1CS}} = (E_1, W_1)</span>, and <span class="math">\\mathsf{w}_{\\mathsf{CCS}} = \\widetilde{w}_2</span>.</p>
+
+    <p class="text-gray-300">Let <span class="math">s = \\log m</span> and <span class="math">s&#x27; = \\log n</span>. Let <span class="math">\\widetilde{z_1} = (\\widetilde{w_1, u, x_1})</span> and <span class="math">\\widetilde{z_2} = (\\widetilde{w_2, 1, x_2})</span>.</p>
+
+    <p class="text-gray-300">The prover and the verifier proceed as follows.</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li><span class="math">\\mathcal{V} \\to \\mathcal{P}</span>: <span class="math">\\mathcal{V}</span> samples <span class="math">\\gamma \\stackrel{\\</span>}{\\leftarrow} \\mathbb{F}_p, \\beta \\stackrel{\\<span class="math">}{\\leftarrow} \\mathbb{F}_p^s</span>, and sends them to <span class="math">\\mathcal{P}</span>.</li>
+
+      <li><span class="math">\\mathcal{V}</span>: Sample <span class="math">r_x&#x27; \\stackrel{\\</span>}{\\leftarrow} \\mathbb{F}_p^s$.</li>
+
+      <li><span class="math">\\mathcal{V} \\leftrightarrow \\mathcal{P}</span>: Run the sum-check protocol <span class="math">c \\gets \\langle \\mathcal{P}, \\mathcal{V}(r_x&#x27;) \\rangle (g, s, d + 1, \\sum_{j \\in [t]} \\gamma^j \\cdot v_j)</span>, where:</li>
+
+    </ol>
+
+    <div class="my-4 text-center"><span class="math-block">\\begin{array}{l} g(x) := \\left(\\sum_{j \\in [t]} \\gamma^j \\cdot L_j(x)\\right) + \\gamma^{t+1} \\cdot Q(x) \\\\ L_j(x) := \\widetilde{e q}(r_x, x) \\cdot \\left(\\sum_{y \\in \\{0, 1\\}^{s&#x27;}} \\widetilde{M}_j(x, y) \\cdot \\widetilde{z}_1(y)\\right) \\\\ Q(x) := \\widetilde{e q}(\\beta, x) \\cdot \\left(\\sum_{i=1}^{q} c_i \\cdot \\prod_{j \\in S_i} \\left(\\sum_{y \\in \\{0, 1\\}^{s&#x27;}} \\widetilde{M}_j(x, y) \\cdot \\widetilde{z}_2(y)\\right)\\right) \\end{array}</span></div>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li><span class="math">\\mathcal{P} \\to \\mathcal{V}</span>: <span class="math">((\\sigma_1, \\ldots, \\sigma_t), (\\theta_1, \\ldots, \\theta_t))</span>, where for all <span class="math">i \\in [t]</span>:</li>
+
+    </ol>
+
+    <div class="my-4 text-center"><span class="math-block">\\sigma_i = \\sum_{y \\in \\{0,1\\}^{s&#x27;}} \\widetilde{M}_i(r_x&#x27;, y) \\cdot \\widetilde{z}_1(y)</span></div>
+
+    <div class="my-4 text-center"><span class="math-block">\\theta_i = \\sum_{y \\in \\{0,1\\}^{s&#x27;}} \\widetilde{M}_i(r_x&#x27;, y) \\cdot \\widetilde{z}_2(y)</span></div>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li><span class="math">\\mathcal{V}</span>: Compute <span class="math">e_1 \\gets \\widetilde{eq}(r_x, r_x&#x27;)</span> and <span class="math">e_2 \\gets \\widetilde{eq}(\\beta, r_x&#x27;)</span>, and abort if:</li>
+
+    </ol>
+
+    <div class="my-4 text-center"><span class="math-block">c \\neq \\left(\\sum_{j \\in [t]} \\gamma^j \\cdot e_1 \\cdot \\sigma_j + \\gamma^{t+1} \\cdot e_2 \\cdot \\left(\\sum_{i=1}^q c_i \\cdot \\prod_{j \\in S_i} \\theta_j\\right)\\right)</span></div>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li><span class="math">\\mathcal{V} \\to \\mathcal{P}</span>: <span class="math">\\mathcal{V}</span> samples <span class="math">\\rho \\stackrel{\\</span>}{\\leftarrow} \\mathbb{F}_p<span class="math"> and sends it to </span>\\mathcal{P}$.</li>
+
+    </ol>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li><span class="math">\\mathcal{P} \\to \\mathcal{V}</span>: <span class="math">\\mathcal{P}</span> computes a committed relaxed R1CS instance <span class="math">\\mathsf{u}_{\\mathsf{CRR1CS}} = (\\overline{E}_2, u_2, \\overline{W}_2, x_2)</span> with structure <span class="math">\\mathsf{s}_{\\mathsf{EC}}</span> and witness <span class="math">\\mathsf{w}_{\\mathsf{CRR1CS}} = (E_2, W_2)</span> to compute the quantity <span class="math">C_1 + \\rho \\cdot C_2</span>, such that the following hold: (1) <span class="math">u_2 = 1</span>, (2) <span class="math">\\overline{E}_1 = \\overline{0}</span>, and (3) <span class="math">x_2 = (\\rho, C_1, C_2, C&#x27;)</span> for some <span class="math">C&#x27; \\in E_1</span>. <span class="math">\\mathcal{P}</span> then sends <span class="math">\\mathsf{u}_{\\mathsf{CRR1CS}}</span> to <span class="math">\\mathcal{V}</span>.</li>
+
+    </ol>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li><span class="math">\\mathcal{V}</span>: Abort if <span class="math">\\overline{E}_2 \\neq \\overline{0}</span> or <span class="math">u_2 \\neq 1</span> or <span class="math">x_2 \\neq (\\rho, C_1, C_2, C&#x27;)</span> for some <span class="math">C&#x27; \\in E_1</span>.</li>
+
+    </ol>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li><span class="math">\\mathcal{P} \\to \\mathcal{V}</span>: Send <span class="math">\\overline{T} = \\mathsf{VC}</span>. Commit(<span class="math">\\mathsf{pp}_{\\mathsf{VC}}, T</span>), where <span class="math">T = AZ_1 \\circ BZ_2 + AZ_2 \\circ BZ_1 - u_1 \\cdot CZ_2 - u_2 \\cdot CZ_1</span>, <span class="math">Z_1 = (W_1, x_1, u_1)</span>, and <span class="math">Z_2 = (W_2, x_2, u_2)</span>.</li>
+
+    </ol>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li><span class="math">V \\to \\mathcal{P}</span>: <span class="math">\\mathcal{V}</span> samples <span class="math">\\rho^{\\star} \\stackrel{\\</span>}{\\leftarrow} \\mathbb{F}_p<span class="math"> and sends it to </span>\\mathcal{P}$.</li>
+
+    </ol>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li><span class="math">\\mathcal{V}, \\mathcal{P}</span>: Output the folded linearized committed CCS instance <span class="math">(C&#x27;, u&#x27;, x&#x27;, r_x&#x27;, v_1&#x27;, \\ldots, v_t&#x27;)</span> and the folded committed relaxed R1CS instance <span class="math">(\\overline{E}^{\\star}, u^{\\star}, \\overline{W}^{\\star}, x^{\\star})</span>, where <span class="math">\\forall i \\in [t]</span>:</li>
+
+    </ol>
+
+    <div class="my-4 text-center"><span class="math-block">u&#x27; \\quad \\leftarrow u \\quad + \\rho \\cdot 1</span></div>
+
+    <div class="my-4 text-center"><span class="math-block">x&#x27; \\quad \\leftarrow x_1 \\quad + \\rho \\cdot x_2</span></div>
+
+    <div class="my-4 text-center"><span class="math-block">v_i&#x27; \\quad \\leftarrow \\sigma_i \\quad + \\rho \\cdot \\theta_i</span></div>
+
+    <div class="my-4 text-center"><span class="math-block">\\overline{E}^{\\star} \\quad \\leftarrow \\overline{E}_1 \\quad + \\rho^{\\star} \\cdot \\overline{T}</span></div>
+
+    <div class="my-4 text-center"><span class="math-block">u^{\\star} \\quad \\leftarrow u_1 \\quad + \\rho^{\\star} \\cdot 1</span></div>
+
+    <div class="my-4 text-center"><span class="math-block">\\overline{W}^{\\star} \\quad \\leftarrow \\overline{W}_1 \\quad + \\rho^{\\star} \\cdot \\overline{W}_2</span></div>
+
+    <div class="my-4 text-center"><span class="math-block">x^{\\star} \\quad \\leftarrow x_1 \\quad + \\rho^{\\star} \\cdot x_2</span></div>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li><span class="math">\\mathcal{P}</span>: Output the folded witnesses <span class="math">\\mathsf{W}_{\\mathsf{LCCCS}} = \\widetilde{w}&#x27; \\gets \\widetilde{w}_1 + \\rho \\cdot \\widetilde{w}_2</span> and <span class="math">\\mathsf{W}_{\\mathsf{CRR1CS}} = (E^{\\star}, W^{\\star})</span>, where <span class="math">E^{\\star} \\gets E_1 + \\rho^{\\star} \\cdot T</span> and <span class="math">W^{\\star} \\gets W_1 + \\rho^{\\star} \\cdot W_2</span>.</li>
+
+    </ol>
+
+    <p class="text-gray-300">Theorem 1 (A multi-folding scheme for CCS). Construction 1 is a public-coin multi-folding scheme for <span class="math">(\\mathcal{R}_1 = \\mathcal{R}_{\\mathsf{LCCCS}} \\times \\mathcal{R}_{\\mathsf{CRRICS}}, \\mathcal{R}_2 = \\mathcal{R}_{\\mathsf{CCCS}}, \\mathsf{compat}, \\mu = 1, \\nu = 1)</span>. with perfect completeness and knowledge soundness.</p>
+
+    <p class="text-gray-300">Lemma 1 (Perfect Completeness). Construction 1 satisfies perfect completeness.</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Proof. Consider public parameters $\\mathsf{pp} = (m,n,N,\\ell ,t,q,d,</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mathsf{s}_{\\mathsf{EC}}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">,\\mathsf{pp}_{\\mathsf{PC}},\\mathsf{pp}_{\\mathsf{VC}})\\gets \\mathcal{G}(1^{\\lambda})<span class="math"> and let </span>s = \\log m<span class="math"> and </span>s^{\\prime} = \\log n<span class="math">. Let </span>\\mathsf{s}_{\\mathsf{EC}} = (A,B,C)<span class="math"> denote a committed relaxed R1CS structure defined over </span>F_{q}<span class="math">, with public IO </span>(\\rho ,C_1,C_2,C')<span class="math">, where </span>\\rho \\in \\mathbb{F}_p,C_1\\in E_1,C_2\\in E_1,C'\\in E_1<span class="math">. This constraint system enforces that </span>C' = C_1 + \\rho \\cdot C_2<span class="math">, where </span>+<span class="math"> is the elliptic curve point addition and </span>\\cdot<span class="math"> is the elliptic curve scalar multiplication operation in </span>E_{1}$.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">Consider arbitrary structures <span class="math">(\\mathsf{s}_1,\\mathsf{s}_2)\\gets \\mathcal{A}(\\mathsf{pp})</span> such that <span class="math">\\mathsf{compat}(\\mathsf{s}_1,\\mathsf{s}_2) = \\mathsf{true}</span>. Let <span class="math">\\mathsf{s}_1 = ((\\widetilde{M}_1,\\ldots ,\\widetilde{M}_t),(S_1,\\ldots ,S_q),(c_1,\\ldots ,c_q))</span>, and let <span class="math">\\mathsf{s}_2 = (A,B,C)</span>. Consider prover and verifier keys <span class="math">(\\mathsf{pk},\\mathsf{vk})\\gets \\mathcal{K}(\\mathsf{pp},(\\mathsf{s}_1,\\mathsf{s}_2))</span>. Suppose that the prover and the verifier are provided with a linearized committed CCS instance and a committed relaxed R1CS instance</p>
+
+    <div class="my-4 text-center"><span class="math-block">\\left(\\left(C _ {1}, u, \\mathrm {x} _ {1}, r _ {x}, v _ {1}, \\dots , v _ {t}\\right), \\left(\\bar {E} _ {1}, u _ {1}, \\bar {W} _ {1}, x _ {1}\\right)\\right),</span></div>
+
+    <p class="text-gray-300">and a committed CCS instance</p>
+
+    <div class="my-4 text-center"><span class="math-block">(C _ {2}, \\mathrm {x} _ {2}).</span></div>
+
+    <p class="text-gray-300">Suppose that the prover additionally is provided with the corresponding satisfying witnesses <span class="math">(\\widetilde{w}_1, (E_1, W_1))</span> and <span class="math">\\widetilde{w}_2</span>.</p>
+
+    <p class="text-gray-300">Because the input linearized committed CCS instance-witness pair is satisfying, we have, for <span class="math">\\widetilde{z}_1 = (\\widetilde{w_1,u},\\mathbf{x}_1)</span>, that</p>
+
+    <div class="my-4 text-center"><span class="math-block">\\begin{array}{l} v _ {j} = \\sum_ {y \\in \\{0, 1 \\} ^ {s ^ {\\prime}}} \\widetilde {M} _ {j} (r _ {x}, y) \\cdot \\widetilde {z} _ {1} (y) \\quad \\text {By precondition.} \\\\ = \\sum_ {x \\in \\{0, 1 \\} ^ {s}} \\widetilde {e q} (r _ {x}, x) \\cdot \\left(\\sum_ {y \\in \\{0, 1 \\} ^ {s ^ {\\prime}}} \\widetilde {M} _ {j} (x, y) \\cdot \\widetilde {z} _ {1} (y)\\right) \\quad \\text {By Lemma 3} \\\\ = \\sum_ {x \\in \\{0, 1 \\} ^ {s}} L _ {j} (x) \\quad \\text {By construction.} \\\\ \\end{array}</span></div>
+
+    <p class="text-gray-300">Furthermore, because the input committed relaxed R1CS instance-witness pair is also satisfying, we have for <span class="math">Z_{1} = (W_{1},u_{1},x_{1})</span>, <span class="math">AZ_{1}\\circ BZ_{1} = u\\cdot CZ_{1} + E_{1}</span>.</p>
+
+    <p class="text-gray-300">Moreover, because the input committed CCS instance-witness pair is satisfying, we have, for all <span class="math">x \\in \\{0,1\\}^s</span> and for <span class="math">\\widetilde{z}_2(x) = (\\widetilde{w_2,1},\\mathbf{x}_2)(x)</span>, that</p>
+
+    <div class="my-4 text-center"><span class="math-block">0 = \\sum_ {i = 1} ^ {q} c _ {i} \\cdot \\prod_ {j \\in S _ {i}} \\left(\\sum_ {y \\in \\{0, 1 \\} ^ {s ^ {\\prime}}} \\widetilde {M} _ {j} (x, y) \\cdot \\widetilde {z} _ {2} (y)\\right)</span></div>
+
+    <p class="text-gray-300">Because the RHS vanishes on all <span class="math">x \\in \\{0,1\\}^s</span>, we have, for <span class="math">\\beta</span> sampled by the verifier, that</p>
+
+    <div class="my-4 text-center"><span class="math-block">\\begin{array}{l} 0 = \\sum_{x \\in \\{0, 1 \\}^s} \\widetilde{e q} (\\beta , x) \\cdot \\sum_{i = 1}^q c_i \\cdot \\prod_{j \\in S_i} \\left(\\sum_{y \\in \\{0, 1 \\}^s&#x27;} \\widetilde{M}_j (x, y) \\cdot \\widetilde{z}_2 (y)\\right) \\quad \\text{By Lemma 3.} \\\\ = \\sum_{x \\in \\{0, 1 \\}^s} Q (x) \\quad \\text{By construction.} \\end{array}</span></div>
+
+    <p class="text-gray-300">Therefore, for <span class="math">\\gamma</span> sampled by the verifier, by linearity, we have that</p>
+
+    <div class="my-4 text-center"><span class="math-block">\\begin{array}{l} \\sum_{j \\in [t]} \\gamma^j \\cdot v_j = \\sum_{x \\in \\{0, 1\\}^s} \\left(\\left(\\sum_{j \\in [t]} \\gamma^j \\cdot L_j (x)\\right) + \\gamma^{t + 1} \\cdot Q (x)\\right) \\\\ = \\sum_{x \\in \\{0, 1\\}^s} g (x) \\quad \\text{By construction.} \\end{array}</span></div>
+
+    <p class="text-gray-300">Therefore, by the perfect completeness of the sum-check protocol, we have for <span class="math">e_1 = \\widetilde{e q} (r_x,r_x&#x27;)</span>, <span class="math">e_2 = \\widetilde{e q} (\\beta ,r_x&#x27;)</span> and</p>
+
+    <div class="my-4 text-center"><span class="math-block">\\sigma_i = \\sum_{y \\in \\{0, 1\\}^s&#x27;} \\widetilde{M}_i (r_x&#x27;, y) \\cdot \\widetilde{z}_1 (y) \\quad \\text{and} \\quad \\theta_i = \\sum_{y \\in \\{0, 1\\}^s&#x27;} \\widetilde{M}_i (r_x&#x27;, y) \\cdot \\widetilde{z}_2 (y)</span></div>
+
+    <p class="text-gray-300">that</p>
+
+    <div class="my-4 text-center"><span class="math-block">\\begin{array}{l} c = g (r_x&#x27;) \\\\ = \\left(\\left(\\sum_{j \\in [t]} \\gamma^j \\cdot L_j (r_x&#x27;)\\right) + \\gamma^{t + 1} \\cdot Q (r_x&#x27;)\\right) \\\\ = \\left(\\left(\\sum_{j \\in [t]} \\gamma^j \\cdot e_1 \\cdot \\sigma_j\\right) + \\gamma^{t + 1} \\cdot e_2 \\sum_{i \\in [q]} c_i \\cdot \\prod_{j \\in S_i} \\theta_j\\right). \\end{array}</span></div>
+
+    <p class="text-gray-300">This implies that the verifier will not abort on step 5.</p>
+
+    <p class="text-gray-300">By construction, the prover can construct <span class="math">\\mathsf{u}_{\\mathsf{CRR1CS}}</span> such that the verifier does not abort on step 8. Furthermore, the prover can construct <span class="math">\\mathsf{u}_{\\mathsf{CRR1CS}}</span> such that <span class="math">\\mathsf{w}_{\\mathsf{CRR1CS}}</span> is a satisfying witness under structure <span class="math">\\mathsf{s}_{\\mathsf{EC}}</span>. This implies that <span class="math">C&#x27; = C_1 + \\rho \\cdot C_2</span>, where <span class="math">C&#x27;</span> is parsed from <span class="math">x_2</span>, which is the public IO of <span class="math">\\mathsf{u}_{\\mathsf{CRR1CS}}</span>.</p>
+
+    <p class="text-gray-300">Now, consider the linearized CCS instance</p>
+
+    <div class="my-4 text-center"><span class="math-block">(C_2, 1, \\mathbf{x}_2, r_x&#x27;, \\theta_1, \\dots, \\theta_t).</span></div>
+
+    <p class="text-gray-300">By the precondition that the committed CCS instance <span class="math">(C_2, \\mathbf{x}_2)</span> is satisfied by <span class="math">\\widetilde{w}_2</span> and by the definition of <span class="math">\\theta_1, \\ldots, \\theta_t</span> we have that this linearized CCS instance is satisfied by the witness <span class="math">\\widetilde{w}_2</span>.</p>
+
+    <p class="text-gray-300">Therefore, for random <span class="math">\\rho</span> sampled by the verifier, and for <span class="math">C^{\\prime}=C_{1}+\\rho\\cdot C_{2}</span>, <span class="math">u^{\\prime}=u+\\rho\\cdot 1</span>, <span class="math">\\mathsf{x}^{\\prime}=\\mathsf{x}_{1}+\\rho\\cdot\\mathsf{x}_{2}</span>, <span class="math">v^{\\prime}_{i}=\\sigma_{i}+\\rho\\cdot\\theta_{i}</span>, we have that the output linearized CCS instance</p>
+
+    <p class="text-gray-300"><span class="math">(C^{\\prime},u^{\\prime},\\mathsf{x}^{\\prime},r^{\\prime}_{x},v^{\\prime}_{1},\\ldots,v^{\\prime}_{t})</span></p>
+
+    <p class="text-gray-300">is satisfied by the witness <span class="math">\\widetilde{w}^{\\prime}=\\widetilde{w}_{1}+\\rho\\cdot\\widetilde{w}_{2}</span> by the linearity and the additive homomorphism property of the commitment scheme.</p>
+
+    <p class="text-gray-300">Now, we argue that the the output committed relaxed R1CS instance <span class="math">(\\overline{E}^{\\star},u^{\\star},\\overline{W}^{\\star},x^{\\star})</span> is satisfying under the witness <span class="math">(E^{\\star},W^{\\star})</span>, for relaxed R1CS structure <span class="math">\\mathsf{s_{EC}}=(A,B,C)</span>. We need to establish the following. Let <span class="math">Z^{\\star}=(W^{\\star},u^{\\star},x^{\\star})</span>.</p>
+
+    <p class="text-gray-300"><span class="math">AZ^{\\star}\\circ BZ^{\\star}</span> <span class="math">=u^{\\star}\\cdot CZ^{\\star}+E^{\\star}</span> (1) <span class="math">\\overline{W}^{\\star}</span> <span class="math">=\\mathsf{VC.Commit}(\\mathsf{pp_{VC}},W^{\\star})</span> (2) <span class="math">\\overline{E}^{\\star}</span> <span class="math">=\\mathsf{VC.Commit}(\\mathsf{pp_{VC}},E^{\\star})</span> (3)</p>
+
+    <p class="text-gray-300">The latter two requirements hold from the additive homomorphism of the commitment scheme. We now focus on proving the first requirement. We are given that the input committed relaxed R1CS instance <span class="math">(\\overline{E}_{1},u_{1},\\overline{W}_{1},x_{1})</span> is satisfying under the witness <span class="math">(E_{1},W_{1})</span> and structure <span class="math">\\mathsf{s_{EC}}</span>. This implies that</p>
+
+    <p class="text-gray-300"><span class="math">AZ_{1}\\circ BZ_{2}=u_{1}\\cdot CZ_{1}+E_{1},</span></p>
+
+    <p class="text-gray-300">where <span class="math">Z_{1}=(W_{1},u_{1},x_{1})</span>. As noted above, the committed relaxed R1CS instance sent by the prover <span class="math">(\\overline{E}_{2},u_{2},\\overline{W}_{2},x_{2})</span> is satisfying under the witness <span class="math">(E_{2},W_{2})</span> and structure <span class="math">\\mathsf{s_{EC}}</span>. This implies that</p>
+
+    <p class="text-gray-300"><span class="math">AZ_{2}\\circ BZ_{2}=CZ_{2},</span></p>
+
+    <p class="text-gray-300">where <span class="math">Z_{2}=(W_{2},1,x_{2})</span>. (This is because by construction <span class="math">u_{2}=1</span> and <span class="math">E_{2}=0</span>.)</p>
+
+    <p class="text-gray-300">Now, consider the LHS of the desired equality.</p>
+
+    <p class="text-gray-300"><span class="math">AZ^{\\star}\\circ BZ^{\\star}</span> <span class="math">=A(Z_{1}+\\rho^{\\star}\\cdot Z_{2})\\circ B(Z_{1}+\\rho^{\\star}\\cdot Z_{2})</span> <span class="math">=AZ_{1}\\circ BZ_{1}+\\rho^{\\star}\\cdot(AZ_{1}\\circ BZ_{2}+AZ_{2}\\circ BZ_{1})+(\\rho^{\\star})^{2}\\cdot(AZ_{2}\\circ BZ_{2})</span> <span class="math">=u_{1}\\cdot CZ_{1}+E_{1}+\\rho^{\\star}\\cdot(AZ_{1}\\circ BZ_{2}+AZ_{2}\\circ BZ_{1})+(\\rho^{\\star})^{2}\\cdot CZ_{2}</span></p>
+
+    <p class="text-gray-300">Consider the RHS of the desired equality.</p>
+
+    <p class="text-gray-300"><span class="math">u^{\\star}\\cdot CZ^{\\star}+E^{\\star}</span> <span class="math">=(u_{1}+\\rho^{\\star})\\cdot C(Z_{1}+\\rho^{\\star}\\cdot Z_{2})+E_{1}+\\rho^{\\star}\\cdot T</span> <span class="math">=(u_{1}+\\rho^{\\star})\\cdot(CZ_{1}+\\rho^{\\star}\\cdot CZ_{2})+E_{1}+\\rho^{\\star}\\cdot(AZ_{1}\\circ BZ_{2}+AZ_{2}\\circ BZ_{1}-u_{1}\\cdot CZ_{2}-CZ_{1})</span> <span class="math">=u_{1}\\cdot CZ_{1}+\\rho^{\\star}\\cdot(AZ_{1}\\circ BZ_{2}+AZ_{2}\\circ BZ_{1})+(\\rho^{\\star})^{2}\\cdot CZ_{2}</span></p>
+
+    <p class="text-gray-300">This establishes the desired requirements. <span class="math">\\Box</span></p>
+
+    <p class="text-gray-300">Some of our probabilistic analysis below is adapted from the proof of forking lemma for folding schemes <em>[x10]</em>, which itself builds on the proof of the forking lemma for interactive arguments <em>[BCC^{+}16]</em>.</p>
+
+    <p class="text-gray-300">##</p>
+
+    <h6 id="sec-18" class="text-base font-medium mt-4">Lemma 2 (Knowledge Soundness)</h6>
+
+    <p class="text-gray-300">Construction 1 satisfies knowledge soundness.</p>
+
+    <h6 id="sec-19" class="text-base font-medium mt-4">Proof.</h6>
+
+    <p class="text-gray-300">Consider an adversary <span class="math">\\mathcal{A}</span> that adaptively picks the structure and instances, and a malicious prover <span class="math">\\mathcal{P}^{*}</span> that succeeds with probability <span class="math">\\epsilon</span>. Let <span class="math">\\mathsf{pp}\\leftarrow\\mathcal{G}(1^{\\lambda})</span>. Suppose on input <span class="math">\\mathsf{pp}</span> and random tape <span class="math">\\mathsf{r}</span>, the adversary <span class="math">\\mathcal{A}</span> picks a structure <span class="math">(\\mathsf{s}_{1},\\mathsf{s}_{2})=((\\widetilde{M}_{1},\\ldots,\\widetilde{M}_{t}),(S_{1},\\ldots,S_{q}),(c_{1},\\ldots,c_{q})),(A,B,C))</span> such that <span class="math">\\mathsf{compat}(\\mathsf{s}_{1},\\mathsf{s}_{2})=\\mathsf{true}</span>, a pair of linearized committed CCS instance and a committed relaxed R1CS instance</p>
+
+    <p class="text-gray-300"><span class="math">\\varphi_{1}=((C_{1},u,\\mathsf{x}_{1},r_{x},v_{1},\\ldots,v_{t}),(\\overline{E}_{1},u_{1},\\overline{W}_{1},x_{1}))</span></p>
+
+    <p class="text-gray-300">and a committed CCS instance</p>
+
+    <p class="text-gray-300"><span class="math">\\varphi_{2}=(C_{2},\\mathsf{x}_{2}),</span></p>
+
+    <p class="text-gray-300">and some auxiliary state <span class="math">\\mathsf{st}</span>.</p>
+
+    <p class="text-gray-300">We construct an expected-polynomial time extractor <span class="math">\\mathcal{E}</span> that succeeds with probability <span class="math">\\epsilon-\\mathsf{negl}(\\lambda)</span> in obtaining satisfying witnesses for the original instances as follows. Below, let <span class="math">\\mathcal{R}_{1}=\\mathcal{R}_{\\mathsf{LCCCS}}\\times\\mathcal{R}_{\\mathsf{CRR1CS}}</span> and <span class="math">\\mathcal{R}_{2}=\\mathcal{R}_{\\mathsf{CCCS}}</span>.</p>
+
+    <h6 id="sec-20" class="text-base font-medium mt-4"><span class="math">\\mathcal{E}(\\mathsf{pp},\\mathsf{r})</span>:</h6>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Obtain the output tuple from <span class="math">\\mathcal{A}</span>:</li>
+
+    </ol>
+
+    <p class="text-gray-300"><span class="math">(\\mathsf{s},\\varphi_{1},\\varphi_{2},\\mathsf{st})\\leftarrow\\mathcal{A}(\\mathsf{pp},\\mathsf{r}).</span></p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Compute <span class="math">(\\mathsf{pk},\\mathsf{vk})\\leftarrow\\mathcal{K}(\\mathsf{pp},\\mathsf{s})</span>.</li>
+
+      <li>Run the interaction</li>
+
+    </ol>
+
+    <p class="text-gray-300"><span class="math">(\\varphi^{(1,1)},(\\widetilde{w},(E,W))^{(1,1)})\\leftarrow\\langle\\mathcal{P}^{*},\\mathcal{V}\\rangle((\\mathsf{pk},\\mathsf{vk}),\\varphi_{1},\\varphi_{2},\\mathsf{st})</span></p>
+
+    <p class="text-gray-300">once with the verifier’s final challenges <span class="math">\\rho^{(1)}\\stackrel{{\\scriptstyle\\</span>}}{{\\leftarrow}}\\mathbb{F}<span class="math"> and </span>\\rho^{\\star{}^{(1,1)}}\\stackrel{{\\scriptstyle\\<span class="math">}}{{\\leftarrow}}\\mathbb{F}</span>.</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Abort if <span class="math">(\\mathsf{pp},\\mathsf{s},\\varphi^{(1,1)},(\\widetilde{w},(E,W))^{(1,1)})\\not\\in\\mathcal{R}_{1}</span>.</li>
+
+      <li>Rewind the interaction</li>
+
+    </ol>
+
+    <p class="text-gray-300"><span class="math">(\\varphi^{(1,2)},(\\widetilde{w},(E,W))^{(1,2)})\\leftarrow\\langle\\mathcal{P}^{*},\\mathcal{V}\\rangle((\\mathsf{pk},\\mathsf{vk}),\\varphi_{1},\\varphi_{2},\\mathsf{st})</span></p>
+
+    <p class="text-gray-300">with a different verifier’s challenge <span class="math">\\rho^{\\star{}^{(2,1)}}\\stackrel{{\\scriptstyle\\</span>}}{{\\leftarrow}}\\mathbb{F}<span class="math"> while maintaining the same prior randomness. Repeat until </span>(\\mathsf{pp},\\mathsf{s},\\varphi^{(1,2)},(\\widetilde{w},(E,W))^{(1,2)})\\in\\mathcal{R}_{1}$.</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Rewind the interaction</li>
+
+    </ol>
+
+    <p class="text-gray-300"><span class="math">(\\varphi^{(2,1)},(\\widetilde{w},(E,W))^{(2,1)})\\leftarrow\\langle\\mathcal{P}^{*},\\mathcal{V}\\rangle((\\mathsf{pk},\\mathsf{vk}),\\varphi_{1},\\varphi_{2},\\mathsf{st})</span></p>
+
+    <p class="text-gray-300">with different verifier’s challenges <span class="math">\\rho^{(2)}\\stackrel{{\\scriptstyle\\</span>}}{{\\leftarrow}}\\mathbb{F}<span class="math"> and </span>\\rho^{\\star{}^{(2,1)}}\\stackrel{{\\scriptstyle\\<span class="math">}}{{\\leftarrow}}\\mathbb{F}</span> while maintaining the same prior randomness. Repeat until <span class="math">(\\mathsf{pp},\\mathsf{s},\\varphi^{(2,1)},(\\widetilde{w},(E,W))^{(2,1)})\\in\\mathcal{R}_{1}</span>.</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Rewind the interaction</li>
+
+    </ol>
+
+    <p class="text-gray-300"><span class="math">(\\varphi^{(2,2)},(\\widetilde{w},(E,W))^{(2,2)})\\leftarrow\\langle\\mathcal{P}^{*},\\mathcal{V}\\rangle((\\mathsf{pk},\\mathsf{vk}),\\varphi_{1},\\varphi_{2},\\mathsf{st})</span></p>
+
+    <p class="text-gray-300">with a different verifier’s challenge <span class="math">\\rho^{\\star^{(2,2)}}\\stackrel{{\\scriptstyle\\</span>}}{{\\leftarrow}}\\mathbb{F}<span class="math"> while maintaining the same prior randomness. Repeat until </span>(\\mathsf{pp},\\mathsf{s},\\varphi^{(2,1)},(\\widetilde{w},(E,W))^{(2,2)})\\in\\mathcal{R}_{1}$.</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Abort if <span class="math">\\rho^{\\star^{(1,1)}}=\\rho^{\\star^{(1,2)}}</span>, <span class="math">\\rho^{(1)}=\\rho^{(2)}</span>, or <span class="math">\\rho^{\\star^{(2,1)}}=\\rho^{\\star^{(2,2)}}</span>.</li>
+
+      <li>Interpolating points <span class="math">(\\rho^{(1)},\\widetilde{w}^{(1,1)})</span> and <span class="math">(\\rho^{(2)},\\widetilde{w}^{(2,1)})</span>, retrieve the witness polynomials <span class="math">\\widetilde{w}_{1}</span> and <span class="math">\\widetilde{w}_{2}</span> such that for <span class="math">i\\in\\{1,2\\}</span></li>
+
+    </ol>
+
+    <p class="text-gray-300"><span class="math">\\widetilde{w}_{1}+\\rho^{(i)}\\cdot\\widetilde{w}_{2}=\\widetilde{w}^{(i,1)}.</span> (4)</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Interpolating points <span class="math">(\\rho^{\\star^{(1,1)}},(E,W)^{(1,1)})</span> and <span class="math">(\\rho^{\\star^{(1,2)}},(E,W)^{(1,2)})</span>, retrieve <span class="math">(E_{1},W_{1})</span> and <span class="math">(T,W_{2})</span> such that for <span class="math">j\\in\\{1,2\\}</span></li>
+
+    </ol>
+
+    <p class="text-gray-300"><span class="math">E_{1}+\\rho^{\\star^{(1,j)}}\\cdot T</span> <span class="math">=E^{(1,j)}</span> (5) <span class="math">W_{1}+\\rho^{\\star^{(1,j)}}\\cdot W_{2}</span> <span class="math">=W^{(1,j)}</span> (6)</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Output <span class="math">((\\widetilde{w_{1}},(E_{1},W_{1})),\\widetilde{w_{2}})</span>.</li>
+
+    </ol>
+
+    <p class="text-gray-300">We first demonstrate that the extractor <span class="math">\\mathcal{E}</span> runs in expected polynomial time. Observe that <span class="math">\\mathcal{E}</span> runs the interaction once, and if it does not abort, keeps rerunning the interaction until <span class="math">\\mathcal{P}^{*}</span> succeeds three additional times. Thus, the expected number of times <span class="math">\\mathcal{E}</span> runs the interaction is</p>
+
+    <p class="text-gray-300"><span class="math">1+\\Pr[\\text{First call to }\\langle\\mathcal{P}^{<em>},\\mathcal{V}\\rangle\\text{ succeeds}]\\cdot\\frac{3}{\\Pr[\\langle\\mathcal{P}^{</em>},\\mathcal{V}\\rangle\\text{ succeeds}]}={1+\\epsilon\\cdot\\frac{3}{\\epsilon}}=4.</span></p>
+
+    <p class="text-gray-300">Therefore, we have that the extractor runs in expected polynomial-time.</p>
+
+    <p class="text-gray-300">We now analyze <span class="math">\\mathcal{E}</span>’s success probability. We must demonstrate that <span class="math">\\mathcal{E}</span> succeeds in producing <span class="math">(\\widetilde{w}_{1},(E_{1},W_{1}))</span> and <span class="math">\\widetilde{w}_{2}</span> such that</p>
+
+    <p class="text-gray-300"><span class="math">(\\mathsf{pp},\\mathsf{s},\\varphi_{1},(\\widetilde{w}_{1},(E_{1},W_{1})))\\in\\mathcal{R}_{1}\\quad\\text{and}\\quad(\\mathsf{pp},\\mathsf{s}_{1},\\varphi_{2},\\widetilde{w}_{2})\\in\\mathcal{R}_{2}</span></p>
+
+    <p class="text-gray-300">with probability <span class="math">\\epsilon-\\mathsf{negl}(\\lambda)</span>.</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">To do so, we first show that the extractor successfully produces <em>some</em> output (i.e., does not abort) in under $</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mathbb{F}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"><span class="math"> rewinding steps with probability </span>\\epsilon-\\mathsf{negl}(\\lambda)<span class="math">. Note that </span></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mathbb{F}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"><span class="math"> is a worst case bound and we have already established that the extractor runs in expected polynomial time. By the malicious prover’s success probability, we have that the extractor does not abort in step (4) with probability </span>\\epsilon<span class="math">. Given that the extractor does not abort in step (4), by Markov’s inequality, we have that the extractor rewinds more than </span></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mathbb{F}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"><span class="math"> times with probability </span>4/</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mathbb{F}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"><span class="math">. Thus, the probability that the extractor does not abort in step (4) and requires less than </span></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mathbb{F}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"><span class="math"> rewinds is </span>\\epsilon\\cdot(1-4/</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mathbb{F}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">)$.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Now, suppose that the extractor does not abort in step (4). Then, because the extractor randomly samples <span class="math">\\rho^{\\star^{(1,2)}}</span>, we have that <span class="math">\\rho^{\\star^{(1,1)}} \\neq \\rho^{\\star^{(1,2)}}</span> with probability $1 /</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mathbb{F}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"><span class="math">. Similarly, we have that, </span>\\rho^{(1)} \\neq \\rho^{(2)}<span class="math"> with probability </span>1 /</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mathbb{F}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"><span class="math"> and </span>\\rho^{\\star^{(2,1)}} = \\rho^{\\star^{(2,2)}}<span class="math"> with probability </span>1 /</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mathbb{F}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"><span class="math">. Thus, we have that the probability the extractor successfully produces some output in under </span></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mathbb{F}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">$ rewinding steps is</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\epsilon \\cdot \\left(1 - \\frac {4}{</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mathbb {F}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">}\\right) \\cdot \\left(1 - \\frac {3}{</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mathbb {F}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">}\\right) = \\epsilon - \\operatorname {n e g l} (\\lambda).</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <p class="text-gray-300">Next, if the extractor does not abort, we show that the extractor succeeds in producing satisfying witnesses with probability <span class="math">1 - \\mathrm{negl}(\\lambda)</span>. This brings the overall extractor success probability to <span class="math">\\epsilon -\\mathrm{negl}(\\lambda)</span>.</p>
+
+    <p class="text-gray-300">We first show that the in the transcripts retrieved, the output witnesses for linearized committed CCS instances do not depend on the choice of <span class="math">\\rho^{\\star}</span>. More precisely, we show that, for <span class="math">i\\in \\{1,2\\}</span>, <span class="math">\\widetilde{w}^{(i,1)} = \\widetilde{w}^{(i,2)}</span>.</p>
+
+    <p class="text-gray-300">For <span class="math">i\\in \\{1,2\\}</span> and <span class="math">j\\in \\{1,2\\}</span>, let</p>
+
+    <div class="my-4 text-center"><span class="math-block">\\varphi^ {(i, j)} = ((C ^ {(i, j)}, u ^ {(i, j)}, \\mathsf {x} ^ {(i, j)}, r _ {x} ^ {(i, j)}, v _ {1} ^ {(i, j)}, \\ldots , v _ {t} ^ {(i, j)}), (\\overline {{E}} ^ {(i, j)}, u ^ {\\star (i, j)}, \\overline {{W}} ^ {(i, j)}, x ^ {\\star (i, j)})).</span></div>
+
+    <p class="text-gray-300">By the verifier's construction and because the transcripts share the same prefix prior to the choice of <span class="math">\\rho^{\\star}</span>, we have for <span class="math">i \\in \\{1,2\\}</span> that</p>
+
+    <div class="my-4 text-center"><span class="math-block">\\left(C ^ {(i, 1)}, u ^ {(i, 1)}, \\mathbf {x} ^ {(i, 1)}, r _ {x} ^ {(i, 1)}, v _ {1} ^ {(i, 1)}, \\dots , v _ {t} ^ {(i, 1)}\\right) = \\left(C ^ {(i, 2)}, u ^ {(i, 2)}, \\mathbf {x} ^ {(i, 2)}, r _ {x} ^ {(i, 2)}, v _ {1} ^ {(i, 2)}, \\dots , v _ {t} ^ {(i, 2)}\\right). \\tag {7}</span></div>
+
+    <p class="text-gray-300">We are given that for <span class="math">i \\in \\{1,2\\}</span> and <span class="math">j \\in \\{1,2\\}</span>, <span class="math">\\widetilde{w}^{(i,j)}</span> is a satisfying witness and hence a valid opening of the commitment <span class="math">C^{(i,j)}</span>. By Equation 7, we have that for <span class="math">i \\in \\{1,2\\}</span>, <span class="math">C^{(i,1)} = C^{(i,2)}</span>. Therefore, by the binding property of the polynomial commitment scheme, with probability <span class="math">1 - \\mathrm{negl}(\\lambda)</span>, we have for <span class="math">i \\in \\{1,2\\}</span> that</p>
+
+    <div class="my-4 text-center"><span class="math-block">\\widetilde {w} ^ {(i, 1)} = \\widetilde {w} ^ {(i, 2)}. \\tag {8}</span></div>
+
+    <p class="text-gray-300">Given this equality of commitments and the associated witnesses for the output linearized committed CCS instances, we drop the second index when appropriate.</p>
+
+    <p class="text-gray-300">We now show that the retrieved polynomials and vectors <span class="math">((\\widetilde{w}_1,(E_1,W_1)),\\widetilde{w}_2)</span> are valid openings to the corresponding commitments in the instance.</p>
+
+    <p class="text-gray-300">For <span class="math">j \\in \\{1, 2\\}</span>, because <span class="math">(E, W)^{(1,j)}</span> is a satisfying witness to the folded committed relaxed R1CS instance, by construction,</p>
+
+    <div class="my-4 text-center"><span class="math-block">\\operatorname {C o m m i t} \\left(\\mathrm {p p} _ {\\mathrm {V C}}, W _ {1}\\right) + \\rho^ {\\star (1, j)} \\cdot \\operatorname {C o m m i t} \\left(\\mathrm {p p} _ {\\mathrm {V C}}, W _ {2}\\right)</span></div>
+
+    <div class="my-4 text-center"><span class="math-block">= \\operatorname {C o m m i t} \\left(\\mathrm {p p} _ {\\mathrm {V C}}, W _ {1} + \\rho^ {\\star (1, j)} \\cdot W _ {2}\\right)</span></div>
+
+    <p class="text-gray-300">By additive homomorphism.</p>
+
+    <div class="my-4 text-center"><span class="math-block">= \\operatorname {C o m m i t} \\left(\\mathrm {p p} _ {\\mathrm {V C}}, W ^ {(1, j)}\\right)</span></div>
+
+    <p class="text-gray-300">By Equation (6).</p>
+
+    <div class="my-4 text-center"><span class="math-block">= \\overline {{W}} ^ {(1, j)}</span></div>
+
+    <p class="text-gray-300">Witness <span class="math">\\widetilde{W}^{(1,j)}</span> is a satisfying opening.</p>
+
+    <div class="my-4 text-center"><span class="math-block">= \\overline {{W}} _ {1} + \\rho^ {\\star (1, j)} \\cdot \\overline {{W}} _ {2}</span></div>
+
+    <p class="text-gray-300">By the verifier's computation.</p>
+
+    <p class="text-gray-300">Interpolating, we have that</p>
+
+    <p class="text-gray-300"><span class="math">\\mathsf{Commit}(\\mathsf{pp}_{\\mathsf{VC}},W_{1})</span> <span class="math">=\\overline{W}_{1}</span> (9) <span class="math">\\mathsf{Commit}(\\mathsf{pp}_{\\mathsf{VC}},W_{2})</span> <span class="math">=\\overline{W}_{2}</span> (10)</p>
+
+    <p class="text-gray-300">Similarly,</p>
+
+    <p class="text-gray-300"><span class="math">\\mathsf{Commit}(\\mathsf{pp}_{\\mathsf{VC}},E_{1})+\\rho^{\\star^{(1,j)}}\\cdot\\mathsf{Commit}(\\mathsf{pp}_{\\mathsf{VC}},T)</span></p>
+
+    <p class="text-gray-300"><span class="math">=\\mathsf{Commit}(\\mathsf{pp}_{\\mathsf{VC}},E_{1}+\\rho^{\\star^{(1,j)}}\\cdot T)</span> By additive homomorphism. <span class="math">=\\mathsf{Commit}(\\mathsf{pp}_{\\mathsf{VC}},E^{(1,j)})</span> By Equation (5). <span class="math">=\\overline{E}^{(1,j)}</span> Witness <span class="math">\\widetilde{E}^{(1,j)}</span> is a satisfying opening. <span class="math">=\\overline{E}_{1}+\\rho^{\\star^{(1,j)}}\\cdot\\overline{T}</span> By the verifier’s computation.</p>
+
+    <p class="text-gray-300">Interpolating, we have that</p>
+
+    <p class="text-gray-300"><span class="math">\\mathsf{Commit}(\\mathsf{pp}_{\\mathsf{VC}},E_{1})=\\overline{E}_{1}</span> (11)</p>
+
+    <p class="text-gray-300">For <span class="math">j\\in\\{1,2\\}</span>, because <span class="math">(E,W)^{(1,j)}</span> is a satisfying witness to the committed relaxed R1CS instance <span class="math">(\\overline{E}^{(1,j)},u^{\\star^{(1,j)}},\\overline{W}^{(1,j)},x^{\\star^{(1,j)})}</span>, we have the following, where <span class="math">Z^{(1,j)}=(W^{(1,j)},u^{\\star^{(1,j)}},x^{\\star^{(1,j)}})</span>.</p>
+
+    <p class="text-gray-300"><span class="math">AZ^{(1,j)}\\circ BZ^{(1,j)}=u^{\\star^{(1,j)}}\\cdot CZ^{(1,j)}+E^{(1,j)}</span></p>
+
+    <p class="text-gray-300">By Equation (6), this implies that for <span class="math">j\\in\\{1,2\\}</span></p>
+
+    <p class="text-gray-300"><span class="math">A\\cdot(Z_{1}+\\rho^{\\star^{(1,j)}}\\cdot Z_{2})\\circ B\\cdot(Z_{1}+\\rho^{\\star^{(1,j)}}\\cdot Z_{2})</span> <span class="math">=(u_{1}+\\rho^{\\star^{(1,j)}})\\cdot C\\cdot(Z_{1}+\\rho^{\\star^{(1,j)}}\\cdot Z_{2})+(E_{1}+\\rho^{\\star^{(1,j)}}\\cdot T),</span></p>
+
+    <p class="text-gray-300">where <span class="math">Z_{1}=(W_{1},u_{1},x_{1})</span>, <span class="math">Z_{2}=(W_{2},1,x_{2})</span>, and <span class="math">x_{2}</span> is parsed from the transcripts and is identical across the two executions with the same <span class="math">\\rho</span>.</p>
+
+    <p class="text-gray-300">Because the prover commits to <span class="math">W_{1}</span>, <span class="math">W_{2}</span>, and <span class="math">T</span> before the verifier sends the challenge <span class="math">\\rho^{\\star^{(1,j)}}</span>, we have with probability <span class="math">1-\\mathsf{negl}(\\lambda)</span> that</p>
+
+    <p class="text-gray-300"><span class="math">AZ_{1}\\circ BZ_{1}</span> <span class="math">=u_{1}\\cdot CZ_{1}+E_{1}</span> (12) <span class="math">AZ_{2}\\circ BZ_{2}</span> <span class="math">=CZ_{2}.</span> (13)</p>
+
+    <p class="text-gray-300">This implies that <span class="math">(E_{1},W_{1})</span> and <span class="math">(\\vec{0},W_{2})</span> meet the requirements of a satisfying witness for committed relaxed R1CS instances with structure <span class="math">(A,B,C)</span>. In particular, we have established that <span class="math">(E_{1},W_{1})</span> is a satisfying witness to the committed relaxed R1CS instance in <span class="math">\\varphi_{1}</span>.</p>
+
+    <p class="text-gray-300">Furthermore, since the verifier checks that <span class="math">x_{2}=(\\rho^{(1)},C_{1},C_{2},C^{\\prime})</span> for some <span class="math">C^{\\prime}\\in E_{1}</span>, given that the we have have a witness satisfying Equation 13, this implies that for <span class="math">j\\in\\{1,2\\}</span></p>
+
+    <p class="text-gray-300"><span class="math">C^{(1,j)}=C_{1}+\\rho^{(1)}\\cdot C_{2}</span> (14)</p>
+
+    <p class="text-gray-300">With a similar reasoning via the accepting transcripts with <span class="math">\\rho^{(2)}</span> as the verifier's randomness, we can establish that for <span class="math">j \\in \\{1, 2\\}</span>:</p>
+
+    <div class="my-4 text-center"><span class="math-block">C^{(2,j)} = C_1 + \\rho^{(2)} \\cdot C_2 \\tag{15}</span></div>
+
+    <p class="text-gray-300">For <span class="math">i \\in \\{1,2\\}</span> and <span class="math">j \\in \\{1,2\\}</span>, because <span class="math">\\widetilde{w}^{(i,j)}</span> is a satisfying witness to the folded linearized CCS instance, by construction,</p>
+
+    <div class="my-4 text-center"><span class="math-block">\\operatorname{Commit}(\\mathfrak{pp}_{\\mathsf{PC}}, \\widetilde{w}_1) + \\rho^{(i)} \\cdot \\operatorname{Commit}(\\mathfrak{pp}_{\\mathsf{PC}}, \\widetilde{w}_2)</span></div>
+
+    <div class="my-4 text-center"><span class="math-block">= \\operatorname{Commit}(\\mathfrak{pp}_{\\mathsf{PC}}, \\widetilde{w}_1 + \\rho^{(i)} \\cdot \\widetilde{w}_2) \\quad \\text{By additive homomorphism.}</span></div>
+
+    <div class="my-4 text-center"><span class="math-block">= \\operatorname{Commit}(\\mathfrak{pp}_{\\mathsf{PC}}, \\widetilde{w}^{(i,j)}) \\quad \\text{By Equations (4) and (8).}</span></div>
+
+    <div class="my-4 text-center"><span class="math-block">= C^{(i,j)} \\quad \\text{Witness } \\widetilde{w}^{(i,j)} \\text{ is a satisfying opening.}</span></div>
+
+    <div class="my-4 text-center"><span class="math-block">= C_1 + \\rho^{(i)} \\cdot C_2 \\quad \\text{By Equations 14 and 15}</span></div>
+
+    <p class="text-gray-300">Interpolating, we have that</p>
+
+    <div class="my-4 text-center"><span class="math-block">\\operatorname{Commit}(\\mathfrak{pp}_{\\mathsf{PC}}, \\widetilde{w}_1) = C_1 \\tag{16}</span></div>
+
+    <div class="my-4 text-center"><span class="math-block">\\operatorname{Commit}(\\mathfrak{pp}_{\\mathsf{PC}}, \\widetilde{w}_2) = C_2. \\tag{17}</span></div>
+
+    <p class="text-gray-300">Next, we must argue that <span class="math">\\widetilde{w}_1</span> and <span class="math">\\widetilde{w}_2</span> satisfy the remainder of the instances <span class="math">\\varphi_1</span> and <span class="math">\\varphi_2</span> respectively under the structure <span class="math">\\mathfrak{s}</span>.</p>
+
+    <p class="text-gray-300">Indeed, consider <span class="math">(\\sigma_1,\\ldots,\\sigma_t)</span> and <span class="math">(\\theta_1,\\ldots,\\theta_t)</span> sent by the prover which by the extractor's construction are identical across all executions of the interaction. By the verifier's computation we have that for <span class="math">i \\in \\{1,2\\}</span> and all <span class="math">j \\in [t]</span></p>
+
+    <div class="my-4 text-center"><span class="math-block">\\sigma_j + \\rho^{(i)} \\cdot \\theta_j = v_j^{(i)} \\tag{18}</span></div>
+
+    <p class="text-gray-300">Now, because <span class="math">\\widetilde{w}^{(i)}</span> is a satisfying witness, for <span class="math">i \\in \\{1,2\\}</span> we have for all <span class="math">j \\in [t]</span> that</p>
+
+    <div class="my-4 text-center"><span class="math-block">v_j^{(i)} = \\sum_{y \\in \\{0,1\\}^{s&#x27;}} \\widetilde{M}_j(r_x&#x27;, y) \\cdot \\widetilde{z}^{(i)}(y),</span></div>
+
+    <p class="text-gray-300">where <span class="math">\\widetilde{z}^{(i)} = (\\widetilde{w^{(i)}}, \\widetilde{u^{(i)}}), \\mathsf{x}^{(i)})</span>.</p>
+
+    <p class="text-gray-300">However, by Equations (4) and (18), for <span class="math">i \\in \\{1,2\\}</span> and <span class="math">j \\in [t]</span>, this implies that</p>
+
+    <div class="my-4 text-center"><span class="math-block">\\sigma_j + \\rho^{(i)} \\cdot \\theta_j = \\sum_{y \\in \\{0,1\\}^{s&#x27;}} \\widetilde{M}_j(r_x&#x27;, y) \\cdot \\widetilde{z}_1(y) + \\rho^{(i)} \\cdot \\sum_{y \\in \\{0,1\\}^{s&#x27;}} \\widetilde{M}_j(r_x&#x27;, y) \\cdot \\widetilde{z}_2(y),</span></div>
+
+    <p class="text-gray-300">where <span class="math">\\widetilde{z_1} = (\\widetilde{w_1,u},\\mathbf{x}_1)</span> and <span class="math">\\widetilde{z_2} = (\\widetilde{w_2,1},\\mathbf{x}_2)</span>. Interpolating, we have that, for all <span class="math">j \\in [t]</span></p>
+
+    <div class="my-4 text-center"><span class="math-block">\\sigma_j = \\sum_{y \\in \\{0,1\\}^{s&#x27;}} \\widetilde{M}_j(r_x&#x27;, y) \\cdot \\widetilde{z}_1(y)</span></div>
+
+    <div class="my-4 text-center"><span class="math-block">\\theta_j = \\sum_{y \\in \\{0,1\\}^{s&#x27;}} \\widetilde{M}_j(r_x&#x27;, y) \\cdot \\widetilde{z}_2(y)</span></div>
+
+    <p class="text-gray-300">Thus, because that the verifier does not abort, we have that</p>
+
+    <div class="my-4 text-center"><span class="math-block">\\begin{aligned} c &amp;amp;= \\left(\\sum_{j \\in t} \\gamma^j \\cdot e_1 \\cdot \\sigma_j\\right) + \\left(\\gamma^{t+1} \\cdot e_2 \\cdot \\sum_{i \\in [q]} c_i \\cdot \\prod_{j \\in S_i} \\theta_j\\right) \\\\ &amp;amp;= \\left(\\sum_{j \\in t} \\gamma^j \\cdot \\widetilde{eq}(r_x, r_x&#x27;) \\cdot \\sigma_j\\right) + \\left(\\gamma^{t+1} \\cdot \\widetilde{eq}(\\beta, r_x&#x27;) \\cdot \\sum_{i \\in [q]} c_i \\cdot \\prod_{j \\in S_i} \\theta_j\\right) \\\\ &amp;amp;= \\left(\\sum_{j \\in t} \\gamma^j \\cdot \\widetilde{eq}(r_x, r_x&#x27;) \\cdot \\sum_{y \\in \\{0,1\\}^s} \\widetilde{M}_j(r_x&#x27;, y) \\cdot \\widetilde{z_1}(y)\\right) + \\\\ &amp;amp;\\quad \\left(\\gamma^{t+1} \\cdot \\widetilde{eq}(\\beta, r_x&#x27;) \\cdot \\sum_{i \\in [q]} c_i \\cdot \\prod_{j \\in S_i} \\sum_{y \\in \\{0,1\\}^s} \\widetilde{M}_j(r_x&#x27;, y) \\cdot \\widetilde{z_2}(y)\\right) \\\\ &amp;amp;= \\sum_{j \\in [t]} \\gamma_j \\cdot L_j(r_x&#x27;) + \\gamma^{t+1} \\cdot Q(r_x&#x27;) \\\\ &amp;amp;= g(r_x&#x27;) \\end{aligned}</span></div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">by the soundness of the sum-check protocol, this implies that with probability $1 - O(d \\cdot s) /</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mathbb{F}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">= 1 - \\mathrm{negl}(\\lambda)<span class="math"> over the choice of </span>r_x'$,</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="my-4 text-center"><span class="math-block">\\begin{aligned} \\sum_{j \\in [t]} \\gamma^j \\cdot v_j + \\gamma^{t+1} \\cdot 0 &amp;amp;= \\sum_{x \\in \\{0,1\\}^s} g(x) \\\\ &amp;amp;= \\sum_{x \\in \\{0,1\\}^s} \\left(\\sum_{j \\in [t]} \\gamma^j \\cdot L_j(x) + \\gamma^{t+1} \\cdot Q(x)\\right) \\\\ &amp;amp;= \\sum_{j \\in [t]} \\gamma^j \\cdot \\left(\\sum_{x \\in \\{0,1\\}^s} L_j(x)\\right) + \\gamma^{t+1} \\cdot \\sum_{x \\in \\{0,1\\}^s} Q(x) \\end{aligned}</span></div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">By the Schwartz-Zippel lemma [Sch80], this implies that with probability $1 - O(t) /</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mathbb{F}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">= 1 - \\mathrm{negl}(\\lambda)<span class="math"> over the choice of </span>\\gamma$, we have</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="my-4 text-center"><span class="math-block">v_j = \\sum_{x \\in \\{0,1\\}^s} L_j(x)</span></div>
+
+    <p class="text-gray-300">for all <span class="math">j \\in [t]</span> and</p>
+
+    <div class="my-4 text-center"><span class="math-block">0 = \\sum_{x \\in \\{0,1\\}^s} Q(x).</span></div>
+
+    <p class="text-gray-300">Now, for all <span class="math">j \\in [t]</span>, we have</p>
+
+    <div class="my-4 text-center"><span class="math-block">\\begin{aligned} v_j &amp;amp;= \\sum_{x \\in \\{0,1\\}^s} L_j(x) \\\\ &amp;amp;= \\sum_{x \\in \\{0,1\\}^s} \\widetilde{eq}(r_x, x) \\cdot \\left(\\sum_{y \\in \\{0,1\\}^{s&#x27;}} M_j(x, y) \\cdot \\widetilde{z}_1(y)\\right) \\\\ &amp;amp;= \\sum_{y \\in \\{0,1\\}^{s&#x27;}} M_j(r_x, y) \\cdot \\widetilde{z}_1(y) \\end{aligned}</span></div>
+
+    <p class="text-gray-300">This implies that <span class="math">\\widetilde{w_1}</span> is a satisfying witness to the linearized committed CCS instance in <span class="math">\\varphi_1</span>.</p>
+
+    <p class="text-gray-300">Finally, we have that</p>
+
+    <div class="my-4 text-center"><span class="math-block">\\begin{aligned} 0 &amp;amp;= \\sum_{x \\in \\{0,1\\}^s} Q(x) \\\\ &amp;amp;= \\sum_{x \\in \\{0,1\\}^s} \\widetilde{eq}(\\beta, x) \\cdot \\left(\\sum_{i=1}^q c_i \\cdot \\prod_{j \\in S_i} \\left(\\sum_{y \\in \\{0,1\\}^{s&#x27;}} \\widetilde{M}_j(x, y) \\cdot \\widetilde{z}_2(y)\\right)\\right) \\\\ &amp;amp;= \\sum_{i=1}^q c_i \\cdot \\prod_{j \\in S_i} \\left(\\sum_{y \\in \\{0,1\\}^{s&#x27;}} \\widetilde{M}_j(\\beta, y) \\cdot \\widetilde{z}_2(y)\\right) \\end{aligned}</span></div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">By the Schwartz-Zippel lemma, this implies that with probability $1 - s/</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mathbb{F}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">= 1 - \\mathrm{negl}(\\lambda)<span class="math"> over the choice of </span>\\beta<span class="math">, we have that for all </span>x \\in \\{0,1\\}^s$</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="my-4 text-center"><span class="math-block">0 = \\sum_{i=1}^q c_i \\cdot \\prod_{j \\in S_i} \\left(\\sum_{y \\in \\{0,1\\}^{s&#x27;}} \\widetilde{M}_j(x, y) \\cdot \\widetilde{z}_2(y)\\right)</span></div>
+
+    <p class="text-gray-300">This implies that <span class="math">\\widetilde{w_2}</span> is a satisfying witness to <span class="math">\\varphi_2</span>.</p>
+
+    <p class="text-gray-300">Thus, if the extractor does not abort, it succeeds in producing satisfying witness <span class="math">(\\widetilde{w_1}, \\widetilde{w_2})</span> with probability <span class="math">1 - \\mathrm{negl}(\\lambda)</span>.</p>
+
+    <p class="text-gray-300"><strong>Assumption 1 (Non-Interactive Multi-Folding Scheme).</strong> There exists a non-interactive multi-folding scheme for <span class="math">(\\mathcal{R}_{\\mathsf{LCCS}} \\times \\mathcal{R}_{\\mathsf{CRRICS}}, \\mathcal{R}_{\\mathsf{CCS}}, 1, 1)</span> in the plain model.</p>
+
+    <p class="text-gray-300"><strong>Justification.</strong> By applying the Fiat-Shamir transformation in [KS23, Construction 1] to the multi-folding scheme in Construction 1, we obtain a non-interactive multi-folding scheme for <span class="math">(\\mathcal{R}_{\\mathsf{LCCS}} \\times \\mathcal{R}_{\\mathsf{CRRICS}}, \\mathcal{R}_{\\mathsf{CCS}}, 1, 1)</span> in the random oracle model. By instantiating the random oracle with an appropriate cryptographic hash function, we heuristically obtain a non-interactive multi-folding scheme for <span class="math">(\\mathcal{R}_{\\mathsf{LCCS}} \\times \\mathcal{R}_{\\mathsf{CRRICS}}, \\mathcal{R}_{\\mathsf{CCS}}, 1, 1)</span> in the plain model.</p>
+
+    <p class="text-gray-300">Acknowledgments</p>
+
+    <p class="text-gray-300">Special thanks to Justin Drake for helpful conversations on the efficiency of a 2-cycle instantiation of Nova and HyperNova.</p>
+
+    <p class="text-gray-300">References</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>[BBF18] Dan Boneh, Benedikt Bünz, and Ben Fisch. A survey of two verifiable delay functions. Cryptology ePrint Archive, Report 2018/712, 2018.</li>
+
+      <li>[BC23] Benedikt Bünz and Binyi Chen. Protostar: Generic efficient accumulation/folding for special sound protocols. Cryptology ePrint Archive, Paper 2023/620, 2023.</li>
+
+      <li>[BCC^{+}16] Jonathan Bootle, Andrea Cerulli, Pyrros Chaidos, Jens Groth, and Christophe Petit. Efficient zero-knowledge arguments for arithmetic circuits in the discrete log setting. In EUROCRYPT, 2016.</li>
+
+      <li>[BCCT12] Nir Bitansky, Ran Canetti, Alessandro Chiesa, and Eran Tromer. From extractable collision resistance to succinct non-interactive arguments of knowledge, and back again. In ITCS, 2012.</li>
+
+      <li>[BCCT13] Nir Bitansky, Ran Canetti, Alessandro Chiesa, and Eran Tromer. Recursive composition and bootstrapping for SNARKs and proof-carrying data. In STOC, 2013.</li>
+
+      <li>[BCL^{+}21] Benedikt Bünz, Alessandro Chiesa, William Lin, Pratyush Mishra, and Nicholas Spooner. Proof-carrying data without succinct arguments. In CRYPTO, 2021.</li>
+
+      <li>[BCMS20] Benedikt Bünz, Alessandro Chiesa, Pratyush Mishra, and Nicholas Spooner. Proof-carrying data from accumulation schemes. In TCC, 2020.</li>
+
+      <li>[BCTV14a] Eli Ben-Sasson, Alessandro Chiesa, Eran Tromer, and Madars Virza. Scalable zero knowledge via cycles of elliptic curves. In CRYPTO, 2014.</li>
+
+      <li>[BCTV14b] Eli Ben-Sasson, Alessandro Chiesa, Eran Tromer, and Madars Virza. Succinct non-interactive zero knowledge for a von Neumann architecture. In USENIX Security, 2014.</li>
+
+      <li>[BDFG21] Dan Boneh, Justin Drake, Ben Fisch, and Ariel Gabizon. Halo Infinite: Recursive zk-SNARKs from any Additive Polynomial Commitment Scheme. In CRYPTO, 2021.</li>
+
+      <li>[BFS20] Benedikt Bünz, Ben Fisch, and Alan Szepieniec. Transparent SNARKs from DARK compilers. In EUROCRYPT, 2020.</li>
+
+      <li>[BGH19] Sean Bowe, Jack Grigg, and Daira Hopwood. Halo: Recursive proof composition without a trusted setup. Cryptology ePrint Archive, Report 2019/1021, 2019.</li>
+
+      <li>[GGPR13] Rosario Gennaro, Craig Gentry, Bryan Parno, and Mariana Raykova. Quadratic span programs and succinct NIZKs without PCPs. In EUROCRYPT, 2013.</li>
+
+      <li>[GW11] Craig Gentry and Daniel Wichs. Separating succinct non-interactive arguments from all falsifiable assumptions. In STOC, pages 99–108, 2011.</li>
+
+      <li>[Kil92] Joe Kilian. A note on efficient zero-knowledge proofs and arguments (extended abstract). In STOC, 1992.</li>
+
+      <li>[KS22] Abhiram Kothapalli and Srinath Setty. SuperNova: Proving universal machine executions without universal circuits. Cryptology ePrint Archive, 2022.</li>
+
+      <li>[KS23] Abhiram Kothapalli and Srinath Setty. HyperNova: Recursive arguments for customizable constraint systems. Cryptology ePrint Archive, 2023.</li>
+
+      <li>[KST22] Abhiram Kothapalli, Srinath Setty, and Ioanna Tzialla. Nova: Recursive Zero-Knowledge Arguments from Folding Schemes. In CRYPTO, 2022.</li>
+
+      <li>[Lab20] O(1) Labs. Mina cryptocurrency, 2020. https://minaprotocol.com.</li>
+
+      <li>[LFKN90] Carsten Lund, Lance Fortnow, Howard Karloff, and Noam Nisan. Algebraic methods for interactive proof systems. In FOCS, October 1990.</li>
+
+    </ul>
+
+    <p class="text-gray-300">LNS20. Jonathan Lee, Kirill Nikitin, and Srinath Setty. Replicated state machines without replicated execution. In S&P, 2020.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Mic94. Silvio Micali. CS proofs. In FOCS, 1994.</li>
+
+      <li>Moh23. Nicolas Mohnblatt. Sangria: a folding scheme for PLONK. https://geometry.xyz/notebook/sangria-a-folding-scheme-for-plonk, 2023.</li>
+
+      <li>NBS23. Wilson Nguyen, Dan Boneh, and Srinath Setty. Revisiting the Nova proof system on a cycle of curves. Cryptology ePrint Archive, Paper 2023/969, 2023.</li>
+
+      <li>nov. Nova: Recursive SNARKs without trusted setup. https://github.com/Microsoft/Nova.</li>
+
+      <li>OWB20. Alex Ozdemir, Riad S. Wahby, and Dan Boneh. Scaling verifiable computation using efficient set accumulators. In USENIX Security, 2020.</li>
+
+      <li>PGHR13. Bryan Parno, Craig Gentry, Jon Howell, and Mariana Raykova. Pinocchio: Nearly practical verifiable computation. In S&P, May 2013.</li>
+
+      <li>SAGL18. Srinath Setty, Sebastian Angel, Trinabh Gupta, and Jonathan Lee. Proving the correct execution of concurrent services in zero-knowledge. In OSDI, October 2018.</li>
+
+      <li>Sch80. Jacob T Schwartz. Fast probabilistic algorithms for verification of polynomial identities. Journal of the ACM, 27(4), 1980.</li>
+
+      <li>Set20. Srinath Setty. Spartan: Efficient and general-purpose zkSNARKs without trusted setup. In CRYPTO, 2020.</li>
+
+      <li>STW23. Srinath Setty, Justin Thaler, and Riad Wahby. Customizable constraint systems for succinct arguments. Cryptology ePrint Archive, 2023.</li>
+
+      <li>Tha13. Justin Thaler. Time-optimal interactive proofs for circuit evaluation. In CRYPTO, 2013.</li>
+
+      <li>Val08. Paul Valiant. Incrementally verifiable computation or proofs of knowledge imply time/space efficiency. In TCC, pages 552–576, 2008.</li>
+
+      <li>VSBW13. Victor Vu, Srinath Setty, Andrew J. Blumberg, and Michael Walfish. A hybrid architecture for verifiable computation. In S&P, 2013.</li>
+
+      <li>Wes19. Benjamin Wesolowski. Efficient verifiable delay functions. In EUROCRYPT, pages 379–407, 2019.</li>
+
+      <li>WGH^{+}18. Barry WhiteHat, Alex Gluchowski, HarryR, Yondon Fu, and Philippe Castonguay. Roll_up / roll_back snark side chain ~17000 tps. https://ethresear.ch/t/roll-up-roll-back-snark-side-chain-17000-tps/3675, October 2018.</li>
+
+      <li>Wil23. Zachary J. Williamson. Goblin Plonk: lazy recursive proof composition. https://hackmd.io/@aztec-network/B19AA8812, 2023.</li>
+
+    </ul>
+
+    <p class="text-gray-300">We first recall the syntax for commitment schemes and then define the required binding and hiding properties. Next, we define the required additively homomorphic and succinctness properties.</p>
+
+    <p class="text-gray-300">Definition 9 (Commitment Scheme). A commitment scheme for  <span class="math">\\mathbb{F}^m</span>  is a tuple of three protocols with the following syntax that satisfy the two properties listed below:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li><span class="math">\\mathsf{pp} \\gets \\mathsf{Gen}(1^{\\lambda}, m)</span> : produces public parameters  <span class="math">\\mathsf{pp}</span> .</li>
+
+      <li><span class="math">C \\gets \\text{Commit}(\\mathsf{pp}, x, r)</span> : takes as input  <span class="math">x \\in \\mathbb{F}^m</span>  and  <span class="math">r \\in \\mathbb{F}</span> ; produces a public commitment  <span class="math">C</span> .</li>
+
+      <li><span class="math">b \\gets \\text{Open}(\\mathsf{pp}, C, x, r)</span> : verifies the opening of commitment  <span class="math">C</span>  to  <span class="math">x \\in \\mathbb{F}^m</span>  and  <span class="math">r \\in \\mathbb{F}</span> ; outputs  <span class="math">b \\in \\{0, 1\\}</span> .</li>
+
+    </ul>
+
+    <p class="text-gray-300">(1) Binding. For any PPT adversary  <span class="math">\\mathcal{A}</span> , the following probability is  <span class="math">\\mathrm{negl}(\\lambda)</span> :</p>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\operatorname * {P r} \\left[ \\begin{array}{l} b _ {0} = b _ {1} = 1, \\left</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\begin{array}{l} \\mathsf {p p} \\leftarrow G e n (1 ^ {\\lambda}, m), \\\\ (C, x _ {0} \\in \\mathbb {F} ^ {m}, x _ {1} \\in \\mathbb {F} ^ {m}, r _ {0} \\in \\mathbb {F}, r _ {1} \\in \\mathbb {F}) \\leftarrow \\mathcal {A} (\\mathsf {p p}), \\\\ x _ {0} \\neq x _ {1} \\end{array} \\right. \\\\ b _ {0} \\leftarrow O p e n (\\mathsf {p p}, C, x _ {0}, r _ {0}), \\\\ b _ {1} \\leftarrow O p e n (\\mathsf {p p}, C, x _ {1}, r _ {1}) \\end{array} \\right]</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <p class="text-gray-300">(2) Hiding. For all PPT adversaries  <span class="math">\\mathcal{A} = (\\mathcal{A}_0, \\mathcal{A}_1)</span> , the following probability is  <span class="math">\\mathrm{negl}(\\lambda)</span> :</p>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\left</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\frac {1}{2} - \\Pr \\left[ b = \\bar {b} \\left</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\begin{array}{l} (x _ {0}, x _ {1}, \\mathsf {s t}) \\leftarrow \\mathcal {A} _ {0} (\\mathsf {p p}), \\\\ b \\stackrel {\\S} {\\leftarrow} \\{0, 1 \\}, r \\stackrel {\\S} {\\leftarrow} \\mathbb {F}, \\\\ C \\leftarrow \\text {C o m m i t} (\\mathsf {p p}, x _ {b}, r), \\\\ \\bar {b} \\leftarrow \\mathcal {A} _ {1} (\\mathsf {s t}, C) \\end{array} \\right. \\right] \\right. \\right</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <p class="text-gray-300">If hiding holds for all adversaries, then the commitment is statistically hiding.</p>
+
+    <p class="text-gray-300">Definition 10 (Additively Homomorphic). A commitment scheme for vectors over  <span class="math">\\mathbb{F}^m</span> , (Gen, Commit, Open), is additively homomorphic if for all public parameters  <span class="math">\\mathfrak{pp}</span>  produced from  <span class="math">\\text{Gen}(1^\\lambda, m)</span> , and for any  <span class="math">x_1, x_2 \\in \\mathbb{F}^m</span>  and for any  <span class="math">r_1, r_2 \\in \\mathbb{F}</span> ,  <span class="math">\\text{Commit}(\\mathfrak{pp}, x_1, r_1) + \\text{Commit}(\\mathfrak{pp}, x_2, r_2) = \\text{Commit}(\\mathfrak{pp}, x_1 + x_2, r_1 + r_2)</span> .</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Definition 11 (Succinctness). A commitment scheme for vectors over  <span class="math">\\mathbb{F}^m</span> , (Gen, Commit, Open), provides succinct commitments if for all public parameters  <span class="math">\\mathfrak{pp}</span>  produced from  <span class="math">\\text{Gen}(1^\\lambda, m)</span> , and any  <span class="math">x \\in \\mathbb{F}^m</span>  and  <span class="math">r \\in \\mathbb{F}</span> ,  $</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\text{Commit}(\\mathfrak{pp}, x, r)</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">= O_\\lambda(\\text{polylog}(</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">x</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">))$ .</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">A.2 Polynomials and low-degree extensions</p>
+
+    <p class="text-gray-300">We adapt this subsection from prior work <em>[x20]</em>. We start by recalling several facts about polynomials.</p>
+
+    <h6 id="sec-23" class="text-base font-medium mt-4">Definition 12 (Multilinear polynomial)</h6>
+
+    <p class="text-gray-300">A multivariate polynomial is called a multilinear polynomial if the degree of the polynomial in each variable is at most one.</p>
+
+    <h6 id="sec-24" class="text-base font-medium mt-4">Definition 13 (Low-degree polynomial)</h6>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">A multivariate polynomial <span class="math">g</span> over a finite field <span class="math">\\mathbb{F}</span> is called low-degree polynomial if the degree of <span class="math">g</span> in each variable is exponentially smaller than $</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mathbb{F}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">$.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <h3 id="sec-25" class="text-xl font-semibold mt-8">Low-degree extensions (LDEs)</h3>
+
+    <p class="text-gray-300">Suppose <span class="math">g:\\{0,1\\}^{\\ell}\\to\\mathbb{F}</span> is a function that maps <span class="math">\\ell</span>-bit elements into an element of <span class="math">\\mathbb{F}</span>. A <em>polynomial extension</em> of <span class="math">g</span> is a low-degree <span class="math">ell</span>-variate polynomial <span class="math">\\widetilde{g}</span> such that <span class="math">\\widetilde{g}(x)=g(x)</span> for all <span class="math">x\\in\\{0,1\\}^{\\ell}</span>.</p>
+
+    <p class="text-gray-300">A <em>multilinear</em> polynomial extension (or simply, a multilinear extension, or MLE) is a low-degree polynomial extension where the extension is a multilinear polynomial (i.e., the degree of each variable in <span class="math">\\widetilde{g}</span> is at most one). Given a function <span class="math">Z:\\{0,1\\}^{\\ell}\\to\\mathbb{F}</span>, the multilinear extension of <span class="math">Z</span> is the unique multilinear polynomial <span class="math">\\widetilde{Z}:\\mathbb{F}^{\\ell}\\to\\mathbb{F}</span>. It can be computed as follows.</p>
+
+    <p class="text-gray-300"><span class="math">\\widetilde{Z}(x_{1},\\ldots,x_{\\ell})</span> <span class="math">=\\sum_{e\\in\\{0,1\\}^{\\ell}}Z(e)\\cdot\\prod_{i=1}^{\\ell}(x_{i}\\cdot e_{i}+(1-x_{i})\\cdot(1-e_{i}))</span> <span class="math">=\\sum_{e\\in\\{0,1\\}^{\\ell}}Z(e)\\cdot\\widetilde{eq}(x,e)</span> <span class="math">=\\langle(Z(0),\\ldots,Z(2^{\\ell}-1)),(\\widetilde{eq}(x,0),\\ldots,\\widetilde{eq}(x,2^{\\ell}-1)\\rangle</span></p>
+
+    <p class="text-gray-300">Note that <span class="math">\\widetilde{eq}(x,e)=\\prod_{i=1}^{\\ell}(e_{i}\\cdot x_{i}+(1-e_{i})\\cdot(1-x_{i}))</span>, which is the MLE of the following function:</p>
+
+    <p class="text-gray-300">\\[ eq(x,e)=\\begin{cases}1&\\text{if }x=e\\\\ 0&\\text{otherwise}\\end{cases} \\]</p>
+
+    <p class="text-gray-300">For any <span class="math">r\\in\\mathbb{F}^{\\ell}</span>, <span class="math">\\widetilde{Z}(r)</span> can be computed in <span class="math">O(2^{\\ell})</span> operations in <span class="math">\\mathbb{F}</span> <em>[x21, x16]</em>.</p>
+
+    <h3 id="sec-26" class="text-xl font-semibold mt-8">Dense representation for multilinear polynomials</h3>
+
+    <p class="text-gray-300">Since the MLE of a function is unique, it offers the following method to represent any multilinear polynomial. Given a multilinear polynomial <span class="math">g:\\mathbb{F}^{\\ell}\\to\\mathbb{F}</span>, it can be represented uniquely by the list of tuples <span class="math">L</span> such that for all <span class="math">i\\in\\{0,1\\}^{\\ell}</span>, <span class="math">(\\textsf{to-field}(i),g(i))\\in L</span> if and only if <span class="math">g(i)\\neq 0</span>, where to-field is the canonical injection from <span class="math">\\{0,1\\}^{\\ell}</span> to <span class="math">\\mathbb{F}</span>. We denote such a representation of <span class="math">g</span> as <span class="math">\\textsf{DenseRepr}(g)</span>.</p>
+
+    <p class="text-gray-300">###</p>
+
+    <h6 id="sec-27" class="text-base font-medium mt-4">Definition 14.</h6>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">A multilinear polynomial <span class="math">g</span> in <span class="math">\\ell</span> variables is a sparse multilinear polynomial if $</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\textsf{DenseRepr}(g)</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"><span class="math"> is sub-linear in </span>O(2^{\\ell})$. Otherwise, it is a dense multilinear polynomial.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">As an example, suppose <span class="math">g:\\mathbb{F}^{2s}\\to\\mathbb{F}</span>. Suppose $</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\textsf{DenseRepr}(g)</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">=O(2^{s})<span class="math">, then </span>g(\\cdot)<span class="math"> is a sparse multilinear polynomial because </span>O(2^{s})<span class="math"> is sublinear in </span>O(2^{2s})$.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <h6 id="sec-28" class="text-base font-medium mt-4">Lemma 3 (Sums over evaluations).</h6>
+
+    <p class="text-gray-300">Consider size <span class="math">\\ell\\in\\mathbb{N}</span>. For multilinear polynomial <span class="math">P\\in\\mathbb{F}[X_{1},\\ldots,X_{\\ell}]</span> we have that</p>
+
+    <p class="text-gray-300"><span class="math">P(X)=\\sum_{x\\in\\{0,1\\}^{\\ell}}\\widetilde{eq}(X,x)\\cdot P(x).</span></p>
+
+    <h6 id="sec-29" class="text-base font-medium mt-4">Proof.</h6>
+
+    <p class="text-gray-300">Let <span class="math">Q(X)=\\sum_{x\\in\\{0,1\\}^{\\ell}}\\widetilde{eq}(X,x)\\cdot P(x)</span> By the definition of <span class="math">\\widetilde{eq}</span>, we have that</p>
+
+    <p class="text-gray-300"><span class="math">P(x)=Q(x)</span></p>
+
+    <p class="text-gray-300">for all <span class="math">x\\in\\{0,1\\}^{\\ell}</span>. However, because <span class="math">P\\in\\mathbb{F}[X_{1},\\ldots,X_{\\ell}]</span> is multilinear it is completely determined by <span class="math">2^{\\ell}</span> evaluation points. The same is holds for <span class="math">Q</span>. Because <span class="math">P</span> and <span class="math">Q</span> agree on <span class="math">2^{\\ell}</span> points, they must be the same polynomial. ∎</p>
+
+    <h3 id="sec-30" class="text-xl font-semibold mt-8">A.3 Schwartz-Zippel lemma</h3>
+
+    <h6 id="sec-31" class="text-base font-medium mt-4">Lemma 4.</h6>
+
+    <p class="text-gray-300">let <span class="math">g:\\mathbb{F}^{\\ell}\\to\\mathbb{F}</span> be an <span class="math">\\ell</span>-variate polynomial of total degree at most <span class="math">d</span>. Then, on any finite set <span class="math">S\\subseteq\\mathbb{F}</span>,</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">$\\Pr_{x\\leftarrow S^{\\ell}}[g(x)=0]\\leq d/</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">S</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">$</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">.</p>
+
+    <h3 id="sec-32" class="text-xl font-semibold mt-8">A.4 The sum-check protocol</h3>
+
+    <p class="text-gray-300">Suppose there is an <span class="math">\\ell</span>-variate low-degree polynomial, <span class="math">g</span>, where the degree of each variable in <span class="math">g</span> is at most <span class="math">d</span>. Suppose that a verifier <span class="math">\\mathcal{V}</span> is interested in checking a claim of the following form by an untrusted prover <span class="math">\\mathcal{P}</span>:</p>
+
+    <p class="text-gray-300"><span class="math">T=\\sum_{x_{1}\\in\\{0,1\\}}\\sum_{x_{2}\\in\\{0,1\\}}\\ldots\\sum_{x_{\\ell}\\in\\{0,1\\}}g(x_{1},x_{2},\\ldots,x_{\\ell})</span></p>
+
+    <p class="text-gray-300">Of course, given <span class="math">g</span>, <span class="math">\\mathcal{V}</span> can deterministically evaluate the above sum and verify whether the sum is <span class="math">T</span>. But, this computation takes time exponential in <span class="math">\\ell</span>. Lund et al. <em>[x14]</em> describe the sum-check protocol that requires far less computation on <span class="math">\\mathcal{V}</span>’s behalf, but provides a probabilistic guarantee. In the protocol, <span class="math">\\mathcal{V}</span> takes as input randomness <span class="math">r\\in\\mathbb{F}^{\\ell}</span> and interacts with <span class="math">\\mathcal{P}</span> over a sequence of <span class="math">\\ell</span> rounds. At the end of this interaction, <span class="math">\\mathcal{V}</span> outputs a claim about the evaluation <span class="math">g(r)</span>. Let <span class="math">\\langle\\mathcal{P},\\mathcal{V}(r)\\rangle</span> denote the interaction between the prover and verifier with verifier randomness <span class="math">r</span>. We treat <span class="math">\\langle\\mathcal{P},\\mathcal{V}(r)\\rangle</span> as a function that takes prover and verifier input <span class="math">(g,\\ell,d,T)</span> and outputs the claimed evaluation to be checked.</p>
+
+    <p class="text-gray-300">For any <span class="math">\\ell</span>-variate polynomial <span class="math">g</span> with degree at most <span class="math">d</span> in each variable, the sum-check protocol satisfies the following properties.</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Completeness: If <span class="math">T = \\sum_{x \\in \\{0,1\\}^\\ell} g(x)</span>, then for all <span class="math">r \\in \\mathbb{F}^\\ell</span>,</li>
+
+    </ol>
+
+    <div class="my-4 text-center"><span class="math-block">\\Pr_{r}[\\langle \\mathcal{P}, \\mathcal{V}(r) \\rangle (g, \\ell, d, T) = g(r)] = 1.</span></div>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Soundness: If <span class="math">T \\neq \\sum_{x \\in \\{0,1\\}^\\ell} g(x)</span>, then for any <span class="math">\\mathcal{P}^*</span> and for all <span class="math">r \\in \\mathbb{F}^\\ell</span>,</li>
+
+    </ol>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\Pr_{r}[\\langle \\mathcal{P}^*, \\mathcal{V}(r) \\rangle (g, \\ell, d, T) = c \\wedge g(r) = c] \\leq \\ell \\cdot d /</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mathbb{F}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Succinctness: The communication cost is <span class="math">O(\\ell \\cdot d)</span> elements of <span class="math">\\mathbb{F}</span>.</li>
+
+    </ol>
+
+    <h2 id="sec-33" class="text-2xl font-bold">A.5 Arguments of knowledge and SNARKs</h2>
+
+    <p class="text-gray-300">We adapt the definition provided in [KST22].</p>
+
+    <p class="text-gray-300"><strong>Definition 15.</strong> Consider a relation <span class="math">\\mathcal{R}</span> over public parameters, structure, instance, and witness tuples. A non-interactive argument of knowledge for <span class="math">\\mathcal{R}</span> consists of PPT algorithms <span class="math">(\\mathcal{G}, \\mathcal{P}, \\mathcal{V})</span> and deterministic <span class="math">\\mathcal{K}</span>, denoting the generator, the prover, the verifier and the encoder respectively with the following interface.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li><span class="math">\\mathcal{G}(1^{\\lambda}) \\to \\mathfrak{pp}</span>: On input security parameter <span class="math">\\lambda</span>, samples public parameters <span class="math">\\mathfrak{pp}</span>.</li>
+
+      <li><span class="math">\\mathcal{K}(\\mathfrak{pp}, \\mathfrak{s}) \\to (\\mathfrak{pk}, \\mathfrak{vk})</span>: On input structure <span class="math">\\mathfrak{s}</span>, representing common structure among instances, outputs the prover key <span class="math">\\mathfrak{pk}</span> and verifier key <span class="math">\\mathfrak{vk}</span>.</li>
+
+      <li><span class="math">\\mathcal{P}(\\mathfrak{pk}, u, w) \\to \\pi</span>: On input instance <span class="math">u</span> and witness <span class="math">w</span>, outputs a proof <span class="math">\\pi</span> proving that <span class="math">(\\mathfrak{pp}, \\mathfrak{s}, u, w) \\in \\mathcal{R}</span>.</li>
+
+      <li><span class="math">\\mathcal{V}(\\mathsf{vk}, u, \\pi) \\to \\{0, 1\\}</span>: On input the verifier key <span class="math">\\mathsf{vk}</span>, instance <span class="math">u</span>, and a proof <span class="math">\\pi</span>, outputs 1 if the instance is accepting and 0 otherwise.</li>
+
+    </ul>
+
+    <p class="text-gray-300">A non-interactive argument of knowledge satisfies the following properties.</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Completeness: If for any PPT adversary <span class="math">\\mathcal{A}</span></li>
+
+    </ol>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\Pr \\left[ \\mathcal{V}(\\mathsf{vk}, u, \\pi) = 1 \\left</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\begin{array}{l} \\mathsf{pp} \\leftarrow \\mathcal{G}(1^{\\lambda}), \\\\ (\\mathsf{s}, (u, w)) \\leftarrow \\mathcal{A}(\\mathsf{pp}), \\\\ (\\mathsf{pp}, \\mathsf{s}, u, w) \\in \\mathcal{R}, \\\\ (\\mathsf{pk}, \\mathsf{vk}) \\leftarrow \\mathcal{K}(\\mathsf{pp}, \\mathsf{s}), \\\\ \\pi \\leftarrow \\mathcal{P}(\\mathsf{pk}, u, w) \\end{array} \\right. \\right] = 1.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Knowledge Soundness: if for all PPT adversaries <span class="math">\\mathcal{A}</span> there exists a PPT extractor <span class="math">\\mathcal{E}</span> such that for all randomness <span class="math">\\mathbf{r}</span></li>
+
+    </ol>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\Pr \\left[ \\mathcal{V}(\\mathsf{vk}, u, \\pi) = 1, \\left</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\begin{array}{l} \\mathsf{pp} \\leftarrow \\mathcal{G}(1^{\\lambda}), \\\\ (\\mathsf{s}, u, \\pi) \\leftarrow \\mathcal{A}(\\mathsf{pp}; \\mathsf{r}), \\\\ (\\mathsf{pk}, \\mathsf{vk}) \\leftarrow \\mathcal{K}(\\mathsf{pp}, \\mathsf{s}), \\\\ w \\leftarrow \\mathcal{E}(\\mathsf{pp}, \\mathsf{r}) \\end{array} \\right. \\right] = \\mathsf{negl}(\\lambda).</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <p class="text-gray-300">A non-interactive argument of knowledge is succinct if the size of the proof  <span class="math">\\pi</span>  and the time to verify it are at most polylogarithmic in the size of the statement proven.</p>
+
+    <p class="text-gray-300">We adapt the following definition from [BFS20].</p>
+
+    <p class="text-gray-300">Definition 16. An extractable polynomial commitment scheme for multilinear polynomials over finite field  <span class="math">\\mathbb{F}</span>  is a tuple of four protocols  <span class="math">PC = (\\text{Gen}, \\text{Commit}, \\text{Open}, \\text{Eval})</span> :</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li><span class="math">\\mathsf{pp} \\gets \\mathsf{Gen}(1^{\\lambda}, \\ell)</span> : takes as input  <span class="math">\\ell</span>  (the number of variables in a multivariate polynomial); produces public parameters  <span class="math">\\mathsf{pp}</span> .</li>
+
+      <li><span class="math">\\mathcal{C} \\gets \\text{Commit}(\\mathsf{pp}, g)</span> : takes as input a  <span class="math">\\ell</span> -variate multilinear polynomial  <span class="math">g \\in \\mathbb{F}[X_1, \\ldots, X_\\ell]</span> ; produces a commitment  <span class="math">\\mathcal{C}</span> .</li>
+
+      <li><span class="math">b \\gets \\text{Open}(\\mathsf{pp}, \\mathcal{C}, g)</span> : verifies the opening of commitment  <span class="math">\\mathcal{C}</span>  to the  <span class="math">\\ell</span> -variate multilinear polynomial  <span class="math">g \\in \\mathbb{F}[X_1, \\ldots, X_\\ell]</span> ; outputs  <span class="math">b \\in \\{0, 1\\}</span> .</li>
+
+      <li><span class="math">b \\gets \\text{Eval}(\\mathsf{pp}, \\mathcal{C}, r, v, \\ell, g)</span>  is a protocol between a PPT prover  <span class="math">\\mathcal{P}</span>  and verifier  <span class="math">\\mathcal{V}</span> . Both  <span class="math">\\mathcal{V}</span>  and  <span class="math">\\mathcal{P}</span>  hold a commitment  <span class="math">\\mathcal{C}</span> , the number of variables  <span class="math">\\ell</span> , a scalar  <span class="math">v \\in \\mathbb{F}</span> , and  <span class="math">r \\in \\mathbb{F}^\\ell</span> .  <span class="math">\\mathcal{P}</span>  additionally knows an  <span class="math">\\ell</span> -variate multilinear polynomial  <span class="math">g \\in \\mathbb{F}[\\ell]</span> .  <span class="math">\\mathcal{P}</span>  attempts to convince  <span class="math">\\mathcal{V}</span>  that  <span class="math">g(r) = v</span> . At the end of the protocol,  <span class="math">\\mathcal{V}</span>  outputs  <span class="math">b \\in \\{0, 1\\}</span> .</li>
+
+    </ul>
+
+    <p class="text-gray-300">An extractable polynomial commitment scheme (Gen, Commit, Open, Eval) for multilinear polynomials over a finite field  <span class="math">\\mathbb{F}</span>  must satisfy the following conditions.</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Completeness: For any  <span class="math">\\ell</span> -variate multilinear polynomial  <span class="math">g \\in \\mathbb{F}[X_1, \\ldots, X_\\ell]</span> ,</li>
+
+    </ol>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\Pr \\left[ \\text{Eval}(\\mathsf{pp},\\mathcal{C},r,g(r),\\ell ,g) = 1\\Bigg</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\begin{array}{l}\\mathsf{pp}\\gets \\mathsf{Gen}(1^{\\lambda},\\ell),\\\\ \\mathcal{C}\\gets \\mathsf{Commit}(\\mathsf{pp},g) \\end{array} \\right]\\geq 1 - \\mathsf{negl}(\\lambda).</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Binding: For any PPT adversary  <span class="math">\\mathcal{A}</span> , size parameter  <span class="math">\\ell \\geq 1</span></li>
+
+    </ol>
+
+    <div class="my-4 text-center"><span class="math-block">\\Pr \\left[ \\begin{array}{l l} b _ {0} = b _ {1} \\neq 0, &amp;amp; \\mathsf {p p} \\leftarrow \\mathsf {G e n} (1 ^ {\\lambda}, \\ell), \\\\ g _ {0} \\neq g _ {1} &amp;amp; (g _ {0}, g _ {1}) \\in \\mathbb {F} ^ {1} [ X _ {1}, \\ldots , X _ {\\ell} ], \\mathcal {C} \\leftarrow \\mathcal {A} (\\mathsf {p p}), \\\\ &amp;amp; b _ {0} \\leftarrow \\mathsf {O p e n} (\\mathsf {p p}, \\mathcal {C}, g _ {0}), \\\\ &amp;amp; b _ {1} \\leftarrow \\mathsf {O p e n} (\\mathsf {p p}, \\mathcal {C}, g _ {1}) \\end{array} \\right] \\leq \\mathsf {n e g l} (\\lambda).</span></div>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Knowledge soundness: Eval is a succinct argument of knowledge for the following relation given  <span class="math">\\mathsf{pp} \\gets \\mathsf{Gen}(1^{\\lambda}, \\ell)</span> .</li>
+
+    </ol>
+
+    <div class="my-4 text-center"><span class="math-block">\\mathcal {R} _ {E v a l} (\\mathsf {p p}) = \\left\\{ \\begin{array}{l l} ((\\mathcal {C}, r, v), g) &amp;amp; g \\in \\mathbb {F} ^ {1} [ X _ {1}, \\ldots , X _ {\\ell} ], \\\\ &amp;amp; g (r) = v, \\\\ &amp;amp; O p e n (\\mathsf {p p}, \\mathcal {C}, g) = 1 \\end{array} \\right\\}</span></div>
+
+    <p class="text-gray-300">Definition 17. A polynomial commitment scheme for multilinear polynomials <span class="math">PC = (\\text{Gen}, \\text{Commit}, \\text{Open}, \\text{Eval})</span> is additively homomorphic if for all <span class="math">\\ell</span> and <span class="math">\\mathsf{pp} \\gets \\text{Gen}(1^{\\lambda}, \\ell)</span>, and for any <span class="math">g_1, g_2 \\in \\mathbb{F}^1[X_1, \\ldots, X_\\ell]</span>,</p>
+
+    <div class="my-4 text-center"><span class="math-block">\\text{Commit}(\\mathsf{pp}, g_1) + \\text{Commit}(\\mathsf{pp}, g_2) = \\text{Commit}(\\mathsf{pp}, g_1 + g_2).</span></div>
+
+    <h2 id="sec-35" class="text-2xl font-bold">A.7 Rank-1 constraint satisfiability (R1CS)</h2>
+
+    <p class="text-gray-300">R1CS is an NP-complete problem implicit in the work of GGPR [GGPR13]. Below, we recall its definition.</p>
+
+    <p class="text-gray-300">Definition 18 (R1CS). Consider a finite field <span class="math">\\mathbb{F}</span>. Let the public parameters consist of size bounds <span class="math">m, n, \\ell \\in \\mathbb{N}</span> where <span class="math">m &amp;gt; \\ell</span>. The R1CS structure consists of sparse matrices <span class="math">A, B, C \\in \\mathbb{F}^{m \\times m}</span> with at most <span class="math">n = \\Omega(m)</span> non-zero entries in each matrix. An instance <span class="math">x \\in \\mathbb{F}^{\\ell}</span> consists of public inputs and outputs and is satisfied by a witness <span class="math">W \\in \\mathbb{F}^{m - \\ell - 1}</span> if <span class="math">(A \\cdot Z) \\circ (B \\cdot Z) = C \\cdot Z</span>, where <span class="math">Z = (W, x, 1)</span>.</p>`;
+---
+
+<BaseLayout title="CycleFold: Folding-scheme-based recursive arguments over a c... (2023/1192)">
+  <article class="max-w-4xl mx-auto article-prose">
+    <nav class="mb-8">
+      <a href="/papers" class="text-blue-400 hover:text-blue-300">
+        &larr; Back to Papers
+      </a>
+    </nav>
+
+    <header class="mb-12">
+      <h1 class="text-3xl font-bold mb-4"
+        set:html={TITLE_HTML} />
+      <p class="text-gray-400 mb-2"
+        set:html={AUTHORS_HTML} />
+      <p class="text-gray-500 text-sm mb-4">
+        2023 &middot; eprint 2023/1192
+      </p>
+      <div class="flex gap-4 text-sm">
+        <a
+          href={EPRINT_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          class="text-blue-400 hover:text-blue-300"
+        >
+          Paper (eprint) &rarr;
+        </a>
+      </div>
+      <p class="mt-4 text-xs text-gray-500">
+        All content below belongs to the original authors. This page
+        reproduces the paper for educational purposes. Always
+        <a
+          href={EPRINT_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          class="text-blue-400 hover:text-blue-300"
+        >cite the original</a>.
+      </p>
+      <p class="mt-1 text-xs text-gray-600">
+        Converted with: {CRAWLER} &middot; {CONVERTED_DATE}
+      </p>
+    </header>
+
+    <Fragment set:html={CONTENT} />
+
+  </article>
+</BaseLayout>

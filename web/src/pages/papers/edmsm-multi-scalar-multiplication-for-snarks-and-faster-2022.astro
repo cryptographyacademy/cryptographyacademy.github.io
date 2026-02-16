@@ -1,0 +1,1041 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+
+const EPRINT_URL = 'https://eprint.iacr.org/2022/1400';
+const CRAWLER = 'mistral';
+const CONVERTED_DATE = '2026-02-16';
+const TITLE_HTML = 'EdMSM: Multi-Scalar-Multiplication for SNARKs and Faster Montgomery multiplication';
+const AUTHORS_HTML = 'Youssef El Housni, Gautam Botrel';
+
+const CONTENT = `    <p class="text-gray-300">Gautam Botrel and Youssef El Housni</p>
+
+    <h6 id="sec-2" class="text-base font-medium mt-4">Abstract</h6>
+
+    <p class="text-gray-300">The bottleneck in the proving algorithm of most of elliptic-curve-based SNARK proof systems is the Multi-Scalar-Multiplication (MSM) algorithm. In this paper we give an overview of a variant of the Pippenger MSM algorithm together with a set of optimizations tailored for curves that admit a twisted Edwards form. We prove that this is the case for SNARK-friendly chains and cycles of elliptic curves, which are useful for recursive constructions. Our contribution is twofold: first, we optimize the arithmetic of finite fields by improving on the well-known Coarsely Integrated Operand Scanning (CIOS) modular multiplication. This is a contribution of independent interest that applies to many different contexts. Second, we propose a new coordinate system for twisted Edwards curves tailored for the Pippenger MSM algorithm.</p>
+
+    <p class="text-gray-300">Accelerating the MSM over these curves is critical for deployment of recursive proof systems applications such as proof-carrying-data, blockchain rollups and blockchain light clients. We implement our work in Go and benchmark it on two different CPU architectures (x86 and arm64). We show that our implementation achieves a 40-47% speedup over the state-of-the-art implementation (which was implemented in Rust). This MSM implementation won the first place in the ZPrize competition in the open division “Accelerating MSM on Mobile” and will be deployed in two real-world applications: Linea zkEVM by ConsenSys and probably Celo network.</p>
+
+    <h6 id="sec-3" class="text-base font-medium mt-4">Keywords:</h6>
+
+    <p class="text-gray-300">elliptic curves multi-scalar-multiplication implementation zero-knowledge proof</p>
+
+    <h2 id="sec-4" class="text-2xl font-bold">1 Introduction</h2>
+
+    <p class="text-gray-300">A SNARK is a cryptographic primitive that enables a prover to prove to a verifier the knowledge of a satisfying witness to a non-deterministic (NP) statement by producing a proof <span class="math">\\pi</span> such that the size of <span class="math">\\pi</span> and the cost to verify it are both sub-linear in the size of the witness. Today, the most efficient SNARKs use elliptic curves to generate and verify the proof. A SNARK usually consists in three algorithms <em>Setup</em>, <em>Prove</em> and <em>Verify</em>.</p>
+
+    <p class="text-gray-300">The <em>Setup</em> and <em>Prove</em> algorithms involve solving multiple large instances of tasks about polynomial arithmetic in <span class="math">\\mathbb{F}_{r}[X]</span> (where <span class="math">r</span> is a prime) and multi-scalar multiplication (MSM) over the points of an elliptic curve. Fast arithmetic in <span class="math">\\mathbb{F}_{r}[X]</span>, when manipulating large-degree polynomials, is best implemented using the Fast Fourier Transform (FFT) <em>[x20]</em> and MSMs of large sizes are best implemented using a variant of Pippenger’s algorithm <em>[x1, Section 4]</em>. For example, Table 1 reports the numbers of MSMs required in the <em>Setup</em>, <em>Prove</em> and <em>Verify</em> algorithms in the <em>[x10]</em> SNARK and the KZG-based PLONK universal SNARK <em>[x11]</em>. The sizes of the MSMs are given in terms of the number of gates in the arithmetic circuits defining the computation to be proved by the SNARK (notation in the Table caption). The report excludes the number of FFTs as</p>
+
+    <p class="text-gray-300">EdMSM: Multi-Scalar-Multiplication for SNARKs and Faster Montgomery multiplication</p>
+
+    <p class="text-gray-300">the dominating cost for such constructions is the MSM computation ( <span class="math">\\sim 80\\%</span>  of the overall time).</p>
+
+    <p class="text-gray-300">Table 1: Cost of Setup, Prove and Verify algorithms for [Gro16] and PLONK.  <span class="math">m =</span>  number of wires,  <span class="math">n =</span>  number of multiplication gates,  <span class="math">a =</span>  number of addition gates and  <span class="math">\\ell =</span>  number of public inputs.  <span class="math">\\mathbb{M}_{\\mathbb{G}_{i\\in 1,2}} =</span>  multiplication in  <span class="math">\\mathbb{G}_{i\\in 1,2}</span>  and  <span class="math">\\mathbb{P} =</span>  pairing.</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Setup</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Prove</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Verify</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">[Gro16]</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">3n MG1</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">(3n+m-l) MG1</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">3 P</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+            <td class="px-3 py-2 border-b border-gray-700">m MG2</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">n MG2</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">l MG1</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">PLONK (KZG)</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">d (≥n+a) MG1</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">9(n+a) MG1</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">2 P</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1 MG2</td>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+            <td class="px-3 py-2 border-b border-gray-700">18 MG1</td>
+
+          </tr>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">Given a set of  <span class="math">n</span>  elements  <span class="math">G_{1},\\dots ,G_{n}</span>  (bases) in  <span class="math">\\mathbb{G}</span>  a cyclic group (e.g. cyclic subgroup of the group of points on an elliptic curve) whose order  <span class="math">\\# \\mathbb{G}</span>  has  <span class="math">b</span>  bits and a set of  <span class="math">n</span>  integers  <span class="math">a_1,\\dots ,a_n</span>  (calars) between 0 and  <span class="math">\\# \\mathbb{G}</span> , the goal is to compute efficiently the group element  <span class="math">[a_1]G_1 + \\dots +[a_n]G_n</span> . In SNARK applications, we are interested in large instances of variable-base MSMs  <span class="math">(n = 10^{7},10^{8},10^{9})</span>  with random bases and random scalars over the pairing groups  <span class="math">\\mathbb{G}_1</span>  and  <span class="math">\\mathbb{G}_2</span> .</p>
+
+    <p class="text-gray-300">The naive algorithm uses a double-and-add strategy to compute each  <span class="math">[a_i]G_i</span>  then adds them all up, costing on average  <span class="math">3/2 \\cdot b \\cdot n</span>  group operations (+). On the one hand, there are several algorithms that optimize the total number of group operations as a function of  <span class="math">n</span>  such as Strauss [Str64], Bos-Coster [dR95, Sec. 4] and Pippenger [Pip76] algorithms. For large instances of a variable-base MSM, the fastest approach is a variant of Pippenger's algorithm [BDLO12, Sec. 4]. For simplicity, we call it the bucket method. On the other hand, efficient implementation of finite fields arithmetic impacts directly the performance of the group operation and therefore the performance of the whole MSM algorithm. In this paper we are interested in the bucket-method MSM on inner curves of 2-chains and 2-cycles of elliptic curves.</p>
+
+    <p class="text-gray-300">Contributions. Our contribution is twofold: first, we discovered an optimization that reduces the number of operations needed to compute the modular multiplication of two big integers for most (but not all) choices of modulus. To the best of our knowledge, we are not aware of any prior art describing this optimization. Our multiplication algorithm improves on the CIOS algorithm [Aca98] by saving  <span class="math">5N + 2</span>  additions, where  <span class="math">N</span>  is the number of 64-bit machine words in the modulus. When  <span class="math">N = 6</span>  for instance, this yields a  <span class="math">8\\%</span>  improvement. On arm64, our implementation achieves an additional  <span class="math">17\\%</span>  thanks to a collection of assembly optimizations explained in Sec. 6.</p>
+
+    <p class="text-gray-300">Second, we analyse the complexity of the bucket method variant of the Pippenger MSM algorithm. We propose a new coordinate system for twisted Edwards curves tailored for this algorithm. We finally show how to use the algebraic structure of elliptic curves to further reduce the complexity of the algorithm.</p>
+
+    <p class="text-gray-300">We choose, as an example, the widely used BLS12-377 elliptic  <span class="math">\\left[\\mathrm{BCG}^{+}20\\right]</span>  as an inner 2-chain. We implement both the finite field arithmetic using our algorithm and the bucket MSM algorithm using the twisted Edwards new coordinate system. Our implementation in Go outperforms the state-of-the-art implementation in Rust [aC22] by  <span class="math">40 - 47\\%</span> .</p>
+
+    <p class="text-gray-300">Our implementation won the first place in the ZPrize competition in the open division "Accelerating MSM on Mobile" (https://www.zprize.io/) and will be deployed in two real-world applications: Linea zkEVM by ConsenSys (https://consensys.net/zkevm/) and probably Celo network (https://celo.org/). The zkEVM use-case uses our CPU MSM implementation to generate a PLONK proof of a batch of transactions to scale the Ethereum blockchain, while the Celo network would use our techniques to reduce its Groth16 proof generation time on a mobile from 3s to 400ms.</p>
+
+    <h4 id="sec-5" class="text-lg font-semibold mt-6">Organization of the paper.</h4>
+
+    <p class="text-gray-300">Section 2 provides preliminaries on CIOS modular multiplication and proofs of our new algorithm. Section 3 provides definitions of 2-chains and 2-cycles of elliptic curves and some results we prove. In section 4, we explain the bucket method and provide its complexity analysis. Section 5 provides our optimizations to the bucket method for both generic elliptic curves and the twisted Edwards curves. We prove that inner 2-chains and 2-cycles always fall into the second more optimized case. Finally, section 6 reports on our implementation of the bucket method alongside our optimizations. We choose to tailor the implementation to the widely used BLS12-377 curve and to benchmark our results on two different CPU architectures(x86 and arm64).</p>
+
+    <h2 id="sec-6" class="text-2xl font-bold">2 Optimizing modular multiplication</h2>
+
+    <h3 id="sec-7" class="text-xl font-semibold mt-8">2.1 The Montgomery multiplication: theory</h3>
+
+    <h4 id="sec-8" class="text-lg font-semibold mt-6">The modular multiplication problem.</h4>
+
+    <p class="text-gray-300">Given integers <span class="math">a</span>, <span class="math">b</span> and <span class="math">p</span> the modular multiplication problem is to compute the remainder of the product</p>
+
+    <p class="text-gray-300"><span class="math">ab\\mod p\\;.</span></p>
+
+    <p class="text-gray-300">On computers a division operation is much slower than other operations such as multiplication. Thus, a naive implementation of <span class="math">ab\\mod p</span> using a division operation is prohibitively slow. In 1985, Montgomery introduced a method to avoid costly divisions <em>[x18]</em>. This method, now called the Montgomery multiplication, is among the fastest solutions to the problem and it continues to enjoy widespread use in modern cryptography.</p>
+
+    <h4 id="sec-9" class="text-lg font-semibold mt-6">Overview of the solution: the Montgomery multiplication.</h4>
+
+    <p class="text-gray-300">There are many good expositions of the Montgomery multiplication (e.g. <em>[x3]</em>). As such, we do not go into detail on the mathematics of the Montgomery multiplication. Instead, this paragraph is intended to establish notation that is used throughout this section.</p>
+
+    <p class="text-gray-300">The Montgomery multiplication algorithm does not directly compute <span class="math">ab\\mod p</span>. Instead it computes <span class="math">abR^{-1}\\mod p</span> for some carefully chosen number <span class="math">R</span> called the Montgomery radix. Typically, <span class="math">R</span> is set to the smallest power of two exceeding <span class="math">p</span> that falls on a computer word boundary. For example, if <span class="math">p</span> is 381 bits then <span class="math">R=2^{6\\times 64}=2^{384}</span> on a 64-bit architecture.</p>
+
+    <p class="text-gray-300">In order to make use of the Montgomery multiplication the numbers <span class="math">a</span> and <span class="math">b</span> must be encoded into the Montgomery form: instead of storing <span class="math">(a,b)</span>, we store the numbers <span class="math">(\\tilde{a},\\tilde{b})</span> given by <span class="math">\\tilde{a}=aR\\mod p</span> and <span class="math">\\tilde{b}=bR\\mod p</span>. A simple calculation shows that the Montgomery multiplication produces the product <span class="math">ab\\mod p</span>, encoded in the Montgomery form: <span class="math">(aR)(bR)R^{-1}=abR\\mod p</span>. The idea is that numbers are always stored in the Montgomery form so as to avoid costly conversions to and from the Montgomery form.</p>
+
+    <p class="text-gray-300">Other arithmetic operations such as addition, subtraction are unaffected by the Montgomery form encoding. But the modular inverse computation <span class="math">a^{-1}\\mod p</span> must be adapted to account for the Montgomery form. We do not discuss modular inversion in this section (cf. <em>[x5]</em> and <em>[x20]</em>).</p>
+
+    <h3 id="sec-10" class="text-xl font-semibold mt-8">2.2 The Montgomery multiplication: implementation</h3>
+
+    <p class="text-gray-300">For security purposes, cryptographic protocols use large moduli — <span class="math">a</span>,<span class="math">b</span> and <span class="math">p</span> are stored on multiple machine words (multi-precision). In this section, we let <span class="math">D</span> denote the base in which integers are represented. (For example, <span class="math">D=2^{64}</span> if a word is 64 bits). A large number <span class="math">a</span> can be represented by its base-<span class="math">D</span> digits <span class="math">a_{0},\\ldots,a_{N}</span> stored in machine words (uint) such that <span class="math">a=\\sum_{i=0}^{N}a_{i}D^{i}</span>.</p>
+
+    <p class="text-gray-300">There are several variations of multi-precision Montgomery multiplication. To compute <span class="math">\\tilde{c}=\\tilde{a}\\tilde{b}R^{-1}</span>, we need to multiply the operands (<span class="math">P=\\tilde{a}\\tilde{b}</span>) and then compute <span class="math">PR^{-1}\\mod p</span>. This second step (Montgomery reduction) can be computed efficiently (see Algorithm 1 <em>[x1]</em>) when we precompute the number <span class="math">-p^{-1}\\mod R</span>.</p>
+
+    <p class="text-gray-300">A popular choice is the Coarsely Integrated Operand Scanning (CIOS) variant <em>[x1]</em> which interleaves the operands multiplication and the reduction step. In some settings, factors such as modulus size, CPU cache management, optimization techniques, architecture and available instruction set might favor other variants.</p>
+
+    <h4 id="sec-11" class="text-lg font-semibold mt-6">How fast is the CIOS method?</h4>
+
+    <p class="text-gray-300">Let <span class="math">N</span> denote the number of machine words needed to store the modulus <span class="math">p</span>. For example, if <span class="math">p</span> is a 381-bit prime and the hardware has 64-bit word size then <span class="math">N=6</span>. The CIOS method solves modular multiplication using <span class="math">4N^{2}+4N+2</span> unsigned integer additions and <span class="math">2N^{2}+N</span> unsigned integer multiplications.</p>
+
+    <p class="text-gray-300">Our optimization reduces the number of additions needed in the CIOS Montgomery multiplication to only <span class="math">4N^{2}-N</span>, a saving of <span class="math">5N+2</span> additions. This optimization can be used whenever the highest bit of the modulus is zero (and not all of the remaining bits are set — see below for details).</p>
+
+    <p class="text-gray-300">The core of the state-of-the-art CIOS Montgomery multiplication is reproduced below. This listing is adapted from Section 2.3.2 of Tolga Acar’s thesis <em>[x1]</em>. The symbols in this listing have the following meanings:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li><span class="math">N</span> is the number of machine words needed to store the modulus <span class="math">p</span>.</li>
+
+      <li><span class="math">D</span> is the word size. For example, on a 64-bit architecture <span class="math">D</span> is <span class="math">2^{64}</span>.</li>
+
+      <li><span class="math">\\tilde{a}[i],\\tilde{b}[i],p[i]</span> are the <span class="math">i</span>-th words of the integers <span class="math">\\tilde{a}</span>, <span class="math">\\tilde{b}</span> and <span class="math">p</span>.</li>
+
+      <li><span class="math">p^{\\prime}[0]</span> is the lowest word of the number <span class="math">-p^{-1}\\mod R</span>. This quantity is precomputed, as it does not depend on the inputs <span class="math">\\tilde{a}</span> and <span class="math">\\tilde{b}</span>.</li>
+
+      <li><span class="math">t</span> is an array of <span class="math">N+2</span> words.</li>
+
+      <li><span class="math">C</span>, <span class="math">S</span> are machine words. A pair <span class="math">(C,S)</span> refers to (high-bits, low-bits) of a two-word number. For short we denote them (hi,lo).</li>
+
+    </ul>
+
+    <p class="text-gray-300">Next, we show that we can avoid the additions in lines 5 and 12 of Alg. 1 when the highest word of the modulus <span class="math">p</span> is at most <span class="math">(D-1)/2-1</span>. This condition holds if and only if the highest bit of the modulus is zero and not all of the remaining bits are set. With 64bits machine words (<span class="math">D=2^{64}</span>) the most significant word of the modulus should be at most 0x7FFFFFFFFFFFFFFE.</p>
+
+    <h4 id="sec-12" class="text-lg font-semibold mt-6">Our optimization.</h4>
+
+    <p class="text-gray-300">Observe that lines 4 and 10 have the form (hi,lo) := <span class="math">m_{1}+m_{2}\\cdot B+m_{3}</span>, where hi, lo, <span class="math">m_{1}</span>, <span class="math">m_{2}</span>, <span class="math">m_{3}</span> and <span class="math">B</span> are machine-words where each is at most <span class="math">D-1</span>. If <span class="math">B\\leq(D-1)/2-1</span> then a simple calculation shows that</p>
+
+    <p class="text-gray-300"><span class="math">m_{1}+m_{2}\\cdot B+m_{3}</span> <span class="math">\\leq(D-1)+(D-1)(\\tfrac{D-1}{2}-1)+(D-1)</span> <span class="math">\\leq D\\underbrace{(\\tfrac{D-1}{2})}_{\\text{hi}}+\\underbrace{(\\tfrac{D+1}{2}-1)}_{\\text{lo}}</span></p>
+
+    <p class="text-gray-300">From which we derive the following Lemma:</p>
+
+    <h6 id="sec-13" class="text-base font-medium mt-4">Lemma 1.</h6>
+
+    <p class="text-gray-300">If <span class="math">B\\leq(D-1)/2-1</span>, then hi <span class="math">\\leq(D-1)/2</span>.</p>
+
+    <p class="text-gray-300">We use Lemma 1 to prove the following Proposition:</p>
+
+    <p class="text-gray-300">Gautam Botrel and Youssef El Housni</p>
+
+    <p class="text-gray-300">| Algorithm 1: The CIOS Montgomery multiplication Input: a = aR and b = bR with a, b < R Output: abR mod p |</p>
+
+    <p class="text-gray-300">| --- |</p>
+
+    <p class="text-gray-300">| 1 for i = 0 to N - 1 do |</p>
+
+    <p class="text-gray-300">| 2 C = 0; |</p>
+
+    <p class="text-gray-300">| 3 for j = 0 to N - 1 do |</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">4</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">(C, t[j]) = t[j] + a[j] · b[i] + C</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">| 5 (t[N + 1], t[N]) = t[N] + C; |</p>
+
+    <p class="text-gray-300">| 6 C = 0; |</p>
+
+    <p class="text-gray-300">| 7 m = t[0] · p'[0] mod D; |</p>
+
+    <p class="text-gray-300">| 8 (C, _) = t[0] + m · p[0]; |</p>
+
+    <p class="text-gray-300">| 9 for j = 1 to N - 1 do |</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">10</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">(C, t[j - 1]) = t[j] + m · p[j] + C</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">| 11 (C, t[N - 1]) = t[N] + C; |</p>
+
+    <p class="text-gray-300">| 12 t[N] = t[N + 1] + C; |</p>
+
+    <p class="text-gray-300">| 13 t[N + 1] = 0; |</p>
+
+    <p class="text-gray-300">| 14 if t < p then |</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">15 return t;</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">// abR mod p</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">| 16 else |</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">17 return t - p;</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">// abR mod p</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">Proposition 1. If the highest word of  <span class="math">p</span>  is at most  <span class="math">(D - 1) / 2 - 1</span> , then the variables  <span class="math">t[N]</span>  and  <span class="math">t[N + 1]</span>  always store the value 0 at the beginning of each iteration of the outer  <span class="math">i</span> -loop.</p>
+
+    <p class="text-gray-300">Proof. We prove this proposition by induction. The base case  <span class="math">i = 0</span>  is trivial, since the  <span class="math">t</span>  array is initialized to 0. For the inductive step at the iteration  <span class="math">i</span> , we suppose that  <span class="math">t[N] = t[N + 1] = 0</span>  and trace the execution through the iteration. Begin at the final iteration of the first inner loop ( <span class="math">j = N - 1</span> ) on line 4. Because  <span class="math">\\tilde{a} &amp;lt; p</span>  and because the highest word of  <span class="math">p</span>  is smaller than  <span class="math">(D - 1)/2</span> , we may use Lemma 1 to see that the carry  <span class="math">C</span>  is at most  <span class="math">(D - 1)/2</span> . Then line 5 sets</p>
+
+    <p class="text-gray-300"><span class="math">t[N] = C</span></p>
+
+    <p class="text-gray-300"><span class="math">t[N + 1] = 0</span></p>
+
+    <p class="text-gray-300">A similar observation holds at the end of the second inner loop ( <span class="math">j = N - 1</span> ) on line 10: Lemma 1 implies that the carry  <span class="math">C</span>  is at most  <span class="math">(D - 1)/2</span> . We previously observed that  <span class="math">t[N]</span>  is also at most  <span class="math">(D - 1)/2</span> , so  <span class="math">t[N] + C</span>  is at most</p>
+
+    <p class="text-gray-300"><span class="math">\\frac{D - 1}{2} + \\frac{D - 1}{2} = D - 1</span></p>
+
+    <p class="text-gray-300">which fits entirely into a single word. Then line 11 sets  <span class="math">C</span>  to 0 and line 12 sets  <span class="math">t[N]</span>  to 0. The proof by induction is now complete.</p>
+
+    <p class="text-gray-300">With this proposition, we no longer need the addition at line 5, and guarantee that addition on line 11 will fit in one machine word.  <span class="math">t</span>  size is reduced to  <span class="math">N + 1</span>  words.</p>
+
+    <p class="text-gray-300">Performance. In practice (cf. Sec.6.) Algorithm 2 yields a  <span class="math">5 - 10\\%</span>  improvement over Algorithm 1 given different  <span class="math">N</span>  values. For  <span class="math">N = 4</span> , we measure  <span class="math">5.9\\%</span>  improvement. For  <span class="math">N = 6</span> , which is the value that corresponds to a field on which a 128-bit secure elliptic curve should be defined, our algorithm achieves a  <span class="math">8\\%</span>  improvement. The improvement peaks at  <span class="math">N = 8</span>  ( <span class="math">10\\%</span> ) and decreases afterwards. We measure  <span class="math">5\\%</span>  for  <span class="math">N = 10</span> . This is expected as the number of additions we saved is linear whereas the total number of word</p>
+
+    <p class="text-gray-300">EdMSM: Multi-Scalar-Multiplication for SNARKs and Faster Montgomery multiplication</p>
+
+    <p class="text-gray-300">|  Algorithm 2: Our optimized CIOS Montgomery multiplication Input: a = aR mod p, b = bR mod p Output: abR mod p 1 for i = 0 to N - 1 do 2 C = 0; 3 for j = 0 to N - 1 do 4 (C, t[j]) = t[j] + a[j] · b[i] + C 5 t[N] = C; 6 C = 0; 7 m = t[0] · p'[0] mod D; 8 (C, _) = t[0] + m · p[0]; 9 for j = 1 to N - 1 do 10 (C, t[j - 1]) = t[j] + m · p[j] + C 11 t[N - 1] = t[N] + C; 12 t[N] = 0; 13 if t < p then 14 return t; // abR mod p 15 else 16 return t - p; // abR mod p  |   |</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">---</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">---</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">multiplications and additions in the algorithm is quadratic. Moreover, as  <span class="math">N</span>  grows it becomes necessary to push/pop registers to the stack which overshadows the gains.</p>
+
+    <p class="text-gray-300">The same reasoning applies as well to the squaring algorithm (cf. Alg. 5 in the appendix A). Note that the condition on the modulus  <span class="math">p</span>  i.e.  <span class="math">p[N - 1] \\leq (D - 1) / 2 - 1</span>  is a relaxed condition compared to other techniques that impose a specific form for  <span class="math">p</span>  such as Montgomery-friendly primes [BD21] (e.g.  <span class="math">p = 2^{e_2} \\alpha \\pm 1</span>  where  <span class="math">2^{e_2}</span>  is an upper bound for the reduction coefficient  <span class="math">R</span> ). However, in our method, we impose the inputs  <span class="math">\\tilde{a}, \\tilde{b}</span>  to be reduced mod  <span class="math">p</span> . This can limit lazy reduction techniques [Sco07] for multiplication over the extensions of  <span class="math">\\mathbb{F}_p</span> .</p>
+
+    <p class="text-gray-300">Following [EG22], a 2-chain of elliptic curves is a set of two curves as in Definition 2.</p>
+
+    <p class="text-gray-300">Definition 1. A 2-chain of elliptic curves is a list of two distinct curves  <span class="math">E_1 / \\mathbb{F}_{p_1}</span>  and  <span class="math">E_1 / \\mathbb{F}_{p_2}</span>  where  <span class="math">p_1</span>  and  <span class="math">p_2</span>  are large primes and  <span class="math">p_1 \\mid \\# E_2(\\mathbb{F}_{p_2})</span> . SNARK-friendly 2-chains are composed of two curves that have highly 2-adic subgroups of orders  <span class="math">r_1 \\mid \\# E_1(\\mathbb{F}_{p_1})</span>  and  <span class="math">r_2 \\mid \\# E_2(\\mathbb{F}_{p_2})</span>  such that  <span class="math">r_1 \\equiv r_2 \\equiv 1 \\mod 2^L</span>  for a large integer  <span class="math">L \\geq 1</span> . This also means that  <span class="math">p_1 \\equiv 1 \\mod 2^L</span> .</p>
+
+    <p class="text-gray-300">In a 2-chain, the first curve is denoted the inner curve, while the second curve whose order is the characteristic of the inner curve, is denoted the outer curve (cf. Fig. 1).</p>
+
+    <p class="text-gray-300">Inner curves from polynomial families. The best elliptic curves amenable to efficient implementations arise from polynomial based families. These curves are obtained by parameterizing the Complex Multiplication (CM) equation with polynomials  <span class="math">p(x), t(x), r(x)</span>  and  <span class="math">y(x)</span> . The authors of [EG22] showed that the polynomial-based pairing-friendly Barreto-Lynn-Scott families of embedding degrees  <span class="math">k = 12</span>  (BLS12) and  <span class="math">k = 24</span>  (BLS24) [BLS03] are the most suitable to construct inner curves in the context of pairing-based SNARKs.</p>
+
+    <p class="text-gray-300">Gautam Botrel and Youssef El Housni</p>
+
+    <p class="text-gray-300">!<a href="img-0.jpeg">img-0.jpeg</a> Figure 1: A 2-chain of elliptic curves.</p>
+
+    <p class="text-gray-300">These curves require the seed  <span class="math">x</span>  to satisfy  <span class="math">x \\equiv 1 \\mod 3 \\cdot 2^L</span>  to have the 2-adicity requirement with respect to both  <span class="math">r</span>  and  <span class="math">p</span> .</p>
+
+    <p class="text-gray-300">A particular example of an efficient 2-chain for SNARK applications is composed of the inner curve BLS12-377 [BCG+20] and the outer curve BW6-761 [EG20].</p>
+
+    <p class="text-gray-300">We prove useful a result 2 that will be needed later to optimize the MSM computation.</p>
+
+    <p class="text-gray-300">Proposition 2 ([EG22, Sec. 3.4]). All inner BLS curves admit a short Weierstrass form  <span class="math">Y^{2} = X^{3} + 1</span> .</p>
+
+    <p class="text-gray-300">Lemma 2. All inner BLS curves admit a twisted Edwards form  <span class="math">ay^2 + x^2 = 1 + dx^2y^2</span>  with  <span class="math">a = 2\\sqrt{3} - 3</span>  and  <span class="math">d = -2\\sqrt{3} - 3</span>  over  <span class="math">\\mathbb{F}_p</span> . If further  <span class="math">-a</span>  is a square, the equation becomes  <span class="math">-x^2 + y^2 = 1 + d&#x27;x^2y^2</span>  with  <span class="math">d&#x27; = 7 + 4\\sqrt{3} \\in \\mathbb{F}_p</span> .</p>
+
+    <p class="text-gray-300">Proof. Proposition 2 shows that all inner BLS curves are of the form  <span class="math">W_{0,1} : y^2 = x^3 + 1</span> . The following map</p>
+
+    <div class="my-4 text-center"><span class="math-block">W _ {0, 1} \\rightarrow E _ {a, d}</span></div>
+
+    <div class="my-4 text-center"><span class="math-block">(x, y) \\mapsto \\left(\\frac {x + 1}{y}, \\frac {x + 1 - \\sqrt {3}}{x + 1 + \\sqrt {3}}\\right)</span></div>
+
+    <p class="text-gray-300">defines the curve  <span class="math">E_{a,d} : ay^2 + x^2 = 1 + dx^2y^2</span>  with  <span class="math">a = 2\\sqrt{3} - 3</span>  and  <span class="math">d = -2\\sqrt{3} - 3</span> . The inverse map is</p>
+
+    <div class="my-4 text-center"><span class="math-block">E _ {a, d} \\rightarrow W _ {0, 1}</span></div>
+
+    <div class="my-4 text-center"><span class="math-block">(x, y) \\mapsto \\left(\\frac {(1 + y) \\sqrt {3}}{1 - y} - 1, \\frac {(1 + y) \\sqrt {3}}{(1 - y) x}\\right)</span></div>
+
+    <p class="text-gray-300">If  <span class="math">-a</span>  is a square in  <span class="math">\\mathbb{F}_p</span> , the map  <span class="math">(x,y) \\mapsto (x / \\sqrt{-a},y)</span>  defines from  <span class="math">E_{a,d}</span>  the curve  <span class="math">E_{-1,d&#x27;}</span>  of equation  <span class="math">-x^2 + y^2 = 1 + d&#x27;x^2y^2</span>  with  <span class="math">d&#x27; = -d/a = (2\\sqrt{3} + 3)/(2\\sqrt{3} - 3) = 7 + 4\\sqrt{3}</span> .</p>
+
+    <p class="text-gray-300">These maps work only if  <span class="math">\\sqrt{3}</span>  is defined in  <span class="math">\\mathbb{F}_p</span> , that is 3 is a quadratic residue. This is always the case in  <span class="math">\\mathbb{F}_p</span>  on which an inner BLS curve is defined. Let  <span class="math">\\left(\\frac{3}{p}\\right)</span>  be  <span class="math">3^{\\frac{p - 1}{2}} \\mod p</span> , the Legendre symbol. The quadratic reciprocity theorem tells us that  <span class="math">\\left(\\frac{3}{p}\\right)\\left(\\frac{p}{3}\\right) = (-1)^{\\frac{p - 1}{2}}</span> . We have  <span class="math">p \\equiv 1 \\mod 4</span>  from the 2-adicity condition, so  <span class="math">\\left(\\frac{3}{p}\\right) = \\left(\\frac{p}{3}\\right)</span> . Now  <span class="math">\\left(\\frac{p}{3}\\right) \\equiv p \\mod 3</span>  which is always equal to 1 for all BLS curves ( <span class="math">x \\equiv 1 \\mod 3</span>  and  <span class="math">x - 1 \\mid p - 1</span> ). More generally one can prove that when  <span class="math">p = 2</span>  or  <span class="math">p \\equiv 1</span>  or 11 mod 12 then 3 is a quadratic residue in  <span class="math">\\mathbb{F}_p</span> . For inner BLS, we have  <span class="math">p \\equiv 1 \\mod 3 \\cdot 2^L</span>  with  <span class="math">L \\gg 2</span> .</p>
+
+    <p class="text-gray-300">Definition 2. A 2-cycle of elliptic curves is a list of two distinct prime-order curves  <span class="math">E_1 / \\mathbb{F}_{p_1}</span>  and  <span class="math">E_1 / \\mathbb{F}_{p_2}</span>  where  <span class="math">p_1</span>  and  <span class="math">p_2</span>  are large primes,  <span class="math">p_1 = \\# E_2(\\mathbb{F}_{p_2})</span>  and  <span class="math">p_2 = \\# E_1(\\mathbb{F}_{p_1})</span> . SNARK-friendly 2-cycles are composed of two curves that have highly 2-adic subgroups, i.e.  <span class="math">\\# E_1(\\mathbb{F}_{p_1}) \\equiv \\# E_2(\\mathbb{F}_{p_2}) \\equiv 1 \\mod 2^L</span>  for a large integer  <span class="math">L \\geq 1</span> . This also means that  <span class="math">p_1 \\equiv p_2 \\equiv 1 \\mod 2^L</span> .</p>
+
+    <p class="text-gray-300">EdMSM: Multi-Scalar-Multiplication for SNARKs and Faster Montgomery multiplication</p>
+
+    <p class="text-gray-300">This notion was initially introduced under different names, for example amicable pairs (or equivalently dual elliptic primes [Mih07]) for 2-cycles of ordinary curves, and aliquot cycles for the general case [SS11]. Some examples of SNARK-friendly 2-cycles include MNT4-MNT6 curves [BCTV14], Tweedle curves [BGH19] and Pasta curves [Hop20].</p>
+
+    <p class="text-gray-300">In particular a 2-cycle is a 2-chain where both curves are inner and outer curves with respect to each other (cf. Fig. 2). This means that both curves in a 2-cycle admit a twisted Edwards form following the same reasoning as in subsection 3.1. In the sequel we will focus on the case of BLS12 inner curves that form a 2-chain but we stress that these results apply to 2-chain inner curves from other families (e.g. BLS24 and BN [AHG22]) and to 2-cycles as well.</p>
+
+    <p class="text-gray-300">!<a href="img-1.jpeg">img-1.jpeg</a> Figure 2: A cycle of elliptic curves.</p>
+
+    <p class="text-gray-300">The high-level strategy of the bucket-method MSM can be given in three steps:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Step 1: reduce the  <span class="math">b</span> -bit MSM to several  <span class="math">c</span> -bit MSMs for some fixed  <span class="math">c \\leq b</span></li>
+
+      <li>Step 2: solve each  <span class="math">c</span> -bit MSM efficiently</li>
+
+      <li>Step 3: combine the  <span class="math">c</span> -bit MSMs into the final  <span class="math">b</span> -bit MSM</li>
+
+    </ul>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Choose a window  <span class="math">c \\leq b</span></li>
+
+      <li>Write each scalar  <span class="math">a_1, \\dots, a_n</span>  in binary form and partition each into  <span class="math">c</span> -bit parts</li>
+
+    </ol>
+
+    <p class="text-gray-300">!<a href="img-2.jpeg">img-2.jpeg</a></p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Deduce  <span class="math">b / c</span>  instances of  <span class="math">c</span> -bit MSMs from the partitioned scalars</li>
+
+    </ol>
+
+    <p class="text-gray-300">!<a href="img-3.jpeg">img-3.jpeg</a></p>
+
+    <p class="text-gray-300">Cost of Step 1 is negligible.</p>
+
+    <p class="text-gray-300">Gautam Botrel and Youssef El Housni</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>For each  <span class="math">T_{j}</span> , accumulate the bases  <span class="math">G_{i}</span>  inside buckets</li>
+
+    </ol>
+
+    <p class="text-gray-300">Each element  <span class="math">a_{i,j}</span>  is in the set  <span class="math">\\{0,1,2,\\dots 2^c -1\\}</span> . We initialize  <span class="math">2^{c} - 1</span>  empty buckets (with points at infinity) and accumulate the bases  <span class="math">G_{i}</span>  from each  <span class="math">T_{j}</span>  inside the bucket corresponding to the scalar  <span class="math">a_{i,j}</span> .</p>
+
+    <p class="text-gray-300">!<a href="img-4.jpeg">img-4.jpeg</a></p>
+
+    <p class="text-gray-300">Cost:  <span class="math">n - (2^c - 1) = n - 2^c + 1</span>  group operations.</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Combine the buckets to compute  <span class="math">T_{j}</span></li>
+
+    </ol>
+
+    <p class="text-gray-300">This step is also a  <span class="math">c</span> -bit MSM of size  <span class="math">2^c - 1</span>  but this time the scalars are ordered and known in advance  <span class="math">S_1 + [2]S_2 + \\dots + [2^c - 1]S_{2^c - 1}</span> , thus we can compute this instance efficiently as follows</p>
+
+    <p class="text-gray-300">!<a href="img-5.jpeg">img-5.jpeg</a></p>
+
+    <p class="text-gray-300">Cost of Step 2:  <span class="math">n - 2^c + 1 + 2^{c+1} - 3 = n + 2^c - 2</span>  group operations.</p>
+
+    <p class="text-gray-300">Algorithm 3 gives an iterative way to combine the small MSMs into the original MSM.</p>
+
+    <p class="text-gray-300">Cost of Step 3:  <span class="math">(b / c - 1)(c + 1) = b - c + b / c - 1</span>  group operations.</p>
+
+    <p class="text-gray-300">Combining Steps 1, 2 and 3, the expected overall cost of the bucket method is</p>
+
+    <p class="text-gray-300">Total cost:  <span class="math">\\frac{b}{c} (n + 2^c) + (b - c - b / c - 1)\\approx \\frac{b}{c} (n + 2^c)</span>  group operations.</p>
+
+    <p class="text-gray-300">H&amp;MSM: Multi-Scalar-Multiplication for SNARKs and Faster Montgomery multiplication</p>
+
+    <p class="text-gray-300">|  Algorithm 3: Step 3 Input: {T1, ..., Tb/c} Output: T = [a1]G1 + ··· + [an]Gn  |   |</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">---</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">---</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">|  1 T ← T1;  |   |</p>
+
+    <p class="text-gray-300">|  2 for i from 2 to b/c do  |   |</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">3</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">T ← [2c]T; // DOUBLE c TIMES</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">|  5 return T;  |   |</p>
+
+    <p class="text-gray-300">Remark 1 (On choosing  <span class="math">c</span> ). The theoretical minimum occurs at  <span class="math">c \\approx \\log n</span>  and the asymptotic scaling looks like  <span class="math">\\%_{\\mathrm{c}}(b_{\\log n} \\log n)</span> . However, in practice, empirical choices of  <span class="math">c</span>  yield a better performance because the memory usage scales with  <span class="math">2^c</span>  and there are fewer edge cases if  <span class="math">c</span>  divides  <span class="math">b</span> . For example, with  <span class="math">n = 10^7</span>  and  <span class="math">b = 256</span> , we observed a peak performance at  <span class="math">c = 16</span>  instead of  <span class="math">c = \\log n \\approx 23</span> .</p>
+
+    <p class="text-gray-300">Since each  <span class="math">c</span> -bit MSM is independent of the rest, we can compute each (Step 2) on a separate core. This makes full use of up to  <span class="math">b / c</span>  cores but increases memory usage as each core needs  <span class="math">2^c - 1</span>  buckets (points). If more than  <span class="math">b / c</span>  cores are available, further parallelism does not help much because  <span class="math">m</span>  MSM instances of size  <span class="math">n / m</span>  cost more than 1 MSM instance of size  <span class="math">n</span> .</p>
+
+    <p class="text-gray-300">When the bases  <span class="math">G_{1}, \\dots, G_{n}</span>  are known in advance, we can use a smooth trade-off between precomputed storage vs. run time. For each base  <span class="math">G_{i}</span> , choose  <span class="math">k</span>  as big as the storage allows and precompute  <span class="math">k</span>  points  <span class="math">[2^{c} - k]G, \\dots, [2^{c} - 1]G</span>  and use the bucket method only for the first  <span class="math">2^{c} - 1 - k</span>  buckets instead of  <span class="math">2^{c} - 1</span> . The total cost becomes  <span class="math">\\approx \\frac{b}{c}(n + 2^{c} - k)</span> . However, large MSM instances already use most available memory. For example, when  <span class="math">n = 10^{8}</span>  our implementation needs 58GB to store enough BLS12-377 curve points to produce a Groth16 [Gro16] proof. Hence, the precomputation approach yield negligible improvement in our case.</p>
+
+    <p class="text-gray-300">Since the bases  <span class="math">G_1, \\dots, G_n</span>  are points in  <span class="math">\\mathbb{G}_1</span>  (or  <span class="math">\\mathbb{G}_2</span> ), we can use the algebraic structure of elliptic curves to further optimize the bucket method.</p>
+
+    <p class="text-gray-300">Non-Adjacent-Form (NAF). Given a point  <span class="math">G_{i} = (x,y) \\in \\mathbb{G}_{1}</span>  (or  <span class="math">\\mathbb{G}_2</span> ), on a Weierstrass curve for instance, the negative  <span class="math">-G_{i}</span>  is  <span class="math">(x, -y)</span> . This observation is well known to speed up the scalar multiplication  <span class="math">[s]G_{i}</span>  by encoding the scalar  <span class="math">s</span>  in a signed binary form  <span class="math">\\{-1,0,1\\}</span>  (later called 2-NAF — the first usage might go back to 1989 [MO90]). However, this does not help in the bucket method because the cost increases with the number of possible scalars regardless of their encodings. For a  <span class="math">c</span> -bit scalar, we always need  <span class="math">2^{c} - 1</span>  buckets. That is said, we can use the 2-NAF decomposition differently. Instead of writing the  <span class="math">c</span> -bit scalars in the set  <span class="math">\\{0,\\dots ,2^c -1\\}</span> , we write them in the signed set  <span class="math">\\{-2^{c - 1},\\dots ,2^{c - 1} - 1\\}</span>  (cf. Alg. 4). If a scalar  <span class="math">a_{i,j}</span>  is strictly positive we add  <span class="math">G_{i}</span>  to the bucket  <span class="math">S_{(a_{i,j})_2}</span>  as usual,</p>
+
+    <p class="text-gray-300">Gautam Botrel and Youssef El Housni</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">and if  <span class="math">a_{i,j}</span>  is strictly negative we add  <span class="math">-G_{i}</span>  to the bucket  $S_{</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">(a_{i,j})_2</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">}$ . This way we reduce the number of buckets by half.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">Total cost:  <span class="math">\\approx \\frac{b}{c} (n + 2^{c - 1})</span>  group operations.</p>
+
+    <p class="text-gray-300">Algorithm 4: Signed-digit decomposition Input:  <span class="math">(a_0,\\dots ,a_{b / c - 1})\\in \\{0,\\dots ,2^c -1\\}</span> Output:  <span class="math">(a_0&#x27;,\\dots ,a_{b / c - 1}&#x27;)\\in \\{-2^{c - 1},\\dots ,2^{c - 1} - 1\\}</span> 1 for  <span class="math">i</span>  from 0 to  <span class="math">b / c - 1</span>  do 2 if  <span class="math">a_i\\geq 2^{c - 1}</span>  then 3 assert  <span class="math">i\\neq b / c - 1</span>  // NO OVERFLOW FOR THE FINAL DIGIT 4  <span class="math">a_i^\\prime \\gets a_i - 2^c</span>  // FORCE THIS DIGIT INTO  <span class="math">\\{-2^{c - 1},\\dots ,2^{c - 1} - 1\\}</span> 5  <span class="math">a_{i + 1}\\gets a_{i + 1} + 1</span>  // LEND  <span class="math">2^{c}</span>  TO THE NEXT DIGIT 6 else 7  <span class="math">a_i^\\prime \\gets a_i</span> 8 return  <span class="math">(a_0&#x27;,\\dots ,a_{b / c - 1}&#x27;)</span></p>
+
+    <p class="text-gray-300">The signed-digit decomposition cost is negligible but it works only if the bitsize of  <span class="math">\\# \\mathbb{G}_1</span>  (and  <span class="math">\\# \\mathbb{G}_2</span> ) is strictly bigger than  <span class="math">b</span> . We use the spare bits to avoid the overflow. This observation should be taken into account at the curve design level.</p>
+
+    <p class="text-gray-300">Curve forms and coordinate systems. To minimize the overall cost of storage but also run time, one can store the bases  <span class="math">G_{i}</span>  in affine coordinates. This way we only need the tuples  <span class="math">(x_{i},y_{i})</span>  for storage (although we can batch-compress these following [Kos21]) and we can make use of mixed addition with a different coordinate systems.</p>
+
+    <p class="text-gray-300">The overall cost of the bucket method is  <span class="math">\\frac{b}{c} (n + 2^{c - 1}) + (b - c - b / c - 1)</span>  group operations. This can be broken down explicitly to:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Mixed additions: to accumulate  <span class="math">G_{i}</span>  in the  <span class="math">c</span> -bit MSM buckets with cost  <span class="math">\\frac{b}{c} (n - 2^{c - 1} + 1)</span></li>
+
+      <li>Additions: to combine the bucket sums with cost  <span class="math">\\frac{b}{c} (2^c - 3)</span></li>
+
+      <li>Additions and doublings: to combine the  <span class="math">c</span> -bit MSMs into the  <span class="math">b</span> -bit MSM with cost  <span class="math">b - c + b / c - 1</span></li>
+
+    </ul>
+
+    <p class="text-gray-300"><span class="math">b / c - 1</span>  additions and <span class="math">b - c</span>  doublings</p>
+
+    <p class="text-gray-300">For large MSM instances, the dominating cost is in the mixed additions as it scales with  <span class="math">n</span> . For this, we use extended Jacobian coordinates  <span class="math">\\{X,Y,ZZ,ZZZ\\}</span>  ( <span class="math">x = X / ZZ, y = Y / ZZZ, ZZ^3 = ZZZ^2</span> ) trading-off memory for run time compared to the usual Jacobian coordinates  <span class="math">\\{X,Y,Z\\}</span>  ( <span class="math">x = X / Z^2, y = Y / Z^3</span> ) (cf. Table 2).</p>
+
+    <p class="text-gray-300">Table 2: Cost of arithmetic in Jacobian and extended Jacobian coordinate systems.  <span class="math">\\mathbf{m} =</span>  Multiplication and  <span class="math">\\mathbf{s} =</span>  Squaring in the field.</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Coordinate systems</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Mixed addition</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Addition</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Doubling</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Jacobian</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">7m + 4s</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">11m + 5s</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">2m + 5s</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Extended Jacobian</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">8m + 2s</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">12m + 2s</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">6m + 4s</td>
+
+          </tr>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">We work over fields of large prime characteristic  <span class="math">(\\neq 2,3)</span> , so the elliptic curves in question have always a short Weierstrass  <span class="math">(SW)</span>  form  <span class="math">y^{2} = x^{3} + ax + b</span> . Over this form, the</p>
+
+    <p class="text-gray-300">E2IMSM: Multi-Scalar-Multiplication for SNARKs and Faster Montgomery multiplication</p>
+
+    <p class="text-gray-300">Table 3: Cost of mixed addition in different elliptic curve forms and coordinate systems assuming  <span class="math">1\\mathbf{m} = 1\\mathbf{s}</span> . Formulas and references from [BL22].</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Form</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Coordinates system</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Equation</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Mixed addition cost</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">short Weierstrass</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">extended Jacobian</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">y2=x3+ax+b</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">10m</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Jacobi quartics</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">XXYZZ, doubling-oriented XXYZZ, XXYZZR, doubling-oriented XXYZZR</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">y2=x4+2ax2+1</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">9m</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Edwards</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">projective, inverted</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">x2+y2=c2(1+dx2y2)</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">9m</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">twisted Edwards</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">extended (XYZT) x = X/Z, y = Y/Z, x · y = T/Z</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">ax2+y2=1+dx2y2</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">8m (dedicated) 9m (unified)</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">twisted Edwards</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">extended (XYZT) x = X/Z, y = Y/Z, x · y = T/Z</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">-x2+y2=1+dx2y2 (a = -1)</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">7m (dedicated) 8m (unified)</td>
+
+          </tr>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">fastest mixed addition is achieved using extended Jacobian coordinates. However, there are other forms that enable even faster mixed additions (cf. Table 3).</p>
+
+    <p class="text-gray-300">It appears that a twisted Edwards ( <span class="math">tEd</span> ) form is appealing for the bucket method since it has the lowest cost for the mixed addition in extended coordinates. Furthermore, the arithmetic on this form is complete, i.e. the addition formulas are defined for all inputs. This improves the run time by eliminating the need of branching in case of adding the neutral element or doubling compared to a  <span class="math">SW</span>  form. We showed in Lemma 2 that all inner BLS curves admit a  <span class="math">tEd</span>  form.</p>
+
+    <p class="text-gray-300">For the arithmetic, we use the formulas in [HWCD08] alongside some optimizations. We take the example of BLS12-377 for which  <span class="math">a = -1</span> :</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>To combine the  <span class="math">c</span> -bit MSMs into a  <span class="math">b</span> -bit MSM we use unified additions [HWCD08, Sec. 3.1] (9m) and dedicated doublings [HWCD08, Sec. 3.3] (4m + 4s).</li>
+
+      <li>To combine the bucket sums we use unified additions (9m) to keep track of the running sum and unified re-additions (8m) to keep track of the total sum. We save 1m by caching the multiplication by  <span class="math">2d&#x27;</span>  from the running sum.</li>
+
+      <li>To accumulate the  <span class="math">G_{i}</span>  in the  <span class="math">c</span> -bit MSM we use unified re-additions with some precomputations. Instead of storing  <span class="math">G_{i}</span>  in affine coordinates we store them in a custom coordinates system  <span class="math">(X, Y, T)</span>  where  <span class="math">y - x = X</span> ,  <span class="math">y + x = Y</span>  and  <span class="math">2d&#x27; \\cdot x \\cdot y = T</span> . This saves 1m and 2s (additions) at each accumulation of  <span class="math">G_{i}</span> .</li>
+
+    </ul>
+
+    <p class="text-gray-300">We note that although the dedicated addition (resp. the dedicated mixed addition) in [HWCD08, Sec. 3.2] saves the multiplication by  <span class="math">2d&#x27;</span> , it costs  <span class="math">4\\mathbf{m}</span>  (resp.  <span class="math">2\\mathbf{m}</span> ) to check the operands equality:  <span class="math">X_{1}Z_{2} = X_{2}Z1</span>  and  <span class="math">Y_{1}Z_{2} = Y_{2}Z1</span>  (resp.  <span class="math">X_{1} = X_{2}Z1</span>  and  <span class="math">Y_{1} = Y_{2}Z1</span> ). This cost offset makes both the dedicated (mixed) addition and the dedicated doubling slower than the unified (mixed) addition in the MSM case. We also note that the conversion of all the  <span class="math">G_{i}</span>  points given on a SW curve with affine coordinates to points on a tEd curve (also with  <span class="math">a = -1</span> ) with the custom coordinates  <span class="math">(X,Y,T)</span>  is a one-time computation dominated by a single inverse using the Montgomery batch trick. In SNARKs, since the  <span class="math">G_{i}</span>  are points from the proving key, this computation can be part of the Setup algorithm and do not impact the Prove algorithm. If the Setup ceremony is yet to be conducted, it can be performed directly with points in the twisted Edwards form.</p>
+
+    <p class="text-gray-300">Our implementation shows that an MSM instance of size  <span class="math">2^{16}</span>  on the BLS12-377 curve is  <span class="math">30\\%</span>  faster when the  <span class="math">\\mathbb{G}_i</span>  points are given on a tEd curve with the custom coordinates</p>
+
+    <p class="text-gray-300">Gautam Botrel and Youssef El Housni</p>
+
+    <p class="text-gray-300">compared to the Jacobian-extended-based version which takes points in affine coordinates on a  <span class="math">SW</span>  curve.</p>
+
+    <p class="text-gray-300">We implemented our algorithm in Go language. We've benchmarked the implementation against the arkworks Rust library [aC22], a widely used library in SNARK projects. We've chosen two different CPU architectures: a x86 z1d.large AWS machine (Intel Xeon Platinum 8151 CPU @ 3.40GHz) and a arm64 Samsung Galaxy A13 5G (Model SM-A136ULGDXAA with SoC MediaTek Dimensity 700 (MT6833)) running on Android 12 (API level 32).</p>
+
+    <p class="text-gray-300">We achieved a speed up of  <span class="math">40 - 47\\%</span>  for MSM instances of sizes ranging from  <span class="math">2^{8}</span>  to  <span class="math">2^{18}</span> .</p>
+
+    <p class="text-gray-300">The source code is available under MIT or Apache2 licenses at:</p>
+
+    <p class="text-gray-300">https://github.com/gbotrel/zprize-mobile-harness</p>
+
+    <p class="text-gray-300">Table 4: Comparison of the arkworks and our MSM instances of  <span class="math">2^{16}</span> <span class="math">\\mathbb{G}_1</span> -points on the BLS12-377 curve.</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Implementation</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Timing</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Curve form and coordinates system</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Parallelism?</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Precomputation?</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">2-NAF buckets?</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">arkworks</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">2309 ms</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">SW Jacobian (X,Y,Z)</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">✓</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">X</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">X</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Submission</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">509 ms</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">tEd (a = -1) Custom (X,Y,T)</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">✓</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">X</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">✓</td>
+
+          </tr>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">The speedup against arkworks comes from the algorithmic optimizations discussed in this paper and the bigint arithmetic optimizations.</p>
+
+    <p class="text-gray-300">Finite field arithmetic implementation on arm64. We use a Montgomery CIOS variant to handle the field multiplication (Details of the algorithms and proofs are in section 2).</p>
+
+    <p class="text-gray-300">The two inner loops (line 3 and line 9 in Alg. 2) have the same form. They perform one word  <span class="math">\\times</span>  word multiplication and two word  <span class="math">+</span>  word additions. These additions can overflow and the two distinct carry chains need to be propagated up to the last iteration.</p>
+
+    <p class="text-gray-300">For efficiency reasons, it is highly desirable to keep the carry in the CPU flag (i.e. avoid moving it to a register) between the additions.</p>
+
+    <p class="text-gray-300">On x86 architectures, we leverage the ADCX, ADOX and MULX instructions to efficiently handle the interleaved carry chains in the algorithm. ADCX and ADOX perform unsigned addition with carry using distinct CPU flags, while MULX performs unsigned multiply without affecting flags.</p>
+
+    <p class="text-gray-300">On arm64 architecture, we split the inner loops in two to ensure the carry propagation are uninterrupted. In the first part, we multiply and propagate the first carry from the 10 word. The large number of available registers (in practice 28 for arm64 against 14 for x86) allows us to store this intermediary result in registers.</p>
+
+    <p class="text-gray-300">In the second part, we propagate the second carry chain from the hi word.</p>
+
+    <p class="text-gray-300">The same technique is used for the squaring function - except we have three carry to propagate since we double the intermediate product (line 5 in Alg. 5).</p>
+
+    <p class="text-gray-300">The impact of these optimizations is  <span class="math">\\sim 17\\%</span>  for  <span class="math">\\mathbb{F}_p</span>  multiplication and  <span class="math">\\sim 25\\%</span>  for the squaring. For an ext-Jac MSM instance of size  <span class="math">2^{16}</span> , the timing was 821ms before these arm64 field arithmetic optimizations and 620ms after. For the tEd-custom version the speedup is only related to the  <span class="math">\\mathbb{F}_p</span> -multiplication since there are no squaring in the mixed addition. For this same version, we stored  <span class="math">(y - x, y + x)</span>  in the coordinates system instead of</p>
+
+    <p class="text-gray-300">E&amp;IMSM: Multi-Scalar-Multiplication for SNARKs and Faster Montgomery multiplication</p>
+
+    <p class="text-gray-300"><span class="math">(x,y)</span>  and added  <span class="math">\\sim 40</span>  lines of arm64 assembly for a small function in  <span class="math">\\mathbb{F}_p</span>  (Butterfly(a, b)  <span class="math">\\rightarrow</span>  a = a + b; b = a - b). The butterfly performance impact was  <span class="math">\\sim 5\\%</span> , as it speeds up the unified (mixed) addition in the tEd form.</p>
+
+    <p class="text-gray-300">We report in Figure 3 a comparison of our code to the arkworks baseline on the Samsung Galaxy A13 and in Figure 4 the comparison on the x86 AWS machine. We report timings of several MSM instances of different sizes (powers of 2) and with different curve parameterizations (SW in extended Jacobians vs. tEd ( <span class="math">a = -1</span> ) in custom/extended coordinates).</p>
+
+    <p class="text-gray-300">!<a href="img-6.jpeg">img-6.jpeg</a> Figure 3: Comparison of our MSM code and the arkworks one for different instances on the BLS12-377  <span class="math">\\mathbb{G}_1</span>  group on the Samsung Galaxy A13.</p>
+
+    <p class="text-gray-300">!<a href="img-7.jpeg">img-7.jpeg</a> Figure 4: Comparison of our MSM code and the arkworks one for different instances on the BLS12-377  <span class="math">\\mathbb{G}_1</span>  group on the x86 AWS machine.</p>
+
+    <p class="text-gray-300">For different sizes ranging from  <span class="math">2^{8}</span>  to  <span class="math">2^{18}</span>  the speed up is  <span class="math">40 - 47\\%</span>  with the tEd version and  <span class="math">20 - 35\\%</span>  with SW-extJac.</p>
+
+    <p class="text-gray-300">Multi-scalar-multiplication dominates the proving cost in most elliptic-curve-based SNARKs. Inner curves such as the BLS12-377 are optimized elliptic curves suitable for both proving generic-purpose statements and in particular for proving composition and recursive statements. Hence, it is critical to aggressively optimize the computation of MSM instances on these curves. We showed that our work yield a very fast implementation both when the points are given on a short Weierstrass curve and even more when the points are given on a twisted Edwards curve. We showed that this is always the case for inner curves such as BLS12-377 and that the conversion cost is a one-time computation that can be</p>
+
+    <p class="text-gray-300">performed in the Setup phase. We note that, more generally, these tricks apply to any elliptic curve that admits a twisted Edwards form — particularly SNARK-friendly 2-cycles of elliptic curves. We suggest that this should be taken into account at the design level of SNARK-friendly curves.</p>
+
+    <p class="text-gray-300">Open question: For the Groth16 SNARK <em>[x13]</em>, the same scalars <span class="math">a_{i}</span> are used for two MSMs on two different elliptic curves (<span class="math">\\mathbb{G}_{1}</span> and <span class="math">\\mathbb{G}_{2}</span> MSMs where these are the pairing groups <em>[x10, Chapter 2]</em>). We ask if it is possible to mutualize a maximum of computations between these two instances? It seems that moving to a type-2 pairing <em>[x15]</em> would allow to deduce the <span class="math">\\mathbb{G}_{1}</span> instance from the <span class="math">\\mathbb{G}_{2}</span> one using an efficient homomorphism over the resulting single point (the Trace map, cf. <em>[x10, Section 2.3.1]</em>). However, <span class="math">\\mathbb{G}_{2}</span> computations would be done on the much slower full extension <span class="math">\\mathbb{F}_{p^{k}}</span> (instead of <span class="math">\\mathbb{F}_{p^{k/d}}</span> where <span class="math">d</span> is the twist degree and <span class="math">k</span> the embedding degree of the curve). The pairing, needed for proof verification, would also be also slightly slower (using the anti-Trace map, cf. <em>[x10, Section 2.3.1]</em>).</p>
+
+    <h2 id="sec-27" class="text-2xl font-bold">References</h2>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>[aC22] arkworks Contributors. arkworks zkSNARK ecosystem. https://arkworks.rs, 2022.</li>
+
+      <li>[Aca98] Tolga Acar. High-Speed Algorithms and Architectures For Number-Theoretic Cryptosystems. PhD thesis, June 1998.</li>
+
+      <li>[AHG22] Diego F. Aranha, Youssef El Housni, and Aurore Guillevic. A survey of elliptic curves for proof systems. Cryptology ePrint Archive, Paper 2022/586, 2022. https://eprint.iacr.org/2022/586.</li>
+
+      <li>[BCG^{+}20] Sean Bowe, Alessandro Chiesa, Matthew Green, Ian Miers, Pratyush Mishra, and Howard Wu. ZEXE: Enabling decentralized private computation. pages 947–964, 2020.</li>
+
+      <li>[BCTV14] Eli Ben-Sasson, Alessandro Chiesa, Eran Tromer, and Madars Virza. Scalable zero knowledge via cycles of elliptic curves. LNCS, pages 276–294, 2014.</li>
+
+      <li>[BD21] Jean-Claude Bajard and Sylvain Duquesne. Montgomery-friendly primes and applications to cryptography. 11(4):399–415, November 2021.</li>
+
+      <li>[BDLO12] Daniel J. Bernstein, Jeroen Doumen, Tanja Lange, and Jan-Jaap Oosterwijk. Faster batch forgery identification. LNCS, pages 454–473, 2012.</li>
+
+      <li>[BGH19] Sean Bowe, Jack Grigg, and Daira Hopwood. Halo: Recursive proof composition without a trusted setup. Cryptology ePrint Archive, Report 2019/1021, 2019. https://eprint.iacr.org/2019/1021.</li>
+
+      <li>[BL22] Daniel Bernstein and Tanja Lange. Explicit-formulas database. https://www.hyperelliptic.org/EFD/, 2022.</li>
+
+      <li>[BLS03] Paulo S. L. M. Barreto, Ben Lynn, and Michael Scott. Constructing elliptic curves with prescribed embedding degrees. LNCS, pages 257–267, 2003.</li>
+
+      <li>[BM17] Joppe W. Bos and Peter L. Montgomery. Montgomery arithmetic from a software perspective. Cryptology ePrint Archive, Report 2017/1057, 2017. https://eprint.iacr.org/2017/1057.</li>
+
+      <li>[BY19] Daniel J. Bernstein and Bo-Yin Yang. Fast constant-time gcd computation and modular inversion. IACR Transactions on Cryptographic Hardware and Embedded Systems, 2019(3):340–398, May 2019.</li>
+
+    </ul>
+
+    <p class="text-gray-300">-</p>
+
+    <p class="text-gray-300">HAMSM: Multi-Scalar-Multiplication for SNARKs and Faster Montgomery multiplication</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>[Cos12] Craig Costello. Fast formulas for computing cryptographic pairings. PhD thesis, Queensland University of Technology, 2012.</li>
+
+      <li>[dR95] Peter de Rooij. Efficient exponentiation using procomputation and vector addition chains. LNCS, pages 389–399, 1995.</li>
+
+      <li>[EG20] Youssef El Housni and Aurore Guillevic. Optimized and secure pairing-friendly elliptic curves suitable for one layer proof composition. LNCS, pages 259–279, 2020.</li>
+
+      <li>[EG22] Youssef El Housni and Aurore Guillevic. Families of SNARK-friendly 2-chains of elliptic curves. LNCS, pages 367–396, 2022.</li>
+
+      <li>[GPS08] Steven D. Galbraith, Kenneth G. Paterson, and Nigel P. Smart. Pairings for cryptographers. Discrete Applied Mathematics, 156(16):3113–3121, 2008. Applications of Algebra to Cryptography.</li>
+
+      <li>[Gro16] Jens Groth. On the size of pairing-based non-interactive arguments. LNCS, pages 305–326, 2016.</li>
+
+      <li>[GWC19] Ariel Gabizon, Zachary J. Williamson, and Oana Ciobotaru. PLONK: Permutations over lagrange-bases for oecumenical noninteractive arguments of knowledge. Cryptology ePrint Archive, Report 2019/953, 2019. https://eprint.iacr.org/2019/953.</li>
+
+      <li>[Hop20] Daira Hopwood. The pasta curves for halo 2 and beyond. https://electriccoin.co/blog/the-pasta-curves-for-halo-2-and-beyond/, 2020.</li>
+
+      <li>[HWCD08] Hüseyin Hisil, Kenneth Koon-Ho Wong, Gary Carter, and Ed Dawson. Twisted Edwards curves revisited. LNCS, pages 326–343, 2008.</li>
+
+      <li>[Kos21] Dmitrii Koshelev. Batch point compression in the context of advanced pairing-based protocols. Cryptology ePrint Archive, Report 2021/1446, 2021. https://eprint.iacr.org/2021/1446.</li>
+
+      <li>[Mih07] Preda Mihailescu. Dual elliptic primes and applications to cyclotomy primality proving. arXiv 0709.4113, 2007.</li>
+
+      <li>[MO90] François Morain and Jorge Olivos. Speeding up the computations on an elliptic curve using addition-subtraction chains. RAIRO - Theoretical Informatics and Applications - Informatique Théorique et Applications, 24(6):531–543, 1990.</li>
+
+      <li>[Mon85] Peter L. Montgomery. Modular multiplication without trial division. Mathematics of Computation, 44(170):519–521, 1985.</li>
+
+      <li>[Pip76] Nicholas Pippenger. On the evaluation of powers and related problems (preliminary version). In 17th Annual Symposium on Foundations of Computer Science, Houston, Texas, USA, 25-27 October 1976, pages 258–263. IEEE Computer Society, 1976.</li>
+
+      <li>[Pol71] J. M. Pollard. The Fast Fourier Transform in a finite field. Math. Comp., 25(114):365–374, April 1971.</li>
+
+      <li>[Por20] Thomas Pornin. Optimized binary gcd for modular inversion. Cryptology ePrint Archive, Paper 2020/972, 2020. https://eprint.iacr.org/2020/972.</li>
+
+    </ul>
+
+    <p class="text-gray-300">Gautam Botrel and Youssef El Housni</p>
+
+    <p class="text-gray-300">[Sco07] Michael Scott. Implementing cryptographic pairings. In Proceedings of the First International Conference on Pairing-Based Cryptography, Pairing'07, pages 177-196, Berlin, Heidelberg, 2007. Springer-Verlag. [SS11] Joseph H. Silverman and Katherine E. Stange. Amicable Pairs and Aliquot Cycles for Elliptic Curves. Experimental Mathematics, 20(3):329 - 357, 2011. [Str64] Ernst G. Strauss. Addition chains of vectors (problem 5125). American Mathematical Monthly, 70(114):806-808, 1964.</p>
+
+    <p class="text-gray-300">The condition on the modulus differs, here</p>
+
+    <div class="my-4 text-center"><span class="math-block">p [ N - 1 ] \\leq \\frac {D - 1}{4} - 1.</span></div>
+
+    <p class="text-gray-300">However, the reasoning is similar to section 2 and we end up with Algorithm 5.</p>
+
+    <p class="text-gray-300">|  Algorithm 5: Our optimized CIOS Montgomery squaring Input: à = aR mod p Output: a2R mod p 1 for i = 0 to N - 1 do 2 C, t[i] = à[i] · à[i] + t[i]; 3 h = 0; 4 for j = i + 1 to N - 1 do 5 h, C, t[j] = 2à[j] · à[i] + t[j] + (h, C) 6 t[N] = C; 7 C = 0; 8 m = t[0] · p'[0]; 9 (C, _) = t[0] + p[0] · m; 10 for j = 1 to N - 1 do 11 C, t[j - 1] = p[j] · m + t[j] + C 12 t[N - 1] = t[N] + C; 13 t[N] = 0; 14 if t < p then 15 return t; // a2R mod p 16 else 17 return t - p; // a2R mod p  |   |</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">---</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">---</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>`;
+---
+
+<BaseLayout title="EdMSM: Multi-Scalar-Multiplication for SNARKs and Faster Mon... (2022/1400)">
+  <article class="max-w-4xl mx-auto article-prose">
+    <nav class="mb-8">
+      <a href="/papers" class="text-blue-400 hover:text-blue-300">
+        &larr; Back to Papers
+      </a>
+    </nav>
+
+    <header class="mb-12">
+      <h1 class="text-3xl font-bold mb-4"
+        set:html={TITLE_HTML} />
+      <p class="text-gray-400 mb-2"
+        set:html={AUTHORS_HTML} />
+      <p class="text-gray-500 text-sm mb-4">
+        2022 &middot; eprint 2022/1400
+      </p>
+      <div class="flex gap-4 text-sm">
+        <a
+          href={EPRINT_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          class="text-blue-400 hover:text-blue-300"
+        >
+          Paper (eprint) &rarr;
+        </a>
+      </div>
+      <p class="mt-4 text-xs text-gray-500">
+        All content below belongs to the original authors. This page
+        reproduces the paper for educational purposes. Always
+        <a
+          href={EPRINT_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          class="text-blue-400 hover:text-blue-300"
+        >cite the original</a>.
+      </p>
+      <p class="mt-1 text-xs text-gray-600">
+        Converted with: {CRAWLER} &middot; {CONVERTED_DATE}
+      </p>
+    </header>
+
+    <Fragment set:html={CONTENT} />
+
+  </article>
+</BaseLayout>

@@ -1,0 +1,2255 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+
+const EPRINT_URL = 'https://eprint.iacr.org/2012/232';
+const CRAWLER = 'marker';
+const CONVERTED_DATE = '2026-02-16';
+const TITLE_HTML = 'Implementing Pairings at the 192-bit Security Level';
+const AUTHORS_HTML = 'Diego F.  Aranha, Laura Fuentes-Castañeda, Edward Knapp, Alfred Menezes, Francisco Rodríguez-Henríquez';
+
+const CONTENT = `    <p class="text-gray-300">Diego F. Aranha<sup>1</sup> , Laura Fuentes-Casta˜neda<sup>2</sup> , Edward Knapp<sup>3</sup> , Alfred Menezes<sup>3</sup> , and Francisco Rodr´ıguez-Henr´ıquez<sup>2</sup></p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li><sup>1</sup> Department of Computer Science, University of Bras´ılia dfaranha@unb.br</li>
+
+      <li><sup>2</sup> CINVESTAV-IPN, Computer Science Department lfuentes@cs.cinvestav.mx, francisco@cs.cinvestav.mx <sup>3</sup> Department of Combinatorics & Optimization, University of Waterloo edward.m.knapp@gmail.com, ajmeneze@uwaterloo.ca</li>
+
+    </ul>
+
+    <p class="text-gray-300"><strong>Abstract.</strong> We implement asymmetric pairings derived from Kachisa-Schaefer-Scott (KSS), Barreto-Naehrig (BN), and Barreto-Lynn-Scott (BLS) elliptic curves at the 192-bit security level. Somewhat surprisingly, we find pairings derived from BLS curves with embedding degree 12 to be the fastest for our serial as well as our parallel implementations. Our serial implementations provide a factor-3 speedup over the previous state-of-the-art, demonstrating that pairing computation at the 192-bit security level is not as expensive as previously thought. We also present a general framework for deriving a Weil-type pairing that is well-suited for computing a single pairing on a multi-processor machine.</p>
+
+    <h3 id="sec-2" class="text-xl font-semibold mt-8"><strong>1 Introduction</strong></h3>
+
+    <p class="text-gray-300">Since the advent of pairing-based cryptography, researchers have been devising methods for constructing and efficiently implementing bilinear pairings. Initial work [5,12] was focused on implementing pairings at (roughly) the 80-bit security level. Koblitz and Menezes [19] highlighted the performance drawbacks of pairings at very high security levels. The subsequent discovery of Barreto-Naehrig (BN) elliptic curves [7], ideally suited for implementing pairings at the 128-bit security level, spurred a lot of research culminating in the implementation of Aranha et al. [2] that achieved speeds of under 2 million cycles for a 128-bit pairing computation on a single core of Phenom II, Core i5 and Opteron machines.</p>
+
+    <p class="text-gray-300">More recently, researchers have considered implementing pairings at even higher security levels. Costello, Lauter and Naehrig [9] argued that a certain family of embedding degree <em>k</em> = 24 Barreto-Lynn-Scott elliptic curves [6], henceforth called <em>BLS24</em> curves, are well-suited for implementing pairings at the 192, 224, 256, 288, and 320-bit security levels. Scott [28] implemented several pairing-based protocols using BN curves at the 128-bit security level, Kachisa-Schaefer-Scott (KSS) curves [17] with embedding degree <em>k</em> = 18 at the 192-bit security level, and BLS24 curves at the 256-bit security level. Scott concludes that the best choice of pairing to implement a particular protocol can depend on a variety of factors including the number and complexity of non-pairing operations in the protocol, the number of pairing computations that are required, and the applicability of several optimizations including fixed-argument pairings and products of pairings [27].</p>
+
+    <p class="text-gray-300">In this paper, we focus on fast implementations of a single pairing at the 192-bit security level. We chose the 192-bit level because it is the higher security level (the other is 128-bit) for public-key operations in the National Security Agency's Suite B Cryptography standard [23]. Moreover, as mentioned by Scott [28], the optimum choice of pairing-friendly curve for the 192-bit security level from the many available candidates [10] is not straightforward.</p>
+
+    <p class="text-gray-300">We examine a family of embedding degree k=12 elliptic curves, henceforth called BLS12 curves, first proposed by Barreto, Lynn and Scott [6] (see also [8]). Unlike BN curves, the BLS12 curves are not ideal for the 128-bit security level since the group order  <span class="math">\\#E(\\mathbb{F}_p)</span>  is not prime. Nevertheless, our careful estimates and implementation results demonstrate that they outperform KSS, BN and BLS24 curves at the 192-bit security level. We also present a general framework for deriving analogues of the  <span class="math">\\beta</span>  Weil pairing, first presented in [3] for BN curves. This pairing is well-suited for computing a single pairing on a multi-processor machine since it avoids the relatively-costly final exponentiation that cannot be effectively parallelized and is present in all Tate-type pairings.</p>
+
+    <p class="text-gray-300">The remainder of the paper is organized as follows. The salient parameters of KSS, BN, BLS12 and BLS24 curves are presented in §2. In §3, we review Vercauteren's notion of an optimal pairing and present the  <span class="math">\\beta</span>  Weil pairing. The cost of the BLS12, KSS, BN and BLS24 pairings are estimated in §4, §5, §6 and §7, respectively. Finally, §8 compares the estimated speeds of the four pairings and reports on our implementation. Our results show a significant performance improvement over the previous state-of-the-art for serial pairing implementation of the optimal ate pairing at the 192-bit security level, and an increased scalability of the  <span class="math">\\beta</span>  Weil pairing in relation to the optimal ate pairing.</p>
+
+    <h4 id="sec-3" class="text-lg font-semibold mt-6">2 Pairing-friendly elliptic curves</h4>
+
+    <p class="text-gray-300">Let p be a prime, and let E be an elliptic curve defined over the finite field  <span class="math">\\mathbb{F}_p</span> . Let r be a prime with  <span class="math">r \\mid \\#E(\\mathbb{F}_p)</span>  and  <span class="math">\\gcd(r,p) = 1</span> . The <em>cofactor</em> is  <span class="math">\\rho = \\log p / \\log r</span> . The <em>embedding degree</em> k is the smallest positive integer with  <span class="math">r \\mid (p^k - 1)</span> . We will assume that k is even, whence k > 1 and  <span class="math">E[r] \\subseteq E(\\mathbb{F}_{p^k})</span> .</p>
+
+    <p class="text-gray-300">Let  <span class="math">\\pi:(x,y)\\mapsto (x^p,y^p)</span>  be the p-th power Frobenius endomorphism. The trace of the Frobenius is  <span class="math">t=p+1-\\#E(\\mathbb{F}_p)</span> . Let  <span class="math">\\mathbb{G}_1=\\{P\\in E[r]:\\pi(P)=P\\}=E(\\mathbb{F}_p)[r];\\mathbb{G}_1</span>  is the 1-eigenspace of  <span class="math">\\pi</span>  acting on E[r]. Let d be the order of the automorphism group of E, and suppose that  <span class="math">d\\mid k</span> . Let e=k/d and  <span class="math">q=p^e</span> . Then there is a unique degree-d twist  <span class="math">\\tilde{E}</span>  of E over  <span class="math">\\mathbb{F}_q</span>  with  <span class="math">r\\mid \\#\\tilde{E}(\\mathbb{F}_q)</span>  [16]; let  <span class="math">\\Psi:\\tilde{E}\\to E</span>  be the associated twisting isomorphism. Let  <span class="math">\\tilde{Q}\\in \\tilde{E}(\\mathbb{F}_q)</span>  be a point of order r; then  <span class="math">Q=\\Psi(\\tilde{Q})\\not\\in E(\\mathbb{F}_p)</span> . The group  <span class="math">\\mathbb{G}_2=\\langle Q\\rangle</span>  is the p-eigenspace of  <span class="math">\\pi</span>  acting on E[r]. Let  <span class="math">\\mathbb{G}_T</span>  denote the order-r subgroup of  <span class="math">\\mathbb{F}_{n^k}^*</span> . The pairings we</p>
+
+    <p class="text-gray-300">study in this paper are non-degenerate bilinear maps from  <span class="math">\\mathbb{G}_1 \\times \\mathbb{G}_2</span>  to  <span class="math">\\mathbb{G}_T</span>  and are called Type 3 pairings in the literature [13].</p>
+
+    <p class="text-gray-300">Table 1 summarizes the salient parameters of the KSS [17], BN [7], BLS12 [6] and BLS24 [6] families of elliptic curves. All these curves are parameterized by a positive integer z, are defined by an equation of the form  <span class="math">Y^2 = X^3 + b</span> , and have a twist of order d = 6. Table 2 lists the important parameters of the particular KSS, BN, BLS12 and BLS24 curves that are suitable for implementing pairing-based protocols at the 192-bit security level. The requirements for this security level are that the bitlength of r be at least 384 (in order to resist Pollard's rho attack [25] on the discrete logarithm problem in  <span class="math">\\mathbb{G}_1</span> ), and that the bitlength of  <span class="math">p^k</span>  should be at least 7680 (in order to resist the number field sieve attack [26] on the discrete logarithm problem in  <span class="math">\\mathbb{F}_{p^k}^*</span> ).</p>
+
+    <pre><code class="language-text">KSS curves: k = 18, \\rho \\approx 4/3
+
+p(z) = (z^8 + 5z^7 + 7z^6 + 37z^5 + 188z^4 + 259z^3 + 343z^2 + 1763z + 2401)/21
+
+r(z) = (z^6 + 37z^3 + 343)/343, t(z) = (z^4 + 16z + 7)/7
+
+BN curves: k = 12, \\rho \\approx 1
+
+p(z) = 36z^4 + 36z^3 + 24z^2 + 6z + 1
+
+r(z) = 36z^4 + 36z^3 + 18z^2 + 6z + 1, t(z) = 6z^2 + 1
+
+BLS12 curves: k = 12, \\rho \\approx 1.5
+
+p(z) = (z - 1)^2(z^4 - z^2 + 1)/3 + z, r(z) = z^4 - z^2 + 1, t(z) = z + 1
+
+BLS24 curves: k = 24, \\rho \\approx 1.25
+
+p(z) = (z - 1)^2(z^8 - z^4 + 1)/3 + z, r(z) = z^8 - z^4 + 1, t(z) = z + 1</code></pre>
+
+    <p class="text-gray-300">Table 1. Important parameters for the KSS, BN, BLS12 and BLS24 families.</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Curve</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">b</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">k</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">z</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"><span class="math">\\lceil \\log_2 p \\rceil</span></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"><span class="math">\\lceil \\log_2 r \\rceil</span></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">ρ</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"><span class="math">\\lceil \\log_2 q \\rceil</span></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"><span class="math">\\lceil \\log_2 p^k \\rceil</span></th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">KSS</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">2</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">18</td>
+
+            <td class="px-3 py-2 border-b border-gray-700"><span class="math">-2^{64} - 2^{51} + 2^{46} + 2^{12}</span></td>
+
+            <td class="px-3 py-2 border-b border-gray-700">508</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">376</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1.35</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1523</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">9137</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">BN</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">5</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">12</td>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+            <td class="px-3 py-2 border-b border-gray-700">638</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">638</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1275</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">7647</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">BLS12</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">4</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">12</td>
+
+            <td class="px-3 py-2 border-b border-gray-700"><span class="math">-2^{107} + 2^{105} + 2^{93} + 2^{5}</span></td>
+
+            <td class="px-3 py-2 border-b border-gray-700">638</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">427</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1.49</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1276</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">7656</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">BLS24</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">4</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">24</td>
+
+            <td class="px-3 py-2 border-b border-gray-700"><span class="math">-2^{48} + 2^{45} + 2^{31} - 2^7</span></td>
+
+            <td class="px-3 py-2 border-b border-gray-700">477</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">383</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1.25</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1914</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">11482</td>
+
+          </tr>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">Table 2. Important parameters for the chosen KSS, BN, BLS12, BLS24 curves.</p>
+
+    <h4 id="sec-4" class="text-lg font-semibold mt-6">3 Optimal pairings</h4>
+
+    <p class="text-gray-300">Let  <span class="math">R \\in E(\\mathbb{F}_{p^k})</span>  and let s be a non-negative integer. A Miller function  <span class="math">f_{s,R}</span>  [22] of length s is a function in  <span class="math">\\mathbb{F}_{p^k}(E)</span>  with divisor  <span class="math">(f_{s,R}) = s(R) - (sR) - (s-1)(\\infty)</span> . Note that  <span class="math">f_{s,R}</span>  is uniquely defined up to multiplication by nonzero constants in  <span class="math">\\mathbb{F}_{p^k}</span> . The length s of a Miller function determines the number  <span class="math">\\lfloor \\log_2 s \\rfloor</span>  of doubling steps, and the Hamming weight of s determines the number of addition steps in Miller's algorithm for computing  <span class="math">f_{s,R}</span>  [22]. We will always assume that Miller</p>
+
+    <p class="text-gray-300">functions are minimally defined; that is, if  <span class="math">R \\in E(\\mathbb{F}_{p^{\\ell}})</span> , then  <span class="math">f_{s,R}</span>  is selected from the function field  <span class="math">\\mathbb{F}_{p^{\\ell}}(E)</span> .</p>
+
+    <p class="text-gray-300">The optimal ate pairing. Vercauteren's optimal pairing framework [30] allows one to compute a pairing using Miller functions each of length approximately  <span class="math">(1/\\varphi(k)) \\log r</span> .</p>
+
+    <p class="text-gray-300">For a point  <span class="math">R \\in E[r]</span>  and polynomial  <span class="math">h = \\sum h_i x^i \\in \\mathbb{Z}[x]</span>  such that  <span class="math">h(s) \\equiv 0 \\pmod{r}</span> , define the extended Miller function  <span class="math">f_{s,h,R}</span>  to be the normalized rational function with divisor</p>
+
+    <div class="my-4 text-center"><span class="math-block">\\sum_{i=0}^{\\deg h} h_i[(s^i R) - (\\infty)].</span></div>
+
+    <p class="text-gray-300">The length of the extended Miller function  <span class="math">f_{s,h,R}</span>  is the maximum of the absolute values of the  <span class="math">h_i</span> 's. Observing that  <span class="math">f_{s,h_1,R} \\cdot f_{s,h_2,R} = f_{s,h_1+h_2,R}</span>  and the polynomials h(x) = r,  <span class="math">h(x) = x^i - p^i</span>  satisfy the congruence condition with s = p, we desire elements in the following lattice which have small coefficients:</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">$$\\left[ \\frac{r(z) \\, \\middle</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\, \\mathbf{0}}{\\mathbf{v} \\, \\middle</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">I_{\\varphi(k)-1}} \\right],$$</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">where <strong>v</strong> is the column vector with <em>i</em>-th entry  <span class="math">-p(z)^i</span> . This leads to the following result of Vercauteren's.</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"><strong>Theorem 1 ([30]).</strong> There exists h such that  $</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">h_i</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\leq r^{1/\\varphi(k)}<span class="math">  and  </span>(P,Q) \\mapsto f_{p,h,Q}(P)^{(p^k-1)/r}$  is a pairing.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">For parameterized curves, the function  <span class="math">f_{p,h,Q}</span>  where  $</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">h_i</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\leq r^{1/\\varphi(k)}<span class="math">  can be computed as a product of Miller functions each having length approximately  </span>(1/\\varphi(k)) \\log r<span class="math"> . Optimal ate pairings for KSS [30], BN [30], BLS12 [16] and BLS24 [16] curves are given in Table 3. In the table,  </span>\\ell_{S,T}$  denotes the line through points S and T.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Curve</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Optimal ate pairing: <span class="math">(P,Q) \\mapsto</span></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">h(x)</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">KSS</td>
+
+            <td class="px-3 py-2 border-b border-gray-700"><span class="math">(f_{z,Q} \\cdot f_{3,Q}^p \\cdot \\ell_{z[Q],[3p]Q}(P))^{(p^{18}-1)/r}</span></td>
+
+            <td class="px-3 py-2 border-b border-gray-700"><span class="math">z + 3x - x^4</span></td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">BN</td>
+
+            <td class="px-3 py-2 border-b border-gray-700"><span class="math">\\left(f_{6z+2,Q} \\cdot \\ell_{[6z+2]Q,[p]Q} \\cdot \\ell_{[6z+2+p]Q,[-p^2]Q}(P)\\right)^{(p^{12}-1)/r}</span></td>
+
+            <td class="px-3 py-2 border-b border-gray-700"><span class="math">6z + 2 + x - x^2 + x^3</span></td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">BLS12</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">( 12 1) (</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">z-x</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">BLS24</td>
+
+            <td class="px-3 py-2 border-b border-gray-700"><span class="math">(f_{z,Q}(P))^{(p^{24}-1)/r}</span></td>
+
+            <td class="px-3 py-2 border-b border-gray-700">z-x</td>
+
+          </tr>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">Table 3. Optimal ate pairings.</p>
+
+    <p class="text-gray-300">The  <span class="math">\\beta</span>  Weil pairing. Set k = ed, where d is the order of the automorphism group of E. Define  <span class="math">w_s</span>  and  <span class="math">w_{s,h}</span>  as</p>
+
+    <p class="text-gray-300"><span class="math-block">w_s(P,Q) = \\left(\\frac{f_{s,Q}(P)}{f_{s,P}(Q)}\\right)^{p^{k/2}-1}</span>  and  <span class="math">w_{s,h}(P,Q) = \\left(\\frac{f_{s,h,Q}(P)}{f_{s,h,P}(Q)}\\right)^{p^{k/2}-1}</span> . (1)</p>
+
+    <p class="text-gray-300">Hess [15] gave a framework for computing <em>optimal Weil</em> pairings, building on the methods of Vercauteren as expressed in Theorem 1.</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"><strong>Theorem 2 (Theorem 1 in [15]).</strong> There exists h such that  $</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">h_i</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\leq r^{1/2}<span class="math">  and  </span>w_{p^e,h}$  is a pairing.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">The pairing  <span class="math">w_{p^e,h}</span>  with  $</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">h_i</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\leq r^{1/2}<span class="math">  can be computed using two extended Miller functions of length approximately  </span>\\frac{1}{2}\\log r<span class="math"> . We present a framework for constructing Weil-type pairings, called  </span>\\beta<span class="math">  pairings, which can be computed using 2e extended Miller functions each of length approximately  </span>(1/\\varphi(k))\\log r<span class="math"> . In particular, we prove that for a polynomial h for which  </span>h(p) \\equiv 0 \\pmod{r}$ , the following is a pairing:</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="my-4 text-center"><span class="math-block">\\beta \\colon \\mathbb{G}_1 \\times \\mathbb{G}_2 \\to \\mathbb{G}_T : (P, Q) \\mapsto \\prod_{i=0}^{e-1} w_{p,h}([p^i]P, Q)^{p^{e-1-i}}. \\tag{2}</span></div>
+
+    <p class="text-gray-300">To establish that (2) is a pairing, we require a few technical lemmas, building on the work of Hess and Vercauteren. Lemma 1 gives a pairing which is the product of Weil pairings consisting of Miller functions having ate-like lengths.</p>
+
+    <p class="text-gray-300"><strong>Lemma 1.</strong> For all positive integers s, the following map from  <span class="math">\\mathbb{G}_1 \\times \\mathbb{G}_2</span>  to  <span class="math">\\mathbb{G}_T</span>  is a pairing:</p>
+
+    <div class="my-4 text-center"><span class="math-block">(P,Q) \\mapsto \\left( \\prod_{i=0}^{e-1} \\left( \\frac{f_{p^s,[p^i]Q}(P)}{f_{p^s,[p^i]P}(Q)} \\right)^{p^{e-1-i}} \\right)^{p^{k/2}-1}.</span></div>
+
+    <p class="text-gray-300"><em>Proof.</em> It follows from Theorem 1 of [15] that the map</p>
+
+    <div class="my-4 text-center"><span class="math-block">(P,Q) \\mapsto \\left(\\frac{f_{p^e,Q}(P)}{f_{p^e,P}(Q)}\\right)^{p^{k/2}-1}</span></div>
+
+    <p class="text-gray-300">is a pairing. Using Lemma 3(ii), one can see that</p>
+
+    <div class="my-4 text-center"><span class="math-block">f_{p^e,P} = \\prod_{i=0}^{e-1} (f_{p,[p^i]P})^{p^{e-1-i}}.</span></div>
+
+    <p class="text-gray-300">Hence, the result holds for s = 1.</p>
+
+    <p class="text-gray-300">Since</p>
+
+    <div class="my-4 text-center"><span class="math-block">f_{p^s,P} = \\prod_{i=0}^{s-1} (f_{p,[p^j]P})^{p^{s-1-j}},</span></div>
+
+    <p class="text-gray-300">we have that</p>
+
+    <div class="my-4 text-center"><span class="math-block">\\begin{split} \\prod_{i=0}^{e-1} (f_{p^s,[p^i]P})^{p^{e-1-i}} &amp;= \\prod_{i=0}^{e-1} \\left( \\prod_{j=0}^{s-1} (f_{p,[p^i][p^j]P})^{p^{s-1-j}} \\right)^{p^{e-1-i}} \\\\ &amp;= \\prod_{j=0}^{s-1} \\left( \\prod_{i=0}^{e-1} (f_{p,[p^i]([p^j]P)})^{p^{e-1-i}} \\right)^{p^{s-1-j}} \\\\ &amp;= \\prod_{i=0}^{s-1} \\left( f_{p^e,[p^j]P} \\right)^{p^{s-1-j}} . \\end{split}</span></div>
+
+    <p class="text-gray-300">From this, we can observe that</p>
+
+    <p class="text-gray-300"><span class="math-block">\\left(\\prod_{i=0}^{e-1} \\left(\\frac{f_{p^s,[p^i]Q}(P)}{f_{p^s,[p^i]P}(Q)}\\right)^{p^{e-1-i}}\\right)^{p^{k/2}-1} = \\left(\\prod_{i=0}^{s-1} \\left(\\frac{f_{p^e,[p^i]Q}(P)}{f_{p^e,[p^i]P}(Q)}\\right)^{p^{s-1-i}}\\right)^{p^{k/2}-1}.</span>  (3)</p>
+
+    <p class="text-gray-300">By Lemma 6 of [14], the map  <span class="math">(P,Q) \\mapsto f_{p^e,Q}(P)</span>  is a pairing. Thus, the right hand side of (3) is a product of pairings.  <span class="math">\\square</span></p>
+
+    <p class="text-gray-300">The next lemma relates the previous pairing to the Weil pairing notation defined in (1).</p>
+
+    <p class="text-gray-300"><strong>Lemma 2.</strong> The following identity holds for all positive integers s:</p>
+
+    <div class="my-4 text-center"><span class="math-block">\\left(\\prod_{i=0}^{e-1} \\left(\\frac{f_{p^s,[p^i]Q}(P)}{f_{p^s,[p^i]P}(Q)}\\right)^{p^{e-1-i}}\\right)^{p^{k/2}-1} = \\prod_{i=0}^{e-1} w_{p^s}([p^i]P,Q)^{p^{e-1-i}}.</span></div>
+
+    <p class="text-gray-300"><em>Proof.</em> By Lemma 6 of [14], the map  <span class="math">(P,Q) \\mapsto f_{p^s,Q}(P)</span>  is a pairing and so</p>
+
+    <div class="my-4 text-center"><span class="math-block">\\left(\\prod_{i=0}^{e-1} \\left(\\frac{f_{p^s,[p^i]Q}(P)}{f_{p^s,[p^i]P}(Q)}\\right)^{p^{e-1-i}}\\right)^{p^{k/2}-1} = \\left(\\prod_{i=0}^{e-1} \\left(\\frac{f_{p^s,Q}([p^i]P)}{f_{p^s,[p^i]P}(Q)}\\right)^{p^{e-1-i}}\\right)^{p^{k/2}-1} \\\\ = \\prod_{i=0}^{e-1} w_{p^s}([p^i]P,Q)^{p^{e-1-i}}. \\quad \\square</span></div>
+
+    <p class="text-gray-300">Finally, using the pairing relation from Lemma 2, we can obtain a pairing composed of Miller functions each with Vercauteren-style bound on the length.</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"><strong>Theorem 3.</strong> There exists h such that  $</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">h_i</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\leq r^{1/\\varphi(k)}$  and the following is a pairing:</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="my-4 text-center"><span class="math-block">\\beta \\colon \\mathbb{G}_1 \\times \\mathbb{G}_2 \\to \\mathbb{G}_T \\colon (P,Q) \\mapsto \\prod_{i=0}^{e-1} w_{p,h}([p^i]P,Q)^{p^{e-1-i}}.</span></div>
+
+    <p class="text-gray-300"><em>Proof.</em> Let  <span class="math">h(x) = \\sum_{i=0}^{c} h_i x^i</span>  be given by Vercauteren's theorem and let h(p) = rm. Since</p>
+
+    <div class="my-4 text-center"><span class="math-block">f_{r,P}^{m} = f_{p,h,P} \\cdot \\prod_{j=0}^{c} f_{p^{j},P}^{h_{j}},</span></div>
+
+    <p class="text-gray-300">we have that</p>
+
+    <div class="my-4 text-center"><span class="math-block">w_r(P,Q)^m = w_{p,h}(P,Q) \\cdot \\prod_{j=0}^c w_{p^j}(P,Q)^{h_j}.</span></div>
+
+    <p class="text-gray-300">Hence</p>
+
+    <div class="my-4 text-center"><span class="math-block">\\prod_{i=0}^{e-1} w_{p,h}([p^i]P,Q)^{p^{e-1-i}} = \\prod_{i=0}^{e-1} \\left( w_r([p^i]P,Q)^m \\cdot \\prod_{j=0}^c w_{p^j}([p^i]P,Q)^{-h_j} \\right)^{p^{e-1-i}} \\\\ = \\prod_{i=0}^{e-1} w_r([p^i]P,Q)^{mp^{e-1-i}} \\cdot \\prod_{j=0}^c \\left( \\prod_{i=0}^{e-1} w_{p^j}([p^i]P,Q)^{p^{e-1-i}} \\right)^{-h_j},</span></div>
+
+    <p class="text-gray-300">which by Lemmas 1 and 2 is a product of pairings.  <span class="math">\\Box</span></p>
+
+    <p class="text-gray-300">Using Theorem 3 and the polynomials h from Table 3, we found that the  <span class="math">\\beta</span>  Weil pairings for BN, BLS12, KSS and BLS24 curves can be defined as follows:</p>
+
+    <div class="my-4 text-center"><span class="math-block">KSS: (P,Q) \\mapsto \\left[ \\left( \\frac{f_{p,h,P}(Q)}{f_{p,h,Q}(P)} \\right)^{p^2} \\left( \\frac{f_{p,h,[p]P}(Q)}{f_{p,h,Q}([p]P)} \\right)^{p} \\frac{f_{p,h,[p^2]P}(Q)}{f_{p,h,Q}([p^2]P)} \\right]^{(p^9-1)(p^3+1)}, \\tag{4}</span></div>
+
+    <p class="text-gray-300">BN: <span class="math-block">(P,Q) \\mapsto \\left[ \\left( \\frac{f_{p,h,P}(Q)}{f_{p,h,Q}(P)} \\right)^p \\frac{f_{p,h,[p]P}(Q)}{f_{p,h,Q}([p]P)} \\right]^{(p^6-1)(p^2+1)},</span>  (5)</p>
+
+    <p class="text-gray-300">BLS12: <span class="math-block">(P,Q) \\mapsto \\left[ \\left( \\frac{f_{z,P}(Q)}{f_{z,Q}(P)} \\right)^p \\frac{f_{z,[p]P}(Q)}{f_{z,Q}([p]P)} \\right]^{(p^6-1)(p^2+1)},</span>  (6)</p>
+
+    <div class="my-4 text-center"><span class="math-block">BLS24: (P,Q) \\mapsto \\left[ \\frac{f_{z,P}^{p^{3}}(Q) \\cdot f_{z,[p]P}^{p^{2}}(Q) \\cdot f_{z,[p^{2}]P}(Q) \\cdot f_{z,[p^{3}]P}(Q)}{f_{z,Q}^{p^{3}}(P) \\cdot f_{z,Q}^{p^{2}}([p]P) \\cdot f_{z,Q}^{p}([p^{2}]P) \\cdot f_{z,Q}([p^{3}]P)} \\right]^{(p^{12}-1)(p^{4}+1)}</span></div>
+
+    <div class="my-4 text-center"><span class="math-block">(7)</span></div>
+
+    <p class="text-gray-300">For all four  <span class="math">\\beta</span>  Weil pairings, computing [p]P has approximately the same cost as computing [z]P.</p>
+
+    <p class="text-gray-300">Parallelization of pairings. Given two processors, the Weil pairing can be trivially parallelized since the numerator and denominator of the Weil pairing are independent operations. The ate pairing requires two serial operations, the Miller loop and the final exponentiation. The next lemma can be used to parallelize the computation of the Miller loop. We know of no way to parallelize the final exponentiation.</p>
+
+    <p class="text-gray-300"><strong>Lemma 3.</strong> Let a and b be non-negative integers, and let  <span class="math">R \\in E(\\mathbb{F}_{q^k})</span> . Then (i)  <span class="math">f_{a+b,R} = f_{a,R} \\cdot f_{b,R} \\cdot \\ell_{[a]R,[b]R}/v_{[a+b]R}</span> , where  <span class="math">v_P</span>  denotes the vertical line through P; and (ii)  <span class="math">f_{ab,R} = f_{a,R}^b \\cdot f_{a,[b]R}</span> .</p>
+
+    <p class="text-gray-300">The method of Aranha et al. [4] for parallelizing the computation of a Miller function  <span class="math">f_{s,R}</span>  is the following. We first write  <span class="math">s = 2^w s_1 + s_0</span>  with  <span class="math">s_0 &lt; 2^w</span> . Applying Lemma 3, we obtain</p>
+
+    <p class="text-gray-300"><span class="math-block">f_{s,R} = f_{s_1,R}^{2^w} \\cdot f_{2^w,[s_1]R} \\cdot f_{s_0,R} \\cdot \\ell_{[2^w s_1]R,[s_0]R} / v_{[s]R}.</span> (8)</p>
+
+    <p class="text-gray-300">If  <span class="math">s_0</span>  is small, then the Miller function  <span class="math">f_{s_0,R}</span>  can be computed relatively cheaply. Thus the computation of  <span class="math">f_{s,R}</span>  can be parallelized by computing  <span class="math">f_{s_1,R}^{2^w}</span>  on one processor and  <span class="math">f_{2^w,[s_1]R}</span>  on a second processor. The parameter w should be carefully selected in order to balance the time of the two function computations. The relevant criteria for selecting w include the Hamming weight of  <span class="math">s_1</span>  (which determines the number of additions in the Miller loop for the first function), and the cost of the w-fold squaring in the first function relative to the cost of computing  <span class="math">s_1R</span>  in the second function. This idea can be extended to c processors by writing  <span class="math">s = 2^{w_{c-1}} s_{c-1} + \\cdots + 2^{w_1} s_1 + s_0</span> .</p>
+
+    <p class="text-gray-300">Remark 1. (unsuitability of composite-order BN curves) Consider a BN curve at the 192-bit security level. For such a curve, we desire a (sparse) BN parameter z of approximately 160 bits. From the optimal pairing framework, we choose a suitable vector [2z, z+1, -z, z] corresponding to the following pairing (with the final exponentiation omitted):</p>
+
+    <div class="my-4 text-center"><span class="math-block">(P,Q) \\mapsto f_{2z,Q} \\cdot f_{z+1,Q}^p \\cdot f_{z,Q}^{-p^2} \\cdot f_{z,Q}^{p^3} \\cdot \\ell_{[-zp^2]Q,[zp^3]Q} \\cdot \\ell_{[p(z+1)]Q,[-zp^2+zp^3]Q}(P).</span></div>
+
+    <p class="text-gray-300">Computation of the lines is relatively inexpensive. However, at first, it appears one must evaluate multiple Miller functions. Fortunately, for parameterized curves, one can (usually) rearrange terms such that the computational bottleneck is  <span class="math">f_{z,Q}</span>  with only a few lines comprising the remaining computation. In the above case, we obtain</p>
+
+    <div class="my-4 text-center"><span class="math-block">(P,Q) \\mapsto f_{z,Q}^{2+p-p^2+p^3} \\cdot \\ell_{[z]Q,[z]Q} \\cdot \\ell_{[zp]Q,[p]Q} \\cdot \\ell_{[-zp^2]Q,[zp^3]Q} \\cdot \\ell_{[p(z+1)]Q,[-zp^2+zp^3]Q}(P).</span></div>
+
+    <p class="text-gray-300">At the 192-bit security level, we require that r have a prime divisor of at least 384 bits. We can easily choose r to be (a 640-bit) prime. However, given that the optimal pairing framework gives a maximum Miller length of around  <span class="math">(\\log n)/4</span>  for BN curves where n is a large prime divisor of r, we should be tempted to choose r with a 384-bit prime divisor. The fact that the coordinates of the vector [2z, z+1, -z, z] have small coefficients when written in base z allowed us to write the pairings as a power of  <span class="math">f_{z,Q}</span>  multiplied by a few lines. However, for composite values of r, the vector with 96-bit elements which we obtain from the optimal pairing framework does not, in general, have coordinates which we can relate to each other. We would therefore require approximately 4 independent Miller functions, negating most of the benefit of computing an optimal pairing, rather</p>
+
+    <p class="text-gray-300">than the Tate pairing. The possibility of choosing a vector whose elements are part of a short addition chain may still exist but the vectors produced by the LLL algorithm [21] do not appear to maintain such structure. Thus, composite-order BN curves would appear to yield inferior performance compared to prime-order BN curves.</p>
+
+    <p class="text-gray-300">In this section, we consider the BLS12 curve <em>Y</em> <sup>2</sup> = <em>X</em><sup>3</sup> + 4 defined with the parameter selection <em>z</em> = <em>−</em>2 <sup>107</sup> + 2<sup>105</sup> + 2<sup>93</sup> + 2<sup>5</sup> which yields a 638-bit prime <em>p</em> and a 427-bit prime <em>r</em>.</p>
+
+    <p class="text-gray-300"><strong>Extension field arithmetic for pairings with k</strong> = <strong>12.</strong> A tower extension for F<em>p</em><sup>12</sup> can be constructed as follows:</p>
+
+    <div class="my-4 text-center"><span class="math-block">\\mathbb{F}_{p^2} = \\mathbb{F}_p[u]/(u^2 - \\beta), \\text{ where } \\beta \\in \\mathbb{F}_p, \\mathbb{F}_{p^6} = \\mathbb{F}_{p^2}[v]/(v^3 - \\xi), \\text{ where } \\xi \\in \\mathbb{F}_{p^2}, \\text{ and} \\mathbb{F}_{p^{12}} = \\mathbb{F}_{p^6}[w]/(w^2 - \\gamma), \\text{ where } \\gamma \\in \\mathbb{F}_{p^6}.</span></div>
+
+    <p class="text-gray-300">For our choice of parameters, we have the optimal <em>β</em> = <em>−</em>1, <em>ξ</em> = <em>u</em> + 1, <em>γ</em> = <em>v</em>. Table 4 gives the computational costs of the tower extension field arithmetic for curves with <em>k</em> = 12 in terms of a 640-bit multiplication (<em>m</em>640) and inversion (<em>i</em>640) in F<em>p</em>, with <em>p</em> a 638-bit prime.<sup>1</sup> The cost of additions is ignored because of their lower overall performance impact due to the larger field size in comparison with [2,24]. Moreover, ˜<em>m</em>, ˜<em>s</em>, ˜<em>ı</em> denote the cost of multiplication, squaring and inversion in F<em>p</em><sup>2</sup> respectively.<sup>2</sup> G<em><sup>Φ</sup></em>6(<em>p</em>2) denotes the order-<em>Φ</em>6(<em>p</em> 2 ) subgroup of F <em>∗ <sup>p</sup></em><sup>12</sup> , where <em>Φ<sup>k</sup></em> denotes the <em>k</em>-th cyclotomic polynomial.</p>
+
+    <p class="text-gray-300"><strong>Miller loop.</strong> For the parameter selection <em>z</em> = <em>−</em>2 <sup>107</sup> + 2<sup>105</sup> + 2<sup>93</sup> + 2<sup>5</sup> , the Miller loop computation of <em>fz,Q</em> requires 107 point doublings and associated line evaluations, 3 point additions with line evaluations, 109 sparse multiplications, and 106 squarings in F<em>p</em><sup>12</sup> . The computational costs of these operations can be found in [2, Table 1]. We obtain a BLS12 Miller loop cost of 107(3 ˜<em>m</em> + 6˜<em>s</em> + 4<em>m</em>640)+3(11 ˜<em>m</em>+2˜<em>s</em>+4<em>m</em>640)+109(13 ˜<em>m</em>)+106(12 ˜<em>m</em>) = 3043 ˜<em>m</em>+648˜<em>s</em>+440<em>m</em><sup>640</sup> = 10865<em>m</em>640.</p>
+
+    <p class="text-gray-300"><strong>Final exponentiation.</strong> The final exponentiation consists of raising the Miller loop result <em>f ∈</em> F<em>p<sup>k</sup></em> to the <em>e</em> = (<em>p <sup>k</sup> −</em>1)<em>/r</em>-th power. This task can be broken into two parts since</p>
+
+    <div class="my-4 text-center"><span class="math-block">e = (p^k - 1)/r = [(p^k - 1)/\\Phi_k(p)] \\cdot [\\Phi_k(p)/r].</span></div>
+
+    <p class="text-gray-300">Computing <em>f</em> (<em>p <sup>k</sup>−</em>1)<em>/Φk</em>(<em>p</em>) is considered easy, costing only a few multiplications, inversions, and inexpensive <em>p</em>-th powerings in F<em>p<sup>k</sup></em> . Raising to the power <em>d</em> =</p>
+
+    <p class="text-gray-300"><sup>1</sup> In the case of software implementation, this selection of the size of <em>p</em> facilitates the usage of <em>lazy reduction</em> techniques as recommended in [2,24].</p>
+
+    <p class="text-gray-300"><sup>2</sup> For further details on how these costs were deduced, the reader is referred to [2,24].</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Field</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Mult.</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Squaring</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Inversion</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700"><span class="math">\\mathbb{F}_{p^2}</span></td>
+
+            <td class="px-3 py-2 border-b border-gray-700"><span class="math">\\tilde{m} = 3m_{640}</span></td>
+
+            <td class="px-3 py-2 border-b border-gray-700"><span class="math">\\tilde{s} = 2m_{640}</span></td>
+
+            <td class="px-3 py-2 border-b border-gray-700"><span class="math">\\tilde{i} = 4m_{640} + i_{640}</span></td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700"><span class="math">\\mathbb{F}_{p^6}</span></td>
+
+            <td class="px-3 py-2 border-b border-gray-700"><span class="math">6\\tilde{m}</span></td>
+
+            <td class="px-3 py-2 border-b border-gray-700"><span class="math">\\tilde{m} + 4\\tilde{s}</span></td>
+
+            <td class="px-3 py-2 border-b border-gray-700"><span class="math">9\\tilde{m} + 3\\tilde{s} + \\tilde{\\imath}</span></td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700"><span class="math">\\mathbb{F}_{p^{12}}</span></td>
+
+            <td class="px-3 py-2 border-b border-gray-700"><span class="math">18\\tilde{m}</span></td>
+
+            <td class="px-3 py-2 border-b border-gray-700"><span class="math">12\\tilde{m}</span></td>
+
+            <td class="px-3 py-2 border-b border-gray-700"><span class="math">23\\tilde{m} + 11\\tilde{s} + \\tilde{\\imath}</span></td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700"><span class="math">\\mathbb{G}_{\\Phi_6(p^2)}</span></td>
+
+            <td class="px-3 py-2 border-b border-gray-700"><span class="math">18\\tilde{m}</span></td>
+
+            <td class="px-3 py-2 border-b border-gray-700"><span class="math">9\\tilde{s}</span></td>
+
+            <td class="px-3 py-2 border-b border-gray-700">Conjugation</td>
+
+          </tr>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Operation</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Cost</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Sparse Mult.</td>
+
+            <td class="px-3 py-2 border-b border-gray-700"><span class="math">13\\tilde{m}</span></td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Sparser Mult.</td>
+
+            <td class="px-3 py-2 border-b border-gray-700"><span class="math">7\\tilde{m}</span></td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Compressed Squaring</td>
+
+            <td class="px-3 py-2 border-b border-gray-700"><span class="math">6\\tilde{s}</span></td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Simult. decompression</td>
+
+            <td class="px-3 py-2 border-b border-gray-700"><span class="math">n(3\\tilde{m}+3\\tilde{s})+</span></td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">of <span class="math">n</span> field elements</td>
+
+            <td class="px-3 py-2 border-b border-gray-700"><span class="math">(n-1)3\\tilde{m}+\\tilde{\\imath}</span></td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700"><span class="math">p/p^2/p^3</span> -Frobenius</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">10m/15m/15m</td>
+
+          </tr>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300"><strong>Table 4.</strong> Costs of arithmetic operations in a tower extension field  <span class="math">\\mathbb{F}_{p^{12}}</span> .</p>
+
+    <p class="text-gray-300"> <span class="math">\\Phi_k(p)/r</span>  is a more challenging task. Observing that p-th powering is much less expensive than multiplication, Scott et al. [29] give a systematic method for reducing the expense of exponentiating by d. In the case of BLS12 curves, it can be shown that the exponent d can be written as  <span class="math">d=\\lambda_0+\\lambda_1p+\\lambda_2p^2+\\lambda_3p^3</span>  where  <span class="math">\\lambda_0=z^5-2z^4+2z^2-z+3</span> ,  <span class="math">\\lambda_1=z^4-2z^3+2z-1</span> ,  <span class="math">\\lambda_2=z^3-2z^2+z</span> , and  <span class="math">\\lambda_3=z^2-2z+1</span> . The exponentiation  <span class="math">f^d</span>  can be computed using the following addition-subtraction chain:</p>
+
+    <div class="my-4 text-center"><span class="math-block">\\begin{split} f \\to f^{-2} \\to f^z \\to f^{2z} \\to f^{z-2} \\to f^{z^2-2z} \\to f^{z^3-2z^2} \\to f^{z^4-2z^3} \\\\ \\to f^{z^4-2z^3+2z} \\to f^{z^5-2z^4+2z^2}, \\end{split}</span></div>
+
+    <p class="text-gray-300">which requires 5 exponentiations by z, 2 multiplications in  <span class="math">\\mathbb{F}_{p^{12}}</span> , and 2 cyclotomic squarings. This allows  <span class="math">f^d</span>  to be computed as</p>
+
+    <div class="my-4 text-center"><span class="math-block">f^d = f^{z^5 - 2z^4 + 2z^2} \\cdot (f^{z-2})^{-1} \\cdot f \\cdot (f^{z^4 - 2z^3 + 2z} \\cdot f^{-1})^p \\cdot (f^{z^3 - 2z^2} \\cdot f^z)^{p^2} \\cdot (f^{z^2 - 2z} \\cdot f)^{p^3},</span></div>
+
+    <p class="text-gray-300">which requires an additional 8 multiplications in  <span class="math">\\mathbb{F}_{p^{12}}</span>  and 3 Frobenius maps. This implies that the hard part of the final exponentiation requires 2 cyclotomic squarings, 5 exponentiations by z, 10 multiplications in  <span class="math">\\mathbb{F}_{p^{12}}</span> , and 3 Frobenius maps.</p>
+
+    <p class="text-gray-300">In total, the cost of computing the final exponentiation is 1 inversion in  <span class="math">\\mathbb{F}_{p^{12}}</span> , 2 cyclotomic squarings, 12 multiplications in  <span class="math">\\mathbb{F}_{p^{12}}</span> , 4 Frobenius maps, and 5 exponentiations by z. It can be shown that exponentiation by our choice of the z parameter requires 107 compressed squarings, simultaneous decompression of 4 field elements, and 3 multiplications in  <span class="math">\\mathbb{F}_{p^{12}}</span>  when Karabina's exponentiation technique [18] is employed. The cost of an exponentiation by z is  <span class="math">107(6\\tilde{s})+4(3\\tilde{m}+3\\tilde{s})+3(3\\tilde{m})+\\tilde{\\imath}+3(18\\tilde{m})=75\\tilde{m}+654\\tilde{s}+\\tilde{\\imath}</span> , whence the total cost of the final exponentiation is  <span class="math">(23\\tilde{m}+11\\tilde{s}+\\tilde{\\imath})+2(9\\tilde{s})+12(18\\tilde{m})+60m_{640}+5(75\\tilde{m}+654\\tilde{s}+\\tilde{\\imath})=614\\tilde{m}+3299\\tilde{s}+6\\tilde{\\imath}=8464m_{640}+6i_{640}</span> .</p>
+
+    <p class="text-gray-300"><strong>Optimal pairing cost.</strong> From the above, we conclude that the estimated cost of the optimal ate pairing for our chosen BLS12 curve is 10865<em>m</em><sup>640</sup> + 8464<em>m</em><sup>640</sup> + 6<em>i</em><sup>640</sup> = 19329<em>m</em><sup>640</sup> + 6<em>i</em>640.</p>
+
+    <p class="text-gray-300"><strong>Parallelization.</strong> Figure 1 illustrates the execution path for the <em>β</em> Weil pairing (6) when the four Miller functions are computed in parallel using 4 processors. As with the optimal ate pairing, Lemma 3 was repeatedly applied to each Miller function in the <em>β</em> Weil pairing in order to obtain a parallel implementation using 8 processors.</p>
+
+    <p class="text-gray-300">1. <span class="math-block">f_{z,Q}(P) \\longrightarrow f_{z,Q}^p(P) \\longrightarrow f_{z,Q}^p(P) \\cdot f_{z,Q}([p]P)</span></p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li><span class="math">[p]P \\longrightarrow f_{z,Q}([p]P)</span></li>
+
+      <li><span class="math">f_{z,P}(Q) \\longrightarrow f_{z,P}^p(Q) \\cdot f_{z,[p]P}(Q)</span></li>
+
+      <li><span class="math">[p]P \\longrightarrow f_{z,[p]P}(Q)</span></li>
+
+    </ol>
+
+    <p class="text-gray-300"><strong>Fig. 1.</strong> Execution path for computing the <em>β</em> Weil pairing for BLS12 curves on 4 processors.</p>
+
+    <p class="text-gray-300">In this section, we consider the KSS curve <em>Y</em> <sup>2</sup> = <em>X</em><sup>3</sup> + 2 defined with the parameter selection <em>z</em> = <em>−</em>2 <sup>64</sup> <em>−</em> 2 <sup>61</sup> + 2<sup>46</sup> + 2<sup>12</sup> .</p>
+
+    <p class="text-gray-300"><strong>Extension field arithmetic for pairings with k</strong> = <strong>18.</strong> An element in F<em>p</em><sup>18</sup> can be represented using the following towering scheme:</p>
+
+    <div class="my-4 text-center"><span class="math-block">\\begin{split} \\mathbb{F}_{p^3} &amp;= \\mathbb{F}_p[u]/(u^3 + 2), \\\\ \\mathbb{F}_{p^6} &amp;= \\mathbb{F}_{p^3}[v]/(v^2 - u), \\\\ \\mathbb{F}_{p^{18}} &amp;= \\mathbb{F}_{p^6}[w]/(w^3 - v). \\end{split}</span></div>
+
+    <p class="text-gray-300">Table 5 gives the computational costs of the tower extensions field arithmetic for curves with <em>k</em> = 18, where <em>m</em>512, <em>i</em><sup>512</sup> denote the cost of multiplication and inversion in F<em>p</em>, with <em>p</em> a 512-bit prime. Moreover, ˆ<em>m</em>, ˆ<em>s</em>, ˆ<em>ı</em> denote the cost of multiplication, squaring and inversion in F<em>p</em><sup>3</sup> respectively.</p>
+
+    <p class="text-gray-300"><strong>Computation of the optimal ate pairing.</strong> For the parameter selection <em>z</em> = <em>−</em>2 <sup>64</sup> <em>−</em>2 <sup>51</sup> + 2<sup>46</sup> + 2<sup>12</sup>, the Miller loop executes 64 point doublings with line evaluations, 4 point additions with line evaluations, 67 sparse multiplications and 63 squarings in F<em>p</em><sup>18</sup> . We obtain a KSS Miller loop cost of 64(3 ˆ<em>m</em> + 6ˆ<em>s</em> + 6<em>m</em>512) + 4(11 ˆ<em>m</em>+2ˆ<em>s</em>+6<em>m</em>512)+67(13 ˆ<em>m</em>)+63(11 ˆ<em>m</em>) = 1800 ˆ<em>m</em>+392ˆ<em>s</em>+408<em>m</em><sup>512</sup> = 13168<em>m</em>512. Furthermore, the final step executes 1 squaring in F<em>p</em><sup>18</sup> , one <em>p</em>-power Frobenius, 1 multiplication in F<em>p</em><sup>18</sup> , 2 point additions with line evaluation, one point doubling with line evaluation, 1 sparse multiplication, 1 sparser multiplication,</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Field</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Mult.</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Squaring</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Inversion</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700"><span class="math">\\mathbb{F}_{p^3}</span></td>
+
+            <td class="px-3 py-2 border-b border-gray-700"><span class="math">\\hat{m} = 6m_{512}</span></td>
+
+            <td class="px-3 py-2 border-b border-gray-700"><span class="math">\\hat{s} = 5m_{512}</span></td>
+
+            <td class="px-3 py-2 border-b border-gray-700"><span class="math">\\hat{\\imath} = 12m_{512} + i_{512}</span></td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700"><span class="math">\\mathbb{F}_{p^6}</span></td>
+
+            <td class="px-3 py-2 border-b border-gray-700"><span class="math">3\\hat{m}</span></td>
+
+            <td class="px-3 py-2 border-b border-gray-700"><span class="math">2\\hat{m}</span></td>
+
+            <td class="px-3 py-2 border-b border-gray-700"><span class="math">2\\hat{m} + 2\\hat{s} + \\hat{\\imath}</span></td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700"><span class="math">\\mathbb{F}_{p^{18}}</span></td>
+
+            <td class="px-3 py-2 border-b border-gray-700"><span class="math">18\\hat{m}</span></td>
+
+            <td class="px-3 py-2 border-b border-gray-700"><span class="math">11\\hat{m}</span></td>
+
+            <td class="px-3 py-2 border-b border-gray-700"><span class="math">20\\hat{m} + 8\\hat{s} + \\hat{\\imath}</span></td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700"><span class="math">\\mathbb{G}_{\\varphi_6}(\\mathbb{F}_{p^3})</span></td>
+
+            <td class="px-3 py-2 border-b border-gray-700"><span class="math">18\\hat{m}</span></td>
+
+            <td class="px-3 py-2 border-b border-gray-700"><span class="math">6\\hat{m}</span></td>
+
+            <td class="px-3 py-2 border-b border-gray-700">Conjugation</td>
+
+          </tr>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Operation</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Cost</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Sparse Mult.</td>
+
+            <td class="px-3 py-2 border-b border-gray-700"><span class="math">13\\hat{m}</span></td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Sparser Mult.</td>
+
+            <td class="px-3 py-2 border-b border-gray-700"><span class="math">7\\hat{m}</span></td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Compressed Squaring</td>
+
+            <td class="px-3 py-2 border-b border-gray-700"><span class="math">4\\hat{m}</span></td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Simult. decompression</td>
+
+            <td class="px-3 py-2 border-b border-gray-700"><span class="math">n(3\\hat{m}+3\\hat{s})+</span></td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">of <span class="math">n</span> field elements</td>
+
+            <td class="px-3 py-2 border-b border-gray-700"><span class="math">(n-1)3\\hat{m} + \\hat{\\imath}</span></td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">p-th Frobenius</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">15m</td>
+
+          </tr>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300"><strong>Table 5.</strong> Costs of arithmetic operations in a tower extension field  <span class="math">\\mathbb{F}_{p^{18}}</span> .</p>
+
+    <p class="text-gray-300">and the computation of the isomorphism  <span class="math">\\psi(Q)</span> . Thus the KSS final step cost is  <span class="math">11\\hat{m} + 18\\hat{m} + 2(11\\hat{m} + 2\\hat{s} + 6m_{512}) + 3\\hat{m} + 6\\hat{s} + 6m_{512} + 20\\hat{m} + 28m_{512} = 74\\hat{m} + 10\\hat{s} + 40m_{512} = 534m_{512}</span> . The final exponentiation executes in total one inversion in  <span class="math">\\mathbb{F}_{p^{18}}</span> , 8 cyclotomic squarings, 54 multiplications in  <span class="math">\\mathbb{F}_{p^{18}}</span> , 29 p-power Frobenius, and 7 exponentiations by z [11]. The computational cost of an exponentiation by z is 64 compressed squarings, decompression of 4 field elements and 3 multiplications in  <span class="math">\\mathbb{F}_{p^{18}}</span> , for a total cost of  <span class="math">64(6\\hat{s}) + 4(3\\hat{s} + 3\\hat{m}) + 9\\hat{m} + \\hat{\\imath} + 3(18\\hat{m}) = 75\\hat{m} + 396\\hat{s} + \\hat{\\imath}</span> . Hence, the total cost of the final exponentiation is  <span class="math">20\\hat{m} + 8\\hat{s} + \\hat{\\imath} + 8(6\\hat{m}) + 54(18\\hat{m}) + 435m_{512} + 7(75\\hat{m} + 396\\hat{s} + \\hat{\\imath}) = 1565\\hat{m} + 2780\\hat{s} + 8\\hat{\\imath} + 435m_{512} = 23821m_{512} + 8i_{512}</span>  Finally, the total cost of computing the KSS optimal ate pairing is  <span class="math">13168m_{512} + 534m_{512} + 23821m_{512} + 8i_{512} = 37523m_{512} + 8i_{512}</span> .</p>
+
+    <p class="text-gray-300">Computation of the  <span class="math">\\beta</span>  Weil pairing. The most expensive part of the  <span class="math">\\beta</span>  Weil pairing for KSS curves (4) are the six Miller functions  <span class="math">f_{z,R}</span> . For parallel implementation using 4 cores, repeated applications of Lemma 3 can be used to write  <span class="math">z = 2^w z_1 + z_0</span>  such that  <span class="math">f_{z,R}</span>  can be computed in the following way:</p>
+
+    <div class="my-4 text-center"><span class="math-block">f_{z,R} = f_{z_1,R}^{2^w} \\cdot f_{2^w,[z_1]R} \\cdot f_{z_0,R} \\cdot (\\ell_{2^w} \\cdot [z_1]R,[z_0]R) / v_{[z]R}.</span></div>
+
+    <p class="text-gray-300">For the KSS parameter  <span class="math">z=-2^{64}-2^{51}+2^{46}+2^{12}</span> , we chose  <span class="math">w=36, z_1=-2^{28}+2^{15}+2^{10}, z_0=2^{12}</span>  and split the two most expensive Miller functions  <span class="math">f_{z,Q}^p([p]P)</span>  and  <span class="math">f_{z,Q}([p^2]P)</span> . Figure 2 illustrates an execution path. At the end, it is necessary for each core to compute the additional functions  <span class="math">(f_{3,R}^p \\cdot \\ell_{[z]R,[3p]R})^{p^i}</span>  and the exponentiation by  <span class="math">(p^9-1) \\cdot (p^3+1)</span> .</p>
+
+    <p class="text-gray-300">For the case of an 8-core implementation, we simply reschedule these functions so that each core takes approximately the same time.</p>
+
+    <p class="text-gray-300">1. <span class="math-block">[p]P \\longrightarrow \\frac{1}{f_{z,Q}^{p^2}(P) \\cdot f_{z_1,Q}^{2w}<a href="P">[p</a>} \\longrightarrow \\frac{f_{z,P}^{p^2}(Q)}{f_{z,Q}^{p^2}(P) \\cdot f_{z,Q}^p([p]P)}</span></p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li><span class="math">[p]P \\longrightarrow \\frac{f_{z,P}^{p^2}(Q)}{f_{zw,[z_1]Q}^p([p]P) \\cdot f_{z_0,Q}^p([p]P)}</span></li>
+
+    </ol>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li><span class="math">[p]P \\longrightarrow [p^2]P \\longrightarrow \\frac{f_{z,[p]P}^p(Q)}{f_{z_1,Q}^{2w}([p^2]P)} \\longrightarrow \\frac{f_{z,[p]P}^p(Q) \\cdot f_{z,[p^2]P}(Q)}{f_{z,Q}([p^2]P)}</span></li>
+
+    </ol>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li><span class="math">[p]P \\longrightarrow [p^2]P \\longrightarrow \\frac{f_{zw,[z_1]Q}([p^2]P) \\cdot f_{z_0,Q}([p^2]P)}{f_{zw,[z_1]Q}([p^2]P) \\cdot f_{z_0,Q}([p^2]P)}</span></li>
+
+    </ol>
+
+    <p class="text-gray-300"><strong>Fig. 2.</strong> Execution path for computing the  <span class="math">\\beta</span>  Weil pairing for KSS curves on 4 processors.</p>
+
+    <h4 id="sec-7" class="text-lg font-semibold mt-6">6 BN pairings</h4>
+
+    <p class="text-gray-300">In this section, we consider the BN curve  <span class="math">Y^2=X^3+5</span>  defined with the parameter selection  <span class="math">z=2^{158}-2^{128}-2^{68}+1</span> . The extension fields are  <span class="math">\\mathbb{F}_{p^2}=\\mathbb{F}_p[u]/(u^2+1)</span> ,  <span class="math">\\mathbb{F}_{p^6}=\\mathbb{F}_{p^2}[v]/(v^3-\\xi)</span>  with  <span class="math">\\xi=u+2</span> , and  <span class="math">\\mathbb{F}_{p^{12}}=\\mathbb{F}_{p^6}[w]/(w^2-v)</span> .</p>
+
+    <p class="text-gray-300">Computation of the optimal ate pairing. The Miller loop executes 160 point doublings with line evaluations, 6 point additions with line evaluations, 164 sparse multiplications, 1 sparser multiplication and 159 squarings in  <span class="math">\\mathbb{F}_{p^{12}}</span> . We obtain a BN Miller loop cost of  <span class="math">160(3\\tilde{m}+6\\tilde{s}+4m_{640})+6(11\\tilde{m}+2\\tilde{s}+4m_{640})+164(13\\tilde{m})+7\\tilde{m}+159(12\\tilde{m})=4593\\tilde{m}+972\\tilde{s}+664m_{640}=16387m_{640}</span> .</p>
+
+    <p class="text-gray-300">Furthermore, the final step executes  <span class="math">\\psi(Q)</span> ,  <span class="math">\\psi^2(Q)</span> , 2 point additions with line evaluation, 1 sparser multiplication and 1 multiplication in  <span class="math">\\mathbb{F}_{p^{12}}</span> . The p-th power Frobenius can be computed at a cost of about  <span class="math">5m_{640}</span>  and the  <span class="math">p^2</span> -th power Frobenius can be computed at a cost of about  <span class="math">4m_{640}</span> . Thus the BN final step cost is  <span class="math">2(11\\tilde{m}+2\\tilde{s}+4m_{640})+7\\tilde{m}+18\\tilde{m}+9m_{640}=47\\tilde{m}+4\\tilde{s}+17m_{640}=166m_{640}</span> . The final exponentiation executes in total 1 inversion in  <span class="math">\\mathbb{F}_{p^{12}}</span> , 3 cyclotomic squarings, 12 multiplications in  <span class="math">\\mathbb{F}_{p^{12}}</span> , 2 p-th power Frobenius, 1  <span class="math">p^2</span> -th power Frobenius, 1  <span class="math">p^3</span> -th power Frobenius, and 3 exponentiations by z [11]. The computational cost of an exponentiation by z is: 158 compressed squarings, decompression of 3 field elements and 3 multiplications in  <span class="math">\\mathbb{F}_{p^{12}}</span> , for a total cost of  <span class="math">158(6\\tilde{s})+3(3\\tilde{s}+3\\tilde{m})+6\\tilde{m}+\\tilde{i}+3(18\\tilde{m})=69\\tilde{m}+957\\tilde{s}+\\tilde{i}</span> . Hence, the total cost of the final exponentiation is  <span class="math">23\\tilde{m}+11\\tilde{s}+\\tilde{i}+3(9\\tilde{s})+12(18\\tilde{m})+50m_{640}+3(69\\tilde{m}+957\\tilde{s}+\\tilde{i})=446\\tilde{m}+2909\\tilde{s}+62m_{640}+4i_{640}=7218m_{640}+4i_{640}</span> . Finally, the total cost of computing the BN optimal ate pairing is  <span class="math">16387m_{640}+166m_{640}+7218m_{640}+4i_{640}=23771m_{640}+4i_{640}</span> .</p>
+
+    <p class="text-gray-300">Computation of the  <span class="math">\\beta</span>  Weil pairing. For BN curves, we consider the  <span class="math">\\beta</span>  pairing presented by Aranha et al. [3]. Lemma 3 was repeatedly applied in order to estimate the cost of a parallel implementation using 8 processors.</p>
+
+    <h3 id="sec-8" class="text-xl font-semibold mt-8"><strong>7 BLS24 pairings</strong></h3>
+
+    <p class="text-gray-300">In this section, we consider the BLS24 curve <em>Y</em> <sup>2</sup> = <em>X</em><sup>3</sup> + 1 defined with the parameter selection <em>z</em> = <em>−</em>2 <sup>48</sup> + 2<sup>45</sup> + 2<sup>31</sup> <em>−</em> 2 7 .</p>
+
+    <p class="text-gray-300"><strong>Extension field arithmetic for pairings with k</strong> = <strong>24.</strong> An element in F<em>p</em><sup>24</sup> can be represented using the following towering scheme:</p>
+
+    <div class="my-4 text-center"><span class="math-block">\\begin{split} \\mathbb{F}_{p^2} &amp;= \\mathbb{F}_p[i]/(i^2+1), \\\\ \\mathbb{F}_{p^4} &amp;= \\mathbb{F}_{p^2}[u]/(u^2-\\xi), \\text{ with } \\xi = i+1, \\\\ \\mathbb{F}_{p^{12}} &amp;= \\mathbb{F}_{p^4}[v]/(v^3-u), \\\\ \\mathbb{F}_{p^{24}} &amp;= \\mathbb{F}_{p^{12}}[w]/(w^2-v). \\end{split}</span></div>
+
+    <p class="text-gray-300">Table 6 gives the computational costs of the tower extension field arithmetic for curves with <em>k</em> = 24, where <em>m</em><sup>480</sup> and <em>i</em><sup>480</sup> denote the cost of multiplication and inversion in F<em>p</em>, with <em>p</em> a 479-bit prime. Moreover, ˜<em>m</em>, ˜<em>s</em>, ˜<em>ı</em> denote the cost of multiplication, squaring and inversion in F<em>p</em><sup>2</sup> respectively.</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Field</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Mult.</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Squaring</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Inversion</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Fp2</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">m˜ = 3m480</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">s˜ = 2m480</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">˜ı = 4m480<br>+ i480</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Fp4</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">3 ˜m</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">2 ˜m</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">2 ˜m + 2˜s + ˜ı</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Fp12</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">18 ˜m</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">12 ˜m</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">23 ˜m + 11˜s + ˜ı</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Fp24</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">54 ˜m</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">36 ˜m</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">83 ˜m + 11˜s + ˜ı</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">(Fp4 )<br>Gφ6</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">54 ˜m</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">18 ˜m</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">Conjugation</td>
+
+          </tr>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">|                       | Operation Count          |</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">-----------------------</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">--------------------------</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Sparser Mult.</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">21 ˜m</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Compressed Squaring</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">12 ˜m</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Simult. decompression</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">(2n − 1)(9 ˜m) + n(6 ˜m)</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">of n field elements</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">+2 ˜m + 2˜s + ˜ı</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">p-th Frobenius</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">45m</td>
+
+          </tr>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300"><strong>Table 6.</strong> Costs of arithmetic operations in a tower extension field F<em>p</em><sup>24</sup> .</p>
+
+    <p class="text-gray-300"><strong>Computation of the optimal ate pairing.</strong> The Miller loop executes 48 point doublings with line evaluations, 4 point additions with line evaluations, 51 sparse multiplications and 47 squarings in F<em>p</em><sup>24</sup> . We obtain a BLS24 Miller loop cost of 48(21 ˜<em>m</em> + 8<em>m</em>480) + 4(37 ˜<em>m</em> + 8<em>m</em>480) + 51(39 ˜<em>m</em>) + 47(36 ˜<em>m</em>) = 4837 ˜<em>m</em> + 416<em>m</em><sup>480</sup> = 14927<em>m</em>480. The computation of the final exponentiation requires 1 inversion, 9 exponentiations by <em>z</em>, 14 multiplications in F<em>p</em><sup>24</sup> , 2 cyclotomic squarings, and 8 <em>p</em>th power Frobenius operations. Moreover, the cost of an exponentiation by <em>z</em> is 48 compressed squarings, decompression of 4 field elements and 3 multiplications in F<em>p</em><sup>24</sup> , for a total cost of 48(12 ˜<em>m</em>) + 87 ˜<em>m</em> + ˜<em>ı</em> + 3(54 ˜<em>m</em>) = 827 ˜<em>m</em> + 2˜<em>s</em> + ˜<em>ı</em>. Hence, the total cost of the final exponentiation is  <span class="math">(83\\tilde{m} + 11\\tilde{s} + \\tilde{\\imath}) + 9(827\\tilde{m} + 2\\tilde{s} + \\tilde{\\imath}) + 14(54\\tilde{m}) + 2(18\\tilde{m}) + 360m_{480} = 8318\\tilde{m} + 29\\tilde{s} + 400m_{480} + 10i_{480} = 25412m_{480} + 10i_{480}</span> . Finally, the total cost of computing the BLS24 optimal ate pairing is  <span class="math">14927m_{480} + 25412m_{480} + 10i_{480} = 40339m_{480} + 10i_{480}</span> .</p>
+
+    <p class="text-gray-300">Computation of the  <span class="math">\\beta</span>  Weil pairing. Since  <span class="math">8 \\mid e</span>  where e = k/d, the parallelization procedure for the  <span class="math">\\beta</span>  Weil pairing (7) on 2, 4 and 8 cores is straightforward: with 2 cores, each core computes 4 Miller functions; with 4 cores, each core computes 2 Miller functions; and with 8 cores: each core computes 1 Miller function.</p>
+
+    <h2 id="sec-9" class="text-2xl font-bold">8 Comparisons</h2>
+
+    <p class="text-gray-300">Estimates for serial implementations of the optimal ate pairings. The customary way to estimate the cost of a pairing is to count multiplications in the underlying finite fields. Notice that in the case of software implementations in modern desktop platforms, field elements  <span class="math">a \\in \\mathbb{F}_p</span>  can be represented with  <span class="math">\\ell = 1 + \\lfloor \\log_2(p) \\rfloor</span>  binary coefficients  <span class="math">a_i</span>  packed in  <span class="math">n_{64} = \\lceil \\frac{\\ell}{64} \\rceil</span>  64-bit processor words. If Montgomery representation is used to implement field multiplication in  <span class="math">\\mathbb{F}_{p_{640}}</span>  and  <span class="math">\\mathbb{F}_{p_{512}}</span>  with complexity  <span class="math">O(2n_{64}^2 + n_{64})</span> , then it is reasonable to estimate that we have  <span class="math">m_{640} \\approx (210/136) \\cdot m_{512} \\approx 1.544 \\cdot m_{512}</span> .</p>
+
+    <p class="text-gray-300">Table 7 summarizes the costs in terms of finite field multiplications for computing the optimal ate pairing over our choice of KSS, BN, BLS12 and BLS24 curves at the 192-bit security level.<sup>3</sup> As can be seen, our estimates predict that the optimal ate pairing over BLS12 curves is the most efficient choice at the 192-bit security level, with KSS, BN and BLS24 curves being significantly slower. The main computational bottleneck for BLS24 curves is their very expensive final exponentiation.</p>
+
+    <p class="text-gray-300">Estimates for multi-core implementations of the optimal ate and  <span class="math">\\beta</span>  Weil pairings. Table 8 (see also Figure 3) shows estimated speedups for the parallel version of the optimal ate pairing using the partitions in Table 9 and all the  <span class="math">\\beta</span>  Weil pairing variants considered here. All speedup factors are with respect to the serial version of the KSS optimal ate pairing. It can be seen that the estimated performance for BLS12 curves when using 8 cores is of a factor-3.29 acceleration, which is the highest speedup we obtain. Perhaps the most notable observation from Table 8 is that, for eight-core implementations, the  <span class="math">\\beta</span>  Weil pairing becomes more efficient than the optimal ate pairing for all the four curves considered.</p>
+
+    <p class="text-gray-300"><strong>Timings.</strong> We implemented the KSS, BN, BLS12 and BLS24 pairings following the techniques described in [2] on two different 64-bit 32nm platforms, an Intel Core i5 540M Nehalem and an Intel Core i7 2630QM Sandy Bridge. Field arithmetic was implemented in Assembly for maximum efficiency and high-level code</p>
+
+    <p class="text-gray-300"><sup>&</sup>lt;sup>3</sup> In the case of BN and KSS curves it is necessary to compute several extra lines and Frobenius maps. We refer to these steps as the "Final step". We stress that there is no analogous final step in the case of BLS12 and BLS24 curves.</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Curve</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Phase</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Mult. in Fp</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Mult. in Fp512</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"></th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+            <td class="px-3 py-2 border-b border-gray-700">Miller Loop</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">13168m512</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">13168m512</td>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">KSS</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">Final Step</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">534m512</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">534m512</td>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+            <td class="px-3 py-2 border-b border-gray-700">Final Exp.</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">23821m512</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">23821m512</td>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+            <td class="px-3 py-2 border-b border-gray-700">ML + FS + FE</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">37523m512</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">37523m512</td>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">BN</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">Miller Loop</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">16387m640</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">25301m512</td>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+            <td class="px-3 py-2 border-b border-gray-700">Final Step</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">166m640</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">256m512</td>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+            <td class="px-3 py-2 border-b border-gray-700">Final Exp.</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">7218m640</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">11145m512</td>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+            <td class="px-3 py-2 border-b border-gray-700">ML + FS + FE</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">23771m640</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">36702m512</td>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+            <td class="px-3 py-2 border-b border-gray-700">Miller Loop</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">10865m640</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">16775m512</td>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">BLS12</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">Final Exp.</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">8464m640</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">13068m512</td>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+            <td class="px-3 py-2 border-b border-gray-700">ML + FE</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">19329m640</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">29843m512</td>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">BLS24</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">Miller Loop</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">14927m480</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">14927m512</td>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+            <td class="px-3 py-2 border-b border-gray-700">Final Exp.</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">25412m480</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">25412m512</td>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+            <td class="px-3 py-2 border-b border-gray-700">ML + FE</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">40339m480</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">40339m512</td>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+          </tr>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300"><strong>Table 7.</strong> Cost estimates of the optimal ate pairing for KSS, BN, BLS12 and BLS24 curves at the 192-bit security level. Note that <em>m</em><sup>480</sup> = <em>m</em><sup>512</sup> in a 64-bit processor.</p>
+
+    <p class="text-gray-300">|                         | Number of threads |      |      |      |</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">-------------------------</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">-------------------</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">------</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">------</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">------</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Optimal ate</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1.00</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1.17</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1.28</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1.33</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">β Weil</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">0.47</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">0.91</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1.54</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">2.51</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Estimated speedup BN</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">2</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">4</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">8</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Optimal ate</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1.02</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1.36</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1.61</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1.76</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">β Weil</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">0.41</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">0.81</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1.42</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">2.16</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Estimated speedup BLS12</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">2</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">4</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">8</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Optimal ate</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1.26</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1.56</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1.76</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1.88</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">β Weil</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">0.64</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1.25</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">2.20</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">3.29</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Estimated speedup BLS24</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">2</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">4</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">8</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Optimal ate</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">0.93</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1.05</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1.12</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1.14</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">β Weil</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">0.40</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">0.78</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1.49</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">2.39</td>
+
+          </tr>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300"><strong>Table 8.</strong> Estimated speedups for the parallel version of the optimal ate pairing versus the <em>β</em> Weil pairing. All speedup factors are with respect to the serial version of the KSS optimal ate pairing.</p>
+
+    <p class="text-gray-300"><img src="_page_16_Figure_0.jpeg" alt="" class="my-4 max-w-full" /></p>
+
+    <p class="text-gray-300"><strong>Fig. 3.</strong> Expected speedups for KSS, BN, BLS12 and BLS24 optimal ate pairings at the 192-bit security level. All speedup factors are with respect to the serial version of the KSS optimal ate pairing.</p>
+
+    <p class="text-gray-300">|       | Number of threads <span class="math">(c)</span> |             |                                |  |</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">-------</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">-------------------------</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">-------------</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">--------------------------------</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">--</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">KSS</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">36</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">54, 39, 21</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">63, 58, 52, 45, 36, 26, 14</td>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">BN</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">86</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">129, 93, 50</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">149, 137, 122, 105, 85, 61, 33</td>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">BLS12</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">57</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">85, 61, 33</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">98, 90, 81, 70, 56, 40, 21</td>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">BLS24</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">26</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">38, 28, 15</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">44, 41, 37, 32, 26, 19, 10</td>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+          </tr>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300"><strong>Table 9.</strong> Parameters  <span class="math">w_i</span> , 0 < i < c, which define the partition of the form  <span class="math">s = 2^{w_{c-1}}s_{c-1} + \\cdots + 2^{w_1}s_1 + s_0</span>  for splitting the Miller loop according to Equation (8) when computing a multi-thread optimal ate pairing among c processing units.</p>
+
+    <p class="text-gray-300">was implemented in the C programming language. The GCC 4.7.0 compiler suite was used with compilation flags for loop unrolling, inlining of small functions to reduce function call overheads, and optimization level -O3. The implementation was done on top of the RELIC cryptographic toolkit [1]. The code will eventually be incorporated into the library.</p>
+
+    <p class="text-gray-300">The <em>m</em><sup>640</sup> <em>≈</em> 1<em>.</em>544 <em>· m</em><sup>512</sup> estimate used above was experimentally confirmed with carefully crafted Assembly code for multiplication and Montgomery reduction. Implementing the double-precision arithmetic needed for efficient application of lazy reduction proved to be slightly cumbersome due to the exhaustion of the 16 general-purpose registers available in the target platform (one of the registers is mostly reserved for keeping track of stack memory, aggravating the effect). Naturally, this issue had a bigger performance impact on the larger 638-bit field, introducing higher penalties for reading and writing values stored into memory. By using a very efficient implementation of the Extended Euclidean Algorithm imported from the GMP<sup>4</sup> library, we obtained inversion-to-multiplication ratios in F<em><sup>p</sup></em> of around 16, suggesting the use of the projective coordinate system instead of the affine coordinates recommended in [28] and [20], even after considering the action of the norm map to simplify the inversion operation in extension fields. Affine coordinates were only competitive for the BLS24 curve.</p>
+
+    <p class="text-gray-300">The resulting timings for the two platforms are presented in Table 10 (measured with the Turbo Boost feature disabled). Timings for the parallel implementation of pairings which were estimated to be slower than the reference performance of the KSS pairing are omitted. We obtained results confirming our performance estimates, i.e., the BLS12 curve is the most efficient choice for pairing computation at the 192-bit security level across all the considered scenarios. In particular, our fastest serial implementation on the Intel Core i5 Nehalem machine can compute a pairing in approximately 19 million cycles, more than 3 times faster than the current state-of-the-art. The previous speed record for a single pairing computation without precomputation at this security level was presented in [28, Table 2, column 4 halved] and achieves a latency of 60 million cycles on a very similar machine when a factor of 1.22 is applied to the timings to adjust for the effect of Turbo Boost.<sup>5</sup> Additionally, the <em>β</em> Weil pairing presents itself as the most efficient and scalable choice of pairing in a multiprocessor machine with more than 4 processing units.</p>
+
+    <h3 id="sec-10" class="text-xl font-semibold mt-8"><strong>References</strong></h3>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>1. D. F. Aranha, C. P. L. Gouvˆea, RELIC is an Efficient LIbrary for Cryptography, http://code.google.com/p/relic-toolkit/.</li>
+
+      <li>2. D. F. Aranha, K. Karabina, P. Longa, C. Gebotys and J. L´opez, "Faster explicit formulas for computing pairings over ordinary curves", <em>Advances in Cryptology – EUROCRYPT 2011</em>, LNCS 6632 (2011), 48–68.</li>
+
+    </ul>
+
+    <p class="text-gray-300"><sup>4</sup> GNU Multiple Precision Arithmetic Library: http://www.gmplib.org</p>
+
+    <p class="text-gray-300"><sup>5</sup> This was confirmed with the author via private communication.</p>
+
+    <p class="text-gray-300">|                                              | Number of threads |       |       |       |</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">----------------------------------------------</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">-------------------</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">-------</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">-------</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">-------</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">KSS optimal ate – latency</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">23.40</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">20.91</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">19.75</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">19.17</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">KSS optimal ate – speedup</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1.00</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1.12</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1.18</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1.22</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">KSS β Weil – latency</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">–</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">–</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">15.04</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">9.18</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">KSS β Weil – speedup</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">–</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">–</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1.56</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">2.55</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">BN optimal ate – latency</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">23.22</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">17.28</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">14.63</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">13.40</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">BN optimal ate – speedup</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1.01</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1.35</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1.59</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1.73</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">BN β Weil – latency</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">–</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">–</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">16.65</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">11.17</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">BN β Weil – speedup</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">–</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">–</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1.39</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">2.08</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">BLS12 optimal ate – latency</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">18.67</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">15.15</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">13.49</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">12.58</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">BLS12 optimal ate – speedup</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1.25</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1.54</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1.73</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1.86</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">BLS12 β Weil – latency</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">–</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">19.38</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">10.80</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">7.24</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">BLS12 β Weil – speedup</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">–</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1.21</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">2.17</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">3.23</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">BLS24 optimal ate – latency</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">26.32</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">24.00</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">22.82</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">22.27</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">BLS24 optimal ate – speedup</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">0.89</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">0.98</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1.03</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1.05</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">BLS24 β Weil – latency</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">–</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">–</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">17.83</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">10.26</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">BLS24 β Weil – speedup</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">–</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">–</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1.31</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">2.28</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Platform 2 – Intel Core i7 Sandy Bridge 32nm</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">2</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">4</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">8*</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">KSS optimal ate – latency</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">17.73</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">15.76</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">14.95</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">14.52</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">KSS optimal ate – speedup</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1.00</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1.12</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1.19</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1.22</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">KSS β Weil – latency</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">–</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">–</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">11.36</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">6.97</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">KSS β Weil – speedup</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">–</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">–</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1.56</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">2.54</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">BN optimal ate – latency</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">17.43</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">13.00</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">10.98</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">10.05</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">BN optimal ate – speedup</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1.02</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1.36</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1.61</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1.76</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">BN β Weil – latency</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">–</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">–</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">12.58</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">8.45</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">BN β Weil – speedup</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">–</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">–</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1.41</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">2.10</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">BLS12 optimal ate – latency</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">14.08</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">11.41</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">10.11</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">9.48</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">BLS12 optimal ate – speedup</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1.26</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1.55</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1.75</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1.87</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">BLS12 β Weil – latency</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">–</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">14.58</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">8.13</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">5.47</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">BLS12 β Weil – speedup</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">–</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1.22</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">2.18</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">3.24</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">BLS24 optimal ate – latency</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">19.97</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">18.27</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">17.21</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">16.86</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">BLS24 optimal ate – speedup</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">0.89</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">0.97</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1.03</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1.05</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">BLS24 β Weil – latency</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">–</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">–</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">13.75</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">7.90</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">BLS24 β Weil – speedup</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">–</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">–</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1.29</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">2.24</td>
+
+          </tr>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300"><strong>Table 10.</strong> Experimental results for serial/parallel executions of the KSS, BN and BLS12 optimal ate and <em>β</em> Weil pairings. Timings are presented in millions of clock cycles. The speedups are with respect to the serial version of the KSS optimal ate pairing. The columns marked with (\\*) present estimates based on per-thread data.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>3. D. F. Aranha, E. Knapp, A. Menezes and F. Rodr´ıguez-Henr´ıquez. "Parallelizing the Weil and Tate pairings", <em>Cryptography and Coding</em>, LNCS 7089 (2011), 275– 295.</li>
+
+      <li>4. D. F. Aranha, J. L´opez and D. Hankerson, "High-speed parallel software implementation of the <em>η<sup>T</sup></em> pairing", <em>Topics in Cryptology – CT-RSA 2010</em>, LNCS 5985 (2010), 89–105.</li>
+
+      <li>5. P. Barreto, H. Kim, B. Lynn and M. Scott, "Efficient algorithms for pairing-based cryptosystems", <em>Advances in Cryptology – CRYPTO 2002</em>, LNCS 2442 (2002), 354–368.</li>
+
+      <li>6. P. Barreto, B. Lynn and M. Scott, "Constructing elliptic curves with prescribed embedding degrees", <em>Security in Communication Networks – SCN 2002</em>, LNCS 2576 (2003), 257–267.</li>
+
+      <li>7. P. Barreto and M. Naehrig, "Pairing-friendly elliptic curves of prime order", <em>Selected Areas in Cryptography – SAC 2005</em>, LNCS 3897 (2006), 319–331.</li>
+
+      <li>8. F. Brezing and A. Weng, "Elliptic curves suitable for pairing based cryptography", <em>Designs, Codes and Cryptography</em>, 37 (2006), 133–141.</li>
+
+      <li>9. C. Costello, K. Lauter and M. Naehrig, "Attractive subfamilies of BLS curves for implementing high-security pairings", <em>Progress in Cryptology – INDOCRYPT 2011</em>, LNCS 7107 (2011), 320–342.</li>
+
+      <li>10. D. Freeman, M. Scott and E. Teske, "A taxonomy of pairing-friendly elliptic curves", <em>Journal of Cryptology</em>, 23 (2010), 224–280.</li>
+
+      <li>11. L. Fuentes-Casta˜neda, E. Knapp and F. Rodr´ıguez-Henr´ıquez, "Faster hashing to G2", <em>Selected Areas in Cryptography – SAC 2011</em>, LNCS 7118 (2012), 412-430.</li>
+
+      <li>12. S. Galbraith, K. Harrison and D. Soldera, "Implementing the Tate pairing", <em>Algorithmic Number Theory – ANTS 2002</em>, LNCS 2369 (2002), 324–337.</li>
+
+      <li>13. S. Galbraith, K. Paterson and N. Smart, "Pairings for cryptographers", <em>Discrete Applied Mathematics</em>, 156 (2008), 3113–3121.</li>
+
+      <li>14. R. Granger, F. Hess, R. Oyono, N. Th´eriault and F. Vercauteren, "Ate pairing on hyperelliptic curves", <em>Advances in Cryptology – EUROCRYPT 2007</em>, LNCS 4515 (2007), 430–447.</li>
+
+      <li>15. F. Hess, "Pairing lattices", <em>Pairing-Based Cryptography Pairing 2008</em>, LNCS 5209 (2008), 18–38.</li>
+
+      <li>16. F. Hess, N. Smart and F. Vercauteren, "The eta pairing revisited" <em>IEEE Transactions on Information Theory</em>, 52 (2006), 4595–4602.</li>
+
+      <li>17. E. Kachisa, E. Schaefer and M. Scott, "Constructing Brezing-Weng pairing-friendly elliptic curves using elements in the cyclotomic field", <em>Pairing-Based Cryptography – Pairing 2008</em>, LNCS 5209 (2008), 126–135.</li>
+
+      <li>18. K. Karabina, "Squaring in cyclotomic subgroups", <em>Mathematics of Computation</em>, to appear.</li>
+
+      <li>19. N. Koblitz and A. Menezes, "Pairing-based cryptography at high security levels", <em>Cryptography and Coding</em>, LNCS 3796 (2005), 13–36.</li>
+
+      <li>20. K. Lauter, P. Montgomery and M. Naehrig, "An analysis of affine coordinates for pairing computation", <em>Pairing-Based Cryptography – Pairing 2010</em>, LNCS 6487 (2010), 1–20.</li>
+
+      <li>21. A. Lenstra, H. Lenstra and L. Lovasz, "Factoring polynomials with rational coefficients", <em>Mathematische Annalen</em>, 261 (1982) 515–534.</li>
+
+      <li>22. V. Miller, "The Weil pairing, and its efficient calculation', <em>Journal of Cryptology</em>, 17 (2004), 235–261.</li>
+
+      <li>23. NSA Suite B Cryptography, www.nsa.gov/ia/programs/suiteb cryptography/.</li>
+
+    </ul>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>24. G. Pereira, M. Simpl´ıcio Jr., M. Naehrig and P. Barreto, "A family of implementation-friendly BN elliptic curves", <em>Journal of Systems and Software</em>, 84 (2011), 1319–1326.</li>
+
+      <li>25. J. Pollard, "Monte Carlo methods for index computation mod <em>p</em>", <em>Mathematics of Computation</em>, 32 (1978), 918–924.</li>
+
+      <li>26. O. Schirokauer, "Discrete logarithms and local units", <em>Philosophical Transactions of the Royal Society London A</em>, 345 (1993), 409–423.</li>
+
+      <li>27. M. Scott, "Computing the Tate pairing", <em>Topics in Cryptology CT-RSA 2005</em>, LNCS 3376 (2005) 300–312.</li>
+
+      <li>28. M. Scott, "On the efficient implementation of pairing-based protocols", <em>Cryptography and Coding</em>, LNCS 7089 (2011), 296–308.</li>
+
+      <li>29. M. Scott, N. Benger, M. Charlemagne, L. J. Dominguez-Perez and E. J. Kachisa, "On the final exponentiation for calculating pairings on ordinary elliptic curves", <em>Pairing-Based Cryptography – Pairing 2009</em>, LNCS 5671 (2009), 78–88.</li>
+
+      <li>30. F. Vercauteren, "Optimal pairings", <em>IEEE Transactions on Information Theory</em>, 56 (2010), 455–461.</li>
+
+    </ul>`;
+---
+
+<BaseLayout title="Implementing Pairings at the 192-bit Security Level (2012/232)">
+  <article class="max-w-4xl mx-auto article-prose">
+    <nav class="mb-8">
+      <a href="/papers" class="text-blue-400 hover:text-blue-300">
+        &larr; Back to Papers
+      </a>
+    </nav>
+
+    <header class="mb-12">
+      <h1 class="text-3xl font-bold mb-4"
+        set:html={TITLE_HTML} />
+      <p class="text-gray-400 mb-2"
+        set:html={AUTHORS_HTML} />
+      <p class="text-gray-500 text-sm mb-4">
+        2012 &middot; eprint 2012/232
+      </p>
+      <div class="flex gap-4 text-sm">
+        <a
+          href={EPRINT_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          class="text-blue-400 hover:text-blue-300"
+        >
+          Paper (eprint) &rarr;
+        </a>
+      </div>
+      <p class="mt-4 text-xs text-gray-500">
+        All content below belongs to the original authors. This page
+        reproduces the paper for educational purposes. Always
+        <a
+          href={EPRINT_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          class="text-blue-400 hover:text-blue-300"
+        >cite the original</a>.
+      </p>
+      <p class="mt-1 text-xs text-gray-600">
+        Converted with: {CRAWLER} &middot; {CONVERTED_DATE}
+      </p>
+    </header>
+
+    <Fragment set:html={CONTENT} />
+
+  </article>
+</BaseLayout>

@@ -1,0 +1,1591 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+
+const EPRINT_URL = 'https://eprint.iacr.org/2022/1072';
+const CRAWLER = 'mistral';
+const CONVERTED_DATE = '2026-02-16';
+const TITLE_HTML = 'Recursion over Public-Coin Interactive Proof Systems; Faster Hash Verification';
+const AUTHORS_HTML = 'Alexandre Belling, Azam Soleimanian, Olivier Bégassat';
+
+const CONTENT = `    <p class="text-gray-300">Alexandre Belling, Azam Soleimanian, Olivier Begassat [ Consensys, Linea-Cryptography firstname.lastname@consensys.net ]</p>
+
+    <h6 id="sec-2" class="text-base font-medium mt-4">Abstract.</h6>
+
+    <p class="text-gray-300">SNARK is a well-known family of cryptographic tools that is increasingly used in the field of computation integrity at scale. In this area, multiple works have introduced SNARK-friendly cryptographic primitives: hashing, but also encryption and signature verification. Despite all the efforts to create cryptographic primitives that can be proved faster, it remains a major performance hole in practice. In this paper, we present a recursive technique that can improve the efficiency of the prover by an order of magnitude compared to proving MiMC hashes (a SNARK-friendly hash function, [Albrecht et al. 2016]) with a Groth16 (Eurocrypt 2016) proof. We use GKR (a well-known public-coin argument system by [Goldwasser et al., STOC 2008]) to prove the integrity of hash computations and embed the GKR verifier inside a SNARK circuit. The challenge comes from the fact that GKR is a public-coin interactive protocol, and applying Fiat-Shamir naively may result in worse performance than applying existing techniques directly. This is because Fiat-Shamir itself is involved with hash computation over a large string. We take advantage of a property that SNARK schemes commonly have, to build a protocol in which the Fiat-Shamir hashes have very short inputs. The technique we present is generic and can be applied over any SNARK-friendly hash, most known SNARK schemes, and any (one-round) public-coin argument system in place of GKR. We emphasize that while our general compiler is secure in the random oracle model, our concrete instantiation (i.e., GKR plus outer SNARK) is only proved to be heuristically secure. This is due to the fact we first need to convert the GKR protocol to a one-round protocol. Thus, the random oracle of GKR, starting from the second round, is replaced with a concrete hash inside the outer layer SNARK which makes the security-proof heuristic.</p>
+
+    <p class="text-gray-300">SNARK, Hash Verification, Proof Recursion, Proof Composition, GKR, Public-Coin, Fiat Shamir, So-Far Digest Model</p>
+
+    <h2 id="sec-3" class="text-2xl font-bold">1. Introduction</h2>
+
+    <p class="text-gray-300">Succinct Non-Interactive Argument of Knowledge (zk-)SNARKs are powerful cryptographic tools that allow a prover to convince a verifier that it knows a witness <span class="math">w</span> such that the relation <span class="math">\\mathcal{R}</span> (usually drawn from a large family) is satisfied with respect to the public input <span class="math">x</span> (i.e., <span class="math">\\mathcal{R}(x;w)=1</span>). Particularly, the verifier needs less time to verify the proof rather than redoing all the computations. In the last few years, an ever-growing number of SNARK constructions have emerged, including <em>(21)</em>, <em>(16)</em>, <em>(6)</em>, <em>(11)</em>, <em>(30)</em>, <em>(35)</em>, <em>(9)</em>, <em>(32)</em> with various security assumptions and performance trade-offs. SNARKs are also widely adopted in the blockchain world for their applications for privacy (zk-SNARKs) <em>(22)</em> and scalable computational integrity <em>(8)</em>.</p>
+
+    <p class="text-gray-300">Hashing inside a SNARK Several important applications of SNARKs involve proving the computation of numerous hashes: signature and Merkle proof verification, which usually becomes the main bottleneck in the runtime of the prover. A SNARK scheme typically works over arithmetic circuits and a prespecified finite field. On the other hand, common hash functions such as SHA256, Blake2, or Keccak typically work with unsigned integers and bit-wise operations, since they are faster on CPUs. Subsequently, even though they can be embedded within an arithmetic circuit, they incur a prohibitive overhead on the prover’s runtime. Due to this fact, numerous works — among which MiMC <em>(1)</em>, Poseidon <em>(19)</em> — have proposed SNARK-friendly hash functions: functions that are more efficient to embed in an arithmetic circuit by 2 orders of magnitude. Our contribution essentially focuses on applying new techniques to speed up the verification of MiMC hash function, resulting in a speed-up of x35 (more details in Fig.14) compared to directly verifying MiMC with Groth16 <em>(21)</em>. However, the techniques we present can also be applied to other SNARK-friendly hash functions such as Poseidon <em>(19)</em>.</p>
+
+    <p class="text-gray-300">The GKR protocol <em>(18)</em> produces sublinear time verifiable proofs (w.r.t the size of the circuit) for multiple parallel executions of a layered arithmetic circuit <span class="math">C</span>. The works <em>(31)</em>, <em>(33)</em>, <em>(36)</em> extend the GKR <em>(18)</em> protocol and improve its performance. In particular, <em>(34)</em> describes a generalization of the GKR protocol for arbitrary arithmetic circuits with a directed acyclic graph structure, which - in practice - also has a faster prover than the original version of GKR. Additionally, it does not require any particular cryptographic operations (apart from the Fiat-Shamir hashes).</p>
+
+    <p class="text-gray-300">Hyrax <em>(32)</em> proposes to compile GKR using discrete logarithm (DLog) assumptions to obtain a zk-SNARK.</p>
+
+    <p class="text-gray-300">LegoSnark, <em>(9)</em> presents a generic framework that enables linking a statement proven using GKR (or more precisely Hyrax <em>(32)</em>) to other ones using possibly different argument systems. Our work differs from theirs by embedding the GKR verifier within another SNARK. Our contribution is a construction that allows us to recurse the GKR protocol within a SNARK.</p>
+
+    <p class="text-gray-300">Proof recursion Generally speaking, the “recursion” term refers to the embedding of the verification algorithm of a proof system inside the circuit of another proof system. One may use this concept for</p>
+
+    <p class="text-gray-300">“incremental computation” (where two proof systems are homogeneous) similar to Halo <em>(Halo, 2016)</em> and Nova <em>(Nova, 2017)</em> suggesting the successive-recursion techniques using a (possibly non-pairing-friendly) cycle of elliptic curves.</p>
+
+    <p class="text-gray-300">Our work extends this model by working on public-coin non-interactive argument systems, and practically, for massive parallelization. In Appendix K, we also provide a discussion of how their techniques can be applied to our use case.</p>
+
+    <h3 id="sec-4" class="text-xl font-semibold mt-8">Technical Aspects and Motivation</h3>
+
+    <p class="text-gray-300">The GKR protocol is originally a multi-round public-coin interactive protocol that is transformed to its non-interactive version by applying the Fiat-Shamir (FS) transform <em>(Fiat, 2016; Fiat, 2017)</em>, being sound in the random oracle model.</p>
+
+    <p class="text-gray-300">At first glance, it may not be convincing to use GKR for hash verification (proof of correct hash computation). In particular, because the non-interactive version of GKR itself requires hash computations over long strings, to generate challenges (by Fiat-Shamir transform). We highlight some technical details which may convince the reader of the relevance of using GKR for hash verification.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Parallelization for the layered circuits: GKR can be used to efficiently prove and verify multiple instances of the same layered circuit in parallel. Particularly, the verifier’s work is logarithmic w.r.t the number of parallel executions. Thanks to the layered circuit of most hash functions and also due to the need for vast parallel hashing in our application, the combination of hash and GKR seems a reasonable choice here.</li>
+
+      <li>Recursion: We recurse GKR inside a SNARK. Namely, a SNARK is applied over the verifier of GKR such that the GKR verifier checks the correct computation of all hashes (leveraging the parallelization property of GKR) and the SNARK proves the correct execution of the GKR verifier.</li>
+
+      <li>Practical proof-time: Another key idea that makes GKR very interesting for recursion is that its practical prover runtime is comparable to the runtime of the alleged computation itself. Regarding efficiency, not all circuits are equally suited for the application of GKR. Generally speaking, layered circuits with a small width, a large depth and low-degree (at each layer) are more interesting. This makes hash functions based on the S-Box <span class="math">x\\rightarrow x^{\\alpha}</span>, where <span class="math">\\alpha</span> is small, such as Poseidon <em>(Poseidon, 2017)</em> and MiMC <em>(MiMC, 2017)</em> excellent candidates for GKR.</li>
+
+      <li>Compressing the input for Fiat-Shamir: Instead of including the input-output of GKR in the Fiat-Shamir hashes (as it would be normally required), we pass a prover-generated commitment which is much shorter. Moreover, we would present a model for the application of Fiat-Shamir, called so-far digest, making it to be more efficient inside the circuit.</li>
+
+      <li>Externalizing the commitment: The challenge here is to force the, possibly malicious, prover to compute the aforementioned commitment correctly. We discuss how to circumvent this challenge in a non-trivial and efficient way. Note that a more trivial solution is to embed the commitment inside the circuit of SNARK, which is far less efficient. Our technique provides a separate constant-size proof, for the correct computation of the commitment, outside the circuit. This guarantees the soundness of the system as a whole.</li>
+
+    </ul>
+
+    <h3 id="sec-5" class="text-xl font-semibold mt-8">Overview of our technique; generation of the initial randomness</h3>
+
+    <p class="text-gray-300">We present a technique to recurse a public-coin single-round interactive protocol inside another SNARK. In public-coin protocols, the verifier sends random challenges to the prover, which we call “randomnesses”. GKR is an instance of public-coin protocols.</p>
+
+    <p class="text-gray-300">Our methodology allows the prover to handle the randomnesses efficiently when compiling to a non-interactive protocol and recursing inside a SNARK. A naive attempt would be to apply the Fiat-Shamir transform over GKR straightforwardly, but this would be inefficient. Indeed, when using the Fiat-Shamir transform, the verifier and the prover are required to hash the past transcript including the inputs of the verifier. If these inputs are very long, this leads to long hashes to be performed inside the SNARK circuit, and these are expensive. Let’s assume <span class="math">n</span> alleged evaluation of the MiMC keyed-permutation <span class="math">H_{mimc}(x,k)=y</span>. Applying the Fiat-Shamir transform directly would require hashing all the input-output <span class="math">x,y,k</span> of the GKR statement and would result in a protocol where we hash at least <span class="math">3n</span> field elements to obtain the initial challenge (called the “initial randomness” through the paper): at least <span class="math">3</span> times worse than directly verifying the same hashes inside a circuit. Our protocol instead applies the Fiat-Shamir transform over a short input provided by the prover and externalizes the relevant computations on how this short input was obtained, outside the circuit. Slightly more in detail, the information that we use to generate the randomness is a piece of computation (let us call it <span class="math">\\gamma_{v}</span>) already required in the SNARK verification. As an example, consider the Groth16 scheme, where the verifier must first compute <span class="math">\\gamma</span>, a multi-scalar multiplication (MSM) of the verification key and the public input (as <span class="math">\\gamma=\\prod_{i}\\nu\\mathrm{k}_{i}^{x_{i}}</span>). Second, it uses <span class="math">\\gamma</span> and the rest of the proof inside a pairing check. When we recurse GKR inside Groth16, we do so in such a way that all the inputs of the GKR protocol are included in the public inputs. We call <span class="math">\\gamma_{v}</span>, the “part” of <span class="math">\\gamma</span> associated with the GKR inputs (i.e., <span class="math">\\gamma=\\prod_{i=0}^{n}\\nu\\mathrm{k}_{i}^{x_{i}}=\\gamma_{v}\\cdot\\prod_{i=n^{\\prime}}^{n}\\nu\\mathrm{k}_{i}^{x_{i}}</span> and <span class="math">(x_{0},\\ldots,x_{n^{\\prime}-1})</span> is the public input corresponding to the GKR statement). In our scheme, the prover computes and sends <span class="math">\\gamma_{v}</span> to the verifier and provides an argument of knowledge that it knows a witness for <span class="math">\\gamma_{v}</span> regarding the appropriate verification key. Note that the prover still has to prove the correct computation of <span class="math">\\gamma_{v}</span>, but the advantage of using <span class="math">\\gamma_{v}</span> for generating the randomness is that,</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>the verifier does not have to compute <span class="math">\\gamma_{v}</span> by itself.</li>
+
+      <li>the prover is bound to <span class="math">((x_{0},\\ldots,x_{n^{\\prime}-1}))</span> through <span class="math">\\gamma_{v}</span>, since it would be used in the verification of SNARKs.</li>
+
+    </ul>
+
+    <p class="text-gray-300">In particular, thanks to the second property, we can give an argument system with constant-size proofs to argue the correct</p>
+
+    <p class="text-gray-300">Recursion over Public-Coin Interactive Proof Systems; Faster Hash Verification</p>
+
+    <p class="text-gray-300">computation of randomness (which is indeed <span class="math">H(\\gamma_{v},\\ldots)</span>, computed outside the circuit). Since <span class="math">\\gamma_{v}</span> depends on the outer-layer SNARK scheme, we present two argument systems for the integrity of <span class="math">\\gamma_{v}</span>, separately for Groth16 <em>(Groth16, 2016)</em> and PLONK <em>(Lindner, 2016)</em> as the outer-SNARK.</p>
+
+    <h3 id="sec-6" class="text-xl font-semibold mt-8">Our contribution</h3>
+
+    <p class="text-gray-300">Our contribution can be divided into two main parts: theory and implementation.</p>
+
+    <p class="text-gray-300">Theoretical aspects: Although the idea of the paper was initially motivated by hash verification through recursion over GKR, our theoretical results are general and can be used for recursion over any public-coin interactive argument system. More precisely, we present a compiler that receives a single-round public-coin argument system and a SNARK (to generate the required randomness based on <span class="math">\\gamma_{v}</span>) and outputs an efficient recursion system. We build our compiler step-by-step, and we analyze the security of each step separately. We prove that if the inputs to the compiler, and the argument of knowledge (AOK) for correct computation of the randomness satisfy the common security notion (knowledge-soundness), then the output of the compiler is also secure.</p>
+
+    <p class="text-gray-300">For the instantiation, we use GKR as the inner argument system, where we first need to convert it to a one-round protocol. For such conversion, we first apply Fiat-Shamir from the second round and use the resulting scheme inside outer SNARK. This means the security holds only heuristically. We also emphasize that the construction and security of single-round GKR are not considered in the standard random oracle model, also known as the “so-far transcript” model, but rather inside what we call the “so-far digest” model. That is a more efficient model for applying Fiat-Shamir inside the circuit (defined in the following).</p>
+
+    <p class="text-gray-300">Implementation aspects: In our implementation, we use Groth16 as the outer-layer SNARK and recurse it over GKR with MiMC as the hash function. To improve efficiency, we use the custom gates specified in Fig.16 and include all optimizations of <em>(Hawking, 2016)</em> and <em>(Hawking, 2017)</em> on the sumcheck protocol and GKR. Our implementation is in Golang and is optimized for massive parallelism (benchmarked on 96 physical cores). We expand further on that matter in Fig.14.</p>
+
+    <p class="text-gray-300">Moreover, we use a realization of Fiat-Shamir that is more convenient for our construction. We call such realization “Fiat-Shamir in the so-far digest model”, a counterpart of the standard “so-far transcript model” (see Appendix H), where instead of hashing the transcript, we hash the randomness of the previous round and the last message of the prover. This improves the efficiency overall since the Fiat-Shamir hash computation is done inside the circuit (particularly, this realization avoids the hashing of public parameters inside the circuit). Working in this model can be of independent interest, for applications involved with Fiat-Shamir hashing inside the circuit. Moreover, in Appendix H, we demonstrate that applying the Fiat-Shamir transform in the so-far digest model is sound if it is sound to do it in the so-far transcript model.</p>
+
+    <p class="text-gray-300">Overall: We enable a secure and efficient recursion over the public-coin proof systems, by generating a short “initial randomness” and presenting the “so-far digest model”. We use the results for an application requiring vast hash verification. The relevance of more applications remains to be seen. Recently, blockchain companies have used PLONK over STARK <em>(Lindner, 2018)</em> to get a trade-off on the size and the time of the proof and be compatible with the Ethereum network. Since STARK is a public coin system, one may use our techniques for performance improvement.</p>
+
+    <h2 id="sec-7" class="text-2xl font-bold">2. Background</h2>
+
+    <h3 id="sec-8" class="text-xl font-semibold mt-8">2.1. Notations</h3>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">We say <span class="math">f(x)=\\omega(g(x))</span>, if and only if <span class="math">\\lim_{x\\to\\infty}f(x)/g(x)=\\infty</span>. Let <span class="math">\\lambda</span> denote the security parameter. We write <span class="math">f(\\lambda)\\approx h(\\lambda)</span> when $</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">f(\\lambda)-h(\\lambda)</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">=\\lambda^{-\\omega(\\lambda)}<span class="math"> for two functions </span>f,h:N\\to[0,1]<span class="math">. Then if </span>f(\\lambda)\\approx 0<span class="math"> we say that </span>f<span class="math"> is negligible, and if </span>f(\\lambda)\\approx 1<span class="math"> we say that </span>f<span class="math"> is overwhelming. We write </span>y\\leftarrow A(x)<span class="math"> to show that the algorithm </span>A<span class="math"> outputs </span>y<span class="math"> on input </span>x<span class="math">. Through the paper, we assume that all the algorithms are probabilistic polynomial time (p.p.t.). By </span>x\\leftarrow\\!\\!\\!sX<span class="math">, we mean that the element </span>x<span class="math"> is chosen uniformly at random from the set </span>X<span class="math">. The notation </span>[n]<span class="math"> stands for the set </span>\\{1,\\ldots,n\\}$.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">To define a security notion, we may define a counterpart game <span class="math">\\mathbf{G}_{\\mathcal{A}}</span> as</p>
+
+    <p class="text-gray-300"><span class="math">\\mathbf{G}_{\\mathcal{A}}=(\\text{winning condition, game interactions})</span></p>
+
+    <p class="text-gray-300">We say that the adversary <span class="math">\\mathcal{A}</span> fails (or its advantage in <span class="math">\\mathbf{G}_{\\mathcal{A}}</span> is negligible) if,</p>
+
+    <p class="text-gray-300"><span class="math">\\Pr[\\text{ Winning condition: Game interactions for }\\mathcal{A}]\\approx 0</span></p>
+
+    <p class="text-gray-300">Groups. <span class="math">\\mathbb{G}</span> denotes a cyclic group of prime order. If <span class="math">\\mathbb{G}</span> is of order <span class="math">p</span>, <span class="math">g\\in\\mathbb{G}</span>, and <span class="math">x\\in\\mathbb{Z}_{p}</span>, then <span class="math">g^{x}</span> denotes the scalar multiplication. For a list of <span class="math">n</span> scalars of <span class="math">\\mathbb{Z}_{p}</span> and group elements of <span class="math">\\mathbb{G}</span>, the multi-scalar multiplication (MSM) is <span class="math">\\prod_{i\\in[n]}g_{i}^{x_{i}}</span>. When it is clear that <span class="math">g</span> is a generator of <span class="math">\\mathbb{G}</span>, we may use the notation <span class="math">[x]</span> for <span class="math">g^{x}</span>.</p>
+
+    <h6 id="sec-9" class="text-base font-medium mt-4">Definition 2.1 (Bilinear Groups)</h6>
+
+    <p class="text-gray-300">A bilinear group is a tuple <span class="math">(p,\\mathbb{G}_{1},\\mathbb{G}_{2},\\mathbb{G}_{T},e)</span> such that: <span class="math">\\mathbb{G}_{1},\\mathbb{G}_{2},\\mathbb{G}_{T}</span> all cyclic groups, have prime order <span class="math">p</span>, <span class="math">e(\\mathbb{G}_{1},\\mathbb{G}_{2})\\to\\mathbb{G}_{T}</span> is a bilinear, non-degenerate map that is efficiently computable. Also, throughout this work, <span class="math">g_{1},g_{2},g_{T}</span> implicitly denotes generators of, respectively, <span class="math">\\mathbb{G}_{1},\\mathbb{G}_{2},\\mathbb{G}_{T}</span> such that <span class="math">e(g_{1},g_{2})=g_{T}</span>.</p>
+
+    <p class="text-gray-300">The argument systems Groth16 <em>(Groth16, 2016)</em> and PLONK <em>(Lindner, 2016)</em> are proved to be secure under the <span class="math">q</span>-DLog assumption (Appendix A, Def.A.1) and in the Algebraic Group Model (AGM), formally defined as follows.</p>
+
+    <h6 id="sec-10" class="text-base font-medium mt-4">Definition 2.2 (Algebraic adversary in an SRS-based protocol <em>(Lindner, 2018)</em>)</h6>
+
+    <p class="text-gray-300">An algebraic adversary <span class="math">\\mathcal{A}</span> is a p.p.t algorithm such that, whenever <span class="math">\\mathcal{A}</span> outputs an element <span class="math">A=[a]_{i}\\in\\mathbb{G}_{i}</span>, it also outputs the associated linear combination based on <span class="math">\\operatorname{srs}_{i}</span>, namely, a vector <span class="math">v</span> of scalars such that <span class="math">A=\\langle v,\\operatorname{srs}_{i}\\rangle=\\sum_{j}v_{j}\\cdot\\operatorname{srs}_{ij}</span>, where <span class="math">\\operatorname{srs}_{i}</span> is part of <span class="math">\\operatorname{srs}</span> belonging to the group <span class="math">\\mathbb{G}_{i}</span>. We call such a representation as the linear-combination representation (LC-representation) of <span class="math">A</span>.</p>
+
+    <h3 id="sec-11" class="text-xl font-semibold mt-8">2.2. Argument of Knowledge</h3>
+
+    <p class="text-gray-300">We define <span class="math">\\mathcal{R}_{\\lambda}</span> to be a relation generator (i.e., <span class="math">(\\mathcal{R},z)\\leftarrow\\mathcal{R}_{\\lambda}</span>) such that <span class="math">\\mathcal{R}</span> is a polynomial time decidable binary relation. For <span class="math">\\mathcal{R}(x;w)</span>, we call <span class="math">x</span> the statement and <span class="math">w</span> the witness. The relation generator</p>
+
+    <p class="text-gray-300">5STARK for time, PLONK for size</p>
+
+    <p class="text-gray-300">6That is based on the PLONK-elliptic curve</p>
+
+    <p class="text-gray-300">7The structured reference string (SRS) is the set of public parameters generated by the trusted setup with a special structure</p>
+
+    <p class="text-gray-300">Belling et al.</p>
+
+    <p class="text-gray-300">may also output some side information  <span class="math">z</span>  which will be given to the adversary. When we have several families of relations, we may show their relation generator as  <span class="math">\\mathcal{R}_{F_i}</span>  (rather than  <span class="math">\\mathcal{R}_{\\lambda}</span> ). We show the set of true statements by  <span class="math">\\mathcal{L}_{\\mathcal{R}} = \\{x : \\exists w \\quad \\mathcal{R}(x; w) = 1\\}</span> . The definitions in this section are mainly borrowed from [21].</p>
+
+    <p class="text-gray-300">Definition 2.3 (non-interactive Argument for  <span class="math">\\mathcal{R}_{\\lambda}</span> ). A Non-Interactive Argument for  <span class="math">\\mathcal{R}_{\\lambda}</span>  is a tuple of three p.p.t. algorithms (Setup, Prove, Verify) defined as follows,</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li><span class="math">\\sigma \\gets \\operatorname{Setup}(\\mathcal{R})</span> : on input  <span class="math">\\mathcal{R} \\gets \\mathcal{R}_{\\lambda}</span> , it generates a reference string  <span class="math">\\sigma</span> . All the other algorithms implicitly receive the relation  <span class="math">\\mathcal{R}</span> .</li>
+
+      <li><span class="math">\\pi \\gets \\operatorname{Prove}(\\sigma, x, w)</span> : it receives the reference string  <span class="math">\\sigma</span>  and for  <span class="math">\\mathcal{R}(x; w) = 1</span>  it outputs a proof  <span class="math">\\pi</span> .</li>
+
+      <li><span class="math">1/0 \\gets \\operatorname{Verify}(\\sigma, x, \\pi)</span> : it receives the reference string  <span class="math">\\sigma</span> , the statement  <span class="math">x</span>  and the proof  <span class="math">\\pi</span>  and returns 0 (reject) or 1 (accept).</li>
+
+    </ul>
+
+    <p class="text-gray-300">For the above argument system, we define the following security requirements.</p>
+
+    <p class="text-gray-300">Definition 2.4 (Completeness). It says that given a true statement  <span class="math">x \\in \\mathcal{L}_{\\mathcal{R}}</span> , the prover can convince the honest verifier; for all  <span class="math">\\lambda \\in \\mathbb{N}</span> ,  <span class="math">\\mathcal{R} \\in \\mathcal{R}_{\\lambda}, x \\in \\mathcal{L}_{\\mathcal{R}}</span> :</p>
+
+    <p class="text-gray-300"><span class="math">\\operatorname*{Pr}\\left[1 = \\operatorname{Verify}(\\sigma, x, \\pi) : \\sigma \\leftarrow \\operatorname{Setup}(\\mathcal{R}), \\pi \\leftarrow \\operatorname{Prove}(\\sigma, x, w)\\right] = 1</span></p>
+
+    <p class="text-gray-300">Definition 2.5 (Soundness). It says that, for the wrong statements, it is not possible to convince the verifier. For any non-uniform p.p.t. adversary  <span class="math">\\mathcal{A}</span> , we have,</p>
+
+    <div class="my-4 text-center"><span class="math-block">\\operatorname * {P r} \\left[ \\begin{array}{c c} 1 = \\operatorname {V e r i f y} (\\sigma , x, \\pi) &amp;amp; : \\quad (\\mathcal {R}, z) \\leftarrow \\mathcal {R} _ {\\lambda},   \\sigma \\leftarrow \\operatorname {S e t u p} (\\mathcal {R}), \\\\ \\wedge x \\notin \\mathcal {L} _ {\\mathcal {R}} &amp;amp; (x, \\pi) \\leftarrow \\mathcal {A} (\\sigma , z) \\end{array} \\right] \\approx 0</span></div>
+
+    <p class="text-gray-300">Definition 2.6 (non-interactive Knowledge-Soundness). It strengthens the notion of soundness by adding an extractor that can compute a witness from a given valid proof. The extractor gets full access to the adversary's state, including any random coins. Formally, for any non-uniform p.p.t adversary  <span class="math">\\mathcal{A}</span>  there exists a non-uniform (expected polynomial time) extractor  <span class="math">\\mathcal{E}_{\\mathcal{A}}</span>  such that:</p>
+
+    <div class="my-4 text-center"><span class="math-block">\\operatorname * {P r} \\left[ \\begin{array}{c c} 1 = \\operatorname {V e r i f y} (\\sigma , x, \\pi) &amp;amp; : \\quad (\\mathcal {R}, z) \\leftarrow \\mathcal {R} _ {\\lambda},   \\sigma \\leftarrow \\operatorname {S e t u p} (\\mathcal {R}), \\\\ \\wedge \\mathcal {R} (x; w) = 0 &amp;amp; : \\quad ((x, \\pi), w) \\leftarrow (\\mathcal {A} \\parallel \\mathcal {E} _ {\\mathcal {A}}) (\\sigma , z) \\end{array} \\right] \\approx 0</span></div>
+
+    <p class="text-gray-300">The advantage of the adversary in the knowledge-soundness game (the probability on the left side) is called as knowledge-error.8</p>
+
+    <p class="text-gray-300">The Interactive AOK is defined similarly to the NIAOK (Def.2.3), where the set (Prove and Verify) is a protocol between the prover and the verifier.</p>
+
+    <p class="text-gray-300">An analog notion of knowledge-soundness can be defined for an interactive protocol. In this context, the definition is identical except that the extractor is only given black-box access to the prover but is nonetheless allowed to rewind it up to any point in the interaction and to send arbitrary messages.</p>
+
+    <p class="text-gray-300">Definition 2.7 (interactive Knowledge-Soundness). An interactive argument system  <span class="math">(\\mathcal{P},\\mathcal{V})</span>  has knowledge-soundness if for all (p.p.t. non-uniform) prover adversaries  <span class="math">\\mathcal{A}</span>  there exists an (expected polynomial time) extractor  <span class="math">\\mathcal{E}_{\\mathcal{A}}</span>  with oracle access to  <span class="math">\\mathcal{A}</span> , allowed to rewind  <span class="math">\\mathcal{A}</span>  to any point in the interaction and to send it arbitrary messages such that the knowledge error in the following is negligible.</p>
+
+    <div class="my-4 text-center"><span class="math-block">\\operatorname * {P r} \\left[ \\begin{array}{c c} &amp;amp; (\\mathcal {R}, z) \\leftarrow \\mathcal {R} _ {\\lambda},   \\sigma \\leftarrow \\operatorname {S e t u p} (\\mathcal {R}), \\\\ 1 = \\operatorname {V e r i f y} (\\sigma , x, \\pi) &amp;amp; x \\leftarrow \\mathcal {A} (\\sigma , z) \\\\ \\wedge \\mathcal {R} (x; w) = 0 &amp;amp; \\pi \\leftarrow \\operatorname {T r a n s c r i p t} \\\\ &amp;amp; w \\leftarrow \\mathcal {E} _ {\\mathcal {A}} ^ {O} (\\sigma , z, x) \\end{array} \\right] \\approx 0</span></div>
+
+    <p class="text-gray-300">Where  <span class="math">O</span>  stands for the oracle access to  <span class="math">\\mathcal{A}</span>  pursuing the interactions.</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Definition 2.8 (Succinctness, SNARK). A non-interactive argument system  <span class="math">\\Pi</span>  for a relation  <span class="math">\\mathcal{R}_{\\lambda}</span>  is succinct if the proof  <span class="math">\\pi</span>  produced by the prover has size  $o(</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">w</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">)<span class="math">  and the run-time of the verifier is  </span>o(</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">w</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">)<span class="math">  for all relations  </span>\\mathcal{R}<span class="math">  drawn from  </span>\\mathcal{R}_{\\lambda}$ . A non-interactive argument system with this property is called SNARK.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <h2 id="sec-12" class="text-2xl font-bold">2.3 Polynomial commitment</h2>
+
+    <p class="text-gray-300">We conveniently adapt the definition of polynomial commitment given by [5, 16] (to its non-interactive version) to match the formalism of the present document. Formally, a polynomial commitment is a tuple of p.p.t. algorithms (Setup, Commit, Prove, Verify) where,</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li><span class="math">\\mathrm{pp} \\gets \\operatorname{Setup}(1^{\\lambda}, t)</span>  generates the public parameters pp suitable to commit to polynomials of degree  <span class="math">&amp;lt; t</span> . It is to be done by a trusted authority.</li>
+
+      <li><span class="math">C \\gets \\operatorname{Commit}(\\mathrm{pp}, P(X))</span>  outputs a commitment  <span class="math">C</span>  to a polynomial  <span class="math">P(X)</span>  of degree at most  <span class="math">t</span>  using pp.</li>
+
+      <li><span class="math">(x, y, \\pi_x) \\gets \\operatorname{Prove}(\\mathrm{pp}, P(X), x)</span>  outputs  <span class="math">(x, y, \\pi_x)</span>  where  <span class="math">\\pi_x</span>  is a proof for the evaluation of  <span class="math">y = P(x)</span> .</li>
+
+      <li><span class="math">0/1 \\gets \\operatorname{Verify}(\\mathrm{pp}, C, x, y, \\pi_x)</span>  verifies that  <span class="math">y = P(x)</span>  is the correct evaluation of the polynomial committed in  <span class="math">C</span> .</li>
+
+    </ul>
+
+    <p class="text-gray-300">The correctness and security of Polynomial Commitments Schemes are defined in Appendix A. We use the KZG polynomial commitment scheme [23] to informally refer to the polynomial commitment based on bilinear groups assumptions (Appendix C). This protocol has been widely studied, extended and applied in numerous recent works [16], [14], [11].</p>
+
+    <h2 id="sec-13" class="text-2xl font-bold">2.4 Fiat-Shamir</h2>
+
+    <p class="text-gray-300">Informally, the Fiat-Shamir heuristic is a tool that allows transforming interactive protocols from a specific class into non-interactive protocols. This specific class is known as public-coin protocols and is formally defined as follows.</p>
+
+    <p class="text-gray-300">Definition 2.9 (Public Coin). An interactive protocol between a prover and a verifier is public-coin if all the messages sent by the verifier to the prover are randomly and independently sampled from the messages sent by the prover (that is, random coins from the verifier are publicly available).</p>
+
+    <p class="text-gray-300">In Appendix H, we provide more details on how we adapt and instantiate the Fiat-Shamir heuristic for our use case, and for building a single-round version of GKR Appendix I.</p>
+
+    <h3 id="sec-14" class="text-xl font-semibold mt-8">2.5. MiMC</h3>
+
+    <p class="text-gray-300">Here we summarize the construction of MiMC <em>(1)</em>. Let <span class="math">q</span> be a prime, and <span class="math">\\mathbb{F}_{q}</span> be the finite field of order <span class="math">q</span>. Let <span class="math">\\alpha</span> be the smallest integer co-prime with <span class="math">q-1</span>; the map <span class="math">x\\to x^{\\alpha}</span> defines a bijection of <span class="math">\\mathbb{F}_{q}</span>. Let <span class="math">(c_{i})_{0\\leq i&lt;r}</span> be a sequence of <span class="math">\\mathbb{F}_{q}</span>. Define the round function <span class="math">F_{i}(x)=(x+k+c_{i})^{\\alpha}</span> where <span class="math">c_{0}=c_{r}=0</span> and also define the cipher as <span class="math">E_{k}(x)=(F_{r-1}\\circ F_{r-2}\\circ\\ldots\\circ F_{0})(x)+k</span>. The authors of <em>(1)</em> suggest that the number of rounds <span class="math">r</span> be chosen so that <span class="math">r\\geq\\left\\lceil\\frac{\\log q}{\\log\\alpha}\\right\\rceil</span> and that the round constants <span class="math">(c_{i})</span> be drawn independently and uniformly at random from <span class="math">\\mathbb{F}_{q}</span>. One can obtain a hash function; either from the cipher and using the Miyaguchi-Preneel construction <em>(4; 29)</em>, or from the permutation (where in <span class="math">E_{k}(x)</span> the key is set to <span class="math">0</span>) and using the sponge construction <em>(1)</em>.</p>
+
+    <p class="text-gray-300">Following a suggestion in Libra (<em>(33)</em>, Sec.5) for efficient application of GKR over MiMC and Poseidon, we define the custom family of gates for these hash functions in Appendix B.3.</p>
+
+    <h3 id="sec-15" class="text-xl font-semibold mt-8">2.6. Sumcheck protocol</h3>
+
+    <p class="text-gray-300">The sumcheck protocol <em>(26)</em> is a multi-round interactive protocol for the following relation where <span class="math">P</span> and <span class="math">a</span> are public inputs and the witness is empty.</p>
+
+    <p class="text-gray-300"><span class="math">\\left\\{(P(X),a;\\;):\\sum_{x_{k-1}\\in\\{0,1\\}}\\cdots\\sum_{x_{0}\\in\\{0,1\\}}P(x_{0},\\ldots,x_{k-1})=a\\right\\}</span></p>
+
+    <p class="text-gray-300">where <span class="math">P</span> is a <span class="math">k</span> multivariate polynomial of maximal degree <span class="math">d</span> on each variable. It consists of <span class="math">k</span> rounds of complexity <span class="math">O(d)</span>, each doing sensibly the same thing (from the verifier’s point of view) and a special final round where the verifier performs an evaluation of <span class="math">P(X)</span> at a random challenge point and compares the result with the prover’s messages.</p>
+
+    <h6 id="sec-16" class="text-base font-medium mt-4">Remark 2.10.</h6>
+
+    <p class="text-gray-300">A useful takeaway to understand the role the sumcheck plays in GKR is to notice that the sumcheck protocol reduces a claim about an exponential size sum of values of <span class="math">P</span> to a claim on a single evaluation of <span class="math">P</span> at a random point.</p>
+
+    <h2 id="sec-17" class="text-2xl font-bold">3. GKR protocol; a public-coin argument system</h2>
+
+    <p class="text-gray-300">Description As mentioned, GKR generates proofs for the data-parallel execution of a layered arithmetic circuit. At a high level, it is done by iteratively applying a sequence of sumcheck protocols <em>(26)</em>, one for each layer of the circuit. Each iteration of the sumcheck protocol inside GKR establishes consistency between two successive layers of computation (starting with the output layer, layer <span class="math">0</span>, and working backward to the input layer, layer <span class="math">d</span>). The reader can find a detailed description of the protocol in Appendix B.</p>
+
+    <p class="text-gray-300">Fiat-Shamir transform The GKR protocol is not constant-round and thus, one cannot straightforwardly compile it in the random oracle model. Recent works <em>(3; 10; 12)</em> have studied the Fiat-Shamir transform of the GKR protocol and the Fiat-Shamir of the sumcheck protocol. We give an informal justification for the soundness of GKR in the random oracle model below.</p>
+
+    <p class="text-gray-300">In <em>(10)</em> Canetti et al. proved that GKR is round-by-round sound in the so-far transcript model. Additionally, the authors of <em>(10)</em> argue that <em>round-by-round soundness</em> readily implies security against state-restoration attack, which is a notion introduced in <em>(3)</em>. In <em>(3)</em> the authors argue that if a public-coin interactive protocol is secure against state restoration attack, then its non-interactive version via Fiat-Shamir is also sound in the random oracle model. Putting it together, this means GKR is sound in the (so-far transcript) random oracle model. We also highlight that GKR is widely used in the random oracle model <em>(9; 33; 36)</em>.</p>
+
+    <p class="text-gray-300">In our compiler, we essentially need a single-round version of GKR. In essence, only the first round of communication is initially kept interactive, while all the other rounds are compiled using the Fiat-Shamir. We elaborate on this version, its security and instantiation in Appendices H and I.</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">When embedded in R1CS (or more broadly, any type of algebraic circuit that does not have special support for hash functions), the performance of the verifier is dominated by the Fiat-Shamir hashes. Particularly, the verifier generates the first randomness by hashing the statement supposed to be proven by GKR, this incurs the prover to perform Fiat-Shamir hashes of size $(</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">x</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">+</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">y</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">)<span class="math"> (corresponding to the claim </span>H_{mimc}(x)=y$). Since doing so entails the verifier working with more computation than it would need to perform the hash itself. We treat this issue in Sec.5.4. Additionally, the verifier and prover perform a logarithmic number of hashes due to applying Fiat-Shamir to the sumcheck instances.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">Performances The verifier work has the overhead of the sumchecks for each layer. Each of the sumchecks has a logarithmic runtime for the verifier. On its hand, the prover runtime is driven by the sumchecks runtime that is <span class="math">O(N)</span> for <span class="math">N</span> the number of instances of the parallel execution.</p>
+
+    <p class="text-gray-300">Compiling the GKR verifier in a R1CS As mentioned the verifier’s work is dominated by Sumchecks that are expensive in practice, and their cost is driven by the hashes required by the Fiat-Shamir transform. Even though this is a logarithmic overhead, it has large constants and typically occupies between 1M to 10M constraints (with Groth16) and twice more with Plonk, depending on the number of hashes to be proven in the batch and the hash function used for Fiat-Shamir. For instance, say for both Fiat-Shamir and the instances to prove, we use the same MiMC function - with degree <span class="math">\\alpha=7</span> and number of rounds <span class="math">R=91</span> - but with different round-constants. Then, the number of constraints to recurse a GKR verifier for <span class="math">N=2^{20}</span> instances of the MiMC permutation is approximated by <span class="math">364R(\\alpha+2)\\log N\\approx 5.9M</span> where <span class="math">364</span> corresponds to the number of R1CS constraints to permute a single element. Indeed, we have a layered circuit of <span class="math">R</span> layers, for each layer GKR needs one sumcheck of <span class="math">\\log N</span> rounds which itself provokes <span class="math">\\log N</span> hashes over <span class="math">\\alpha+2</span> field elements. Therefore, we have <span class="math">R(\\alpha+2)\\log N</span> permutations where each permutation needs <span class="math">364</span> constraints. Here we have assumed the use of short “initial randomness” and working in the “so-far digest model”. In the so-far transcript model, this goes</p>
+
+    <p class="text-gray-300">Belling et al.</p>
+
+    <p class="text-gray-300">up to  <span class="math">364R(\\alpha + 2)\\log^2 N</span>  but is still better than Groth16 without recursion that needs  <span class="math">364N</span>  constraints.</p>
+
+    <p class="text-gray-300">In this section, we explain the challenge of recursion over public-coin argument systems.</p>
+
+    <p class="text-gray-300">Concrete Example. Before delving into the abstract matter, we first give a concrete example of how we intend to embed GKR in a SNARK. Consider, for instance, the problem of verifying Merkle proofs in, say, Groth16 [21]. The circuit doing this performs two distinct tasks: (1) routing Merkle paths (i.e., preparing the inputs to be hashed and deciding the order in which to hash them) and comparing the final output hash with a public Merkle root hash, (2) actually computing the hashes.</p>
+
+    <p class="text-gray-300">The circuit performing the first task, call it  <span class="math">C&#x27;</span> , simply believes the values output by the hashing sub-circuit. The most straightforward option for the second task is to implement the hash as a sub-circuit, i.e., do the second task by computing the hashes in the circuit. Our solution is different: we verify those hashes using a GKR verifier sub-circuit. As a result, combining  <span class="math">C&#x27;</span>  and the GKR verifier circuit produces a circuit  <span class="math">C</span>  that verifies Merkle proofs in their entirety.</p>
+
+    <p class="text-gray-300">Naive attempt. We could try to use the GKR verifier inside  <span class="math">C</span>  in its original form (non-interactive by Fiat-Shamir). The Fiat-Shamir transform of the GKR protocol has been well studied, and we know it is sound for rightfully chosen hash functions. The result would be a sound protocol; however, this approach comes with a major impediment. In the interactive version, the verifier is asked to send a challenge to the prover after receiving the response from the prover. In the Fiat-Shamir transform of GKR, this implies that the verifier has to hash all the information it has received so far, including the entire GKR statement. This is 3 times worse than directly checking the hashes in an arithmetic circuit in the first place. Our goal here is to circumvent the burden of hashing the entire GKR statement to verify a (non-interactive) GKR proof inside the circuit.</p>
+
+    <p class="text-gray-300">Note that in the Fiat-Shamir transform version that we use, the new randomness (for the new round) is obtained by hashing the previous randomness and the last message, ignoring the past transcript (see Appendix H). Thus, the bottleneck in applying GKR for hash verification is generating a challenge for the first round. That is why we refer to the challenge for the first round as the "Initial Randomness", and we consider a public-coin single-round interactive argument system rather than a multi-round one.</p>
+
+    <p class="text-gray-300">This section introduces a generic compiler for building a special class of recursion systems. Let  <span class="math">\\mathcal{PC}</span>  be a public-coin single-round interactive argument system (corresponding to GKR in our use case). Our compiler aims at combining  <span class="math">\\mathcal{PC}</span>  with a SNARK system  <span class="math">S</span>  to get an efficient recursion system (running the verifier of  <span class="math">\\mathcal{PC}</span>  inside  <span class="math">S</span> ). Based on the challenge we described in Sec.4 and thanks to an extra proof-system  <span class="math">\\Gamma</span>  for knowledge of committed value - which we specify later in the present section - we develop a compiler that solves the problem of initial randomness. Here we give a general intuition of how to build such a compiler.</p>
+
+    <p class="text-gray-300">The compiler goes through two main steps. In the first step, we assume that  <span class="math">\\mathcal{PC}</span>  is a single-round argument system (where the first prover's message is not included in the circuit) and the challenge is available as part of the public input. In the second step, we replace the first message of the prover with a short commitment (to the public inputs). To clear up this intuition, we illustrate it in the form of an example for our initial use case, embedding GKR inside Groth16 for Merkle proofs.</p>
+
+    <p class="text-gray-300">5.1.1 Protocol 1. We embed the GKR verifier into a sub-circuit of  <span class="math">C</span>  alongside  <span class="math">C&#x27;</span> . We use the GKR statement and the initial randomness as a public input of the embedding circuit. The resulting circuit  <span class="math">C</span>  can be succinctly described as in Fig.1, while Fig.2 describes the steps of the protocol. Note that the circuit involved in the recursion is the part after receiving the challenge  <span class="math">\\rho</span>  (in Fig.2).</p>
+
+    <p class="text-gray-300">!<a href="img-0.jpeg">img-0.jpeg</a> Figure 1: Protocol 1 : Circuit  <span class="math">C</span>  construction.  <span class="math">x_{C&#x27;}</span>  and  <span class="math">w_{C&#x27;}</span>  are the public input vector and witness vectors of  <span class="math">C&#x27;</span> .  <span class="math">\\mathcal{G}</span>  is a circuit embedding the one-round GKR verifier. The GKR proof belongs to  <span class="math">w_{\\mathcal{G}}</span>  (witness of  <span class="math">\\mathcal{G}</span> ).  <span class="math">x_{\\mathcal{G}}</span>  is the GKR statement vector, and  <span class="math">\\rho</span>  is the initial randomness.</p>
+
+    <p class="text-gray-300">!<a href="img-1.jpeg">img-1.jpeg</a> Figure 2: Protocol 1, We omit the passing of the public parameters. The meaning of the variable is the one of Fig.1</p>
+
+    <p class="text-gray-300">Notice the following two points. First, Protocol 1 is interactive (public-coin single-round), as such, it is not a SNARK. Secondly, the public input vector is longer (it now contains the GKR inputs/outputs). This is highly undesirable: the verifier is no longer sublinear in the circuit size. In this case, the protocol loses its succinctness, which sounds like a step backward. Nonetheless, one can argue that this protocol is sound. This will be helpful for analyzing Protocol 2.</p>
+
+    <p class="text-gray-300">Recursion over Public-Coin Interactive Proof Systems; Faster Hash Verification</p>
+
+    <p class="text-gray-300">5.1.2 Protocol 2. Protocol 2 improves on Protocol 1 by removing the unnecessary GKR inputs/outputs from the public inputs of the circuit (more precisely, pushing them to the witness). This greatly reduces the verifier's overhead and brings back the succinctness that we lost with protocol 1. We start from two observations in the inner-working of the Groth16 presented in Fig.3. Firstly, the output of the pairing check can be computed using only  <span class="math">\\gamma</span>  in place of the public inputs. Secondly, doing a multi-scalar multiplication (MSM) of a vector of field elements and a set of group elements for which no discrete log is known can be viewed as a binding commitment analog of the Pedersen commitment.</p>
+
+    <p class="text-gray-300">!<a href="img-2.jpeg">img-2.jpeg</a> Figure 3: Simplified take on the Groth16 verifier</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Note that in verification of Groth16 (Fig.3), we have an MSM where the entries of  $\\mathbf{G} = \\mathbf{G}_{C'}\\</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mathbf{G}_{\\mathcal{G}}\\</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mathbf{G}_{\\rho}<span class="math">  correspond to the entries of  </span>x_{C'}, x_{\\mathcal{G}}, \\rho<span class="math">  in the MSM. The idea of protocol 2, is that instead of sending the public inputs to the verifier, the prover computes  </span>\\gamma_{\\mathcal{G}} = \\mathsf{MSM}(\\mathbf{G}_{\\mathcal{G}}, x_{\\mathcal{G}})<span class="math">  and sends it to the verifier. From there, the protocol continues as in Protocol 1. When he checks the Groth16 proof, the verifier chooses  </span>\\rho<span class="math">  and completes MSM by adding the missing parts to  </span>\\gamma_{\\mathcal{G}}$ .</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">An issue is that just doing that is insecure. Indeed, a malicious prover can pass the verification check for any arbitrary (invalid)  <span class="math">x_{C&#x27;}&#x27;</span>  by sending  <span class="math">\\gamma_G&#x27; = \\gamma_G + \\mathsf{MSM}(\\mathbf{G}_{C&#x27;}, x_{C&#x27;} - x_{C&#x27;}&#x27;)</span>  where  <span class="math">x_{C&#x27;}</span>  belongs to  <span class="math">\\mathcal{L}(C&#x27;)</span>  for which the prover knows a witness (we shall call such attack "mix-and-match").</p>
+
+    <p class="text-gray-300">We rule out this attack by additionally requesting the prover to send an argument of knowledge that she knows  <span class="math">x_{\\mathcal{G}}</span>  such that w.r.t  <span class="math">\\mathbf{G}_{\\mathcal{G}}</span>  we have  <span class="math">\\gamma_{\\mathcal{G}} = \\mathsf{MSM}(\\mathbf{G}_{\\mathcal{G}},x_{\\mathcal{G}})</span> . This ensures that the prover cannot use anything aside from group elements in  <span class="math">\\mathbf{G}_{\\mathcal{G}}</span>  in the claim of  <span class="math">\\gamma_{\\mathcal{G}}</span> . Also note that even though the  <span class="math">x_{\\mathcal{G}}</span>  is the GKR statement, for the original problem, it is mainly in the witness and so the prover can not choose it arbitrarily. For example, for the Merkle tree paths, only the leaves and the root are in the statement and all the intermediate hashes (which now are done by GKR) are in the witness.</p>
+
+    <p class="text-gray-300">Protocol 2 is sound if Protocol 1 is sound (that implies the binding property of  <span class="math">\\gamma_{\\mathcal{G}}</span> ) and if the argument of knowledge ensuring the right computation of  <span class="math">\\gamma_{\\mathcal{G}}</span>  is sound as well.</p>
+
+    <p class="text-gray-300">Finally, we apply the Fiat-Shamir transform, where the initial randomness is computed as  <span class="math">\\rho = H_{\\mathcal{FS}}(\\gamma_{\\mathcal{G}})</span> . This removes the only interaction of the protocol, where the verifier sent the GKR initial random coin. Thus, we no longer require the verifier to hash the GKR statement, but rather, its commitment  <span class="math">\\gamma_{\\mathcal{G}}</span>  which consists of a single element.</p>
+
+    <p class="text-gray-300">Our compiler has three layers. The first layer verifies the GKR proof, or rather, all the parts that come after the initial randomness, inside</p>
+
+    <p class="text-gray-300">a SNARK  <span class="math">(S)</span>  and sets all the public inputs of GKR, i.e.,  <span class="math">x_{\\mathcal{G}}</span>  as public inputs of the resulting SNARK. The second layer of compilation assumes that the SNARK  <span class="math">S</span>  has a set of properties allowing to move the public inputs of GKR to the witness part. The last layer just applies the Fiat-Shamir transform.</p>
+
+    <p class="text-gray-300">In the present section, we formalize the properties (2-Step verification with splitting compatibility) that SNARK should satisfy (needed for the second layer). Informally, we require that computation relative to the public inputs, the Computation step, can be factored out of the rest of the verifier's computation, the Justification step. This must be possible in such a way that the public inputs do not appear in the Justification step, but rather only in the "Computation step". We formalize this as 2-steps verification. Finally, we require that the Computation step can be computed by "recombining" two partial intermediate results obtained from two complementary subsets of the public input. The latter property is what we formalize as splitting-compatibility and is defined in the following, alongside the 2-steps verification property.</p>
+
+    <p class="text-gray-300">Definition 5.1 (2-Steps Verification). We say that a SNARK system has 2-step verification if the verification algorithm can be expressed as follows,</p>
+
+    <div class="my-4 text-center"><span class="math-block">\\operatorname {V e r i f y} (\\mathrm {v k}, x, \\pi) = \\left\\{ \\begin{array}{l l} 1. \\text {C o m p u t a t i o n :} c \\leftarrow F (\\mathrm {v k}, x, \\pi) \\\\ 2. \\text {J u s t i f i c a t i o n :} 0 / 1 \\leftarrow \\operatorname {V e r i f y} ^ {\\prime} (\\mathrm {v k}, c, \\pi)). \\end{array} \\right.</span></div>
+
+    <p class="text-gray-300">Where the input  <span class="math">x</span>  is not used in the justification-step and  <span class="math">c</span>  is much shorter than  <span class="math">x</span>  (i.e.,  <span class="math">F</span>  is compressing, note that this requirement implies a nontrivial choice of  <span class="math">F</span> ). We emphasize that the computation-step may itself include several steps of computations.</p>
+
+    <p class="text-gray-300">REMARK 5.2. The 2-steps verification property becomes interesting (and less trivial) when we impose a special property on the computation-step called splitting-compatible, which we explain in the following.</p>
+
+    <p class="text-gray-300">Example 5.3. The verifier of Groth16 [21] satisfies the above property. Loosely speaking, the first part consists in performing an MSM of the public inputs with a subset of the verification key see Fig.3 and the second part is the pairing check. For PLONK, identifying the computation step is non-trivial. We elaborate on it in Sec.6.2.1. At a high level, it amounts to computing two things: a challenge  <span class="math">\\mathfrak{z}</span>  and evaluating a polynomial  <span class="math">\\mathrm{PI}(\\mathfrak{z})</span>  interpolating the public inputs vector.</p>
+
+    <p class="text-gray-300">We now, introduce the notions of splitting and partitioning. Informally, they can be understood as dividing a string into two sub-strings (Fig.4).</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Definition 5.4 (Splitting, Partitioning). We define splitting (res. partitioning) as the map  <span class="math">\\phi : X \\to X_A \\times X_B</span>  that maps a vector  <span class="math">X</span>  to two sub-vectors  <span class="math">X_A, X_B</span>  as follows. Let  <span class="math">I</span>  be the index set associated with entries of the vector  <span class="math">X</span> , i.e.,  $I = \\{1, \\dots,</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">X</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\}<span class="math"> . We denote a subvector of  </span>X<span class="math">  associated with the index-set  </span>A \\subseteq I<span class="math">  as  </span>X_A<span class="math">  (using the indices of  </span>A$  in ascending order).</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">We say that  <span class="math">X_A, X_B</span>  is a splitting of  <span class="math">X</span>  if for  <span class="math">A, B \\subseteq I</span>  we have  <span class="math">A \\cup B = I</span> . It is partitioning if  <span class="math">A, B</span>  are partitioning of  <span class="math">I</span>  as well, namely,  <span class="math">A \\cap B = \\emptyset</span> . A visualization is given in Fig.4. For convenience, we may abuse the notation to say  <span class="math">A, B</span>  is a splitting (or partitioning) of  <span class="math">X</span>  as  <span class="math">X = (A, B)</span> .</p>
+
+    <p class="text-gray-300">Belling et al.</p>
+
+    <p class="text-gray-300">!<a href="img-3.jpeg">img-3.jpeg</a> Figure 4: Splitting and partitioning of  <span class="math">X</span>  to  <span class="math">X_A, X_B</span> .</p>
+
+    <p class="text-gray-300">A splitting-compatible map  <span class="math">f</span>  is a map that can be split and recombined according to a splitting  <span class="math">\\sigma</span>  of its inputs (Fig.5). As a toy example, one can consider the Pedersen commitment  <span class="math">g_1^{a_1} \\cdot g_2^{a_2}</span>  splitting to  <span class="math">g_1^{a_1}</span>  and  <span class="math">g_2^{a_2}</span>  according to the splitting  <span class="math">(a_1, a_2)</span>  to  <span class="math">a_1</span>  and  <span class="math">a_2</span> . The formal definition is as follows.</p>
+
+    <p class="text-gray-300">Definition 5.5. ( <span class="math">\\sigma</span> -Compatibility) Consider finite subsets  <span class="math">A, B, X, Y \\subset \\{0,1\\}^*</span> , a map  <span class="math">f: X \\to Y</span> , and a partitioning over its input space as  <span class="math">\\sigma: X \\to A \\times B</span> . We say that  <span class="math">f</span>  is  <span class="math">\\sigma</span> -compatible if there exists  <span class="math">f_A: A \\to Y_A</span>  and  <span class="math">f_B: B \\to Y_B</span>  and a combiner  <span class="math">g: Y_A \\times Y_B \\to Y</span>  such that  <span class="math">\\forall (a,b) \\in A \\times B</span> ,  <span class="math">f(\\sigma^{-1}(a,b)) = g(f_A(a), f_B(b))</span>  (see Fig.5). We may call  <span class="math">f_A, f_B</span>  as the splitting of the map  <span class="math">f</span> .</p>
+
+    <p class="text-gray-300">!<a href="img-4.jpeg">img-4.jpeg</a> Figure 5: Splitting-Compatible: the map  <span class="math">f</span>  is compatible with the splitting  <span class="math">\\sigma</span> .</p>
+
+    <p class="text-gray-300">The compiler works based on three argument systems  <span class="math">(S, \\mathcal{PC}, \\Gamma)</span> , each must satisfy several requirements that we specify in the following. In the description of the compiler, the notation  <span class="math">S</span>  stands for the outer SNARK,  <span class="math">\\mathcal{PC}</span>  represents GKR as a public-coin protocol and  <span class="math">\\Gamma</span>  is AOK for the commitment generated by the prover.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li><span class="math">S = (\\text{Setup}_S, \\text{Prove}_S, \\text{Verify}_S)</span>  should be a secure SNARK scheme for a family of relations  <span class="math">\\mathcal{R}_{\\mathcal{F}0}</span>  closed under intersection.</li>
+
+      <li>The verification algorithm  <span class="math">\\text{Verify}_S</span>  is a 2-step verification (see Def.5.1).</li>
+
+      <li>Let  <span class="math">F_{S}</span>  be an algorithm in the computation-step of the verification (cf Def.5.1), then for any vk and any partitioning  <span class="math">\\sigma</span>  of  <span class="math">x</span> , the function  <span class="math">F_{S}(\\mathrm{vk},\\bullet)</span>  should be compatible with  <span class="math">\\sigma</span> . In the rest of the paper, we may call such  <span class="math">F_{S}</span>  or its output as the contribution of the public input. We may also use  <span class="math">F_{S}(x)</span>  when vk is implicit. We emphasize that, if the computation-step includes several computations, each of these computations should be splittable (i.e.,  <span class="math">\\sigma</span> -compatible).</li>
+
+    </ul>
+
+    <p class="text-gray-300">REMARK 5.6. Note that the soundness of  <span class="math">S</span>  implies that  <span class="math">(\\mathrm{Setup}_S, F_S)</span>  - viewed as a commitment scheme of the public inputs - must be binding as well (see also Rem.5.9).</p>
+
+    <p class="text-gray-300">We require  <span class="math">\\mathcal{PC} = (\\text{Setup}_{\\mathcal{PC}}, \\text{Prove}_{\\mathcal{PC}}, \\text{Verify}_{\\mathcal{PC}})</span>  being a public-coin single-round interactive argument of knowledge for some relation family  <span class="math">\\mathcal{R}_{\\mathcal{F}1}</span>  without any specific restriction on  <span class="math">\\mathcal{R}_{\\mathcal{F}1}</span> . Furthermore, as the protocol is single-round of interaction  <span class="math">\\text{Verify}_{\\mathcal{PC}}</span>  (and also  <span class="math">\\text{Prove}_{\\mathcal{PC}}</span> ) can be split into two parts. Each part,  <span class="math">\\text{Verify}_{\\mathcal{PC},1}</span> ,  <span class="math">\\text{Verify}_{\\mathcal{PC},2}</span>  executes respectively the first and the second round of the verifier. We use the notation  <span class="math">\\pi_{\\mathcal{PC},1}</span> ,  <span class="math">\\pi_{\\mathcal{PC},2}</span>  for the prover messages at round (resp.) 1 and 2. Finally, we require that  <span class="math">\\text{Verify}_{\\mathcal{PC},2}</span>  be expressible in a poly( <span class="math">\\lambda</span> )-sized instance of  <span class="math">\\mathcal{R}_{\\mathcal{F}1}</span> .</p>
+
+    <p class="text-gray-300">REMARK 5.7. Implicitly, we want to use the GKR protocol as  <span class="math">\\mathcal{PC}</span> . An apparent impediment is that GKR is not a single-round protocol, as required. We address it in Appendix I, where we compile the GKR into a single-round protocol. A second apparent issue is that in practice, GKR does not prove or argue the knowledge of a witness. This corresponds to the trivial case where the witness is an empty string.</p>
+
+    <p class="text-gray-300">We introduced above  <span class="math">F_{S}</span>  being defined in the computation-step of verification of Verifier  <span class="math">S</span>  and  <span class="math">\\sigma</span>  being a partitioning of the public inputs. Recall that we already required that  <span class="math">F_{S}</span>  be compatible for all partitioning  <span class="math">\\sigma : X \\to L \\times R</span>  (where  <span class="math">X</span>  is the set of public input of  <span class="math">S</span> ). As a consequence, we can introduce splittings of the map  <span class="math">F_{S}</span>  as  <span class="math">\\phi_{L}, \\phi_{R}</span>  and its combiner  <span class="math">g</span>  (see Def.5.5).</p>
+
+    <p class="text-gray-300">Note that in our protocol, we split the public input  <span class="math">x</span>  to  <span class="math">(x_{L}, x_{R})</span> , and delegate the computation of the map  <span class="math">\\phi_{L}</span>  to the prover. We require  <span class="math">\\Gamma = (\\text{Setup}_{\\Gamma}, \\text{Prove}_{\\Gamma}, \\text{Verify}_{\\Gamma})</span>  be a succinct non-interactive argument of knowledge for relations of the form</p>
+
+    <div class="my-4 text-center"><span class="math-block">\\mathcal {R} _ {\\Gamma} (\\mathrm {v k}, \\sigma) = \\left\\{\\left(\\gamma ; x _ {L}\\right): \\gamma \\leftarrow \\phi_ {L} \\left(x _ {L}\\right) \\right\\}</span></div>
+
+    <p class="text-gray-300">where  <span class="math">\\mathrm{vk}</span>  is the verification key of  <span class="math">S</span> .</p>
+
+    <p class="text-gray-300">REMARK 5.8.  <span class="math">\\Gamma</span>  works over a relation that is defined for fixed vk and  <span class="math">\\sigma</span>  that are, respectively, the verification key of  <span class="math">S</span>  and the splitting over the public inputs of  <span class="math">S</span> . This point is crucial as it addresses the mix-and-match attack raised in Sec.5.1.2. For the sake of clarity, the role of  <span class="math">\\Gamma</span>  is not just about extracting  <span class="math">x_{L}</span>  s.t.  <span class="math">\\gamma = \\phi_L(x_L)</span>  but to enforce that  <span class="math">\\gamma</span>  was obtained only using the correct  <span class="math">\\phi_L</span>  and no other information.</p>
+
+    <p class="text-gray-300">REMARK 5.9. Following the Rem.5.6,  <span class="math">\\phi_L(\\cdot)</span>  (and similarly for  <span class="math">\\phi_R</span> ) can be seen as a binding commitment scheme as well. Indeed, if an adversary were able to find  <span class="math">x_{L} \\neq x_{L}^{\\prime}</span>  such that  <span class="math">\\phi_L(x_L) = \\phi_L(x_L^{\\prime})</span> , then for all  <span class="math">x_{R}</span> , we have  <span class="math">x = \\sigma^{-1}(x_L,x_R) \\neq x&#x27; = \\sigma^{-1}(x_L&#x27;,x_R)</span>  and  <span class="math">F_{S}(\\mathrm{vk},x) = F_{S}(\\mathrm{vk},x^{\\prime})</span>  which contradicts the soundness of  <span class="math">S</span> . The binding property is interesting to intuitively see that we can replace  <span class="math">x_{L}</span>  with  <span class="math">\\gamma_v = \\phi_L(x_L)</span>  in the Fiat-Shamir transform, though in our security proofs we directly reduce the security to the knowledge-soundness.</p>
+
+    <p class="text-gray-300">The compiler proceeds in three layers of compilation, see Fig.6. Intuitively, the first step consists of recursing the verifier of  <span class="math">\\mathcal{PC}</span>  (more precisely,  <span class="math">\\mathrm{Verify}_{\\mathcal{PC},2}</span> ) inside the proof  <span class="math">S</span> , where  <span class="math">\\mathcal{PC}</span>  additionally passes its public inputs as part of the public inputs of the SNARK scheme  <span class="math">S</span> . Then, a second layer of compilation allows us to delegate some contributions of public-inputs of  <span class="math">\\mathcal{PC}</span>  (e.g., a subpart of MSM in the contexts of Groth16 [21]) from the verifier's computations to the prover's (or equivalently, moving a subpart of the public input to the witness part), via the AOK  <span class="math">\\Gamma</span> . The last layer simply consists of applying the Fiat-Shamir transform.</p>
+
+    <p class="text-gray-300">Recursion over Public-Coin Interactive Proof Systems; Faster Hash Verification</p>
+
+    <p class="text-gray-300">!<a href="img-5.jpeg">img-5.jpeg</a> Figure 6: Overview of the compiler</p>
+
+    <p class="text-gray-300">Now we are ready to present the inner-work of each layer separately, as we are going through the layers, we prove the security of each layer.</p>
+
+    <p class="text-gray-300">5.4.1 The first layer. The first layer (L1) takes as input a SNARK scheme  <span class="math">S</span>  for a relation  <span class="math">\\mathcal{R}&#x27; \\in \\mathcal{R}_{\\mathcal{F}0}</span> , and a public-coin single-round argument of knowledge  <span class="math">\\mathcal{PC}</span>  for a relation,  <span class="math">\\mathcal{R}_1 \\in \\mathcal{R}_{\\mathcal{F}_1}</span>  as in Sec.5.3. Note that since  <span class="math">\\mathcal{PC}</span>  is recursed inside  <span class="math">S</span> , then  <span class="math">S</span>  should also check for some relation between the public input and witnesses  <span class="math">\\mathcal{R}_1</span>  and the rest of the circuit. Recalling the visualization given in Fig.1, here one can imagine  <span class="math">\\mathcal{R}_0</span>  as the circuit  <span class="math">C&#x27;</span> ,  <span class="math">\\mathcal{R}_1</span>  for the GKR, and the connection between  <span class="math">\\mathcal{R}_0</span>  and  <span class="math">\\mathcal{R}_1</span>  is checked through some equality relations (in the form of splittings). Thus, the relation for  <span class="math">S</span>  can be expressed as follows, where  <span class="math">\\mathrm{Verify}_{\\mathcal{PC},2}</span>  refers to the second part of  <span class="math">\\mathrm{Verify}_{\\mathcal{PC}}</span>  (i.e., verification after the interaction step).</p>
+
+    <div class="my-4 text-center"><span class="math-block">\\mathcal {R} ^ {\\prime} = \\left\\{(x, \\rho ; w): \\begin{array}{l l} &amp;amp; x _ {0}, x _ {1} = \\sigma_ {t} (x), w _ {0}, \\pi_ {\\mathcal {P C}} = \\sigma_ {u} (w) \\\\ 1 \\leftarrow \\operatorname {V e r i f y} _ {\\mathcal {P C}, 2} \\left(\\mathrm {p p} _ {1}, x _ {1}, \\pi_ {\\mathcal {P C}}, \\rho\\right) \\\\ 1 \\leftarrow \\mathcal {R} _ {0} \\left(x _ {0}, w _ {0}\\right) \\end{array} \\right\\} \\tag {1}</span></div>
+
+    <p class="text-gray-300">Where the compiler also receives two splittings  <span class="math">\\sigma_t, \\sigma_u</span>  of the public input and the witness spaces. Moreover, we require  <span class="math">\\sigma_u</span>  to be a partitioning but not  <span class="math">\\sigma_t</span> . In Appendix D we discuss the choice of  <span class="math">\\sigma_t, \\sigma_u</span> .</p>
+
+    <p class="text-gray-300">Intuitively, the first layer inherits the security property of the underlying SNARK  <span class="math">S</span>  and argument system  <span class="math">\\mathcal{PC}</span>  and so for any choice of  <span class="math">\\sigma_u,\\sigma_t</span>  yields a secure protocol for the following relation,</p>
+
+    <div class="my-4 text-center"><span class="math-block">\\begin{array}{l} \\mathcal {R} _ {L 1} (\\mathcal {R} _ {0}, \\mathcal {R} _ {1}, \\sigma_ {t}, \\sigma_ {u}) \\\\ = \\left\\{(x \\in X; w \\in W): \\begin{array}{l l} x _ {0}, x _ {1} = \\sigma_ {t} (x), &amp;amp; \\mathcal {R} _ {0} \\left(x _ {0}, w _ {0}\\right) = 1 \\\\ w _ {0}, w _ {1} = \\sigma_ {u} (w), &amp;amp; \\mathcal {R} _ {1} \\left(x _ {1}, w _ {1}\\right) = 1 \\end{array} \\right\\} \\tag {2} \\\\ \\end{array}</span></div>
+
+    <p class="text-gray-300">REMARK 5.10. This way of combining relations allows the two instances  <span class="math">\\mathcal{R}_0</span>  and  <span class="math">\\mathcal{R}_1</span>  to share some part of their public inputs, which is the case in most applications[13]. In our use case (SNARK over GKR, for Merkle tree), some public input of  <span class="math">S</span>  are used in the Merkle tree (because we need to commit to them). This is why  <span class="math">x_1</span>  as the public-input of  <span class="math">\\mathcal{R}_1</span>  may share some entries with  <span class="math">x_0</span> , the public-input of  <span class="math">\\mathcal{R}_0</span> . More in detail,  <span class="math">\\sigma_t</span>  not being a partitioning (but only a simple splitting) implies equality constraints in addition to the constraints specified by  <span class="math">\\mathcal{R}_0</span>  and  <span class="math">\\mathcal{R}_1</span> .</p>
+
+    <p class="text-gray-300">Layer 1 Construction. Fig.7 describes the construction of layer 1 with inputs  <span class="math">\\mathcal{R}_0, \\mathcal{R}_1, \\sigma_t, \\sigma_u, S, \\mathcal{PC}</span> .</p>
+
+    <p class="text-gray-300">REMARK 5.11. here we are using an equivalent representation of Fig.2 where the verifier has all the public input of  <span class="math">\\mathcal{PC}</span>  as its input. This representation is more compatible with the definition of SNARK, where the prover and the verifier receive the same public input.</p>
+
+    <p class="text-gray-300">!<a href="img-6.jpeg">img-6.jpeg</a> Figure 7: Setup and interactions of layer 1.</p>
+
+    <p class="text-gray-300">Completeness: It follows from the completeness of  <span class="math">S</span>  and  <span class="math">\\mathcal{PC}</span> . More precisely, the completeness of  <span class="math">\\mathcal{PC}</span>  guarantees that for the correct statement  <span class="math">(x_{1},\\rho)\\in \\mathcal{L}_{\\mathcal{R}_{1}}</span>  where  <span class="math">\\mathcal{R}_1(x_1,\\rho ;w_1) = 1</span> , the verification of argument system  <span class="math">\\mathcal{PC}</span>  satisfies  <span class="math">\\mathrm{Verify}_{\\mathcal{PC}}(\\mathrm{pp}_1,x_1,\\rho ,w_1) = 1</span> . Which gives the right relation consumed by the argument system  <span class="math">S</span>  (i.e., Eq.1), then the completeness of  <span class="math">S</span>  implies that the verification algorithm of  <span class="math">S</span>  (which is also the verification associated with  <span class="math">\\mathcal{R}_{L1}</span> ) outputs 1.</p>
+
+    <p class="text-gray-300">Knowledge-Soundness. Here, we denote our argument system for layer 1 as  <span class="math">\\mathcal{X}_{L1}</span> , applied over the corresponding relation  <span class="math">\\mathcal{R}_{L1}</span>  (in Eq.2). Let  <span class="math">\\mathcal{E}_S</span>  and  <span class="math">\\mathcal{E}_{\\mathcal{PC}}</span>  be the extractors respectively associated with the argument systems  <span class="math">S</span>  and  <span class="math">\\mathcal{PC}</span> . If  <span class="math">\\mathcal{X}_{L1}</span>  outputs a valid proof, we can run the extractor  <span class="math">\\mathcal{E}_S</span>  to extract a witness  <span class="math">w</span> ; a witness for  <span class="math">\\mathcal{R}&#x27;</span>  (relation associated with  <span class="math">S</span> ) including a proof associated with  <span class="math">\\mathcal{PC}</span> . There are two possible cases;</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Case 1. The witness for  <span class="math">\\mathcal{R}&#x27;</span>  is correct (i.e., satisfies the relation  <span class="math">\\mathcal{R}&#x27;</span> ): this means verification  <span class="math">\\mathcal{PC}</span>  passed, and by knowledge-soundness of  <span class="math">\\mathcal{PC}</span> , the probability that the extractor  <span class="math">\\mathcal{E}_{\\mathcal{PC}}</span>  fails (i.e., it extracts a non-satisfying witness for  <span class="math">\\mathcal{R}_1</span>  from the proof of  <span class="math">\\mathcal{PC}</span> ) is negligible.</li>
+
+      <li>Case 2. The relation  <span class="math">\\mathcal{R}&#x27;</span>  is not satisfied: it means the extractor  <span class="math">\\mathcal{E}_S</span>  failed, but it can only happen with negligible probability by knowledge-soundness of  <span class="math">S</span> .</li>
+
+    </ul>
+
+    <p class="text-gray-300">Wrapping up everything together, the extractor  <span class="math">\\mathcal{E}_S</span>  outputs the correct witness  <span class="math">(w_0,\\pi)</span>  with overwhelming probability. This gives a valid proof  <span class="math">\\pi</span>  for  <span class="math">\\mathcal{PC}</span>  (as part of the extracted witness), which then the extractor  <span class="math">\\mathcal{E}_{\\mathcal{PC}}</span>  can use to extract the correct witness  <span class="math">w_{1}</span> .</p>
+
+    <p class="text-gray-300">THEOREM 5.12 (Knowledge-Soundness of  <span class="math">\\mathcal{X}_{L1}</span> ). Let  <span class="math">S, \\mathcal{PC}</span>  be as required in Sec.5.3. If  <span class="math">S</span>  and  <span class="math">\\mathcal{PC}</span>  have (resp.) knowledge errors  <span class="math">\\epsilon_{S}</span>  and  <span class="math">\\epsilon_{\\mathcal{PC}}</span> . Then, the aforementioned protocol  <span class="math">\\mathcal{X}_{L1}</span>  has knowledge error  <span class="math">\\epsilon = O(\\epsilon_{S} + \\epsilon_{\\mathcal{PC}})</span> .</p>
+
+    <p class="text-gray-300">The formal proof is given in Appendix E.</p>
+
+    <p class="text-gray-300">Belling et al.</p>
+
+    <p class="text-gray-300">5.4.2 The second layer. As stated in Sec.5.4.1, the missing part of our compiler is that it can only make the two argument systems communicate by their public inputs. The second layer of compilation solves this problem by allowing moving parts of the public inputs (called  <span class="math">v</span> ) into the witness. Indeed, the aim is to delegate parts of the computation (involved with  <span class="math">v</span> ) to the prover, without breaching the soundness.</p>
+
+    <p class="text-gray-300">Therefore, the second layer takes as input  <span class="math">\\mathcal{X}_{L1}</span> , a public-coin single-round argument of knowledge for the relation  <span class="math">\\mathcal{R}_{L1}</span> . Let  <span class="math">F_{S}</span>  be the computation-step in the verification algorithm (Def.5.1) of  <span class="math">\\mathcal{X}_{L1}</span>  (inherited from  <span class="math">S</span> ) <span class="math">^{14}</span> . Let  <span class="math">\\xi, \\zeta</span>  be (res.) the partitioning of the public input and witness space of  <span class="math">\\mathcal{X}_{L1}</span> , and  <span class="math">\\Gamma</span>  be an AoK for the relation  <span class="math">\\mathcal{R}_{\\Gamma}(\\mathrm{vk}, \\xi) = \\{(\\gamma_v, v) : \\gamma_v \\gets \\Phi_L(v)\\}</span>  where  <span class="math">(v; x_{L2}) = \\xi(x)</span>  (and  <span class="math">\\phi_L</span>  is the left-splitting of  <span class="math">F_{S}</span> , as defined in Sec.5.3). The second layer of compilation builds a SNARK for the following relation where  <span class="math">x</span>  and  <span class="math">w</span>  are associated with layer 1, and we are moving  <span class="math">v</span>  from  <span class="math">x</span>  to  <span class="math">w_{L2}</span> .</p>
+
+    <div class="my-4 text-center"><span class="math-block">\\begin{array}{l} \\mathcal {R} _ {L 2} = \\left\\{ \\begin{array}{c} \\zeta \\left(w _ {L 2}\\right) = (w, v) \\\\ \\left(x _ {L 2}; w _ {L 2}\\right): x = \\xi^ {- 1} (v, x _ {L 2}) \\\\ \\mathcal {R} _ {L 1} (x, w) = 1 \\end{array} \\right\\} \\tag {3} \\\\ = \\left\\{\\left(x _ {L 2}; w, v\\right): \\mathcal {R} _ {L 1} (v, x _ {L 2}; w) = 1 \\right\\} \\\\ \\end{array}</span></div>
+
+    <p class="text-gray-300">where the second equality holds thanks to the fact that  <span class="math">\\xi</span>  and  <span class="math">\\zeta</span>  are partitioning. The proof consists of three main parts; the proof of the first layer, the value  <span class="math">\\gamma_v</span>  and a proof generated by  <span class="math">\\Gamma</span>  as the AoK for the relation  <span class="math">\\mathcal{R}_{\\Gamma}</span> .</p>
+
+    <p class="text-gray-300">Layer 2 Construction The inner-work of the second layer of the compiler is given in Fig.8. Here  <span class="math">(\\mathrm{Prove}_{1,L1}, \\mathrm{Prove}_{2,L1})</span>  stands for the prover algorithm of layer 1. Note that the verification algorithm of  <span class="math">L1</span>  has 2-step verification, here we use  <span class="math">\\gamma</span>  as the output of the computation-step and  <span class="math">\\mathrm{Verify}_{\\mathcal{Y}_{L1}}^t = \\mathrm{Verify}_S^t</span>  as the algorithm for the justification-step (see Fig.7). Moreover, since  <span class="math">F_S</span>  (the map in the computation-step) is compatible with the splitting  <span class="math">\\xi</span> , we can denote  <span class="math">(\\phi_L, \\phi_R)</span>  and  <span class="math">g</span>  as the splitting and combiner for  <span class="math">F_S</span>  (Def.5.5). The last point is that though for clarity we use  <span class="math">\\mathrm{pp}</span> ,  <span class="math">\\mathrm{pp}_{\\Gamma}</span>  in the setup (Fig.8), indeed we have  <span class="math">\\mathrm{pp} \\subset \\mathrm{pp}_{\\Gamma}</span> , this fact is particularly used in the security reduction.</p>
+
+    <p class="text-gray-300">Completeness: is straightforward from the completeness of  <span class="math">\\mathcal{X}_{L1}</span>  and  <span class="math">\\Gamma</span> .</p>
+
+    <p class="text-gray-300">Knowledge-Soundness. Let  <span class="math">\\mathcal{E}_{\\Gamma}</span>  and  <span class="math">\\mathcal{E}_{L1}</span>  be the extractors associated, respectively, with  <span class="math">\\Gamma</span>  and  <span class="math">\\mathcal{X}_{L1}</span> . If our argument system  <span class="math">\\mathcal{X}_{L2}</span>  outputs a valid proof, to obtain a witness we should run the extractors  <span class="math">\\mathcal{E}_{\\Gamma}</span>  and  <span class="math">\\mathcal{E}_{L1}</span>  (to obtain  <span class="math">v</span>  and  <span class="math">w</span> , respectively) and the probability that either of these extractors fails is negligible.</p>
+
+    <p class="text-gray-300">THEOREM 5.13. Let  <span class="math">\\mathcal{X}_{L1}</span>  be a succinct argument of knowledge for a relation  <span class="math">\\mathcal{R}_{L1}</span>  whose verifier has a 2-steps structure such that its computation-steps is compatible with all partitioning. (We do not require non-interactivity). If  <span class="math">\\mathcal{X}_{L1}</span>  and  <span class="math">\\Gamma</span>  both are knowledge-sound with knowledge-error  <span class="math">\\epsilon_{L1}</span>  and  <span class="math">\\epsilon_{\\Gamma}</span>  (res.), then the protocol  <span class="math">\\mathcal{X}_{L2}</span>  is knowledge-sound with knowledge-error  <span class="math">\\epsilon_{L2} = O(\\epsilon_{L1} + \\epsilon_{\\Gamma})</span> .</p>
+
+    <p class="text-gray-300">Our proof technique is similar to the one for Thm.5.12. The proof is given in Appendix F.</p>
+
+    <p class="text-gray-300">In Appendix D, we combine layers of compilation together and present the general form of the relations that our compiler deals with.</p>
+
+    <p class="text-gray-300">!<a href="img-7.jpeg">img-7.jpeg</a> Figure 8: Output protocol of the layer 2</p>
+
+    <p class="text-gray-300">Here, we present a technical description of how we apply Fiat-Shamir to remove the interactive round of the protocol. We compile the protocol in the random oracle model. Below, we discuss the instantiation of Fiat-Shamir for our compiler.</p>
+
+    <p class="text-gray-300">The message to be sent to the random oracle must comprise</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>The public parameters of  <span class="math">\\mathcal{X}_{L2} = (\\mathrm{pp}_{\\Gamma}, \\mathrm{pp}_{L1})</span></li>
+
+      <li>The prover message  <span class="math">\\pi_{\\Gamma}, \\gamma_v, \\pi_1</span></li>
+
+      <li>The public inputs of the protocol  <span class="math">x_{L2}</span></li>
+
+    </ul>
+
+    <p class="text-gray-300">We then instantiate the random oracle with a hash function that can be modeled as a random oracle. Here we do not require the hash function to be efficiently verifiable in an arithmetic circuit <span class="math">^{15}</span> . Thus, standard hash functions like Keccak, SHA2-256, or Blake2/3 can be used here. <span class="math">^{16}</span></p>
+
+    <p class="text-gray-300">As we explain in Appendix H, numerous hash functions, like the one we mentioned above, work by iteratively updating the state of a hash function before returning the result. This allows us to precompute the state of the hash function with the public parameters of  <span class="math">\\mathcal{X}_{L2}</span>  at the end of the setup and only hash the public inputs of the protocol. This implementation detail is important because otherwise, one would have to hash the (possibly gigantic) public parameters of  <span class="math">\\mathcal{X}_{L2}</span>  at every run of the protocol.</p>
+
+    <p class="text-gray-300">Here, we give a specification for the choice of building blocks:  <span class="math">S</span>  as the outer-layer SNARK,  <span class="math">\\mathcal{PC}</span>  as the public-coin single-round interactive argument of knowledge, and  <span class="math">\\Gamma</span>  as AOK for the computation of  <span class="math">\\gamma_v</span> . We instantiate  <span class="math">S</span>  by Groth16 or Plonk and present the single-round GKR as the instantiation for  <span class="math">\\mathcal{PC}</span> . Finally, we give a concrete AOK (corresponding to  <span class="math">\\Gamma</span> ) compatible with the outer-layer SNARK,</p>
+
+    <p class="text-gray-300">Recursion over Public-Coin Interactive Proof Systems; Faster Hash Verification</p>
+
+    <p class="text-gray-300">that is,  <span class="math">S</span> . For both Groth16 [21] and Plonk [16], we present our AOK system  <span class="math">\\Gamma</span>  separately. We emphasize that the AOK system  <span class="math">\\Gamma</span>  is not general and is built with respect to the underlying  <span class="math">S</span> .</p>
+
+    <p class="text-gray-300">Remember that in our layer 2, the prover sends a commitment  <span class="math">\\gamma_v</span>  to a part of public input (denoted as  <span class="math">v</span> ) of underlying SNARK  <span class="math">S</span> , and also an AOK that commitment is computed correctly. Here, we discuss how to build  <span class="math">\\Gamma</span>  for the case that  <span class="math">S</span>  is instantiated with Groth16. Note that under the algebraic group model [13], the Groth16 [21] protocol has witness extended emulation (thus, knowledge-soundness). It also has the requirement that  <span class="math">S</span>  should satisfy; 2-step verification, where the public-input contribution  <span class="math">F_S</span>  is a MSM and so is  <span class="math">\\sigma</span> -compatible for any splitting  <span class="math">\\sigma</span> . We provide a protocol  <span class="math">\\Gamma</span>  as the AOK compatible with Groth16. We remind the reader that the aim of  <span class="math">\\Gamma</span>  is to provide an AOK for the following relation;</p>
+
+    <div class="my-4 text-center"><span class="math-block">\\mathcal {R} _ {\\Gamma} (\\mathrm {v k}, \\xi): \\left\\{\\left(\\gamma_ {v}; v\\right): \\gamma_ {v} = \\phi_ {L} (v) \\right\\}</span></div>
+
+    <p class="text-gray-300">where  <span class="math">\\mathsf{vk}</span>  is the Groth16 verification key, and  <span class="math">\\phi_L</span>  is the left split of  <span class="math">F_S</span>  (the computation step of Groth16 verification) according to the splitting  <span class="math">\\xi</span> , and  <span class="math">v</span>  comes from  <span class="math">\\xi(x) = (v, x_{L2})</span>  splitting of the Groth16's public input  <span class="math">x</span> . Thus,  <span class="math">\\gamma_v = \\phi_L(v) = \\mathrm{MSM}(\\mathsf{vk}_L, v)</span>  for  <span class="math">\\xi(\\mathsf{vk}) = (\\mathsf{vk}_L, \\mathsf{vk}_R)</span> .</p>
+
+    <p class="text-gray-300">The protocol  <span class="math">\\Gamma</span>  is described in Fig.9. Assume  <span class="math">(\\mathbb{G}_1,\\mathbb{G}_2,\\mathbb{G}_T;\\mathbb{F})</span>  to be the description of a bilinear group,  <span class="math">n\\in \\mathbb{N}^*</span>  and  <span class="math">\\mathrm{vk}\\in \\mathbb{G}_1^n</span>  the Groth16 verification key that can be extracted from the public parameters of Groth16. The setup simply splits  <span class="math">\\mathrm{vk}</span>  according to  <span class="math">\\xi</span>  and randomized  <span class="math">\\mathrm{vk}_L</span> . The proof is just a MSM of randomized  <span class="math">\\mathrm{vk}_L</span>  and  <span class="math">v</span> .</p>
+
+    <p class="text-gray-300">|  Setup(ppGroth16, G1, G2, F, ξ)  |</p>
+
+    <p class="text-gray-300">| --- |</p>
+
+    <p class="text-gray-300">|  r←sF, g←sG2  |</p>
+
+    <p class="text-gray-300">|  (vk ∈ G1, -) ← Parse(ppGroth16)  |</p>
+
+    <p class="text-gray-300">|  vkL, vkR ← ξ(vk)  |</p>
+
+    <p class="text-gray-300">|  L ← vkL'  |</p>
+
+    <p class="text-gray-300">return  <span class="math">\\mathrm{srs} = (\\mathrm{pp}_{\\text{Groth16}}, g, g^{\\frac{1}{r}}, \\mathbf{L})</span></p>
+
+    <p class="text-gray-300">|  Prove(L, v)  |</p>
+
+    <p class="text-gray-300">| --- |</p>
+
+    <p class="text-gray-300">|  π← MSM(L, v)  |</p>
+
+    <p class="text-gray-300">|  return π  |</p>
+
+    <p class="text-gray-300">|  Verify(vk, L, π, γv, g, g1/r)  |</p>
+
+    <p class="text-gray-300">|  e(π, g1/r) = e(γv, g)  |</p>
+
+    <p class="text-gray-300">Figure 9: Argument of Knowledge for Groth16</p>
+
+    <p class="text-gray-300">Note that the above AOK prevents the mix-and-match attack (see Sec.5.1.2), since the toxic randomness  <span class="math">r</span>  is hidden. Slightly more in detail, if the adversary tries to mix  <span class="math">\\gamma_v</span>  with the rest of the verification equation of Groth16, to pass the verification check of Groth16, it can not pass the verification of  <span class="math">\\Gamma</span> .</p>
+
+    <p class="text-gray-300">Now we prove the knowledge-soundness of  <span class="math">\\Gamma</span>  in the algebraic group model.</p>
+
+    <p class="text-gray-300">THEOREM 6.1. Our Argument of Knowledge  <span class="math">\\Gamma</span>  for Groth16 (Fig.9) is knowledge-sound in the Algebraic Group Model [13] under the DLog assumption.</p>
+
+    <p class="text-gray-300">Since we are in the algebraic model, the extractor simply receives the LC-representations of  <span class="math">\\gamma_v</span>  and  <span class="math">\\pi</span> , which gives the witness. Based on the pairing check, these LC-representations should satisfy a special equality. We show that the only way that the adversary passes the equality check for a specific value  <span class="math">r</span>  is to break the</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Scheme</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">public input</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">witness</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">verifier part</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Prover part</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Prover Contrib.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">PLONK</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">{wi}i∈{r}</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">{wi}3n i∈{r}</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">{wi}i∈{Q}</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">{wi}i∈{r:Q}</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">C, p1</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Ours</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">x = ξ(v, xL2)</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">w</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">xL2</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">v</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">γv</td>
+
+          </tr>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">Figure 10: Notation-Equivalence for PLONK and our scheme</p>
+
+    <p class="text-gray-300">DLog assumption. On the other hand, it cannot pass the check for arbitrary  <span class="math">r</span> , since this imposes a special structure on the LC-representations which essentially forces the relation to hold (so the winning condition cannot be satisfied). The formal proof is given in Appendix G.</p>
+
+    <p class="text-gray-300">The very popular PLONK [16] protocol is a zk-SNARK for arithmetic constraint systems. As described by its authors, it does not have the 2-step verification property. Thus, we cannot directly apply our compiler on the original PLONK protocol. Fig.11 illustrates a very simplified view of how the Plonk verifier processes its public input. In the following, we borrow the notation of [16]. For an assignment vector  <span class="math">w</span>  (meaning the concatenation of the public inputs with the witness in a single vector), the  <span class="math">\\ell</span>  first entries  <span class="math">w_{i\\leq \\ell}</span>  denote the public inputs and  <span class="math">w_{i &amp;gt; \\ell}</span>  the witness,  <span class="math">\\mathrm{pp}_{\\mathcal{P}\\mathrm{lonh}}</span>  denotes the public parameters (including the preprocessed inputs) and  <span class="math">\\pi_{\\mathcal{P}\\mathrm{lonh}}</span>  the proof. As in [16],  <span class="math">L_{i}</span>  denotes the Lagrange polynomial for the root of unity  <span class="math">\\omega^i</span>  on a larger subgroup of roots of unity  <span class="math">\\Omega</span> .</p>
+
+    <p class="text-gray-300">As explained in Fig.11), at a high level, a randomness  <span class="math">\\mathfrak{z}</span> , among other randomnesses, is obtained by hashing the verifier's input in (1). This randomness is used as an evaluation point for the interpolation polynomial of the public inputs on  <span class="math">\\Omega</span>  in (2). Informally, we could try to pick (1) and (2) as the computation-step and (3) as the justification-step (see Def.5.1). This is unfortunately invalid: in order to compute  <span class="math">\\mathfrak{z}</span> , we need to include the proof in the Fiat-Shamir hash (denoted by Hash). This illustrates why splitting the computation is no trivial task.</p>
+
+    <p class="text-gray-300">|  Verify(ppPlonh, wi<l, πPlonh)  |</p>
+
+    <p class="text-gray-300">| --- |</p>
+
+    <p class="text-gray-300">|  / Implicitly, test that the proof and the public-inputs  |</p>
+
+    <p class="text-gray-300">|  / are valid fields and subgroup elements  |</p>
+
+    <p class="text-gray-300">|  1: 3,···other randomnesses← Hash(ppPlonh, wi≤l, πPlonh)  |</p>
+
+    <p class="text-gray-300">|  2: PI(3)) = ∑i≤l wiLi(3)  |</p>
+
+    <p class="text-gray-300">|  ···  |</p>
+
+    <p class="text-gray-300">|  3: b← OtherCheck(ppPlonh, PI(3), πPlonh)  |</p>
+
+    <p class="text-gray-300">|  return b  |</p>
+
+    <p class="text-gray-300">Figure 11: A very simplified description of the PLONK verifier</p>
+
+    <p class="text-gray-300">6.2.1 Our variant of Plonk. To bypass the aforementioned problem, we consider a family of variants of Plonk instead of the original protocol itself. We use the notations of [16] to make it easier for the reader to determine the changes compared to the original scheme, although we give the equivalent notation of our compiler in Fig.10. In Fig.12 we represent our variant where the verifier does not directly evaluate  <span class="math">\\mathrm{PI}(\\mathfrak{z})</span>  as in (2) for [16]. Instead, he splits the public input into two parts:  <span class="math">w_{(1)}, w_{(2)} = \\operatorname{Part}(w_{i \\leq \\ell})</span>  and computes the KZG commitment to the polynomial  <span class="math">[\\mathrm{PI}_2(x)]_1</span> . We denote by  <span class="math">Q</span>  the</p>
+
+    <p class="text-gray-300">Belling et al.</p>
+
+    <p class="text-gray-300">!<a href="img-8.jpeg">img-8.jpeg</a> Figure 12: A variant of the Plonk protocol</p>
+
+    <p class="text-gray-300">subset of indices selected by Part for  <span class="math">w_{(1)}</span> . Part is to be considered as a parameter of the protocol.</p>
+
+    <p class="text-gray-300">Picking Part:  <span class="math">w \\to (w, \\emptyset)</span>  yields the same protocol as Plonk. For  <span class="math">w_{(1)}, w_{(2)} = \\operatorname{Part}(w_{i \\leq t})</span> , it is similar to the PLONK, except that, for generating the randomness  <span class="math">\\mathfrak{z}</span> , instead of  <span class="math">w_{(2)}</span> , we use the KZG commitment  <span class="math">[PI_2(x)]_1</span>  (Namely, KZG.Commit(srs,  <span class="math">PI_2</span> ) =  <span class="math">[PI_2(x)]_1</span>  for  <span class="math">x</span>  given via srs). As the verifier computes  <span class="math">PI_2(x)</span>  itself, from a security standpoint the variant described above is not different from PLONK, for any splitting Part. Implicitly, we will select Part =  <span class="math">\\xi</span>  (from Sec.5.4.2) to make it compatible with our compiler. The last point is that though in [16] they use only the terms  <span class="math">[x^j]_1, [x]_2</span>  for  <span class="math">i = 0 \\cdots n + 5</span>  (as pp), the security proof is based on srs =  <span class="math">([x^j]_1, [x^j]_2, i = 0 \\cdots n + 5)</span> . Here, we use the whole srs, since we use the elements of  <span class="math">[x^j]_2</span>  in our AOK system  <span class="math">\\Gamma</span> .</p>
+
+    <p class="text-gray-300">Our variant of Plonk is secure under the Algebraic Group Model [13] and has 2-step verification. The computation-step involves the evaluation of hashes and the polynomial  <span class="math">PI(X)</span>  over the point  <span class="math">X = \\mathfrak{z}</span> . Through our compiler, we split this computation into two parts; for the hash computation, we use the trivial splitting given in Fig.13 where the commitment is computed by the prover. For splitting  <span class="math">PI(X)</span>  over the point  <span class="math">X = \\mathfrak{z}</span> , the verifier part is  <span class="math">PI_1(\\mathfrak{z})</span>  and the prover part is  <span class="math">PI_2(\\mathfrak{z})</span> . The prover should give proof for the correct computation of its share. We present the AOK  <span class="math">\\Gamma</span>  for our Plonk variant in Appendix J.</p>
+
+    <p class="text-gray-300">The implementation is in Golang which is optimized and benchmarked for massive parallelism: the protocol has been benchmarked</p>
+
+    <p class="text-gray-300">!<a href="img-9.jpeg">img-9.jpeg</a> Figure 13: Splitting for hash computation;  <span class="math">Id</span>  is the identical function and Commit is the KZG commitment.</p>
+
+    <p class="text-gray-300">over AWS hpc6a instances (96 physical cores and 384 Gb of memory). The implementation uses the libraries gmark <span class="math">^{17}</span>  and gmark-crypto <span class="math">^{18}</span>  for the finite field arithmetic and the Groth16 implementation. Various kinds of optimizations have been carried out: lowering the overheads of parallelization, pooling the memory to reduce the overheads of allocations, and reducing the number field of arithmetic operations. The parallelization gives us a speed-up of 34x over a single-threaded benchmark.</p>
+
+    <p class="text-gray-300">In Fig.14, we give the results of benchmarks measuring the speed at which our implementation can prove MiMC permutations. The benchmarks are performed using the curve BN254 [2] and the results are presented in Fig.14. As a point of comparison, we have benchmarked the prover time of a circuit performing multiple MiMC permutations using gmark's implementation of Groth16 (without using GKR). For a number  <span class="math">2^{18}</span>  of MiMC permutations, it runs in 38.3 sec. This corresponds to proving 6835 permutations per second. Our techniques also bring a small improvement in memory usage between the two approaches, but it is much smaller. That is because the GKR prover still needs to write the set of all the intermediate values at the same time.</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Numb of Hash</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">219</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">220</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">221</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">222</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">223</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">224</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Initial Rand.</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">120 ms</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">196 ms</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">412 ms</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">756 ms</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1293 ms</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">2504 ms</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Gkr Prover</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">3.4 s</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">5.4 s</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">15.1 s</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">19.7 s</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">29.1 s</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">51.8 s</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Groth16 Prover</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">4.0 s</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">6.4 s</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">7.1 s</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">12.5 s</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">21.3 s</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">24.5 s</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Total (GKR)</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">7.6 s</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">12.0 s</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">20.7 s</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">33.0 s</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">51.7 s</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">78.9 s</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Hash per second</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">68400</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">86500</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">101000</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">127000</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">162000</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">212000</td>
+
+          </tr>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">Figure 14: Runtime efficiency benchmarks for GKR</p>
+
+    <p class="text-gray-300">Regarding the hashing framework, one can use sponge construction or Miyaguchi-Preneel construction. We highlight the following points,</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>the benchmarks are given w.r.t. the number of permutations which is independent of the framework for hashing.</li>
+
+      <li>As far as the length extension attack is not a concern by the application (as this is the case for our use case), working with Miyaguchi-Preneel construction remains a nice choice, especially since it needs fewer calls to the permutation  <span class="math">^{19}</span> .</li>
+
+    </ul>
+
+    <p class="text-gray-300">Recursion over Public-Coin Interactive Proof Systems; Faster Hash Verification</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Proving the dependencies between the instances of the hash is negligible compared to the cost of proving the permutation themselves in terms of constraints (&lt;1%)</li>
+
+    </ul>
+
+    <p class="text-gray-300">We thank Dan Boneh for pointing out a flaw in an earlier version of the protocol and for insightful discussions. We are also grateful to Gautam Botrel, Youssef El Housni, Arya Tabaie, Gus Gutoski, Thomas Piellard, Vanessa Bridge and Nicolas Liochon for their feedback and useful discussions on the protocol itself, the paper and its implementation.</p>
+
+    <p class="text-gray-300">[1] Martin R. Albrecht, Lorenzo Grassi, Christian Rechberger, Arnab Roy, and Tyge Tiessen. 2016. MiMC: Efficient Encryption and Cryptographic Hashing with Minimal Multiplicative Complexity. In ASIACRPT 2016, Proceedings, Part I (LNCS, Vol. 10031). 191-219. [2] Paulo S. L. M. Barreto and Michael Naehrig. 2005. Pairing-Friendly Elliptic Curves of Prime Order. In SAC 2005 (Lecture Notes in Computer Science, Vol. 3897). Springer, 319-331. [3] Eli Ben-sasson, Alessandro Chiesa, and Nicholas Spooner. 2016. Interactive Oracle Proofs. In Theory of Cryptography TCC 2016-B (LNCS, Vol. 9986). 31-60. [4] John Black, Phillip Rogaway, and Thomas Shrimpton. 2002. Black-Box Analysis of the Block-Cipher-Based Hash-Function Constructions from PGV. In CRYPTO 2002 (LNCS, Vol. 2442). Springer, 320-335. [5] Dan Boneh, Justin Drake, Ben Fisch, and Ariel Gabizon. 2020. Efficient polynomial commitment schemes for multiple points and polynomials. IACR Cryptol. ePrint Arch. (2020), 81. [6] Sean Bowe, Jack Grigg, and Daira Hopwood. 2019. Halo: Recursive Proof Composition without a Trusted Setup. IACR Cryptol. ePrint Arch. (2019), 1021. [7] Benedikt Bünz, Mary Maller, Pratyush Mishra, Nirvan Tyagi, and Psi Vesely. 2021. Proofs for Inner Pairing Products and Applications. In ASIACRPT (LNCS, Vol. 13092). Springer, 65-97. [8] Vitalik Buterin. 2019. On-chain scaling at potentially 500 transactions per seconds. ethresearch/3477. [9] Matteo Campanelli, Dario Fiore, and Anaïs Querol. 2019. LegoSNARK: Modular Design and Composition of Succinct Zero-Knowledge Proofs. In Proceedings of the 2019 ACM SIGSAC Conference on Computer and Communications Security, CCS 2019, London, UK, November 11-15, 2019. ACM, 2075-2092. [10] Ran Canetti, Yilei Chen, Justin Holmgren, Alex Lombardi, Guy N. Rothblum, and Ron D. Rothblum. 2018. Fiat-Shamir From Simpler Assumptions. IACR Cryptol. ePrint Arch. (2018), 1004. [11] Alessandro Chiesa, Yuncong Hu, Mary Maller, Pratyush Mishra, Noah Vesely, and Nicholas Ward. 2020. Marlin: Preprocessing zkSNARKs with Universal and Updatable SRS. In EUROCRYPT (LNCS, Vol. 12105). Springer, 738-768. [12] Arka Choudhuri, Pavel Hubáček, Chethan Kamath, Krzysztof Pietrzak, Alon Rosen, and Guy Rothblum. 2019. Finding a Nash equilibrium is no easier than breaking Fiat-Shamir. In ACM, STOC. 1103-1114. [13] Georg Fuchsbauer, Eike Kiltz, and Julian Loss. 2018. The Algebraic Group Model and its Applications. In CRYPTO (LNCS, Vol. 10992). Springer, 33-62. [14] Ariel Gabizon and Zachary J. Williamson. 2020. Plookup: A simplified polynomial protocol for lookup tables. IACR Cryptol. ePrint Arch. (2020), 315. [15] Ariel Gabizon and Zachary J. Williamson. 2020. Proposal: The Turbo-PLONK program syntax for specifying SNARK programs. zkproof.org. https://docs.zkproof.org/pages/standards/accepted-workshop3/proposal-turbo_plonk.pdf. [16] Ariel Gabizon, Zachary J. Williamson, and Oana Ciobotaru. 2019. PLONK: Permutations over Lagrange-bases for Occumenical Noninteractive arguments of Knowledge. IACR Cryptol. ePrint Arch. (2019), 953. [17] Oded Goldreich. 2018. On Doubly-Efficient Interactive Proof Systems. Foundations and Trends® in Theoretical Computer Science 13 (01 2018), 157-246. [18] Shafi Goldwasser, Yael Kalai, and Guy Rothblum. 2008. Delegating Computation: Interactive Proofs for Muggles. In ACM STOC. ACM, 113-122. [19] Lorenzo Grassi, Dmitry Khovratovich, Christian Rechberger, Arnab Roy, and Markus Schoenegger. 2019. Starkad and Poseidon: New Hash Functions for Zero Knowledge Proof Systems. IACR Cryptol. ePrint Arch. (2019), 458. [20] Lorenzo Grassi, Reinhard Liftenegger, Christian Rechberger, Dragos Rotaru, and Markus Schoenegger. 2020. On a Generalization of Substitution-Permutation Networks: The HADES Design Strategy. In EUROCRYPT (LNCS, Vol. 12106). Springer, 674–704. [21] Jens Groth. 2016. On the Size of Pairing-Based Non-interactive Arguments. In Eurocrypt (LNCS, Vol. 9666). Springer, 305–326. [22] Daira Hopwood, Sean Bowe, Taylor Hornby, and Nathan Wilcox. 2022. Zcash protocol specification: Version 2022.04.26 Technical report, Zerocoin Electric</p>
+
+    <p class="text-gray-300">Coin Company. https://github.com/zcash/zips/blob/main/protocol/protocol.pdf. [23] Aniket Kate, Gregory Zaverucha, and Ian Goldberg. 2010. Constant-Size Commitments to Polynomials and Their Applications. In ASIACRPT (LNCS, Vol. 6477). Springer, 177-194. [24] Abhiram Kothapalli, Srinath T. V. Setty, and Ioanna Tzialla. 2022. Nova: Recursive Zero-Knowledge Arguments from Folding Schemes. In CRYPTO 2022, Proceedings, Part IV (LNCS, Vol. 13510). Springer, 359-388. [25] Yehuda Lindell. 2001. Parallel Coin-Tossing and Constant-Round Secure Two-Party Computation. In CRYPTO (LNCS, Vol. 2139). Springer, 171–189. [26] Carsten Lund, Lance Fortnow, Howard Karloff, and Noam Nisan. 1990. Algebraic Methods for Interactive Proof Systems. In FOCS. IEEE Computer Society, 2-10. [27] Mary Maller, Sean Bowe, Markulf Kohlweiss, and Sarah Meiklejohn. 2019. Sonic: Zero-Knowledge SNARKs from Linear-Size Universal and Updatable Structured Reference Strings. In ACM SIGSAC-CCS. ACM, 2111-2128. [28] Polygon. 2022. Polygon zkEVM Documentation, zkProver. https://docs.hermez.io/zkEVM/Overview/Overview/. [29] Bart Preneel. 1997. Hash Functions and MAC Algorithms Based on Block Ciphers. In Cryptography and Coding, 6th IMA International Conference, Cirencester, UK, December 17-19, 1997, Proceedings (LNCS, Vol. 1355). Springer, 270-282. [30] Srinath Setty. 2020. Spartan: Efficient and general-purpose zkSNARKs without trusted setup. CRYPTO. [31] Riad Wahby, Ye Ji, Andrew Blumberg, Abhi Shelat, Justin Thaler, Michael Walfish, and Thomas Wies. 2017. Full Accounting for Verifiable Outsourcing. In ACM SIGSAC-CCS. ACM, 2071-2086. [32] Riad Wahby, Ioanna Tzialla, Abhi Shelat, Justin Thaler, and Michael Walfish. 2018. Doubly-Efficient zkSNARKs Without Trusted Setup. In SP. IEEE Computer Society, 926-943. [33] Tiacheng Xie, Jiaheng Zhang, Yupeng Zhang, Charalampos Papamanthou, and Dawn Song. 2019. Libra: Succinct Zero-Knowledge Proofs with Optimal Prover Computation. In CRYPTO (LNCS, Vol. 11694). Springer, 733-764. [34] Jiaheng Zhang, Tianyi Liu, Weijie Wang, Yinuo Zhang, Dawn Song, Xiang Xie, and Yupeng Zhang. 2021. Doubly Efficient Interactive Proofs for General Arithmetic Circuits with Linear Prover Time. In ACM SIGSAC-CCS. ACM, 159-177. [35] Jiaheng Zhang, Tiancheng Xie, Yupeng Zhang, and Dawn Song. 2019. Transparent Polynomial Delegation and Its Applications to Zero Knowledge Proof. 2020 IEEE Symposium on Security and Privacy (SP). [36] William Zhang and Yu Xia. 2021. Hydra: Succinct Fully Pipelineable Interactive Arguments of Knowledge. Cryptology ePrint Archive, Report 2021/641.</p>
+
+    <p class="text-gray-300">The knowledge-soundness of Groth16 and Plonk is proved based on  <span class="math">q</span> -DLog assumption defined in the following.</p>
+
+    <p class="text-gray-300">Definition A.1 (q-Discrete Log Problem [5, 16]). Fix an integer  <span class="math">q</span> . The  <span class="math">q</span> -DLog assumption for  <span class="math">(\\mathbb{G}_1,\\mathbb{G}_2)</span>  states that, given</p>
+
+    <div class="my-4 text-center"><span class="math-block">[ 1 ] _ {1}, [ x ] _ {1}, \\dots , [ x ^ {q} ] _ {1}; [ 1 ] _ {2}, [ x ] _ {2}, \\dots , [ x ^ {q} ] _ {2}</span></div>
+
+    <p class="text-gray-300">for uniformly chosen  <span class="math">x \\in \\mathbb{F}_p</span> , the probability that a p.p.t adversary  <span class="math">\\mathcal{A}</span>  outputs  <span class="math">x</span>  is negligible.</p>
+
+    <p class="text-gray-300">Polynomial Commitment. Here we define the correctness and the security of a polynomial commitment scheme.</p>
+
+    <p class="text-gray-300">Definition A.2 (Correctness). We say that a polynomial commitment scheme has (perfect) completeness if for all  <span class="math">P(X), t, \\lambda, x</span></p>
+
+    <div class="my-4 text-center"><span class="math-block">\\Pr \\left[ \\begin{array}{c c c} &amp;amp; &amp;amp; \\mathrm {p p} \\leftarrow \\operatorname {S e t u p} (1 ^ {\\lambda}, t) \\\\ 1 \\leftarrow \\operatorname {V e r i f y} (\\mathrm {p p}, C, y, \\pi) &amp;amp; : &amp;amp; C \\leftarrow \\operatorname {C o m m i t} (\\mathrm {p p}, P (X)) \\\\ &amp;amp; &amp;amp; \\pi \\leftarrow \\operatorname {P r o v e} (\\mathrm {p p}, P (X), x) \\\\ &amp;amp; &amp;amp; y = P (x) \\end{array} \\right] = 1</span></div>
+
+    <p class="text-gray-300">Definition A.3 (Secure polynomial commitment [5]). A polynomial commitment (Setup, Commit, Prove, Verify) is secure if it is knowledge-sound w.r.t the relation,</p>
+
+    <div class="my-4 text-center"><span class="math-block">\\mathcal {R} = \\left\\{\\left(x, y, c; P (X)\\right): P (x) = y, c = \\operatorname {C o m m i t} (\\mathrm {p p}, P (X)) \\right\\}</span></div>
+
+    <p class="text-gray-300">The original paper [23] introduces the notion of polynomial commitment. In [5, 16], the authors gave a general security notion</p>
+
+    <p class="text-gray-300">supporting batching of the proofs and well-detailed for interactive public-coin polynomial commitments. We expand on this in Appendix C.</p>
+
+    <p class="text-gray-300">Both <em>(16)</em> and <em>(7)</em> provide an analysis of an extended version of the KZG protocol under the algebraic group model <em>(13)</em> in which the authors demonstrate knowledge soundness <em>(16)</em> and bounded-polynomial extractability <em>(27)</em> of the protocol. Both these results are achieved using the q-<span class="math">\\mathcal{D}\\mathcal{L}</span> assumption.</p>
+
+    <h2 id="sec-36" class="text-2xl font-bold">Appendix B. Description of the GKR protocol</h2>
+
+    <h3 id="sec-37" class="text-xl font-semibold mt-8">B.1. Background</h3>
+
+    <p class="text-gray-300">In the following section, we will often use the following notations. Let <span class="math">\\mathcal{G}</span> be a directed acyclic graph. <span class="math">E(\\mathcal{G})</span> denotes the set of edges of <span class="math">\\mathcal{G}</span> and <span class="math">V(\\mathcal{G})</span> the vertex. For two vertices <span class="math">v,v^{\\prime}</span>, <span class="math">(v,v^{\\prime})</span> is the edge going from <span class="math">v</span> to <span class="math">v^{\\prime}</span>. We assume a total ordering over <span class="math">V(\\mathcal{G})</span> compatible with the natural partial ordering defined by the edges of <span class="math">\\mathcal{G}</span>. <span class="math">I:V\\to V^{*}</span> maps each vertex <span class="math">v</span> to the ordered list of vertices <span class="math">I(v)=\\{v^{\\prime}\\in V(\\mathcal{G}):(v^{\\prime},v)\\in E(\\mathcal{G})\\}</span> such that <span class="math">\\forall v^{\\prime}\\in I,(v^{\\prime},v)\\in E(\\mathcal{G})</span>. Conversely, <span class="math">O(v)=\\{v^{\\prime}\\in V(\\mathcal{G}):(v,v^{\\prime})\\in E(\\mathcal{G})\\}</span>. We will use directed acyclic graphs to describe the “shape” of a computation, as such, we call any vertex <span class="math">v</span> with <span class="math">I(v)=\\emptyset</span> an input gate, and any vertex <span class="math">v</span> with <span class="math">O(v)=\\emptyset</span> an output gate. In the following, eq denotes the multilinear polynomial eq<span class="math">(X_{0\\cdots n-1},Y_{0\\cdots n-1})=\\prod_{i&lt;n}\\left[X_{i}Y_{i}+(1-X_{i})(1-Y_{i})\\right]</span>.</p>
+
+    <h4 id="sec-38" class="text-lg font-semibold mt-6">B.1.1. Layered arithmetic circuits</h4>
+
+    <p class="text-gray-300">In the following, we give a broad definition of an arithmetic circuit that encompasses gates with arbitrary low-degree multivariate polynomials (as opposed to just additions and multiplications). This broad definition will be useful for specifying custom gates as in <em>(15)</em> (e.g., in Appendix B.3 for applying GKR over the MiMC and Poseidon permutations).</p>
+
+    <h6 id="sec-39" class="text-base font-medium mt-4">Definition B.1.</h6>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">An arithmetic circuit <span class="math">\\mathcal{C}</span> over a ring <span class="math">\\mathbb{K}</span> is a pair <span class="math">(\\mathcal{G},f)</span> where <span class="math">\\mathcal{G}</span> is a directed acyclic graph and <span class="math">f</span> maps vertices <span class="math">v</span> of <span class="math">G</span> to $</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">I(v)</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"><span class="math">-multivariate polynomials over </span>\\mathbb{K}$.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <h6 id="sec-40" class="text-base font-medium mt-4">Definition B.2 (batch assignment).</h6>
+
+    <p class="text-gray-300">For <span class="math">n\\in\\mathbb{N}</span>, a batch assignment <span class="math">\\mathcal{B}</span> for an arithmetic circuit <span class="math">\\mathcal{C}=(\\mathcal{G},f)</span> on <span class="math">\\mathbb{K}</span> is a mapping from <span class="math">V(\\mathcal{G})</span> to the set of <span class="math">n</span>-multilinear polynomials such that</p>
+
+    <p class="text-gray-300">(1) <span class="math">\\forall x\\in\\{0,1\\}^{n},\\forall v\\in V(\\mathcal{G}),\\quad\\mathcal{B}(v)(x)=R_{v}(\\mathcal{B}(u_{0})(x),\\ldots,\\mathcal{B}(u_{k-1})(x))</span></p>
+
+    <p class="text-gray-300">where we note <span class="math">I(v)=\\{u_{0},...,u_{k-1}\\}</span> and <span class="math">R_{v}=f(v)</span>. Equivalently, this corresponds to <span class="math">2^{n}</span> assignments of an arithmetic circuit. We recall that</p>
+
+    <p class="text-gray-300">In other words, <span class="math">\\mathcal{B}(v)</span> interpolates <span class="math">R_{v}(\\mathcal{B}(u_{0}),\\ldots,\\mathcal{B}(u_{k-1}))</span> on the hypercube <span class="math">\\{0,1\\}^{n}</span>. If <span class="math">v</span> is an input gate or an output gate, we call <span class="math">\\mathcal{B}(v)</span> (resp.) an input or output polynomial.</p>
+
+    <h6 id="sec-41" class="text-base font-medium mt-4">Remark B.3.</h6>
+
+    <p class="text-gray-300">If <span class="math">\\mathcal{B}</span> is a batch assignment to <span class="math">\\mathcal{C}</span>, then for all <span class="math">v\\in V(\\mathcal{G})</span>, if we note <span class="math">I(v)=(u_{0},...,u_{k-1})</span> and <span class="math">P=f(v)</span>, then</p>
+
+    <p class="text-gray-300">(2) <span class="math">\\forall x\\in\\mathbb{K}^{n},\\mathcal{B}(v)(x)=\\sum_{h\\in\\{0,1\\}}\\text{eq}(x,h)P(\\mathcal{B}(u_{0})(h),\\ldots,\\mathcal{B}(u_{k-1})(h))</span></p>
+
+    <p class="text-gray-300">The latter remark is fundamental to the GKR protocol. It gives a relation between a vertex assignment and its input layer in the form of a summation.</p>
+
+    <h3 id="sec-42" class="text-xl font-semibold mt-8">B.2. GKR protocol</h3>
+
+    <p class="text-gray-300">The GKR protocol can be described as follows: the prover starts with a description of an arithmetic circuit <span class="math">\\mathcal{C}</span> and a batch assignment <span class="math">\\mathcal{B}</span> to <span class="math">\\mathcal{C}</span>. The verifier starts with only the input and output polynomials, <span class="math">(P_{I})</span> and <span class="math">(P_{O})</span>. Our description of the GKR protocol is organized in two steps. First, we present a set of “mini-protocol” and then we give the full description in Fig.15 using the mini-protocols.</p>
+
+    <h4 id="sec-43" class="text-lg font-semibold mt-6">Mini-protocol 1: multi-claim reduction.</h4>
+
+    <p class="text-gray-300">The prover wants to convince the verifier that, given a polynomial <span class="math">P</span>, it holds that <span class="math">P(x_{i})=y_{i}</span> for <span class="math">k</span> couples <span class="math">(x_{i},y_{i})\\in\\mathbb{K}^{2}</span>. The verifier initiates the protocol by sending a random challenge <span class="math">\\tau\\leftrightarrows\\mathbb{K}^{k}</span>. The prover and the verifier then engage in a sumcheck for the sum relation</p>
+
+    <p class="text-gray-300">(3) <span class="math">\\sum_{i&lt;k}\\tau_{i}y_{i}=\\sum_{h\\in\\{0,1\\}^{n}}(\\sum_{i&lt;k}\\tau_{i}\\text{eq}(x_{i},h))P(h)</span></p>
+
+    <p class="text-gray-300">In the last step of the sumcheck, the verifier is interested in verifying a claim in the form, for some <span class="math">\\alpha</span> and <span class="math">r</span> that were established during the sumcheck.</p>
+
+    <p class="text-gray-300">(4) <span class="math">\\alpha=\\sum_{i&lt;k}\\tau_{i}\\text{eq}(x_{i},r))P(r)</span></p>
+
+    <p class="text-gray-300">Instead of letting the verifier directly evaluate <span class="math">P(r)</span>, the prover directly sends a claim of <span class="math">p=P(r)</span>. The verifier can then verify that the claimed value of <span class="math">p</span> is consistent with the above claim. The protocol then outputs the claim <span class="math">P(r)=p</span>. At the end of the protocol, the verifier does not learn that <span class="math">P(x_{i})=y_{i}</span>. But we have that if any of these claims were wrong, then with overwhelming probability <span class="math">P(r)\\neq p</span>, hence the name “claim reduction”.</p>
+
+    <h4 id="sec-44" class="text-lg font-semibold mt-6">Mini-protocol 2: single-claim reduction.</h4>
+
+    <p class="text-gray-300">The prover is given an assignment <span class="math">\\mathcal{B}</span> to <span class="math">\\mathcal{C}</span>. The verifier is input a claim that for some <span class="math">v</span>, not an input gate, and <span class="math">P_{v}=\\mathcal{B}(v)</span>, we have <span class="math">P_{v}(x)=y</span>. The aim of mini-protocol 2 is to reduce the verifier’s claim into a collection of evaluation claims <span class="math">P_{u,j}(r)=\\alpha_{u}</span> for all <span class="math">u\\in I(v)</span>. As for the mini-protocol 1, this is achieved using a sumcheck protocol, but over the relation given in Fig.B.3.</p>
+
+    <p class="text-gray-300">(5) <span class="math">y=\\sum_{h\\in\\{0,1\\}^{n}}\\text{eq}(x,h)R_{v}(P_{u,0}(h),\\ldots)</span></p>
+
+    <p class="text-gray-300">where <span class="math">R_{v}</span> is the low-degree polynomial associated to <span class="math">v</span> in the circuit. The rest goes as in the mini-protocol 1. The protocol outputs claims of the form <span class="math">p_{u}=P_{u}(r)</span> and we have that if <span class="math">y\\neq P_{v}(x)</span>, then with overwhelming probability, one of the <span class="math">p_{u}\\neq P_{u}(r)</span> is wrong.</p>
+
+    <h4 id="sec-45" class="text-lg font-semibold mt-6">The full GKR protocol.</h4>
+
+    <p class="text-gray-300">The verifier samples a random <span class="math">\\rho\\leftrightarrows\\mathbb{K}^{n}</span>. He then computes the evaluations of all <span class="math">V_{O}(\\rho)</span> and sends <span class="math">\\rho</span> to the prover. The prover and the verifier then engage in an iterative process, going through each vertex of the arithmetic circuit in reverse order. Each step of the process aims at reducing the claims, made on the <span class="math">\\mathcal{B}(v)</span>, to the claims on children vertices of <span class="math">v</span>.</p>
+
+    <h3 id="sec-46" class="text-xl font-semibold mt-8">B.3. Custom gates for the GKR</h3>
+
+    <p class="text-gray-300">This section presents the use of the GKR protocol for the MiMC and Poseidon keyed permutation.</p>
+
+    <p class="text-gray-300">MiMC custom gates. Let <span class="math">\\alpha</span> be the exponent for MiMC in <span class="math">\\mathbb{P}</span>, and <span class="math">r</span> be the number of rounds for the MiMC permutation. Recalling</p>
+
+    <p class="text-gray-300">Recursion over Public-Coin Interactive Proof Systems; Faster Hash Verification</p>
+
+    <pre><code class="language-txt">/ initialize the claim register, it maps each vertex to a list of claim
+claims := {}
+for each output gate  $v_{O}$  ..
+append claims  $[v_{O}]$  with  $V_{O}(\\rho)$
+/ in reverse order
+for  $v\\in V(\\mathcal{G})$  ..
+if  $|\\mathrm{claims}(v)| &amp;gt; 1$  ..
+claim&#x27;  $\\leftarrow$  miniProtocol1(v, claims(v))
+else :
+claim&#x27;  $\\leftarrow$  claims(v)
+/ input gate
+if  $I(v) = \\emptyset$  ..
+verifier checks directly claim&#x27;
+continue
+newclaims  $\\leftarrow$  miniProtocol2(v, claim)
+for  $\\{u,\\mathrm{claim}_u\\} \\in$  newclaims :
+append claim[u] = claim_u</code></pre>
+
+    <p class="text-gray-300">Sec 2.5, with  <span class="math">c_{1},\\ldots ,c_{r}</span>  being elements in  <span class="math">\\mathbb{F}_q</span>  , we define  <span class="math">R_{c_i,\\alpha}</span>  as the polynomial:</p>
+
+    <div class="my-4 text-center"><span class="math-block">R _ {c _ {i}, \\alpha} (X _ {0}, X _ {1}) = (X _ {0} + X _ {1} + c _ {i}) ^ {\\alpha}</span></div>
+
+    <p class="text-gray-300">We then give an overview of the arithmetic circuit  <span class="math">C</span>  for the MiMC permutation in figure Fig 16.</p>
+
+    <p class="text-gray-300">!<a href="img-10.jpeg">img-10.jpeg</a> Figure 15: GKR protocol Figure 16: Structure of the arithmetic circuit for MiMC</p>
+
+    <p class="text-gray-300">As highlighted in Fig 16, the gate  <span class="math">R_{c_i,\\alpha}(X_0,X_1)</span>  can just be sequentially repeated with the appropriate constants and number of rounds to instantiate a variant of the GKR protocol specialized for the MiMC permutation.</p>
+
+    <p class="text-gray-300">Poseidon Custom gates. Poseidon [19] applies the Hades [20] strategy to build a SNARK-friendly hash function. It uses the same S-box  <span class="math">x \\to x^{\\alpha}</span>  as in MiMC, but is optimized to permute messages from multiple field elements (here  <span class="math">n + 1</span> ) at once. At a high level, it works by alternating heterogeneous nonlinear layers in which either only one of the field elements is passed through the S-Box (partial rounds):  <span class="math">(x_0, x_1, \\dots, x_n) \\to (x_0^{\\alpha}, x_1, \\dots, x_n)</span>  or in which all field elements are passed through the S-Box element-wise (full rounds):  <span class="math">(x_0, x_1, \\dots, x_n) \\to (x_0^{\\alpha}, x_1^{\\alpha}, \\dots, x_n^{\\alpha})</span> . The non-linear layers are interleaved with linear layers instantiated by an MDS matrix.</p>
+
+    <p class="text-gray-300">Although our implementation does not include these custom gates for the Poseidon permutation, we describe below a list of</p>
+
+    <p class="text-gray-300">custom gates to allow obtaining a GKR variant for the Poseidon permutation.</p>
+
+    <p class="text-gray-300">The S-box for partial-rounds : at the beginning of a partial-S-box layer, the prover and the verifier both have preemptively agreed on a set of evaluation claims for the polynomial  <span class="math">\\mathcal{B}(v_0),\\dots ,\\mathcal{B}(v_n)</span>  representing each of the outputs of the partial-round functions. As only the first entry is modified by the round function, only it needs to be reduced to a claim on the (unique) polynomial  <span class="math">\\mathcal{B}(u_0)</span>  for  <span class="math">I(v_{0}) = \\{u_{0}\\}</span> . For this, we use a GKR round with polynomial  <span class="math">R(x_0) = x^{\\alpha}</span> . We can then retain all other claims on  <span class="math">\\mathcal{B}(v_{i &amp;gt; 0})</span>  for the next round.</p>
+
+    <p class="text-gray-300">The S box for full rounds: Here, we need to do a sumcheck for every claim. At a high level, we suggest reusing the same sum-check as for the partial-rounds for all entries and batch them using a random linear combination. Equivalently, the verifier samples  <span class="math">(r_0,\\dots ,r_n)\\gets \\S \\mathbb{P}^{n + 1}</span>  public coins and engages with the prover in the following sumcheck. We note  <span class="math">I(v_{i}) = \\{u_{i}\\}</span>  since they all can have only one single input vertex.</p>
+
+    <div class="my-4 text-center"><span class="math-block">\\sum_ {i \\leq n} r _ {i} \\mathcal {B} (v _ {i}) (x) = \\sum_ {h \\in \\{0, 1 \\} ^ {N}} \\operatorname {e q} (x, h) \\left[ \\sum_ {i \\leq n} r _ {i} \\mathcal {B} (u _ {i}) (h) ^ {\\alpha} \\right]</span></div>
+
+    <p class="text-gray-300">The MDS layers : here we can directly convert the claim (without the claims) since all operations are linear and since MDS matrices are invertible and the ones we use are typically small: typically at most 16x16 in real-world applications. Namely, if we note  <span class="math">M</span>  to be the MDS matrix, then we can obtain claims for the input vertices by multiplying the vector of the current claim (properly ordered) by  <span class="math">M^{-1}</span> .</p>
+
+    <p class="text-gray-300">In this section, we recall the batched version of the KZG polynomial commitment of [5, 16]. Their work extends [23] and allows for multi-point opening for multiple polynomials.</p>
+
+    <p class="text-gray-300">Formally, given a finite field  <span class="math">\\mathbb{F}</span>  of prime order and an integer  <span class="math">n\\in \\mathbb{N}</span> ,  <span class="math">c</span>  we consider a set of polynomial  <span class="math">\\{P_0(X),\\dots ,P_{n - 1}(X)\\}</span> , a set of evaluation points  <span class="math">T = \\{x_0,x_1,\\dots x_t\\}</span> , a set of evaluation point  <span class="math">S_{i}\\subset T</span>  and  <span class="math">r_i:S_i\\to \\mathbb{F}</span> , the minimal degree polynomial mapping each evaluation point  <span class="math">S_{i}</span>  to a claimed value for the polynomial  <span class="math">P_{i}</span> . For any subset  <span class="math">S\\subset \\mathbb{F}</span> ,  <span class="math">Z_{S}</span>  denotes the polynomial  <span class="math">\\prod_{s\\in S}(X - s)</span> .</p>
+
+    <p class="text-gray-300">As in Sec.2.3, the protocol satisfies the completeness and computational knowledge-soundness property in the algebraic group model under the  <span class="math">Q - Dlog</span>  assumption. We give a description of the (interactive form) of the protocol in Fig.17. The protocol can be transformed into an interactive protocol through the Fiat-Shamir transforms, as it is public-coin and has a constant number of rounds.</p>
+
+    <p class="text-gray-300">Here we just put together both layers to see the general form of the relation. Let  <span class="math">\\mathcal{R}_0</span>  and  <span class="math">\\mathcal{R}_1</span>  be the relation associated to (respectively)  <span class="math">S</span>  and  <span class="math">\\mathcal{PC}</span>  (defined in Sec.5.4.1). Our compiler can output a proof system for relations of the form</p>
+
+    <p class="text-gray-300">Belling et al.</p>
+
+    <p class="text-gray-300">!<a href="img-11.jpeg">img-11.jpeg</a> Figure 17: Batching of KZG</p>
+
+    <p class="text-gray-300">!<a href="img-12.jpeg">img-12.jpeg</a> Figure 18: Batching of the KZG</p>
+
+    <p class="text-gray-300">!<a href="img-13.jpeg">img-13.jpeg</a></p>
+
+    <p class="text-gray-300">Let  <span class="math">\\mathcal{A}</span>  be the attacker to the knowledge-soundness of  <span class="math">\\mathcal{X}_{L1}</span> . Through  <span class="math">\\mathcal{ES}</span> ,  <span class="math">\\mathcal{E}_{\\mathcal{PC}}</span>  and  <span class="math">\\mathcal{A}</span>  we build an adversary  <span class="math">\\mathcal{B} = (\\mathcal{B}_S, \\mathcal{B}_{\\mathcal{PC}})</span>  that can break the knowledge-soundness of  <span class="math">S</span>  or  <span class="math">\\mathcal{PC}</span> . The proof proceeds through defining an auxiliary game  <span class="math">\\mathbf{H}</span> , where we show that  <span class="math">\\mathbf{H}</span>  is</p>
+
+    <p class="text-gray-300">computationally indistinguishable from the game for knowledge-soundness (called  <span class="math">\\mathbf{G}</span> ) and the winning probability of the adversary  <span class="math">\\mathcal{A}</span>  in  <span class="math">\\mathbf{H}</span>  is negligible ( <span class="math">\\approx 0</span> ).</p>
+
+    <p class="text-gray-300">Game H: is the same as the knowledge-soundness game (w.r.t  <span class="math">\\mathcal{X}_{L1}</span> ), except that, we modify the winning condition by adding the condition:</p>
+
+    <p class="text-gray-300">Cond*:  <span class="math">\\mathcal{R}_1(x_1,\\rho ,w_1) = 0</span>  and Verify  <span class="math">\\mathcal{PC},2(\\mathrm{pp}_1,x_1,\\rho ,\\pi_{\\mathcal{PC}}) = 1</span></p>
+
+    <p class="text-gray-300">Then we prove two following claims:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Claim 1. The game  <span class="math">\\mathbf{H}</span>  is computationally indistinguishable from the game for knowledge-soundness (i.e.,  <span class="math">\\mathbf{G}</span> ), if  <span class="math">S</span>  is knowledge-sound.</li>
+
+      <li>Claim 2. The winning probability of  <span class="math">\\mathcal{A}</span>  in the game  <span class="math">\\mathbf{H}</span>  is negligible, if  <span class="math">\\mathcal{PC}</span>  is knowledge-sound.</li>
+
+    </ul>
+
+    <p class="text-gray-300">In Lem.E.1 and E.2, we give the proof of these claims.</p>
+
+    <p class="text-gray-300">LEMMA E.1. Claim 1 is true.</p>
+
+    <p class="text-gray-300">Proof. Consider the distinguisher  <span class="math">\\mathcal{D}</span>  which aims to distinguish the games  <span class="math">\\mathbf{H}</span>  from  <span class="math">\\mathbf{G}</span> . We build an adversary  <span class="math">\\mathcal{B}_S</span>  that simulates the games for  <span class="math">\\mathcal{D}</span>  and use the responses from  <span class="math">\\mathcal{D}</span>  to attack the knowledge-soundness of  <span class="math">S</span> . The simulation is as follows:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li><span class="math">\\mathcal{B}_S</span>  receives the parameters  <span class="math">\\mathrm{pp}&#x27;</span>  for the argument system  <span class="math">S</span> , runs the setup for  <span class="math">\\mathcal{PC}</span>  to get  <span class="math">\\mathrm{pp}_1</span>  and then sends  <span class="math">\\mathrm{pp} = (\\mathrm{pp}&#x27;, \\mathrm{pp}_1)</span>  to  <span class="math">\\mathcal{D}</span> .</li>
+
+      <li>the adversary  <span class="math">\\mathcal{D}</span>  responds by  <span class="math">x = (x_0, x_1)</span> ,  <span class="math">\\pi_{\\mathcal{PC},1}</span> , and  <span class="math">\\mathcal{B}_S</span>  sends the randomness  <span class="math">\\rho</span> .</li>
+
+      <li>when the adversary  <span class="math">\\mathcal{D}</span>  responds with  <span class="math">\\pi&#x27;</span> , the adversary  <span class="math">\\mathcal{B}_S</span>  outputs  <span class="math">(x, \\pi) = (x_0, x_1, \\rho; \\pi&#x27;)</span> .</li>
+
+    </ul>
+
+    <p class="text-gray-300">We define the event  <span class="math">\\mathrm{Bad}^<em></span>  where the  <span class="math">\\mathrm{Cond}^</em></span>  is not satisfied. This means if  <span class="math">\\mathrm{Bad}^<em></span>  happens with probability  <span class="math">\\epsilon</span> , then  <span class="math">\\mathcal{D}</span>  can distinguish two games with the same probability (if the adversary wins, we know it is in the game  <span class="math">\\mathbf{G}</span> ). We show the probability that  <span class="math">\\mathrm{Bad}^</em></span>  happens is negligible by knowledge-soundness of  <span class="math">S</span>  (i.e.,  <span class="math">\\epsilon \\leq \\epsilon_S</span>  where  <span class="math">\\epsilon_S</span>  is the knowledge error for  <span class="math">S</span> ). The reason that the event  <span class="math">\\mathrm{Bad}^*</span>  breaks the knowledge-soundness of  <span class="math">S</span>  is because:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>if  <span class="math">\\mathcal{R}_1(x_1, \\rho; w_1) = 1</span>  since the output of  <span class="math">\\mathcal{D}</span>  satisfies  <span class="math">\\mathcal{R}_{L1}(x, w) = 0</span> , we conclude that one of the equalities in  <span class="math">\\mathcal{R}&#x27;</span>  associated with  <span class="math">S</span>  is not satisfied and therefore  <span class="math">\\mathcal{B}_S</span>  has an admissible tuple  <span class="math">(x_0, x_1, \\rho, \\pi&#x27;)</span>  to break the knowledge-soundness of  <span class="math">S</span> .</li>
+
+      <li>if  <span class="math">\\operatorname{Verify}_{\\mathcal{PC},2}(\\mathrm{pp}_1, x_1, \\rho, \\pi_{\\mathcal{PC}}) = 0</span> , clearly, this means  <span class="math">\\mathcal{R}&#x27;</span>  is not satisfied, which again, gives an admissible output to break the knowledge-soundness of  <span class="math">S</span> .</li>
+
+    </ul>
+
+    <p class="text-gray-300">Putting together, the probability that  <span class="math">\\mathcal{D}</span>  can distinguish two games is the probability that  <span class="math">\\mathrm{Bad}^*</span>  happens, and the latter is negligible. This proves that two games  <span class="math">\\mathbf{G}</span>  and  <span class="math">\\mathbf{H}</span>  are indistinguishable.</p>
+
+    <p class="text-gray-300">LEMMA E.2. Claim 2 is true.</p>
+
+    <p class="text-gray-300">Proof. To prove that the winning probability of  <span class="math">\\mathcal{A}</span>  in the game  <span class="math">\\mathbf{H}</span>  is negligible, we build an attacker  <span class="math">\\mathcal{B}_{\\mathcal{PC}}</span>  that simulates the game  <span class="math">\\mathbf{H}</span>  for  <span class="math">\\mathcal{A}</span>  and uses the responses from  <span class="math">\\mathcal{A}</span>  to attack the knowledge-soundness of  <span class="math">\\mathcal{PC}</span> . The simulation is as follows.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li><span class="math">\\mathcal{B}_{\\mathcal{PC}}</span>  receives the parameters  <span class="math">\\mathrm{pp}_1</span>  and runs the setup for  <span class="math">S</span>  to get  <span class="math">\\mathrm{pp}&#x27;</span> . Then it sends  <span class="math">\\mathrm{pp} = (\\mathrm{pp}&#x27;, \\mathrm{pp}_1)</span>  to  <span class="math">\\mathcal{A}</span> .</li>
+
+      <li><span class="math">\\mathcal{A}</span>  responds by  <span class="math">x = (x_0, x_1)</span> ,  <span class="math">\\pi_{\\mathcal{PC},1}</span> , and  <span class="math">\\mathcal{B}_{\\mathcal{PC}}</span>  sends  <span class="math">x_1</span> ,  <span class="math">\\pi_{\\mathcal{PC},1}</span>  to its challenger and relays the randomness  <span class="math">\\rho</span> .</li>
+
+    </ul>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>When <span class="math">\\mathcal{A}</span> responds with <span class="math">\\pi^{\\prime}</span>, the adversary <span class="math">\\mathcal{B}_{\\mathcal{PC}}</span> runs the extraction <span class="math">\\mathcal{E}_{\\mathcal{S}}</span> to extract the witness (<span class="math">w_{0},\\pi_{\\mathcal{PC},2}</span>). Finally, it outputs <span class="math">\\pi_{\\mathcal{PC},2}</span>.</li>
+
+    </ul>
+
+    <p class="text-gray-300">By the definition of the game H and <span class="math">\\mathrm{Cond}^{*}</span>, the output <span class="math">(x_{1},\\rho;\\pi_{\\mathcal{PC}})</span> is an admissible output for the knowledge-soundness of <span class="math">\\mathcal{PC}</span>. This concludes the knowledge-soundness of <span class="math">\\mathcal{X}_{L1}</span> w.r.t the extractor <span class="math">(\\mathcal{E}_{\\mathcal{S}},\\mathcal{E}_{\\mathcal{PC}})</span> and with knowledge error <span class="math">\\epsilon_{L1}\\leq\\epsilon_{\\mathcal{S}}+\\epsilon_{\\mathcal{PC}}</span>. ∎</p>
+
+    <h2 id="sec-51" class="text-2xl font-bold">Appendix F Proof of Theorem 5.13</h2>
+
+    <p class="text-gray-300">Our proof technique is similar to the one for Thm.5.12. The difference is that to define the auxiliary game H, we modify the winning condition to <span class="math">\\mathcal{R}\\Gamma(\\gamma_{v};v)=0</span>.</p>
+
+    <h6 id="sec-52" class="text-base font-medium mt-4">Proof.</h6>
+
+    <p class="text-gray-300">Let <span class="math">\\mathcal{A}</span> be the attacker to the knowledge-soundness of <span class="math">\\mathcal{X}_{L2}</span>, we build an adversary <span class="math">\\mathcal{B}=(\\mathcal{B}_{L1},\\mathcal{B}_{\\Gamma})</span> that uses <span class="math">\\mathcal{A}</span> as the inner-component to break the knowledge-soundness of <span class="math">\\mathcal{X}_{L1}</span> or <span class="math">\\Gamma</span>.</p>
+
+    <p class="text-gray-300">Again, we define an auxiliary game H that is indistinguishable from the knowledge-soundness game, and the probability that <span class="math">\\mathcal{A}</span> wins in H is negligible.</p>
+
+    <p class="text-gray-300">Game H: is the same as the game for knowledge-soundness of <span class="math">\\mathcal{X}_{L2}</span>, except that, the winning condition is modified by adding the following condition:</p>
+
+    <p class="text-gray-300"><span class="math">\\mathrm{Cond}^{*}:\\quad\\mathcal{R}_{\\Gamma}(\\gamma_{v};v)=0</span></p>
+
+    <p class="text-gray-300">We prove two following claims regarding H.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Claim 1. Game H is computationally indistinguishable from the game for knowledge-soundness (i.e., G), if <span class="math">\\mathcal{X}_{L1}</span> is knowledge-sound.</li>
+
+      <li>Claim 2. The probability of winning <span class="math">\\mathcal{A}</span> in the game H is negligible if <span class="math">\\Gamma</span> is knowledge-sound.</li>
+
+    </ul>
+
+    <p class="text-gray-300">Proof of Claim 1: Assume the distinguisher <span class="math">\\mathcal{D}</span> aims to distinguish H from G. The adversary <span class="math">\\mathcal{B}_{L1}</span> (the attacker to the knowledge-soundness of <span class="math">\\mathcal{X}_{L1}</span>) simulates the games for the adversary <span class="math">\\mathcal{D}</span> as follows.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>It receives the parameters for <span class="math">\\mathcal{X}_{L1}</span>, then runs the rest of the setup algorithm to get <span class="math">\\mathrm{pp}_{\\Gamma}</span> and sends <span class="math">\\mathrm{pp}_{L2}=(\\mathrm{pp},\\mathrm{pp}_{\\Gamma})</span> to <span class="math">\\mathcal{D}</span>.</li>
+
+      <li>when <span class="math">\\mathcal{D}</span> responds with <span class="math">x_{L2},\\pi_{1},\\pi_{\\Gamma},\\gamma_{v}</span>, the adversary <span class="math">\\mathcal{B}_{L1}</span> runs the extractor <span class="math">\\mathcal{E}_{\\Gamma}</span> to extract a witness <span class="math">v</span> from <span class="math">\\pi_{\\Gamma},\\gamma_{v}</span>. Then, it forwards <span class="math">(x=\\xi^{-1}(x_{L2},v),\\pi_{1})</span> to its challenger and relays the challenge <span class="math">\\rho</span>.</li>
+
+      <li>when <span class="math">\\mathcal{D}</span> responds by <span class="math">\\pi_{2}</span>, the adversary <span class="math">\\mathcal{B}_{L1}</span> outputs <span class="math">\\pi_{2}</span>.</li>
+
+    </ul>
+
+    <p class="text-gray-300">We claim that the output <span class="math">(x=\\xi(v,x_{L2}))</span> and <span class="math">(\\pi_{1},\\pi_{2})</span> is an admissible output to break the knowledge-soundness of <span class="math">\\mathcal{X}_{L1}</span>. To see this, note that the only way <span class="math">\\mathcal{A}</span> can distinguish the two games is when <span class="math">(\\mathrm{notCond}^{*})</span> happens, that is, when <span class="math">\\mathcal{R}_{\\Gamma}(\\gamma_{v};v)=1</span> happens. Having <span class="math">\\mathcal{R}_{\\Gamma}(\\gamma_{v};v)=1</span> and the fact that verification <span class="math">\\mathcal{X}_{L2}</span> passes, result in passing the verification for <span class="math">\\mathcal{X}_{L1}</span> (since the verification algorithm of <span class="math">\\mathcal{X}_{L2}</span> includes the verification algorithm of <span class="math">\\mathcal{X}_{L1}</span>). While we have <span class="math">\\mathcal{R}_{L1}(v,x_{L2};w)=0</span>, this complete the proof for claim 1.</p>
+
+    <p class="text-gray-300">Proof of Claim 2: Let <span class="math">\\mathcal{A}</span> be the attacker trying to win in the game H, we build the adversary <span class="math">\\mathcal{B}_{\\Gamma}</span> that runs <span class="math">\\mathcal{A}</span> as its inner-component to use its responses for breaking the knowledge-soundness of <span class="math">\\Gamma</span>, the simulation is as follows,</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>It receives the parameters for <span class="math">\\Gamma</span>, by the fact that <span class="math">\\mathrm{pp}\\subset\\mathrm{pp}_{\\Gamma}</span>, it can find <span class="math">\\mathrm{pp}</span> and sends <span class="math">\\mathrm{pp}_{L2}=(\\mathrm{pp},\\mathrm{pp}_{\\Gamma})</span> to <span class="math">\\mathcal{A}</span>.</li>
+
+      <li>when <span class="math">\\mathcal{A}</span> responds with <span class="math">x_{L2},\\pi_{1},\\pi_{\\Gamma},\\gamma_{v}</span>, the adversary <span class="math">\\mathcal{B}_{\\Gamma}</span> chooses the challenge <span class="math">\\rho</span> and sends it to <span class="math">\\mathcal{A}</span>.</li>
+
+      <li>when <span class="math">\\mathcal{A}</span> responds by <span class="math">\\pi_{2}</span>, it outputs <span class="math">(\\gamma_{v};\\pi_{\\Gamma})</span>.</li>
+
+    </ul>
+
+    <p class="text-gray-300">Clearly, <span class="math">(\\gamma_{v};\\pi_{\\Gamma})</span> is an admissible output for breaking the knowledge-soundness of <span class="math">\\Gamma</span>, since in this game we have <span class="math">\\mathcal{R}(\\gamma_{v};v)=0</span> while the verification passes (since the verification algorithm of <span class="math">\\mathcal{X}_{L2}</span> includes the verification algorithm of <span class="math">\\Gamma</span>). ∎</p>
+
+    <h2 id="sec-53" class="text-2xl font-bold">Appendix G Proof of Theorem 6.1</h2>
+
+    <h6 id="sec-54" class="text-base font-medium mt-4">Proof.</h6>
+
+    <p class="text-gray-300">Let <span class="math">\\mathcal{A}</span> be the algebraic adversary attacking the knowledge-soundness of <span class="math">\\Gamma</span>, we show that the probability that it wins is negligible. The adversary receives <span class="math">\\mathrm{srs}=(g,g^{1/r},\\mathrm{pp}_{Groth16},\\mathbf{L}=\\mathrm{vk}_{L}^{\\prime})</span> and outputs the proof <span class="math">\\pi\\in\\mathbb{G}_{1}</span> and the public input <span class="math">\\gamma_{v}\\in\\mathbb{G}_{1}</span>. Define <span class="math">\\mathrm{srs}^{\\prime}</span> as the elements of <span class="math">\\mathrm{srs}</span> in <span class="math">\\mathbb{G}_{1}</span> that excludes <span class="math">\\mathbf{L}</span>. It also outputs the vectors <span class="math">\\vec{a}=(\\vec{a}_{1},\\vec{a}_{2})</span> and <span class="math">\\vec{b}=(\\vec{b}_{1},\\vec{b}_{2})</span> as the LC-representations of <span class="math">\\pi</span> and <span class="math">\\gamma_{v}</span> (where <span class="math">\\vec{a}_{2},\\vec{b}_{2}</span> are associated with the part <span class="math">\\mathbf{L}</span> and <span class="math">\\vec{a}_{1},\\vec{b}_{1}</span> are associated with the part <span class="math">\\mathrm{srs}^{\\prime}</span>). The extractor <span class="math">\\mathcal{E}</span> receives <span class="math">\\vec{a},\\vec{b}</span>. Note that LC-representations of <span class="math">\\pi</span> and <span class="math">\\gamma_{v}</span> can be respectively written as follows (where <span class="math">\\langle\\cdot,\\cdot\\rangle</span> stands for the inner-product of two vectors and DL stands for the discrete logarithm),</p>
+
+    <p class="text-gray-300"><span class="math">\\mathrm{LC}</span>-representation <span class="math">\\pi</span>: <span class="math">a_{1}^{\\prime}+ra_{2}^{\\prime}=\\langle\\mathrm{DL}(\\mathrm{srs}^{\\prime}),\\vec{a}_{1}\\rangle+r\\langle\\mathrm{DL}(\\mathrm{vk}_{L}),\\vec{a}_{2}\\rangle</span> <span class="math">\\mathrm{LC}</span>-representation <span class="math">\\gamma_{v}</span>: <span class="math">b_{1}^{\\prime}+rb_{2}^{\\prime}=\\langle\\mathrm{DL}(\\mathrm{srs}^{\\prime}),\\vec{b}_{1}\\rangle+r\\langle\\mathrm{DL}(\\mathrm{vk}_{L}),\\vec{b}_{2}\\rangle</span></p>
+
+    <p class="text-gray-300">Since the verification passes, the adversary’s response must satisfy the following equation (<span class="math">r</span> being the unknown here),</p>
+
+    <p class="text-gray-300"><span class="math">a_{1}^{\\prime}+ra_{2}^{\\prime}=rb_{1}^{\\prime}+r^{2}b_{2}^{\\prime}</span> (4)</p>
+
+    <p class="text-gray-300">There are two possible cases here, either the equation is satisfied independently of the choice of <span class="math">r</span> or it has a specific solution (w.r.t. <span class="math">r</span> as the unknown). We now discuss what will happen in each case.</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>The first case occurs if and only if <span class="math">a_{1}^{\\prime}=b_{2}^{\\prime}=0</span> and <span class="math">a_{2}^{\\prime}=b_{1}^{\\prime}</span>, which then implies that <span class="math">\\vec{b}_{2}=\\vec{0},\\vec{a}_{1}=\\vec{0}</span>, <span class="math">\\vec{a}_{2}=\\vec{b}_{1,L}=\\vec{a}^{<em>}</span> and <span class="math">\\vec{b}_{1}=(\\vec{0},\\vec{b}_{1,L})</span>, for some <span class="math">\\vec{a}^{</em>}</span> and <span class="math">\\vec{b}_{1,L}</span> being part of <span class="math">\\vec{b}_{1}</span> associated with <span class="math">\\mathrm{vk}_{L}</span> in the LC-representation. Thus, the extractor <span class="math">\\mathcal{E}</span> has indeed extracted <span class="math">\\vec{a}^{<em>}</span>. But this cannot pass the second condition of the knowledge-soundness game which says <span class="math">MSM(\\mathrm{vk}_{L},\\vec{a}^{</em>})\\neq\\gamma_{v}</span> (by the LC-representation of <span class="math">\\gamma_{v}</span>, and the fact that <span class="math">b_{1,L}</span> is associated with the <span class="math">\\mathrm{vk}_{L}</span> part). Thus, the probability that the extractor can output a witness satisfying the required condition is zero in this case.</li>
+
+    </ol>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>In the second case, we can reduce the knowledge-soundness to the DLog problem. Where the attacker <span class="math">\\mathcal{B}</span> to the DLog-problem builds <span class="math">\\mathrm{srs}</span> from its given challenge <span class="math">g_{1},g_{1}^{\\prime}</span>, runs the adversary <span class="math">\\mathcal{A}</span> (attacker to the knowledge-soundness), then as explained in the current case it can solve Eq.4 to find <span class="math">r</span>.</li>
+
+    </ol>
+
+    <p class="text-gray-300">Therefore, we have shown that the probability that Eq.4 has a specific solution is negligible, which means the case (1) would happen with overwhelming probability, while in this case, the probability that expected extractor <span class="math">\\mathcal{E}</span> exists is zero. Putting together the knowledge-error is at most <span class="math">\\epsilon_{\\mathrm{DL}}</span> where <span class="math">\\epsilon_{\\mathrm{DL}}</span> is the probability of breaking the DLog-assumption.</p>
+
+    <p class="text-gray-300">∎</p>
+
+    <h2 id="sec-55" class="text-2xl font-bold">Appendix H. Fiat-Shamir Transform in the So-Far Digest Model</h2>
+
+    <p class="text-gray-300">In the way that we instantiate the Fiat-Shamir transform, we only hash the current message and the previous randomness to obtain the new randomness. We call this model the “so-far digest”, instead of the so-far transcript which is usually used in the original version of Fiat-Shamir transform. We argue that there is no concrete difference between the two approaches, as ultimately each Fiat-Shamir randomness depends on the previous transcript. Indeed, each randomness is the digest of the so-far transcript (thus, the name “so-far digest”).</p>
+
+    <p class="text-gray-300">Motivation. In real applications, the random oracle is replaced with a hash function. And numerous hash functions are <em>updatable</em>, meaning that the hash of the message</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">$M=M^{\\prime}\\</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\text{new block of message}$</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">can be built from the new block of the message and a short input, the <em>hash state</em> after hashing <span class="math">M^{\\prime}</span>. This means for an updatable hash two models so-far transcript and so-far digest (with the same hash for all the rounds) are, in practice, roughly equivalent in terms of performance. The reason we prefer <em>the so-far digest</em> model is mainly due to our one-round GKR. If we had used the <em>so-far transcript model</em>, the verifier would still have to hash the entire transcript from scratch in the second round (public parameters, public inputs, past prover’s messages, etc.). Indeed, in that scenario, the random-coin of the verifier for the first round would count as a <em>message</em> which is part of the transcript and cannot be used as a <em>previous hash state</em>. As a result, we would require the prover to hash a potentially very long string of inputs within a SNARK circuit, but this is what we are trying to avoid in this work.</p>
+
+    <h3 id="sec-56" class="text-xl font-semibold mt-8">H.1. From So-Far Transcript model to So-Far Digest model</h3>
+
+    <p class="text-gray-300">Here, we formally define the so-far digest model which provides us with a more efficient implementation of the Fiat-Shamir transform in the circuit. Then, we prove that if a protocol is sound in the so-far transcript random oracle model, it is also sound in the so-far digest random oracle model.</p>
+
+    <h6 id="sec-57" class="text-base font-medium mt-4">Definition H.1 (So-Far Digest Model).</h6>
+
+    <p class="text-gray-300">Let <span class="math">\\mathcal{P}</span> be a FS-transform of a public-coin interactive protocol in the random oracle model. Let also <span class="math">m_{i}</span> and <span class="math">h_{i}</span> be respectively, the prover message and the output of the FS-hash in the round <span class="math">i</span>. In the so-far digest model, we have <span class="math">h_{i}=H_{\\mathcal{FS}}(m_{i},h_{i-1})</span> for <span class="math">i&gt;1</span>, and <span class="math">h_{1}=H_{\\mathcal{FS}}(m_{1},\\text{pp},x)</span>, where <span class="math">\\text{pp}</span> stands for the public parameters and <span class="math">x</span> is the public input of the verifier.</p>
+
+    <p class="text-gray-300">Note that in the so-far transcript model, we simply have</p>
+
+    <p class="text-gray-300"><span class="math">h_{i}=H_{\\mathcal{FS}}(\\text{so-far Transcript}_{i})</span></p>
+
+    <p class="text-gray-300">and <em>so-far transcript</em> is whatever the verifier has received so far during the protocol execution (this includes all the public parameters, the public input of the verifier, and all the messages of the prover).</p>
+
+    <h6 id="sec-58" class="text-base font-medium mt-4">Theorem H.2.</h6>
+
+    <p class="text-gray-300">If <span class="math">\\mathcal{P}</span> (defined above) is sound in the so-far transcript model with soundness error <span class="math">\\epsilon_{tr}</span>, then it is also sound in the so-far digest model with soundness-error <span class="math">t^{-1}.\\epsilon_{tr}</span> where <span class="math">t=(1-1/2^{\\lambda_{H}})</span> and <span class="math">\\lambda_{H}</span> is the length of the random oracle’s response (in bits).</p>
+
+    <h6 id="sec-59" class="text-base font-medium mt-4">Proof.</h6>
+
+    <p class="text-gray-300">We first define the initial admissible trace as <span class="math">(\\text{pp},x,m_{1})</span> i.e., the concatenation of public parameters, public inputs, and some <span class="math">m_{1}</span>. We say that the trace <span class="math">tr_{k}=(\\text{pp},x,m_{1},m_{2}\\ldots,m_{k};h_{1},h_{2},\\ldots,h_{k-1})</span> in the so-far transcript model is admissible if in the so-far digest model <span class="math">h_{i}</span> has been the response to the RO-query <span class="math">(m_{i},h_{i-1})_{k&gt;i&gt;1}</span>.</p>
+
+    <p class="text-gray-300">Now we are ready to present the reduction between the two models. Let <span class="math">\\mathcal{A}</span> and <span class="math">\\mathcal{B}</span> be the attacker respectively to the soundness of <span class="math">\\mathcal{P}</span> in the so-far transcript model, and the so-far digest model. The attacker <span class="math">\\mathcal{A}</span> simulates the soundness game for the adversary <span class="math">\\mathcal{B}</span> as follows,</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>for any RO-query issued by <span class="math">\\mathcal{B}</span> before an initial admissible trace, <span class="math">\\mathcal{A}</span> responses by a random value.</li>
+
+      <li>When <span class="math">\\mathcal{B}</span> outputs a RO-query over <span class="math">(m,h)</span>, <span class="math">\\mathcal{A}</span> first checks if it can extend any admissible trace via such query (namely, it adds <span class="math">m,h</span> to an admissible trace and the trace is still admissible). If yes, it sends a RO-query over the corresponding trace to its challenger and relays the response to <span class="math">\\mathcal{B}</span>.</li>
+
+      <li><span class="math">\\mathcal{A}</span> responds with random values if it can not extend any admissible trace.</li>
+
+      <li>it repeats the same responses for the repeated queries.</li>
+
+      <li><span class="math">\\mathcal{A}</span> outputs the output of <span class="math">\\mathcal{B}</span>, if for the output <span class="math">(m_{1},\\ldots,m_{k})</span>, public parameters <span class="math">\\text{pp}</span> and the public input <span class="math">x</span>, there has been an admissible trace during the game.</li>
+
+    </ol>
+
+    <p class="text-gray-300">In the case of the “Bad Event”, defined in the following, the adversary <span class="math">\\mathcal{A}</span> would abort.</p>
+
+    <p class="text-gray-300">A bad event in general is when <span class="math">\\mathcal{A}</span> encounters a conflict in the simulation.</p>
+
+    <p class="text-gray-300">Bad Event 1. a single RO-query of <span class="math">\\mathcal{B}</span> can be used to extend more than one admissible trace. In this case, it is not clear by which trace <span class="math">\\mathcal{A}</span> is going to respond to the query of <span class="math">\\mathcal{B}</span>, thus it just aborts.</p>
+
+    <p class="text-gray-300">Bad event 2. a query from <span class="math">\\mathcal{B}</span> is repeated but its second repetition leads to a new admissible trace. This makes a conflict between cases (a) and (c).</p>
+
+    <p class="text-gray-300">Clearly, the adversary <span class="math">\\mathcal{A}</span> can win its game if it has not aborted (“Bad Events” have not happened) and <span class="math">\\mathcal{B}</span> has won its game under the mentioned condition over the output.</p>
+
+    <p class="text-gray-300">First note that by the definition of so-far digest, namely <span class="math">h_{i}=(m_{i},h_{i-1})</span> any output of <span class="math">\\mathcal{B}</span> satisfies the demanded condition over the output. Secondly, by the definition of the random oracle, the probability that bad events <span class="math">1</span> or <span class="math">2</span> happen is negligible.</p>
+
+    <p class="text-gray-300">More in detail, event <span class="math">1</span> happens if there exists the same <span class="math">h^{<em>}</span> inside two different admissible traces. Since the traces are different <span class="math">h^{</em>}</span> should have been the response to two different RO-queries of <span class="math">\\mathcal{A}</span> (collision) which would happen with the probability of <span class="math">1/2^{\\lambda_{H}}</span> for <span class="math">\\lambda_{H}</span> being the bit-length of the random oracle output. Similarly, event <span class="math">2</span> happens if for the repeated query <span class="math">q^{<em>}=(m^{</em>},h^{<em>})</span> we have that for a RO-query issued by <span class="math">\\mathcal{A}</span> (and after the first repetition of <span class="math">q^{</em>}</span>) the response is <span class="math">h^{*}</span>. Again this happens by the probability <span class="math">1/2^{\\lambda_{H}}</span>.</p>
+
+    <h2 id="sec-60" class="text-2xl font-bold">Appendix I. One-Round GKR</h2>
+
+    <p class="text-gray-300">In this section, we explicitly specify a single-round version of the GKR protocol. We then carefully discuss its security in the random</p>
+
+    <p class="text-gray-300">Recursion over Public-Coin Interactive Proof Systems; Faster Hash Verification</p>
+
+    <p class="text-gray-300">oracle model step-by-step, motivate our technical choices and finally explain how to instantiate it using the Fiat-Shamir transform. The reader can assume that GKR stands for the original interactive GKR protocol and  <span class="math">\\mathrm{GKR}_s</span>  for the single-round version of the GKR protocol. For the security proof and reduction from  <span class="math">GKR_{s}</span>  to  <span class="math">GKR</span> , we juggle with several variants of the GKR protocol these intermediate versions are depicted in Fig.18. We emphasize that the single-round GKR used in the compiler Sec.5.4 is  <span class="math">\\mathrm{GKR}_s</span>  that is precisely instantiated by a deterministic hash function (starting from the second round). We explain how we choose the hash function in Appendix I.3.</p>
+
+    <p class="text-gray-300">Let the variants of GKR be defined as in Fig. 18. To clarify the description of  <span class="math">\\mathrm{GKR}_{s,RO}</span> ,</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>The initial challenge  <span class="math">\\rho_{1}</span>  is a genuine public-coin sampled by the verifier</li>
+
+      <li>The second challenge  <span class="math">\\rho_{2}</span>  is obtained by querying the random oracle with inputs: the last prover message together with  <span class="math">\\rho_{1}</span> . In particular, the random oracle is not sent the GKR statement  <span class="math">x</span>  at this round.</li>
+
+    </ul>
+
+    <p class="text-gray-300">：</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>The  <span class="math">i</span> -th challenge  <span class="math">\\rho_{i}</span>  is obtained by querying the random oracle with the last prover message together with the previous challenge  <span class="math">\\rho_{i-1}</span></li>
+
+    </ul>
+
+    <p class="text-gray-300">The reader can see that the present protocol  <span class="math">\\mathrm{GKR}_{s,RO}</span>  is somewhat different from a standard compilation in the full random oracle model. Two points are important here. First, we use a so-far digest (e.g., sending the previous challenge and the last message) construction while the compiling in the Random Oracle Model requires to hash all the transcript so far. Secondly, the protocol  <span class="math">GKR_{s,RO}</span>  retains an initial genuine interactive round while a common (FS-) transform of a protocol in the random oracle model does not "let even a single round" of protocol remain. While the security of this construction can seem somewhat intuitive, its security must be studied with great care.</p>
+
+    <p class="text-gray-300">Fig. 18 summarizes the justification between each two adjacent variants. Namely, if GKR is (round-by-round) knowledge-sound, then  <span class="math">\\mathrm{GKR}_a</span>  is knowledge-sound in the (so-far transcript) random oracle model (see Sec. 3). Also, if  <span class="math">\\mathrm{GKR}_a</span>  is knowledge-sound in the so-far transcript model, then by our Thm. H.2, its variant in the so-far digest model  <span class="math">\\mathrm{GKR}_b</span>  is knowledge-sound. Here we present the missing Lemma I.1 justifying if  <span class="math">\\mathrm{GKR}_b</span>  is knowledge-sound, so is  <span class="math">\\mathrm{GKR}_{s,RO}</span> .</p>
+
+    <p class="text-gray-300">LEMMA I.1. Our single-round GKR (i.e.,  <span class="math">\\mathrm{GKR}_{s,RO}</span> ) is sound in the random oracle model, if non-interactive GKR (i.e.,  <span class="math">GKR_{b}</span> ) is sound in the so-far digest random oracle model.</p>
+
+    <p class="text-gray-300">Proof. Let  <span class="math">\\mathcal{A}</span>  and  <span class="math">\\mathcal{B}</span>  be respectively the attackers to the soundness of  <span class="math">\\mathrm{GKR}_b</span>  and  <span class="math">\\mathrm{GKR}_{s,RO}</span> . The adversary  <span class="math">\\mathcal{A}</span>  simulates the soundness game for  <span class="math">\\mathcal{B}</span> .</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>when  <span class="math">\\mathcal{B}</span>  sends the message  <span class="math">x</span> , the adversary  <span class="math">\\mathcal{A}</span>  sends a RO-query on  <span class="math">x</span> . It sets the response as the challenge (generated by the verifier) for the first round and sends it to  <span class="math">\\mathcal{B}</span></li>
+
+      <li>If  <span class="math">\\mathcal{B}</span>  queries the random oracle  <span class="math">H_{\\mathcal{T},\\mathcal{B}}</span>  for the same value  <span class="math">x</span> , the adversary  <span class="math">\\mathcal{A}</span>  responds with a different random value.</li>
+
+      <li>When  <span class="math">\\mathcal{B}</span>  outputs a proof  <span class="math">\\pi</span> , the adversary  <span class="math">\\mathcal{A}</span>  outputs  <span class="math">x</span>  and  <span class="math">\\pi</span> .</li>
+
+    </ul>
+
+    <p class="text-gray-300">Note that by this simulation, both protocols are technically the same. But, as  <span class="math">\\mathcal{B}</span>  does not understand what it received at the first round was indeed a response to a RO-query over  <span class="math">x</span>  (asked by the verifier, namely  <span class="math">\\mathcal{A}</span>  here), from its perspective, the adversary  <span class="math">\\mathcal{B}</span>  is inside a single-round interactive version.</p>
+
+    <p class="text-gray-300">The last game  <span class="math">\\mathrm{GKR}_s</span>  is simply the Fiat-Shamir transformation of  <span class="math">\\mathrm{GKR}_{s,RO}</span> .</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Protocol</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Details</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Justification</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">GKR</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">The original protocol, fully interactive</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">-</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">GKRa</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">full ROM, so-far transcript model</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">Standard ROM</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">GKRb</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">full ROM, so-far digest model</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">Thm.H.2</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">GKRs,RO</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">Def.I.1 ROM from the second round, so-far digest</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">Lem.I.1</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">GKRs</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">instantiated one-round GKR Appendix I.3</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">Fiat-Shamir hash</td>
+
+          </tr>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">Figure 18: Overview of the security reduction</p>
+
+    <p class="text-gray-300">We apply the Fiat-Shamir heuristic to instantiate the random oracle in  <span class="math">\\mathrm{GKR}_{s,RO}</span>  which results in  <span class="math">\\mathrm{GKR}_s</span> . We do so, by selecting a hash function such that:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>It behaves like a random oracle</li>
+
+      <li>It can be efficiently verified in an arithmetic circuit</li>
+
+      <li>When the construction is applied for proving hashes, it is preferable to either use another hash function (different from the one that is being proved) or at least to change the parameters of the hash functions.</li>
+
+    </ul>
+
+    <p class="text-gray-300">In our implementation, we use MiMC with different constants. We stress that, during this step, the transform only applies for the calls to the random oracle and not the genuine random-coin of the first round. Though finally at the third layer of our compiler (Sec.5.4), we again use the Fiat-Shamir heuristic to instantiate the first round interaction with a hash function (again MiMc with different parameters). Note that what we are using in the compiler in (Sec.5.4) is  <span class="math">\\mathrm{GKR}_s</span> .</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Let  <span class="math">\\omega_{i}</span> 's be the  <span class="math">n</span> -th roots of unity (such that for public inputs  <span class="math">x</span>  we have  $</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">x</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\leq n<span class="math"> , where in our case  </span>\\xi(x) = (v, x_{L2})<span class="math"> , using our notation Fig.10), we can derive three subsets  </span>\\omega_{L2}, \\omega_{v}, \\omega_{n \\setminus \\ell} \\subset \\Omega = \\{\\omega_{i}\\}_{i}<span class="math">  where the first two subsets correspond to  </span>x_{L2}<span class="math">  and  </span>v$ , respectively.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">One can consider  <span class="math">PI(X) = PI_1(X) + PI_2(X)</span>  such that the polynomial  <span class="math">PI_1(X)</span>  is handled by the verifier and over unity roots  <span class="math">\\omega_{L2}</span>  interpolates to the public inputs of layer 2 (i.e.  <span class="math">x_{L2}</span> ) while  <span class="math">PI_2(X)</span>  is handled by the prover and interpolates to  <span class="math">v</span>  over the corresponding unity roots  <span class="math">\\omega_v</span>  and to zero over  <span class="math">\\omega_{L2} \\cup \\omega_{n\\setminus \\ell}</span> . Our compiler, outputs  <span class="math">\\gamma_v = (C,y_h)</span>  (where  <span class="math">C = \\sum_i v_i[L_i(x)]_1</span>  is the KZG commitment to</p>
+
+    <p class="text-gray-300">Belling et al.</p>
+
+    <p class="text-gray-300"><span class="math">PI_{2}(X) = \\sum_{i} v_{i} L_{i}(X)</span> , and  <span class="math">y_{\\hat{\\mathbf{3}}} = PI_{2}(\\mathfrak{z})</span>  and an AOK  <span class="math">\\Gamma</span> , as given in Fig.19, allowing the verifier to check that  <span class="math">PI_{2}(X) := V(X)</span>  evaluates to 0 on the entries  <span class="math">\\omega_{L2} \\cup \\omega_{n \\setminus \\ell}</span> , and to  <span class="math">y_{\\hat{\\mathbf{3}}}</span>  at  <span class="math">X = \\mathfrak{z}</span> . The former guarantees that  <span class="math">C</span>  is computed using only the correct Lagrange basis, while the latter guarantees the correct computation of  <span class="math">PI_{2}(\\mathfrak{z})</span> . The first part of the proof can be done with a batch opening of KZG polynomial commitment. Thus, the argument system  <span class="math">\\Gamma</span>  is a batch opening of KZG at points  <span class="math">\\omega_{L2} \\cup \\omega_{n \\setminus \\ell}</span>  and a single opening for  <span class="math">X = \\mathfrak{z}</span> . In [5] the authors proved the knowledge-soundness of batch KZG opening in the algebraic group model and based on  <span class="math">q</span> -DLog assumption (Appendix A, Def.A.1). Here, our srs is longer but all the extra terms are linear combinations of elements in the original srs in [5], thus the security still holds in the algebraic group model.</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Setup(pp', G1, G2, P, f)</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Prove(L, v, z)</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Verify(x, x', C, y3, y1, Z)</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">[Li(x)]i, [x']2 ← pp'</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">v(X) ⊆ ∑v_i · Li(X)</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">e(C, [1]i) + e(x, [x - 1]i)</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Z(X) ← ∏i=1^l(X - ω^l)</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">y3 ← v(z)</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">e(C, [1]i) + e(x', Z)</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Z ← Z(x) · [1]2</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">x ← KZG.Prove(v(X), y3, z)</td>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">return</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">x' ← KZG.Prove(v(X), x, [ω^l]i∈T)</td>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">urs = (pp', L = ([Li(x)]i), Z)</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">return (x, x')</td>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+          </tr>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">Figure 19: Argument of Knowledge for PLONK. Here,  <span class="math">\\mathrm{pp&#x27;}</span>  is the public parameter of our variant in Fig.12, and  <span class="math">T</span>  is the set of indices associated with the unity roots in  <span class="math">\\omega_{L2} \\cup \\omega_{n \\setminus \\ell}</span></p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">One may also think of applying Nova or Halo in the incremental computation model for  <span class="math">F^n (X) = y</span>  where  <span class="math">F</span>  is the round function of the hash. The key difference between these techniques and GKR is that these techniques require committing to (at least) the entire trace of the computation (due to the use of R1CS of  <span class="math">F</span> ). This is the expensive part of proving claims in practice, as this involves performing elliptic-curve multi-scalar-multiplications. For a single MiMC permutation, this means 360 field elements (using quadratic constraints). With a GKR-based approach, the prover is only required to commit to the inputs and the outputs of the permutations (so 3 field elements). Techniques like folding or accumulation schemes (Nova and Halo), however, have the advantage that they allow proving multiple instances in a "streaming" manner. Consequently, the memory requirements do not scale with the number of instances to prove. Finally, Nova uses Spartan to reduce the proof size from  $</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">F</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"><span class="math">  to  </span>\\log(</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">F</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">)$ . Thanks to the outer snark, our technique reduces the proof size to constant and needs neither cycles of elliptic curves (like Nova/Halo) nor non-native arithmetization (naive approach).</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>`;
+---
+
+<BaseLayout title="Recursion over Public-Coin Interactive Proof Systems; Faster... (2022/1072)">
+  <article class="max-w-4xl mx-auto article-prose">
+    <nav class="mb-8">
+      <a href="/papers" class="text-blue-400 hover:text-blue-300">
+        &larr; Back to Papers
+      </a>
+    </nav>
+
+    <header class="mb-12">
+      <h1 class="text-3xl font-bold mb-4"
+        set:html={TITLE_HTML} />
+      <p class="text-gray-400 mb-2"
+        set:html={AUTHORS_HTML} />
+      <p class="text-gray-500 text-sm mb-4">
+        2022 &middot; eprint 2022/1072
+      </p>
+      <div class="flex gap-4 text-sm">
+        <a
+          href={EPRINT_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          class="text-blue-400 hover:text-blue-300"
+        >
+          Paper (eprint) &rarr;
+        </a>
+      </div>
+      <p class="mt-4 text-xs text-gray-500">
+        All content below belongs to the original authors. This page
+        reproduces the paper for educational purposes. Always
+        <a
+          href={EPRINT_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          class="text-blue-400 hover:text-blue-300"
+        >cite the original</a>.
+      </p>
+      <p class="mt-1 text-xs text-gray-600">
+        Converted with: {CRAWLER} &middot; {CONVERTED_DATE}
+      </p>
+    </header>
+
+    <Fragment set:html={CONTENT} />
+
+  </article>
+</BaseLayout>

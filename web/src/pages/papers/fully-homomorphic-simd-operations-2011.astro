@@ -1,0 +1,1427 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+
+const EPRINT_URL = 'https://eprint.iacr.org/2011/133';
+const CRAWLER = 'mistral';
+const CONVERTED_DATE = '2026-02-16';
+const TITLE_HTML = 'Fully Homomorphic SIMD Operations';
+const AUTHORS_HTML = 'N. P.  Smart, F.  Vercauteren';
+
+const CONTENT = `    <p class="text-gray-300">N.P. Smart [ Dept. Computer Science, University of Bristol, Merchant Venturers Building, Woodland Road, Bristol, BS8 1UB, United Kingdom. nigel@cs.bris.ac.uk ] F. Vercauteren [ COSIC - Electrical Engineering, Katholieke Universiteit Leuven, Kasteelpark Arenberg 10, B-3001 Heverlee, Belgium. fvercaut@esat.kuleuven.ac.be ]</p>
+
+    <h6 id="sec-2" class="text-base font-medium mt-4">Abstract</h6>
+
+    <p class="text-gray-300">At PKC 2010 Smart and Vercauteren presented a variant of Gentry’s fully homomorphic public key encryption scheme and mentioned that the scheme could support SIMD style operations. The slow key generation process of the Smart–Vercauteren system was then addressed in a paper by Gentry and Halevi, but their key generation method appears to exclude the SIMD style operation alluded to by Smart and Vercauteren. In this paper, we show how to select parameters to enable such SIMD operations, whilst still maintaining practicality of the key generation technique of Gentry and Halevi. As such, we obtain a somewhat homomorphic scheme supporting both SIMD operations and operations on large finite fields of characteristic two. This somewhat homomorphic scheme can be made fully homomorphic in a naive way by encrypting all data elements seperately. However, we show that the SIMD operations can be used to perform the recrppt procedure in parallel, resulting in a substantial speed-up. Finally, we demonstrate how such SIMD operations can be used to perform various tasks by studying two use cases: implementing AES homomorphically and encrypted database lookup.</p>
+
+    <h2 id="sec-3" class="text-2xl font-bold">1 Introduction</h2>
+
+    <p class="text-gray-300">For many years a long standing open problem in cryptography has been the construction of a fully homomorphic encryption (FHE) scheme. The practical realisation of such a scheme would have a number of consequences, such as computation on encrypted data held on an untrusted server. In 2009 Gentry <em>[8, 9]</em> came up with the first construction of such a scheme based on ideal lattices. Soon after Gentry’s initial paper appeared, two other variants were presented <em>[5, 16]</em>; the method of van Dijk et al. <em>[5]</em> is a true variant of Gentry’s scheme and relies purely on the arithmetic of the integers; on the other hand the scheme of Smart and Vercauteren <em>[16]</em> is a specialisation of Gentry’s scheme to a particular set of parameters.</p>
+
+    <p class="text-gray-300">All schemes make use of Gentry’s idea of first producing a somewhat homomorphic encryption scheme and then applying a bootstrapping process to obtain a complete FHE scheme. This bootstrapping process requires a “dirty” ciphertext to be publicly reencrypted into a “cleaner” ciphertext. This requires that the somewhat homomorphic scheme can homomorphically implement its own decryption circuit, and so must be able to execute a circuit of a given depth.</p>
+
+    <p class="text-gray-300">Recently, Gentry and Halevi <em>[10]</em> presented an optimized version of the Smart–Vercauteren variant. In particular, the optimized version has an efficient key generation procedure based on the Fast Fourier Transform and a simpler decryption circuit. These two major optimizations, along with some other minor ones, allow Gentry and Halevi to actually implement a “toy” FHE scheme, including the ciphertext cleaning operation.</p>
+
+    <p class="text-gray-300">Smart and Vercauteren mentioned in <em>[16]</em> that their scheme can be adapted to support SIMD (Single-Instruction Multiple-Data) style operations on non-trivial finite fields of characteristic two, as opposed to operations on single bits, as long as the parameters are chosen appropriately. However, the parameters proposed in both <em>[10]</em> and <em>[16]</em> do not allow such SIMD operations, nor direct operation on elements of finite fields of characteristic two of degree greater than one. In particular, the efficient key generation method of <em>[10]</em> precludes the use of parameters which would support SIMD style operations. Using fully homomorphic SIMD operations would be an advantage in any</p>
+
+    <p class="text-gray-300">practical system since FHE schemes usually embed relatively small plaintexts within large ciphertexts. Allowing each ciphertext to represent a number of independent plaintexts would therefore enable more efficient use of both space and computational resources.</p>
+
+    <p class="text-gray-300">In this paper we investigate the use of SIMD operations in FHE systems in more depth. In particular we show how by adapting the parameter settings of <em>[10, 16]</em> one can obtain the benefits of SIMD operations, whilst still maintaining many of the important efficiency improvements obtained by Gentry and Halevi. We thus obtain a somewhat homomorphic scheme supporting SIMD operations, and operations on large finite fields of characteristic two. We then discuss how one can use the SIMD operations to perform the recrrpt procedure in parallel. In addition we explain how such SIMD operations could be utilized to perform a number of interesting higher level operations, such as performing AES encryption homomorphically and searching an encrypted database on a remote server.</p>
+
+    <p class="text-gray-300">The paper is structured as follows. Section 2 presents some basic facts about finite fields and algebras defined as quotients of polynomial rings. Section 3 explains how these algebras allow us to create a somewhat homomorphic encryption scheme whose message space consists of multiple parallel copies of a given finite field of characteristic two. Section 4 describes a encryption procedure for the somewhat homomorphic scheme that preserves the underlying message space structure. Section 5 contains our main contribution, namely, a encryption procedure that makes use of the SIMD operations. This new procedure significantly reduces the cost of encryption. To justify our claims, Section 6 presents implementation timings for a toy example. Finally, Section 7 gives possible applications of the SIMD structure of our FHE scheme, including bit-sliced implementations of algorithms, such as performing AES encryption using an encrypted key, and database search.</p>
+
+    <h4 id="sec-4" class="text-lg font-semibold mt-6">Notations</h4>
+
+    <p class="text-gray-300">We end this introduction by presenting the notations that will be used throughout this paper. Assignment to variables will be denoted by <span class="math">x\\leftarrow y</span>. If <span class="math">A</span> is a set then <span class="math">x\\leftarrow A</span> implies that <span class="math">x</span> is selected from <span class="math">A</span> using the uniform distribution. If <span class="math">A</span> is an algorithm then <span class="math">x\\leftarrow A</span> implies that <span class="math">x</span> is obtained from running <span class="math">A</span>, with the resulting probability distribution being induced by the random coins of <span class="math">A</span>. For integers <span class="math">x,d</span>, we denote <span class="math">[x]_{d}</span> the reduction of <span class="math">x</span> modulo <span class="math">d</span> into the interval <span class="math">[-d/2,d/2)</span>. If <span class="math">\\mathbf{y}</span> is a vector then we let <span class="math">\\mathbf{y}_{i}</span> denote the <span class="math">i</span>’th element of <span class="math">\\mathbf{y}</span>.</p>
+
+    <p class="text-gray-300">Polynomials over an indeterminate <span class="math">X</span> will (usually) be denoted by uppercase roman letters, e.g. <span class="math">F(X)</span>. We make an exception for the cyclotomic polynomials which are as usual denoted by <span class="math">\\Phi_{m}(X)</span>. Elements of finite fields and number fields defined by a polynomial <span class="math">F(X)</span>, i.e. elements of <span class="math">\\mathbb{F}_{2}[X]/F(X)</span> and <span class="math">\\mathbb{Q}[X]/F(X)</span>, can also be represented as polynomials in some fixed root of <span class="math">F(X)</span> in the algebraic closure of the base field. We shall denote such polynomials by lower case greek letters, with the fixed root (being an element of the field) also being denoted by a lower case greek letter; for instance <span class="math">\\gamma(\\theta)</span> where <span class="math">F(\\theta)=0</span>. When the underlying root of <span class="math">F(X)</span> is clear we shall simply write <span class="math">\\gamma</span>.</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">For a polynomial <span class="math">F(X)\\in\\mathbb{Q}[X]</span> we let $\\</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">F(X)\\</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">_{\\infty}<span class="math"> denote the </span>\\infty<span class="math">-norm of the coefficient vector, i.e. the maximum coefficient in absolute value. Similarly, for an element </span>\\gamma\\in\\mathbb{Q}[X]/F(X)<span class="math"> we write </span>\\</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\gamma\\</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">_{\\infty}<span class="math"> for </span>\\</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\gamma(X)\\</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">_{\\infty}<span class="math"> where </span>\\gamma(X)<span class="math"> is the corresponding unique polynomial of degree </span><\\deg(F)<span class="math">. If </span>F(X)\\in\\mathbb{Q}[X]<span class="math"> then we let </span>\\lceil F(X)\\rceil<span class="math"> denote the polynomial in </span>\\mathbb{Z}[X]<span class="math"> obtained by rounding the coefficients of </span>F(X)<span class="math"> to the nearest integer. Similary, for an element </span>\\gamma\\in\\mathbb{Q}[X]/F(X)<span class="math"> we write </span>\\lceil\\gamma\\rfloor<span class="math"> for </span>\\lceil\\gamma(X)\\rceil$.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <h2 id="sec-5" class="text-2xl font-bold">2 Fields and Homomorphisms</h2>
+
+    <p class="text-gray-300">To present the SIMD operations in full generality and to understand how they can be utilized we first set up a number of finite fields and homomorphisms between them. We let <span class="math">F(X)\\in\\mathbb{F}_{2}[X]</span> denote a monic polynomial of degree <span class="math">N</span> that we assume to split into exactly <span class="math">r</span> <em>distinct</em> irreducible factors of degree <span class="math">d=N/r</span></p>
+
+    <p class="text-gray-300"><span class="math">F(X):=\\prod_{i=1}^{r}F_{i}(X).</span></p>
+
+    <p class="text-gray-300">In practice <span class="math">F(X)</span> will be the reduction modulo two of a specially chosen monic <em>irreducible</em> polynomial over <span class="math">\\mathbb{Z}</span>. This polynomial <span class="math">F(X)</span> defines a number field <span class="math">\\mathbb{K}=\\mathbb{Q}(\\theta)=\\mathbb{Q}[X]/(F)</span>, where <span class="math">\\theta</span> is some fixed root in the algebraic closure of <span class="math">\\mathbb{Q}</span>.</p>
+
+    <p class="text-gray-300">Let <span class="math">A</span> denote the algebra <span class="math">A:=\\mathbb{F}_{2}[X]/(F)</span>, then by the Chinese Remainder Theorem we have the natural isomorphisms</p>
+
+    <p class="text-gray-300"><span class="math">A</span> <span class="math">\\cong</span> <span class="math">\\mathbb{F}_{2}[X]/(F_{1})\\otimes\\cdots\\otimes\\mathbb{F}_{2}[X]/(F_{r}),</span> <span class="math">\\cong</span> <span class="math">\\mathbb{F}_{2^{d}}\\otimes\\cdots\\otimes\\mathbb{F}_{2^{d}}\\,,</span></p>
+
+    <p class="text-gray-300">where</p>
+
+    <p class="text-gray-300"><span class="math">A</span> is isomorphic to <span class="math">r</span> copies of the finite field <span class="math">\\mathbb{F}_{2^{d}}</span>. Arithmetic in <span class="math">A</span> will be defined by polynomial arithmetic in the indeterminate <span class="math">X</span> modulo the polynomial <span class="math">F(X)</span>. Our goal in this section is to relate arithmetic in <span class="math">A</span> explicitly with the elements in subfields of the <span class="math">\\mathbb{F}_{2^{d}}</span>.</p>
+
+    <p class="text-gray-300">We let <span class="math">\\theta_{i}</span> denote a fixed root of <span class="math">F_{i}(X)</span> in the algebraic closure of <span class="math">\\mathbb{F}_{2}</span>. To aid notation we define <span class="math">\\mathbb{L}_{i}:=\\mathbb{F}_{2}[X]/(F_{i})</span> and note that all the <span class="math">\\mathbb{L}_{i}</span> are isomorphic as fields, where the isomorphisms are explicitly given by</p>
+
+    <p class="text-gray-300">\\[ \\Lambda_{i,j}:\\left\\{\\begin{array}[]{ccc}\\mathbb{L}_{i}&\\longrightarrow&\\mathbb{L}_{j}\\\\ \\alpha(\\theta_{i})&\\longmapsto&\\alpha(\\rho_{i,j}(\\theta_{j}))\\,,\\end{array}\\right. \\]</p>
+
+    <p class="text-gray-300">with <span class="math">\\rho_{i,j}(\\theta_{j})</span> a fixed root of <span class="math">F_{i}</span> in <span class="math">\\mathbb{L}_{j}</span>, i.e. we have <span class="math">F_{i}(\\rho_{i,j}(X))\\equiv 0\\pmod{F_{j}(X)}</span>.</p>
+
+    <p class="text-gray-300">For each divisor <span class="math">n</span> of <span class="math">d</span>, the finite field <span class="math">\\mathbb{K}_{n}:=\\mathbb{F}_{2^{n}}</span> is contained in <span class="math">\\mathbb{F}_{2^{d}}</span>. We assume a fixed canonical representation for <span class="math">\\mathbb{K}_{n}</span> as <span class="math">\\mathbb{F}_{2}[X]/K_{n}(X)</span> for some irreducible polynomial <span class="math">K_{n}(X)\\in\\mathbb{F}_{2}[X]</span> of degree <span class="math">n</span>, which is often fixed by the application. We let <span class="math">\\psi</span> denote a fixed root of <span class="math">K_{n}(X)</span> in the algebraic closure of <span class="math">\\mathbb{F}_{2}</span>. Since <span class="math">\\mathbb{K}_{n}</span> is contained in each of <span class="math">\\mathbb{L}_{i}</span> defined above, we have explicit homomorphic embeddings given by</p>
+
+    <p class="text-gray-300">\\[ \\Psi_{n,i}:\\left\\{\\begin{array}[]{ccc}\\mathbb{K}_{n}&\\longrightarrow&\\mathbb{L}_{i}\\\\ \\alpha(\\psi)&\\longmapsto&\\alpha(\\sigma_{n,i}(\\theta_{i}))\\,,\\end{array}\\right. \\]</p>
+
+    <p class="text-gray-300">with <span class="math">\\sigma_{n,i}(\\theta_{i})</span> a fixed root of <span class="math">K_{n}(X)</span> in <span class="math">\\mathbb{L}_{i}</span>, i.e. <span class="math">K_{n}(\\sigma_{n,i}(X))\\equiv 0\\pmod{F_{i}(X)}</span>. Note that the above mapping is linear in the coefficients of <span class="math">\\alpha(\\psi)</span>.</p>
+
+    <p class="text-gray-300">Combining the above homomorphic embedding with the Chinese Remainder Theorem, we obtain a homomorphic embedding of <span class="math">l\\leq r</span> copies of <span class="math">\\mathbb{K}_{n}</span> into the algebra <span class="math">A</span> via</p>
+
+    <p class="text-gray-300">\\[ \\Gamma_{n,l}:\\left\\{\\begin{array}[]{ccc}\\mathbb{K}_{n}^{l}&\\longrightarrow&A\\\\ (\\kappa_{1}(\\psi),\\ldots,\\kappa_{l}(\\psi))&\\longmapsto&\\sum_{i=1}^{l}\\kappa_{i}(\\sigma_{n,i}(X))\\cdot H_{i}(X)\\cdot G_{i}(X),\\end{array}\\right. \\].</p>
+
+    <p class="text-gray-300">The polynomials <span class="math">H_{i}(X)</span> and <span class="math">G_{i}(X)</span> are given by the Chinese Remainder Theorem and are defined as</p>
+
+    <p class="text-gray-300"><span class="math">H_{i}(X)\\leftarrow F(X)/F_{i}(X)\\text{ and }G_{i}(X)\\leftarrow 1/H_{i}(X)\\pmod{F_{i}(X)}.</span></p>
+
+    <p class="text-gray-300">We shall denote component wise addition and multiplication of elements in <span class="math">\\mathbb{K}_{n}^{l}</span> by <span class="math">\\mathbf{k}_{1}+\\mathbf{k}_{2}</span> and <span class="math">\\mathbf{k}_{1}\\times\\mathbf{k}_{2}</span>. As such we have constructed two equivalent methods of computing with elements in <span class="math">\\mathbb{K}_{n}^{l}</span>: the first method simply computes component wise on vectors of <span class="math">l</span> elements in <span class="math">\\mathbb{K}_{n}</span>, whereas the second method first maps all inputs to the algebra <span class="math">A</span> using <span class="math">\\Gamma_{n,l}</span>, performs computations in <span class="math">A</span> and finally maps back to <span class="math">\\mathbb{K}_{n}^{l}</span> via <span class="math">\\Gamma_{n,l}^{-1}</span>. Note that by construction <span class="math">\\mathbb{K}_{n}^{l}</span> and <span class="math">\\Gamma_{n,l}(\\mathbb{K}_{n}^{l})</span> are isomorphic, so that <span class="math">\\Gamma_{n,l}^{-1}</span> is always well defined on the result of the computation.</p>
+
+    <p class="text-gray-300">The goal of this paper is to produce a fully homomorphic encryption scheme that allows us to work via SIMD operations on <span class="math">l</span> copies of <span class="math">\\mathbb{K}_{n}</span> at a time, for all <span class="math">n</span> dividing <span class="math">d</span>, by computing in the algebra <span class="math">A</span>. In particular, this enables us to support SIMD operations both in <span class="math">\\mathbb{F}_{2}</span> and <span class="math">\\mathbb{F}_{2^{d}}</span>. To make things concrete the reader should consider the example of <span class="math">F(X)</span> being the <span class="math">3485</span>-th cyclotomic polynomial. In this situation the polynomial <span class="math">F(X)</span> has degree <span class="math">N=\\varphi(3485)=2560</span>, and modulo two it factors into <span class="math">64</span> polynomials each of degree <span class="math">40</span>. This polynomial therefore allows us to compute in parallel with up to <span class="math">64</span> elements of any subfield of <span class="math">\\mathbb{F}_{2^{40}}</span>. For instance, by selecting <span class="math">n=1</span> and <span class="math">l=64</span> we perform <span class="math">64</span> operations in <span class="math">\\mathbb{F}_{2}</span> in parallel; selecting <span class="math">n=40</span> and <span class="math">l=1</span> we perform operations in a single copy of the finite field <span class="math">\\mathbb{F}_{2^{40}}</span>; whereas selecting <span class="math">n=8</span> and <span class="math">l=16</span> we perform SIMD operations on what is essentially the AES state matrix, namely <span class="math">16</span> elements of <span class="math">\\mathbb{F}_{2^{8}}</span>.</p>
+
+    <h2 id="sec-6" class="text-2xl font-bold">3 Somewhat Homomorphic Scheme Supporting SIMD Operations in <span class="math">\\mathbb{K}_{n}</span></h2>
+
+    <p class="text-gray-300">In this section, we recall the Smart–Vercauteren variant of Gentry’s somewhat homomorphic scheme and show that it can support SIMD operations in <span class="math">r</span> copies of the finite field <span class="math">\\mathbb{K}_{n}</span> by modifying key generation. Note that the recent FHE schemes based on ring-LWE <em>[2]</em> also support such style operations, and may be preferable in practice due to their improved key generation procedures, we leave it to the reader to extend our work to these new schemes. However, whilst our SIMD style operations extend to the ring-LWE based somewhat homomorphic schemes, our parallel encryption step does not carry over. We will return to this point later on.</p>
+
+    <p class="text-gray-300">3.1 Smart-Vercauteren somewhat homomorphic scheme</p>
+
+    <p class="text-gray-300">Let <span class="math">F\\in\\mathbb{Z}[X]</span> be a monic irreducible polynomial of degree <span class="math">N</span> and let <span class="math">\\mathbb{K}=\\mathbb{Q}(\\theta)=\\mathbb{Q}[X]/(F)</span> denote the number field defined by <span class="math">F</span>. Gentry’s original scheme uses two co-prime ideals <span class="math">I</span> and <span class="math">J</span> in the number ring <span class="math">\\mathbb{Z}[\\theta]</span>. The ideal <span class="math">I</span> is chosen to have small norm <span class="math">\\mathcal{N}(I)=\\sharp(\\mathbb{Z}[\\theta]/I)</span> and determines the plaintext space, namely <span class="math">\\mathbb{Z}[\\theta]/I</span>. For this reason, <span class="math">I=(2)</span> is chosen in practice. Note that in the case of a general <span class="math">F</span> the quotient ring <span class="math">\\mathbb{Z}[\\theta]/(2)</span> is an algebra of a somewhat more general type than discussed in Section 2. We shall choose <span class="math">F</span> later on such that one obtains precisely the type of algebra considered in Section 2. The ideal <span class="math">J</span> determines the private/public key pair: the private key consists of a “good” representation of <span class="math">J</span>, whereas the public key consists of a “bad” representation of <span class="math">J</span>.</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">To clarify the notions of “good” and “bad”, we first describe the Smart–Vercauteren instantiation. The ideal <span class="math">J</span> is chosen to be principal, i.e. generated by one element <span class="math">\\gamma\\in\\mathbb{Z}[\\theta]</span>, and has the following additional property: let $d=\\mathcal{N}(J)=\\sharp(\\mathbb{Z}[\\theta]/J)=</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">N_{\\mathbb{K}/\\mathbb{Q}}(\\gamma)</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"><span class="math">, where </span>N_{\\mathbb{K}/\\mathbb{Q}}(\\cdot)<span class="math"> denotes the number field norm of </span>\\mathbb{K}<span class="math"> to </span>\\mathbb{Q}<span class="math">, then there must exist a unique </span>\\alpha\\in\\mathbb{Z}_{d}$ such that</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300"><span class="math">J=(\\gamma)=(d,\\theta-\\alpha)\\,.</span></p>
+
+    <p class="text-gray-300">The “good” representation of <span class="math">J</span> (i.e. the private key) corresponds to the small generator <span class="math">\\gamma</span>, whereas the “bad” representation (i.e. public key) is <span class="math">(d,\\theta-\\alpha)</span>. The additional property of <span class="math">J</span> is equivalent with the requirement that the Hermite Normal Form representation of <span class="math">J</span> has the following specific form</p>
+
+    <p class="text-gray-300">\\[ \\left(\\begin{array}[]{cccccc}d&0&0\\ldots 0\\\\ -\\alpha&1&0&0\\\\ -\\alpha^{2}&0&1&0\\\\ \\vdots&&\\ddots\\\\ -\\alpha^{N-1}&0&0&1\\end{array}\\right), \\]</p>
+
+    <p class="text-gray-300">where the entries below <span class="math">d</span> in the first column are taken modulo <span class="math">d</span>. Another characterisation of this property is that the ideal <span class="math">J</span> simply contains an element of the form <span class="math">\\theta-\\alpha</span>. This is clearly necessary since <span class="math">J</span> can be generated by <span class="math">(d,\\theta-\\alpha)</span>, but it is also sufficient. Indeed, since <span class="math">\\gamma\\in J</span>, this implies that <span class="math">d\\in J</span>, so <span class="math">(d,\\theta-\\alpha)\\subset J</span> and since both ideals have the same norm, we must have <span class="math">J=(d,\\theta-\\alpha)</span>. As such, there exists an element <span class="math">\\nu\\in\\mathbb{Z}[\\theta]</span> with <span class="math">\\nu\\cdot\\gamma=\\theta-\\alpha</span>. To derive an easy verifiable condition on <span class="math">\\gamma</span>, we define the algebraic number <span class="math">\\zeta\\in\\mathbb{Z}[\\theta]</span> such that</p>
+
+    <p class="text-gray-300"><span class="math">\\zeta\\cdot\\gamma=d\\,.</span> (1)</p>
+
+    <p class="text-gray-300">Multiplying <span class="math">\\nu\\cdot\\gamma=\\theta-\\alpha</span> on both sides with <span class="math">\\zeta</span> gives the condition <span class="math">d\\cdot\\nu=\\theta\\cdot\\zeta-\\alpha\\cdot\\zeta</span>. Write <span class="math">\\zeta=\\sum_{i=0}^{N-1}\\zeta_{i}\\cdot\\theta^{i}</span> and <span class="math">F(X)=\\sum_{i=0}^{N}F_{i}\\cdot X^{i}</span>, then computing the product <span class="math">\\theta\\cdot\\zeta</span> explicitly and reducing modulo <span class="math">d</span> finally leads to:</p>
+
+    <p class="text-gray-300"><span class="math">\\alpha\\cdot\\zeta_{i}=\\zeta_{i-1}-\\zeta_{N-1}F_{i}\\bmod d\\,,</span> (2)</p>
+
+    <p class="text-gray-300">for all <span class="math">i=0,\\ldots,N-1</span> where <span class="math">\\zeta_{-1}=0</span>.</p>
+
+    <p class="text-gray-300">Note that the two element representation <span class="math">(d,\\theta-\\alpha)</span> defines an easily computable homomorphism</p>
+
+    <p class="text-gray-300"><span class="math">H:\\mathbb{Z}[\\theta]\\to\\mathbb{Z}_{d}:\\eta=\\sum_{i=0}^{N-1}\\eta_{i}\\cdot\\theta^{i}\\mapsto H(\\eta)=\\sum_{i=0}^{N-1}\\eta_{i}\\cdot\\alpha^{i}\\bmod d\\,.</span> (3)</p>
+
+    <p class="text-gray-300">The homomorphism <span class="math">H</span> also makes it very easy to test if an element <span class="math">\\eta\\in\\mathbb{Z}[\\theta]</span> is contained in the ideal <span class="math">J</span>, namely <span class="math">\\eta\\in J</span> if and only if <span class="math">H(\\eta)=0</span>. Furthermore, given the “good” representation <span class="math">\\gamma</span>, it is possible to invert <span class="math">H</span> on a small subset of <span class="math">\\mathbb{Z}[\\theta]</span> as shown by the following lemma.</p>
+
+    <h6 id="sec-7" class="text-base font-medium mt-4">Lemma 1.</h6>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Let <span class="math">J=(\\gamma)=(d,\\theta-\\alpha)</span> and <span class="math">\\zeta\\cdot\\gamma=d</span> and let <span class="math">H</span> be defined as in (3). Let <span class="math">\\eta\\in\\mathbb{Z}[\\theta]</span> with $\\</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\eta\\</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">_{\\infty}<U$, then we have</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">$\\eta=H(\\eta)-\\left\\lceil\\frac{H(\\eta)\\cdot\\zeta}{d}\\right\\rceil\\cdot\\gamma\\qquad\\text{for}\\qquad U=\\frac{d}{2\\cdot\\delta_{\\infty}\\cdot\\</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\zeta\\</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">_{\\infty}}\\,,$</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">where $\\delta_{\\infty}=\\sup\\left\\{\\frac{\\</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mu\\cdot\\nu\\</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">_{\\infty}}{\\</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mu\\</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">_{\\infty}\\cdot\\</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\nu\\</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">_{\\infty}}:\\mu,\\nu\\in\\mathbb{Z}[\\theta]\\right\\}<span class="math">. Furthermore, for </span>\\</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\eta\\</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">_{\\infty}<U$ we have</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300"><span class="math">[H(\\eta)\\cdot\\zeta]_{d}=[\\eta\\cdot\\zeta]_{d}=\\eta\\cdot\\zeta\\,.</span> (4)</p>
+
+    <p class="text-gray-300">######</p>
+
+    <p class="text-gray-300">Proof.</p>
+
+    <p class="text-gray-300">It is easy to see that <span class="math">H(\\eta)-\\eta</span> is contained in the principal ideal generated by <span class="math">\\gamma</span>. As such, there exists a <span class="math">\\beta\\in\\mathbb{Z}[\\theta]</span> such that <span class="math">H(\\eta)-\\eta=\\beta\\cdot\\gamma</span>. Using <span class="math">\\zeta=d/\\gamma</span>, we can write</p>
+
+    <p class="text-gray-300"><span class="math">\\beta=\\frac{H(\\eta)\\cdot\\zeta}{d}-\\frac{\\eta\\cdot\\zeta}{d}\\&gt;.</span> (5)</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Since <span class="math">\\beta</span> has integer coefficients, we can recover it by rounding the coefficients of the first term if the coefficients of the second term are strictly bounded by <span class="math">1/2</span>. This shows that <span class="math">\\eta</span> can be recovered from <span class="math">H(\\eta)</span> for $\\</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\eta\\</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">_{\\infty}<d/(2\\cdot\\delta_{\\infty}\\cdot\\</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\zeta\\</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">_{\\infty})<span class="math">. Furthermore, equation (5) shows that </span>[H(\\eta)\\cdot\\zeta]_{d}=[\\eta\\cdot\\zeta]_{d}<span class="math"> and since </span>\\</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\eta\\</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">_{\\infty}<U<span class="math">, we have </span>[\\eta\\cdot\\zeta]_{d}=\\eta\\cdot\\zeta$.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <h6 id="sec-8" class="text-base font-medium mt-4">Corollary 1.</h6>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Using the notation of Lemma 1, assume that $\\</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\eta\\</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">_{\\infty}<U/L<span class="math">, then for </span>i=0,\\ldots,N-1$ we have</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300"><span class="math">-\\frac{1}{2L}&lt;\\frac{H(\\eta)\\cdot\\zeta_{i}}{d}-\\left\\lceil\\frac{H(\\eta)\\cdot\\zeta_{i}}{d}\\right\\rceil&lt;\\frac{1}{2L}\\&gt;,</span></p>
+
+    <p class="text-gray-300">i.e. <span class="math">H(\\eta)\\cdot\\zeta_{i}/d</span> is within distance <span class="math">1/2L</span> of an integer.</p>
+
+    <h6 id="sec-9" class="text-base font-medium mt-4">Proof.</h6>
+
+    <p class="text-gray-300">Follows directly from equation (5) and the assumption on <span class="math">\\eta</span>.</p>
+
+    <p class="text-gray-300">The above lemma shows that we can recover an element <span class="math">\\eta</span> from its image under <span class="math">H</span>, when its norm is not too large. As such we obtain a trapdoor one way function that can be used as the basis for encryption. Using these preliminaries we are now ready to define key generation, encryption and decryption.</p>
+
+    <p class="text-gray-300">Key Generation: Input parameters: <span class="math">N</span>, <span class="math">t</span></p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Generate a monic irreducible polynomial <span class="math">F\\in\\mathbb{Z}[X]</span> of degree <span class="math">N</span> with small coefficients, defining the number field <span class="math">\\mathbb{K}=\\mathbb{Q}(\\theta)=\\mathbb{Q}[X]/(F)</span>. Choose an element <span class="math">\\gamma\\in\\mathbb{Z}[\\theta]</span> with <span class="math">\\gamma=1\\bmod 2</span> such that the coefficients of <span class="math">\\gamma</span> are smaller in absolute value than <span class="math">2^{t}</span> (at least one coefficient should be a <span class="math">t</span>-bit integer). Compute the norm $d=</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">N_{\\mathbb{K}/\\mathbb{Q}}(\\gamma)</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"><span class="math"> as well as the element </span>\\zeta\\in\\mathbb{Z}[\\theta]<span class="math"> with </span>\\zeta\\cdot\\gamma=d<span class="math">. If </span>d<span class="math"> is even, choose a new </span>\\gamma<span class="math">. If </span>d<span class="math"> is odd, compute </span>\\alpha=-\\zeta_{N-1}\\cdot F_{0}/\\zeta_{0}<span class="math"> and verify whether (2) holds for all </span>i=1,\\ldots,N-1<span class="math">. If not, generate a new </span>\\gamma<span class="math">. Otherwise, the public key is the pair </span>\\mathsf{pk}:=(d,\\alpha)<span class="math"> whereas the private key is the element </span>\\mathsf{sk}:=\\zeta$.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">In practice, <span class="math">N</span> will be of the order a few thousand and <span class="math">t</span> a few hundred. The size of <span class="math">d</span> can be approximated roughly by <span class="math">N^{N}\\cdot 2^{Nt}</span>; this therefore results in a <span class="math">d</span> of several million bits.</p>
+
+    <p class="text-gray-300">Encryption: Input parameters: <span class="math">\\mu</span>, <span class="math">\\mathsf{pk}:=(d,\\alpha)</span>, message <span class="math">M\\in A:=\\mathbb{F}_{2}[X]/(F(X))</span></p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">The plaintext space consists of (a subalgebra of) the algebra <span class="math">A:=\\mathbb{F}_{2}[X]/(F(X))</span>. Represent the message <span class="math">M</span> as a polynomial <span class="math">M(X)\\in\\mathbb{Z}[X]</span> with coefficients in <span class="math">\\{0,1\\}</span>. Generate a “noise” polynomial <span class="math">R(X)\\in\\mathbb{Z}[X]</span> of degree <span class="math">&lt;N</span> with $\\</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">R(X)\\</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">_{\\infty}\\leq\\mu$ and compute the ciphertext as</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300"><span class="math">c\\leftarrow[M(\\alpha)+2\\cdot R(\\alpha)]_{d}\\&gt;.</span></p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Note that the ciphertext is an element in <span class="math">\\mathbb{Z}_{d}</span> and that encryption simply corresponds to applying the homomorphism <span class="math">H</span> to the algebraic integer <span class="math">C(\\theta):=M(\\theta)+2\\cdot R(\\theta)</span>. Furthermore, it should be clear that if we can recover <span class="math">C(\\theta)</span>, then we can decrypt simply by computing <span class="math">C(X)\\bmod 2</span>. The encryption function is denoted as <span class="math">c\\leftarrow\\mathsf{Encrypt}(M(X),\\mathsf{pk})</span>. If <span class="math">M(X)\\in A</span> then we say $M\\big{</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">}_{\\alpha}=M(\\alpha)\\pmod{d}<span class="math"> is a “trivial” encryption of </span>M(X)$, i.e. it is an encryption with no randomness.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">Decryption: Input parameters: ciphertext <span class="math">c\\in\\mathbb{Z}_{d}</span>, <span class="math">\\mathsf{sk}:=\\zeta</span> Given the ciphertext <span class="math">c\\in\\mathbb{Z}_{d}</span>, compute the element <span class="math">C(\\theta)</span> as</p>
+
+    <p class="text-gray-300"><span class="math">C(\\theta)=c-\\left\\lceil\\frac{c\\cdot\\zeta}{d}\\right\\rceil\\&gt;,</span></p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">and then set <span class="math">M(X)=C(X)\\bmod 2</span>. Note that here we used the fact that <span class="math">\\gamma\\equiv 1\\bmod 2</span>. We can obtain a simpler decryption procedure using the last statement in Lemma 1. Indeed, if <span class="math">c</span> is a decryptable ciphertext, we know that $\\</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">C(\\theta)\\</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">_{\\infty}<U$ and thus that</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300"><span class="math">[c\\cdot\\zeta]_{d}=C(\\theta)\\cdot\\zeta\\&gt;.</span></p>
+
+    <p class="text-gray-300">Since <span class="math">\\gamma\\equiv 1\\bmod 2</span> and <span class="math">d</span> is odd with <span class="math">d=\\gamma\\cdot\\zeta</span>, we see that also <span class="math">\\zeta\\equiv 1\\bmod 2</span>. Furthermore, <span class="math">C(\\theta)=M(\\theta)+2R(\\theta)</span>, so we obtain</p>
+
+    <p class="text-gray-300"><span class="math">[c\\cdot\\zeta]_{d}\\bmod 2=M(\\theta)\\bmod 2=M(X)\\&gt;.</span></p>
+
+    <p class="text-gray-300">This shows that for <span class="math">\\zeta=\\sum_{i=0}^{N-1}\\zeta_{i}\\theta^{i}</span> we can recover the coefficients of <span class="math">M(X)=m_{0}+m_{1}\\cdot X+\\cdots+m_{N-1}\\cdot X^{N-1}</span> one by one, by computing</p>
+
+    <p class="text-gray-300"><span class="math">m_{i}=[c\\cdot\\zeta_{i}]_{d}\\pmod{2}\\,.</span></p>
+
+    <p class="text-gray-300">We write <span class="math">M(X)\\leftarrow\\operatorname{Decrypt}(c,\\mathsf{sk})</span>. Note that to save space for key storage, it suffices to store <span class="math">\\zeta_{0}</span>, since the other <span class="math">\\zeta_{i}</span> follow from equation (2). In particular, we obtain the closed expression <span class="math">\\zeta_{i}=w_{i}\\cdot\\zeta_{0}</span> with</p>
+
+    <p class="text-gray-300"><span class="math">w_{i}=-\\frac{1}{F_{0}}\\left(\\sum_{j=i+1}^{N}F_{j}\\cdot\\alpha^{j-i}\\right)\\pmod{d}\\,.</span> (6)</p>
+
+    <p class="text-gray-300">Since the <span class="math">w_{i}</span> can be publicly computed, we can decrypt <span class="math">m_{i}=[c\\cdot w_{i}\\cdot\\zeta_{0}]_{d}\\pmod{2}</span>. We pause to note that it is this linear relationship between the distinct decryption keys <span class="math">\\zeta_{i}</span> which enables the parallel encryption procedure we describe later. For ring-LWE based somewhat homomorphic schemes supporting SIMD operations, where such a simple linear relation does not hold, it seems much harder to produce a parallel encryption procedure using the squashing paradigm of Gentry.</p>
+
+    <p class="text-gray-300">Homomorphic Operations: It is easy to see that the scheme is somewhat homomorphic, where the operations being performed are addition and multiplication of ciphertexts modulo <span class="math">d</span>. Indeed, let <span class="math">c_{i}=H(C_{i}(\\theta))=H(M_{i}(\\theta)+2R_{1}(\\theta))</span> for <span class="math">i=1,2</span>, then we have that</p>
+
+    <p class="text-gray-300"><span class="math">c_{1}+c_{2}</span> <span class="math">=H(M_{1}(\\theta)+M_{2}(\\theta)+2(R_{1}(\\theta)+R_{2}(\\theta)))</span> <span class="math">c_{1}\\cdot c_{2}</span> <span class="math">=H(M_{1}(\\theta)\\cdot M_{2}(\\theta)+2(M_{1}(\\theta)R_{2}(\\theta)+M_{2}(\\theta)R_{1}(\\theta)+2R_{1}(\\theta)R_{2}(\\theta)))\\,.</span></p>
+
+    <p class="text-gray-300">This shows that operations on the ciphertext space induce corresponding operations on the plaintext space, i.e. the algebra <span class="math">A</span>. Thus it is clear that the somewhat homomorphic scheme supports SIMD operations and operations on elements in possibly large degree (i.e. degree <span class="math">n</span>) finite fields. To make a distinction when we are performing homomorphic operations we will use the notation <span class="math">\\oplus</span> and <span class="math">\\odot</span> to denote the homomorphic addition and multiplication of ciphertexts.</p>
+
+    <h3 id="sec-10" class="text-xl font-semibold mt-8">3.2 Efficient key generation and SIMD operations</h3>
+
+    <p class="text-gray-300">Whilst the FHE scheme works for any polynomial <span class="math">F</span> with small coefficients, the common case, as in <em>[10]</em> and <em>[16]</em>, is to use the polynomial <span class="math">F(X):=X^{2^{n}}+1</span>. As pointed out by Gentry and Halevi <em>[10]</em> this leads to a major improvement in the key generation procedure over that proposed by Smart and Vercauteren <em>[16]</em>. If we let <span class="math">\\eta_{i}</span> denote the roots of the polynomial <span class="math">F</span> over the complex numbers, or over a sufficiently large finite field, then we can compute <span class="math">\\zeta</span> and <span class="math">d</span> as follows:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Compute <span class="math">\\omega_{i}\\leftarrow\\gamma(\\eta_{i})\\in\\mathbb{C}</span> for all <span class="math">i</span>.</li>
+
+      <li>Compute <span class="math">d\\leftarrow\\prod\\omega_{i}</span>.</li>
+
+      <li>Compute <span class="math">\\omega_{i}^{*}\\leftarrow 1/\\omega_{i}</span>.</li>
+
+      <li>Interpolate the polynomial <span class="math">\\zeta/d</span> from the data values <span class="math">\\omega_{i}^{*}</span>.</li>
+
+    </ul>
+
+    <p class="text-gray-300">The key observation is that since <span class="math">F(X)</span> is of the form <span class="math">X^{2^{n}}+1</span>, the <span class="math">\\eta_{i}</span> are <span class="math">2^{n+1}</span>-th roots of unity and so to perform the polynomial evaluation and interpolation above we can apply the Fast Fourier Transform (FFT). Indeed, Gentry and Halevi present an even more optimized scheme to compute <span class="math">d</span> and <span class="math">\\zeta</span> which requires only polynomial arithmetic, but this makes significant use of the fact that the trace of <span class="math">2</span>-power roots of unity is always zero.</p>
+
+    <p class="text-gray-300">The problem with selecting <span class="math">F(X)=X^{2^{n}}+1</span> is that it has only one irreducible factor modulo two. In particular if we select <span class="math">F(X)=X^{2^{n}}+1</span> then the underlying plaintext algebra is given by</p>
+
+    <p class="text-gray-300"><span class="math">A:=\\mathbb{F}_{2}[X]/(F)\\cong\\mathbb{F}_{2}[X]/(X-1)^{2^{n}}.</span></p>
+
+    <p class="text-gray-300">In other words, <span class="math">F</span> does not split into a set of distinct irreducible factors modulo two as we required to enable SIMD operations.</p>
+
+    <p class="text-gray-300">We now present a possible replacement for <span class="math">F(X)</span>. The key observation is that we need an <span class="math">F(X)</span> which enables fast key generation via FFT like algorithms, which has small coefficients, and which splits into distinct irreducible factors modulo two of the same degree. In addition we need a relatively large supply of such polynomials to cope with increasing security levels (i.e. <span class="math">N</span>), different numbers of parallel operations (i.e. <span class="math">l</span>) and different degree two finite fields</p>
+
+    <p class="text-gray-300">in which operations occur (i.e. <span class="math">n</span>). In particular need to pick an <span class="math">F(X)</span> which generates a Galois extension of degree <span class="math">n</span>. In addition we need to select a polynomial <span class="math">F(X)</span> such that <span class="math">2</span> is neither ramified, nor an index divisor, in the associated number field generated by a root of <span class="math">F(X)</span>. These conditions ensure that the algebra mod two splits into distinct finite fields of the same degree.</p>
+
+    <p class="text-gray-300">One is then led to consider other cyclotomic polynomials as follows. We select an odd integer <span class="math">m</span> and recall that the <span class="math">m</span>-th cyclotomic polynomial is defined by</p>
+
+    <p class="text-gray-300"><span class="math">\\Phi_{m}(X):=\\prod_{\\eta}(X-\\eta)</span></p>
+
+    <p class="text-gray-300">where <span class="math">\\eta</span> ranges over all <span class="math">m</span>-th primitive roots of unity. We have <span class="math">\\deg(\\Phi_{m}(X))=\\phi(m)</span>, and that <span class="math">\\Phi_{m}(X)</span> is an irreducible polynomial with integer coefficients. In the practical range for <span class="math">m</span>, the coefficients of <span class="math">\\Phi_{m}</span> are very small, e.g. for all <span class="math">m\\leq 40000</span> the coefficients are bounded by 59 and are in most cases much smaller than this upper bound.</p>
+
+    <p class="text-gray-300">The field <span class="math">\\mathbb{Q}(\\theta)</span> is a Galois extension and hence each prime ideal splits in <span class="math">\\mathbb{Q}(\\theta)</span> into a product of prime ideals of the same degree and ramification index. If <span class="math">m</span> is odd then the prime two does not ramify in the field <span class="math">\\mathbb{Q}(\\theta)</span>, nor is it an index divisor. In particular, by Dedekind’s criterion, this means that the polynomial <span class="math">\\Phi_{m}(X)</span>, of degree <span class="math">N=\\phi(m)</span>, factors modulo two into a product of <span class="math">r=N/d</span> distinct irreducible polynomials of degree equal to the unique degree <span class="math">d</span> of the prime ideals lying above the ideal <span class="math">(2)</span>. This degree <span class="math">d</span> is the smallest integer such that <span class="math">2^{d}\\equiv 1\\pmod{m}</span>.</p>
+
+    <p class="text-gray-300">Hence, by selecting <span class="math">F(X):=\\Phi_{m}(X)</span> in our construction of the algebra <span class="math">A</span> over <span class="math">\\mathbb{F}_{2}</span>, we find that <span class="math">A</span> is isomorphic to a product of <span class="math">r</span> finite fields of degree <span class="math">d=N/r</span>. The only issue is whether one can perform the key generation efficiently. To do this we use Fourier Transforms with respect to the <span class="math">m</span>-th roots of unity. In particular given the polynomial <span class="math">\\gamma</span> in the key generation procedure we compute the evaluation at the <span class="math">m</span>-th roots of unity via a Fourier Transform, and produce the norm <span class="math">d</span> by selecting the <span class="math">N</span> required values to multiply together (consisting of the evaluations of the primitive roots of unity). One can then compute <span class="math">1/\\gamma</span> by inverting the Fourier coefficients and then interpolating via the inverse Fourier Transform.</p>
+
+    <p class="text-gray-300">In other words the same optimization as mentioned earlier can be applied: Instead of taking the standard Cooley-Tukey <em>[6]</em> FFT method for powers of two, we apply the Good-Thomas method <em>[11, 18]</em> for when <span class="math">m</span> is a product of two coprime integers, or Cooley-Tukey when <span class="math">m</span> is a prime power. Either method reduces the problem to computing FFTs for prime power values of <span class="math">m</span>, for which we can use the Rader FFT algorithm <em>[15]</em>. This in itself reduces the problem to computing a convolution of two sequences, which is then performed by extension of the sequences to length a power of two followed by the application of the Cooley-Tukey algorithm to the extended sequence. Overall the FFT then takes <span class="math">O(m\\cdot\\log m)</span> operations on elements of size <span class="math">O(\\log_{2}d)</span> bits. In practice <span class="math">m\\approx 2\\cdot N</span> and so this gives the same complexity for key generation as using <span class="math">F(X)=X^{2^{n}}+1</span>, however the implied constants are slightly greater. This means we can achieve almost the same complexity for key generation as in the <span class="math">2</span>-power root of unity case.</p>
+
+    <h2 id="sec-11" class="text-2xl font-bold">4 Fully Homomorphic Scheme and Naive Recryption Method</h2>
+
+    <p class="text-gray-300">To turn the somewhat homomorphic scheme of the previous section into a fully homomorphic scheme, we follow Gentry’s bootstrapping approach, i.e. we squash the decryption circuit so much that it can be evaluated by the somewhat homomorphic scheme. In particular, we use the optimized procedure described by Gentry and Halevi in <em>[10]</em>.</p>
+
+    <h3 id="sec-12" class="text-xl font-semibold mt-8">4.1 Recryption Method</h3>
+
+    <p class="text-gray-300">Recall that each message bit <span class="math">m_{i}</span> can be recovered as <span class="math">m_{i}=[c\\cdot w_{i}\\cdot\\zeta_{0}]_{d}\\pmod{2}</span> with the <span class="math">w_{i}</span> being publicly computable constants defined in (6). Since <span class="math">[c\\cdot w_{i}]_{d}</span> can be computed without knowledge of <span class="math">\\zeta_{0}</span> it suffices to show how <span class="math">[c\\cdot\\zeta_{0}]_{d}\\pmod{2}</span> can be computed with a low complexity circuit.</p>
+
+    <p class="text-gray-300">The idea is to write the private key <span class="math">\\zeta_{0}</span> as the solution to a sparse-subset-sum problem. In particular, we will define <span class="math">s</span> sets of <span class="math">S</span> elements as follows (a discussion on the sizes of <span class="math">s</span> and <span class="math">S</span> will be given later): choose <span class="math">s</span> elements <span class="math">x_{i}\\in[0,\\ldots,d)</span>, a random integer <span class="math">R\\in[1,\\ldots,d)</span> and define the <span class="math">i</span>-th set <span class="math">\\mathcal{B}_{i}=\\{x_{i}\\cdot R^{j}\\pmod{d}\\mid j\\in[0,\\ldots,S)\\}</span> such that the private key <span class="math">\\zeta_{0}</span> can be written as the sum</p>
+
+    <p class="text-gray-300"><span class="math">\\zeta_{0}=\\sum_{i=1}^{s}\\sum_{j=0}^{S-1}b_{i,j}\\cdot x_{i}\\cdot R^{j}\\pmod{d}\\,,</span></p>
+
+    <p class="text-gray-300">where</p>
+
+    <p class="text-gray-300">where for each <span class="math">i</span> only one <span class="math">b_{i,j}=1</span> and all other <span class="math">b_{i,j}</span> are zero. The index <span class="math">j</span> for which <span class="math">b_{i,j}=1</span> will be denoted by <span class="math">e_{i}</span> and so we can write <span class="math">\\zeta_{0}=\\sum_{i=1}^{s}x_{i}\\cdot R^{e_{i}}\\pmod{d}</span>. The result is that we have written <span class="math">\\zeta_{0}</span> as the sum of <span class="math">s</span> elements, where one element is taken from each <span class="math">\\mathcal{B}_{i}</span>. To enable encryption or ciphertext cleaning, we will augment the public key with additional information: compute the ciphertexts <span class="math">c_{i,j}\\leftarrow\\mathsf{Encrypt}(b_{i,j},\\mathsf{pk})</span> for <span class="math">1\\leq i\\leq s,\\ 0\\leq j&lt;S</span>, then the public key now consists of the data</p>
+
+    <p class="text-gray-300"><span class="math">\\left(d,\\alpha,s,S,R,\\left\\{x_{i},\\left\\{c_{i,j}\\right\\}_{j=0}^{S-1}\\right\\}_{i=1}^{s}\\right).</span></p>
+
+    <p class="text-gray-300">Denote <span class="math">y_{i,j}=c\\cdot x_{i}\\cdot R^{j}\\pmod{d}</span> for <span class="math">i=1,\\ldots,s</span> and <span class="math">j=0,\\ldots,S-1</span> such that <span class="math">0\\leq y_{i,j}&lt;d</span>, then the decryption function <span class="math">[c\\cdot\\zeta_{0}]_{d}\\pmod{2}</span> can be rewritten as</p>
+
+    <p class="text-gray-300"><span class="math">[c\\cdot\\zeta_{0}]_{d}\\pmod{2}</span> <span class="math">=\\left[\\sum_{i=1}^{s}\\sum_{j=0}^{S-1}b_{i,j}\\cdot y_{i,j}\\right]_{d}\\pmod{2}</span> <span class="math">=\\left(\\sum_{i=1}^{s}\\sum_{j=0}^{S-1}b_{i,j}\\cdot y_{i,j}\\right)-d\\cdot\\left[\\sum_{i=1}^{s}\\sum_{j=0}^{S-1}b_{i,j}\\cdot\\frac{y_{i,j}}{d}\\right]\\pmod{2}</span> <span class="math">=\\bigoplus_{i=1}^{s}\\bigoplus_{j=0}^{S-1}b_{i,j}\\cdot y_{i,j}\\pmod{2}\\oplus\\left[\\sum_{i=1}^{s}\\sum_{j=0}^{S-1}b_{i,j}\\cdot\\frac{y_{i,j}}{d}\\right]\\pmod{2}\\,.</span></p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Note that the latter double sum <span class="math">\\mathcal{T}=\\sum_{i=1}^{s}\\sum_{j=0}^{S-1}b_{i,j}\\cdot\\frac{y_{i,j}}{d}</span> is equal to <span class="math">c\\cdot\\zeta_{0}/d</span> and if we assume that <span class="math">c</span> is the image of <span class="math">C(\\theta)</span> under <span class="math">H</span>, where $\\</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">C(\\theta)\\</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">_{\\infty}<U/(s+1)<span class="math">, then we know by Corollary 1 that </span>\\mathcal{T}<span class="math"> is within distance </span>1/2(s+1)<span class="math"> of an integer. If we now replace each </span>\\frac{y_{i,j}}{d}<span class="math"> with an approximation </span>z_{i,j}<span class="math"> up to </span>p<span class="math"> bits after the binary point, i.e. </span></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">z_{i,j}-y_{i,j}/d</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"><2^{-(p+1)}<span class="math">, then since there are only </span>s<span class="math"> non-zero terms, we have that </span></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mathcal{T}-\\sum_{i=1}^{s}\\sum_{j=0}^{S-1}b_{i,j}\\cdot z_{i,j}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"><s\\cdot 2^{-(p+1)}<span class="math">. Rounding the double sum over the </span>z_{i,j}<span class="math"> will thus give the same result as rounding </span>\\mathcal{T}$ as long as</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300"><span class="math">\\frac{1}{2(s+1)}+s\\cdot 2^{-(p+1)}&lt;1/2\\,,</span></p>
+
+    <p class="text-gray-300">which implies that <span class="math">p\\geq\\lceil\\log_{2}(s+1)\\rceil</span>. Furthermore, in the inner sum we are adding <span class="math">S</span> numbers of which only one is non-zero. As such, we can compute the <span class="math">k</span>-th bit of this sum by simply XOR-ing the <span class="math">k</span>-th bits of the <span class="math">b_{i,j}\\cdot z_{i,j}</span> for <span class="math">j=1,\\ldots,S</span>. We are then left with an addition of <span class="math">s</span> numbers, each which consists of <span class="math">p</span> bits after the binary point.</p>
+
+    <p class="text-gray-300">We are now ready to formulate the recrtyt algorithm by mapping these equations into the encrypted domain. To this end, we require two helper functions. The first function <span class="math">\\mathbf{b}\\leftarrow\\texttt{compute\\_bits}(y)</span> takes as input an integer <span class="math">0\\leq y&lt;d</span> and outputs the vector of bits <span class="math">\\mathbf{b}=(b_{0},b_{1},\\ldots,b_{p})</span> such that</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">$\\left</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\frac{y}{d}-(b_{0}+\\frac{b_{1}}{2}+\\frac{b_{2}}{2^{2}}+\\cdots+\\frac{b_{p}}{2^{p}})\\right</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"><\\frac{1}{2^{p+1}}.$</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">This is easily computed by determining <span class="math">u\\leftarrow\\lceil(2^{p}\\cdot y)/d\\rfloor</span>, and then reading the bits from the (small) integer <span class="math">u</span>.</p>
+
+    <p class="text-gray-300">The second function school_book_add(<span class="math">A</span>) takes as input an <span class="math">s\\times(p+1)</span> array <span class="math">A</span> of ciphertexts, where each row contains the encryptions of the <span class="math">(p+1)</span> bits of an integer. The result of the function is a <span class="math">(p+1)</span> vector containing the encryptions of the <span class="math">(p+1)</span> bits of the sum of these <span class="math">s</span> integers modulo <span class="math">2^{p+1}</span>. The school book method is discussed in more detail in <em>[10]</em> where it is shown that it requires</p>
+
+    <p class="text-gray-300"><span class="math">T_{\\mathsf{school\\_book\\_add}}:=\\left(s\\cdot 2^{p-1}+\\sum_{k=1}^{p-1}(s+k)\\cdot 2^{p-k}\\right)\\cdot T_{\\mathsf{mod},d}</span></p>
+
+    <p class="text-gray-300">where <span class="math">T_{\\mathsf{mod},d}</span> denotes the cost of one multiplication modulo <span class="math">d</span>.</p>
+
+    <p class="text-gray-300">In Algorithm 1 we present the algorithm for encrypting the first bit of the message underlying a ciphertext <span class="math">c</span>, i.e. the algorithm computes <span class="math">[c\\cdot\\zeta_{0}]_{d}\\pmod{2}</span> in the encrypted domain using the augmented public key. This is essentially the encryption algorithm used by Gentry and Halevi, where the message space is one bit only. To obtain the recyption of the <span class="math">i</span>-th coefficient we simly input <span class="math">[c\\cdot w_{i}]_{d}</span> instead of <span class="math">c</span>, since decrypting the <span class="math">i</span>-th bit is given by <span class="math">[c\\cdot w_{i}\\cdot\\zeta_{0}]_{d}\\pmod{2}</span>.</p>
+
+    <p class="text-gray-300">|  Algorithm 1: BitRecrypt(c, pk): Recrypting the First Bit of the Plaintext Associated With Ciphertext c  |</p>
+
+    <p class="text-gray-300">| --- |</p>
+
+    <p class="text-gray-300">|  A←0, where A∈Ms×(p+1)(Zd).  |</p>
+
+    <p class="text-gray-300">|  sum←0.  |</p>
+
+    <p class="text-gray-300">|  for i from 1 upto s do  |</p>
+
+    <p class="text-gray-300">|  y←c·xi (mod d).  |</p>
+
+    <p class="text-gray-300">|  for j from 0 upto S-1 do  |</p>
+
+    <p class="text-gray-300">|  if y is odd then  |</p>
+
+    <p class="text-gray-300">|  sum←sum ⊕ ci,j.  |</p>
+
+    <p class="text-gray-300">|  b←compute_bits(y).  |</p>
+
+    <p class="text-gray-300">|  for u from 0 upto p do  |</p>
+
+    <p class="text-gray-300">|  Ai,u←Ai,u ⊕ (bu·ci,j).  |</p>
+
+    <p class="text-gray-300">|  y←y·R (mod d).  |</p>
+
+    <p class="text-gray-300">|  a←school_book_add(A).  |</p>
+
+    <p class="text-gray-300">|  c←sum ⊕ a0.  |</p>
+
+    <p class="text-gray-300">|  return (c).  |</p>
+
+    <p class="text-gray-300">We denote the cost of executing this algorithm for a one bit ciphertext as  <span class="math">T_{\\mathrm{bits}}</span> . Ignoring the modular additions, we see that  <span class="math">T_{\\mathrm{bits}} = \\left((S + 1) \\cdot s \\cdot +s \\cdot 2^{p - 1} + \\sum_{k = 1}^{p - 1}(s + k) \\cdot 2^{p - k}\\right) \\cdot T_{\\mathrm{mod},d}</span> .</p>
+
+    <p class="text-gray-300">To recrystallize a whole ciphertext  <span class="math">c</span> , we first form ciphertexts  <span class="math">\\overline{c}_i = \\text{BitRecrypt}([c \\cdot w_i]_d, \\text{pk})</span>  for  <span class="math">i = 0, \\dots, N-1</span> , which are recryptions of the coefficients of the underlying polynomial  <span class="math">M(X)</span>  by submitting  <span class="math">[c \\cdot w_i]_d</span>  to Algorithm 1. Then given  <span class="math">\\overline{c}_i</span>  we form the ciphertext</p>
+
+    <div class="my-4 text-center"><span class="math-block">\\bar {c} \\leftarrow \\sum_ {i = 0} ^ {N - 1} \\bar {c} _ {i} \\odot \\alpha^ {i}</span></div>
+
+    <p class="text-gray-300">which will be a encryption of the original ciphertext. Note, to control the noise this last sum is computed naively, and not via Horner's rule, i.e. we multiply each coefficient ciphertext  <span class="math">\\overline{c}_i</span>  by  <span class="math">\\alpha^i \\pmod{d}</span>  and then sum. The resulting algorithm is summarized in Algorithm 2. Assuming the  <span class="math">\\alpha^i \\pmod{d}</span>  and  <span class="math">w_i</span>  are precomputed, the total cost of encrypting a</p>
+
+    <p class="text-gray-300">|  Algorithm 2: Recrypting Ciphertext c version 1  |</p>
+
+    <p class="text-gray-300">| --- |</p>
+
+    <p class="text-gray-300">|  c←0.  |</p>
+
+    <p class="text-gray-300">|  for i from 0 upto N-1 do  |</p>
+
+    <p class="text-gray-300">|  c̅i←BitRecrypt([c·wi]d, pk).  |</p>
+
+    <p class="text-gray-300">|  c̅←c̅ ⊕ c̅i ⊙ αi.  |</p>
+
+    <p class="text-gray-300">|  return (c̅).  |</p>
+
+    <p class="text-gray-300">ciphertext corresponding to an arbitrary element in  <span class="math">A</span>  (using our naive method) is essentially  <span class="math">N \\cdot T_{\\mathrm{bits}} + 2 \\cdot N \\cdot T_{\\mathrm{mod},d}</span> . If SIMD style operations, and operations on larger datatypes, are to be supported we therefore need a more efficient method to perform encryption.</p>
+
+    <p class="text-gray-300">The analysis of Gentry of the above scheme and bootstrapping operation applies in our situation. The security of the underlying somewhat homomorphic scheme is based on the hardness of a variant of the bounded distance decoding (BDDP) problem; whereas the security of the bootstrapping procedure is based on the sparse subset sum problem (SSSP). Indeed the minor modifications we make in future sections to the public key result in exactly the same security reductions. Thus an adversary against the scheme can either be turned into an algorithm to solve a decision variant of the BDDP, or a SSSP.</p>
+
+    <p class="text-gray-300">When selecting key sizes for cryptographic schemes, in practice one almost always selects key sizes based on the best known attacks and not on the hard problems to which a security problem reduces. We have various parameters we need to select  <span class="math">s</span> ,  <span class="math">S</span> ,  <span class="math">N</span> ,  <span class="math">t</span>  and  <span class="math">\\mu</span> . The sizes of  <span class="math">N</span> ,  <span class="math">t</span>  and  <span class="math">\\mu</span>  determine whether one can break the scheme by distinguishing ciphertexts, or (more seriously) by message or key recovery. Parameter selection is here based on the hardness of</p>
+
+    <p class="text-gray-300">solving explicit closest vector problems (CVPs), in lattices of dimension <span class="math">N</span>, involving basis matrices with coefficients bounded by <span class="math">d</span> (a function of <span class="math">t</span> and <span class="math">N</span>), and for close vectors whose distance to the lattice is related to the size of <span class="math">\\mu</span>. An algorithm to solve the CVP/BDDP can be directly used to recover plaintexts as explained in <em>[16]</em>. The larger the ratio of <span class="math">t</span> to <span class="math">\\mu</span> the easier it is to recover plaintexts, but the ratio of <span class="math">t</span> to <span class="math">\\mu</span> also determines how complicated a circuit the basic somewhat homomorphic scheme can evaluate. Indeed the smaller the ratio of <span class="math">t</span> to <span class="math">\\mu</span> the less expressive our somewhat homomorphic scheme is. In selecting <span class="math">N</span>, <span class="math">t</span> and <span class="math">\\mu</span> one needs to make a careful analysis of the current state of the art in lattice basis reduction; a topic which is beyond the scope of this paper.</p>
+
+    <p class="text-gray-300">On the other hand, it is not the case that an algorithm to solve the sparse subset sum problem can be used to break the scheme. The security proof in <em>[9]</em> uses the FHE adversary to solve the following SSSP</p>
+
+    <p class="text-gray-300"><span class="math">\\zeta_{0}=\\sum_{i=1}^{s}\\sum_{j=0}^{S-1}b_{i,j}\\cdot(x_{i}\\cdot R^{j})\\pmod{d}.</span></p>
+
+    <p class="text-gray-300">The simulator (solving SSSP) is given <span class="math">\\zeta_{0}</span> and the weights <span class="math">x_{i}\\cdot R^{j}\\pmod{d}</span>, and uses random ciphertexts <span class="math">c_{i,j}</span> to represent the encryption of the <span class="math">b_{i,j}</span>. Since the proof has already shown that ciphertexts of specific values are indistinguishable from encryptions of random values, the adversary does not know it is in a simulation. The proof in <em>[9]</em> shows how the simulator can then solve the SSSP. Whilst this easily establishes the fact that the encrypt procedure does not reduce the security of the scheme, assuming of course the scheme is KDM secure and the SSSP is hard, it actually tells us very little in practice. In particular it says: “If the adversary knows the secret key, then recovering another representation of the secret key is equivalent to solving the SSSP”.</p>
+
+    <p class="text-gray-300">Thus the parameters <span class="math">s</span> and <span class="math">S</span> determine (in practice) a hidden sparse subset sum problem rather than a standard SSSP. Namely, the adversary needs to solve the above subset sum problem where he is not given access to the value <span class="math">\\zeta_{0}</span>. Taking the pragmatic view of parameter selection based on the best known attack, it is clear that neither the lattice attacks on the SSSP nor the time-memory trade off methods to solve the SSSP apply in the hidden case. This has important direct implications for parameter size selection. If a time-memory trade off is possible then we need to select <span class="math">S</span> and <span class="math">s</span> such that <span class="math">S^{\\lfloor s/2\\rfloor}&gt;2^{\\lambda}</span>, where we do not believe the adversary can perform <span class="math">2^{\\lambda}</span> operations.</p>
+
+    <p class="text-gray-300">A more pragmatic view of parameter selection would imply that, since the time-memory trade off against the hidden SSSP appears impossible, that we select <span class="math">S^{s}&gt;2^{\\lambda}</span>. This has a number of direct consequences: Firstly we can select <span class="math">S</span> to be much smaller than Gentry–Halevi do, secondly this means we do not need to complicate the encryption procedure with the index encoding method they use to save space, since <span class="math">S</span> is now small enough to not require it. Thirdly this halves the degree of the resulting encryption circuit which makes the scheme more efficient, and fourthly it saves on the computational cost of encryption, since we need to do less work.</p>
+
+    <p class="text-gray-300">In summary: in practice one should select <span class="math">N</span>, <span class="math">t</span> and <span class="math">\\mu</span> according to best practice from lattice basis reduction. For real systems this means that parameters need to be chosen that are significantly larger than the toy examples presented in Gentry–Halevi. However, when selecting <span class="math">s</span> and <span class="math">S</span> one can be less conservative than Gentry–Halevi.</p>
+
+    <p class="text-gray-300">In Section 5 we detail a parallel encryption procedure which has the same multiplicative depth as the one above; but which requires more addition operations, where the number of extra additions depends on the level of SIMD operations required. Thus the value of <span class="math">t</span> may need to be larger than that required in non SIMD based schemes. Asymptotically the constant increase will make no difference, but for “practical” parameters one may have a noticeable difference. Thus in Section 5 we present experimental results for “toy” security levels. This is done purely to show that our algorithms make a difference even for choices of <span class="math">N,\\mu</span> and <span class="math">t</span> corresponding to low security levels.</p>
+
+    <h2 id="sec-14" class="text-2xl font-bold">5 Parallel Recryption</h2>
+
+    <p class="text-gray-300">Whilst Algorithm 1 will encrypt a ciphertext that encodes an element of the algebra <span class="math">A</span>, it can be made significantly more efficient. Firstly, the procedure decrypts a general element in <span class="math">A</span>, yet in practice we will only have that <span class="math">c</span> contains <span class="math">l\\cdot n\\leq N</span> encrypted bits. Secondly, since the encrypt procedure is a binary circuit we can run it on the <span class="math">r</span> embedded copies of <span class="math">\\mathbb{F}_{2}</span>, i.e. we can use the SIMD style operations to encrypt <span class="math">r</span> bits in parallel.</p>
+
+    <p class="text-gray-300">The first optimization is easy to obtain: recall that <span class="math">\\Gamma_{n,l}</span> maps a vector of <span class="math">l</span> binary polynomials <span class="math">(\\kappa_{1}(\\psi),\\ldots,\\kappa_{l}(\\psi))</span> each of of degree less than <span class="math">n</span>, into a polynomial <span class="math">a(X)</span> of degree less than <span class="math">N</span>. The map <span class="math">\\Gamma_{n,l}</span> thus defines an isomorphism between <span class="math">\\mathbb{K}_{n}^{l}</span> and <span class="math">\\Gamma_{n,l}(\\mathbb{K}_{n}^{l})</span> so <span class="math">\\Gamma_{n,l}^{-1}</span> is well defined on the result of the computation. We can represent <span class="math">\\Gamma_{n,l}^{-1}</span> explicitly</p>
+
+    <p class="text-gray-300">by an <span class="math">(n\\cdot l)\\times N</span> binary matrix <span class="math">B</span> over <span class="math">\\mathbb{F}_{2}</span> which is defined as follows:</p>
+
+    <p class="text-gray-300"><span class="math">\\mathsf{coeff}(\\kappa_{i},j)=\\sum_{k=0}^{N-1}B_{j+i\\cdot n+1,k+1}\\cdot\\mathsf{coeff}(a(X),k).</span></p>
+
+    <p class="text-gray-300">Using <span class="math">B</span> we can therefore first obtain encryptions of all the coefficients of the <span class="math">\\kappa_{i}</span>, encrypt these using Algorithm 1 and then reconstruct the encrypted ciphertext using <span class="math">\\Gamma_{n,l}</span>. In particular, denote with <span class="math">\\overline{c}_{i_{1},i_{2}}</span> a encryption of the <span class="math">i_{1}</span>th coefficient of the <span class="math">i_{2}</span>th component in <span class="math">\\mathbb{K}_{n}^{l}</span>, then we can obtain a full encryption of an element in <span class="math">\\mathbb{K}_{n}^{l}</span> by computing</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">$\\overline{c}\\leftarrow\\sum_{i_{1}=0}^{n-1}\\sum_{i_{2}=1}^{l}\\overline{c}_{i_{1},i_{2}}\\odot\\left(\\left(\\Gamma_{n,l}(0,\\ldots,0,\\psi^{i_{1}},0,\\ldots,0)\\right)\\big{</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">}_{\\alpha}\\right)\\,,$</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">where <span class="math">(0,\\ldots,0,\\psi^{i_{1}},0,\\ldots,0)\\in\\mathbb{K}_{n}^{l}</span> is the element whose <span class="math">i_{2}</span>th component is equal to <span class="math">\\psi^{i_{1}}</span>, and $M(X)\\big{</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">}_{\\alpha}<span class="math"> is the trivial encryption of the element </span>M(X)<span class="math"> in the algebra </span>A$.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">Recall that given a ciphertext <span class="math">c</span>, the value <span class="math">[c\\cdot w_{i}]_{d}</span> is an encryption of the <span class="math">i</span>th coefficient of <span class="math">a(X)</span>. Since the scheme is homomorphic and using the matrix <span class="math">B</span> we conclude that</p>
+
+    <p class="text-gray-300"><span class="math">c_{i_{1},i_{2}}=\\left[\\sum_{k=0}^{N-1}B_{i_{1}+i_{2}\\cdot n+1,k+1}[c\\cdot w_{k}]_{d}\\right]_{d}=\\left[c\\cdot\\left(\\sum_{k=0}^{N-1}B_{i_{1}+i_{2}\\cdot n+1,k+1}\\cdot w_{k}\\right)\\right]_{d}</span></p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">is a valid encryption of <span class="math">\\mathsf{coeff}(\\kappa_{i_{2}},i_{1})</span>. Note that these quantities are obtained as the sum of maximum <span class="math">N</span> ciphertexts, which implies that the original <span class="math">c</span> has to be an encryption of <span class="math">C(\\theta)</span> with $\\</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">C(\\theta)\\</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">_{\\infty}<U/((s+1)\\cdot N)<span class="math"> for Algorithm 1 to encrypt correctly. The second algorithm thus first computes the </span>n\\cdot l<span class="math"> constants (the </span>w_{i}$ are no longer required)</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300"><span class="math">v_{i_{1},i_{2}}=\\sum_{k=0}^{N-1}B_{i_{1}+i_{2}\\cdot n+1,k+1}\\cdot w_{k}\\pmod{d}\\,,</span></p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">and then computes the recrptions <span class="math">\\overline{c}_{i_{1},i_{2}}=\\mathsf{BitRecrypt}([c\\cdot v_{i_{1},i_{2}}]_{d},\\mathsf{pk})</span>. Notice how we have reduced the number of calls to encrypt from <span class="math">N</span> down to <span class="math">n\\cdot l</span> and that we require only <span class="math">n\\cdot l</span> constants <span class="math">v_{i_{1},i_{2}}</span> instead of the <span class="math">N</span> constants <span class="math">w_{i}</span>. The result is summarized in Algorithm 3. Assuming the $\\left(\\Gamma_{n,l}(0,\\ldots,0,\\psi^{i_{1}},0,\\ldots,0)\\right)\\big{</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">}_{\\alpha}<span class="math"> and </span>v_{i_{1},i_{2}}<span class="math"> are precomputed, the total cost of encrypting a ciphertext is essentially </span>n\\cdot l\\cdot T_{\\mathsf{bits}}+2\\cdot n\\cdot l\\cdot T_{\\mathsf{mod},d}$.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">Algorithm 3: Recrypting Ciphertext <span class="math">c</span> version 2 <span class="math">\\overline{c}\\leftarrow 0</span>. for <span class="math">i_{1}</span> from <span class="math">0</span> upto <span class="math">n-1</span> do for <span class="math">i_{2}</span> from <span class="math">0</span> upto <span class="math">l-1</span> do <span class="math">\\overline{c}_{i_{1},i_{2}}\\leftarrow\\mathsf{BitRecrypt}([c\\cdot v_{i_{1},i_{2}}]_{d},\\mathsf{pk})</span>.</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">$\\overline{c}\\leftarrow\\overline{c}\\oplus\\overline{c}_{i_{1},i_{2}}\\odot\\left(\\Gamma_{n,l}(0,\\ldots,0,\\psi^{i_{1}},0,\\ldots,0)\\right)\\big{</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">}_{\\alpha}$.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">return (<span class="math">\\overline{c}</span>).</p>
+
+    <p class="text-gray-300">So far we have not exploited the SIMD capabilities of the somewhat homomorphic scheme. Therefore our next goal is to produce the recrptions <span class="math">\\overline{c}_{i_{1},i_{2}}</span> in parallel for <span class="math">i_{2}=1,\\ldots,l</span>. Thus we aim to compute a ciphertext <span class="math">\\hat{c}_{i_{1}}</span> from <span class="math">c</span> such that <span class="math">\\hat{c}_{i_{1}}</span> represents a encryption of the message</p>
+
+    <p class="text-gray-300"><span class="math">\\left(\\mathsf{coeff}(\\kappa_{1},i_{1}),\\ldots,\\mathsf{coeff}(\\kappa_{l},i_{1})\\right),</span></p>
+
+    <p class="text-gray-300">where <span class="math">c</span> represents an encryption of <span class="math">(\\kappa_{1},\\ldots,\\kappa_{l})</span>. We use the notation <span class="math">\\hat{c}_{i}</span> to distinguish it from the encryption <span class="math">\\overline{c}_{i}</span> above.</p>
+
+    <p class="text-gray-300">The key observation is that the encrypt procedure is the evaluation of a binary circuit, and that this binary circuit is identical (bar the constants) no matter which component we are encrypting. In addition the algebra splits into (at least) <span class="math">l</span> finite fields of characteristic two, thus we can embed the binary circuit into each of these <span class="math">l</span> components and perform the associated encryption in parallel. For a fixed <span class="math">i_{1}</span> we therefore want to execute the computation of the vector</p>
+
+    <p class="text-gray-300"><span class="math">([c\\cdot v_{i_{1},1}\\cdot\\zeta_{0}]_{d}\\pmod{2},\\ldots,[c\\cdot v_{i_{1},l}\\cdot\\zeta_{0}]_{d}\\pmod{2})</span></p>
+
+    <p class="text-gray-300">in the encrypted domain in parallel. Recall that each component of this vector is computed as</p>
+
+    <div class="my-4 text-center"><span class="math-block">[ c \\cdot v _ {i _ {1}, k} \\cdot \\zeta_ {0} ] _ {d} \\quad (\\mathrm {m o d} 2) = \\bigoplus_ {i = 1} ^ {s} \\bigoplus_ {j = 0} ^ {S - 1} b _ {i, j} \\cdot y _ {i, j} ^ {(k)} \\quad (\\mathrm {m o d} 2) \\oplus \\left[ \\sum_ {i = 1} ^ {s} \\sum_ {j = 0} ^ {S - 1} b _ {i, j} \\cdot z _ {i, j} ^ {(k)} \\right] \\quad (\\mathrm {m o d} 2),</span></div>
+
+    <p class="text-gray-300">where  <span class="math">y_{i,j}^{(k)} = c \\cdot v_{i_1,k} \\cdot x_i \\cdot R^j</span>  and  <span class="math">z_{i,j}^{(k)}</span>  an approximation of  <span class="math">y_{i,j}^{(k)} / d</span>  up to  <span class="math">p</span>  bits after the binary point. Recall that to obtain the bit  <span class="math">\\mathcal{B}_k = \\left[\\sum_{i=1}^s \\sum_{j=0}^{S-1} b_{i,j} \\cdot z_{i,j}^{(k)}\\right] \\pmod{2}</span>  we used the function school_book_add( <span class="math">M</span> ) with input an  <span class="math">s \\times (p+1)</span>  array  <span class="math">M</span>  where the  <span class="math">i</span> th row contained  <span class="math">\\oplus_{j=0}^{S-1} b_{i,j} \\cdot \\text{compute\\_bits}(y_{i,j}^{(k)})</span> . In fact,  <span class="math">\\mathcal{B}_k</span>  was simply the first bit in the bit vector returned by school_book_add( <span class="math">M</span> ).</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">If we now want to execute the above computation in the  <span class="math">k</span> th component (instead of the first), we basically have to multiply everything by  <span class="math">\\Gamma_{n,l}(0,\\ldots,0,1,0,\\ldots,0)</span> , where  <span class="math">(0,\\ldots,0,1,0,\\ldots,0)</span>  is the vector of  <span class="math">l</span>  elements of  <span class="math">\\mathbb{K}_n</span>  whose  <span class="math">k</span> th element is equal to one, with all other elements being zero. To avoid costly modular multiplications by  $\\Gamma_{n,l}(0,\\ldots,0,1,0,\\ldots,0)\\big</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">_{\\alpha}<span class="math"> , we will use  </span>l<span class="math">  different encryptions of  </span>b_{i,j}<span class="math"> , depending on which of the  </span>l$  components of the algebra we are using. In particular, we no longer augment the public key with the data</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="my-4 text-center"><span class="math-block">\\left(p, s, S, R, \\left\\{x _ {i}, \\left\\{c _ {i, j} \\right\\} _ {j = 0} ^ {S - 1} \\right\\} _ {i = 1} ^ {s}\\right),</span></div>
+
+    <p class="text-gray-300">where  <span class="math">c_{i,j} \\gets \\mathsf{Encrypt}(b_{i,j},\\mathsf{pk})</span> , but instead replace the  <span class="math">c_{i,j}</span>  components with elements  <span class="math">e_{i,j,k}</span>  where</p>
+
+    <div class="my-4 text-center"><span class="math-block">e _ {i, j, k} \\leftarrow \\operatorname {E n c r y p t} \\left(b _ {i, j} \\cdot \\Gamma_ {n, l} (0, \\dots , 0, 1, 0, \\dots , 0), \\mathrm {p k}\\right) \\text {f o r} 1 \\leq i \\leq s, 0 \\leq j &amp;lt;   S, 0 \\leq k &amp;lt;   l.</span></div>
+
+    <p class="text-gray-300">This means we need to increase the size of the augmented public key by essentially a factor of  <span class="math">l</span> . Once we have computed all the  <span class="math">\\hat{c}_{i_1}</span> 's we can simply recover  <span class="math">\\overline{c}</span>  by computing</p>
+
+    <div class="my-4 text-center"><span class="math-block">\\overline {{c}} \\leftarrow \\sum_ {i _ {1} = 0} ^ {n - 1} \\hat {c} _ {i _ {1}} \\odot \\left(\\left(\\Gamma_ {n, l} \\left(\\psi^ {i _ {1}}, \\dots , \\psi^ {i _ {1}}\\right)\\right) \\mid_ {\\alpha}\\right).</span></div>
+
+    <p class="text-gray-300">The resulting algorithm is given in Algorithm 4. Note that to compute each  <span class="math">\\hat{c}_{i_1}</span>  we only require one call to school_book_add(A) compared to  <span class="math">l</span>  calls in Algorithm 3.</p>
+
+    <p class="text-gray-300">Algorithm 4: Recrypting Ciphertext  <span class="math">c</span>  version 3: parallel encryption of all  <span class="math">i_1</span> th coefficients of the  <span class="math">n</span>  elements embedded in a ciphertext  <span class="math">c</span> <span class="math">\\overline{c}\\gets 0</span></p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">for  <span class="math">i_1</span>  from 0 upto  <span class="math">n - 1</span>  do sum  <span class="math">\\leftarrow 0</span> <span class="math">A\\gets 0</span>  , where  <span class="math">A\\in M_{s\\times (p + 1)}(\\mathbb{Z} / d\\mathbb{Z})</span>  for  <span class="math">i_2</span>  from 0 upto  <span class="math">l - 1</span>  do  <span class="math">c_{i_1,i_2}\\gets c\\cdot v_{i_1,i_2}</span>  (mod  <span class="math">d</span>  . for  <span class="math">j</span>  from 1 upto s do  <span class="math">y\\gets c_{i_1,i_2}\\cdot x_j</span>  (mod  <span class="math">d</span>  . for  <span class="math">k</span>  from 0 upto  <span class="math">S - 1</span>  do if  <span class="math">y</span>  is odd then sum  <span class="math">\\leftarrow</span>  sum  <span class="math">\\oplus e_{j,k,i_2}</span>  b  <span class="math">\\leftarrow</span>  compute_bits(y). for u from 0 upto p do  <span class="math">A_{j,u}\\gets A_{j,u}\\oplus (\\mathbf{b}_u\\cdot e_{j,k,i_2})</span> <span class="math">y\\gets y\\cdot R</span>  (mod  <span class="math">d</span>  .. a  <span class="math">\\leftarrow</span>  school_book_add(A).  <span class="math">\\hat{c}_{i_1}\\gets \\mathrm{sum}\\oplus \\mathbf{a}_0</span> $\\overline{c}\\gets \\overline{c}\\oplus \\hat{c}_{i_1}\\odot \\bigl (\\bigl (\\Gamma_{n,l}(\\psi^{i_1},\\dots ,\\psi^{i_1})\\bigr)\\big</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">_{\\alpha}\\bigr).$</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">return  <span class="math">(\\overline{c})</span></p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">We let <span class="math">T_{\\mathsf{par}}(n,l)</span> denote the cost of performing this encryption operation on a message consisting of <span class="math">l</span> field elements from <span class="math">\\mathbb{K}_{n}</span> held in parallel. Assuming the $\\left(\\Gamma_{n,l}(\\psi^{i_{1}},\\ldots,\\psi^{i_{1}})\\right)\\big{</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">}_{\\alpha}<span class="math"> and the </span>v_{i_{1},i_{2}}$ are precomputed we obtain that</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300"><span class="math">T_{\\mathsf{par}}(n,l)=n\\left(S\\cdot s\\cdot l+s\\cdot l+l+1\\right)\\cdot T_{\\mathsf{mod},d}+n\\cdot T_{\\mathsf{school\\_book\\_add}}\\,.</span></p>
+
+    <p class="text-gray-300">The main cost advantage therefore stems from the fewer calls to the function school_book_add.</p>
+
+    <p class="text-gray-300">Naively it would appear that our parallel version of recrrpt, using Algorithm 4, is more efficient than the naive version using Algorithm 2. However, one may need larger public keys to actually implement the parallel encryption (as it is a more complex circuit). We also need to compare whether doing operations in parallel and with large data entries (via the algebra <span class="math">A</span>) is more efficient than doing the same operations but with bits using the standard bit-wise FHE scheme but with more complex circuits. It is to this topic we now turn by examining some “toy” examples.</p>
+
+    <h2 id="sec-15" class="text-2xl font-bold">6 Experimental Results</h2>
+
+    <p class="text-gray-300">So the question arises as to whether it is simpler to perform FHE on bits, or to perform FHE via the algebra <span class="math">A</span>. In this section we concentrate on estimating the performance in terms of the run time and the sizes of the resulting ciphertexts which need to be stored. First recall key generation; we choose <span class="math">N</span> and a polynomial <span class="math">F(X)</span> with small coefficients, we then choose an element <span class="math">\\gamma\\in\\mathbb{Z}[\\theta]</span> which has coefficients of order <span class="math">2^{t}</span>. This results in a value for <span class="math">d</span> of size approximately <span class="math">N^{N}\\cdot 2^{t\\cdot N}</span>; thus we require roughly <span class="math">t\\cdot N</span> bits to represent a single ciphertext.</p>
+
+    <p class="text-gray-300">We first let <span class="math">T(n)</span> denote the function which returns the number of <span class="math">\\mathbb{F}_{2}</span> multiplications needed to perform a multiplication in the field <span class="math">\\mathbb{K}_{n}=\\mathbb{F}_{2^{n}}</span>. Using Karatsuba multiplication (for example) we find, for <span class="math">n</span> a power of two, that</p>
+
+    <p class="text-gray-300">\\[ T(n):=\\left\\{\\begin{array}[]{ll}1&\\text{if }n=1,\\\\ 3\\cdot T(n/2)\\text{ otherwise.}\\end{array}\\right. \\]</p>
+
+    <p class="text-gray-300">This is clearly only an estimate of the overall cost, as we are ignoring the required additions and management of the data.</p>
+
+    <p class="text-gray-300">There are various different options one has for implementing operations on <span class="math">l^{\\prime}</span> finite fields each of size <span class="math">2^{n^{\\prime}}</span>. In the following discussion we concentrate on the following four options; clearly other options are available but we select these as a way of demonstrating the different ways how our techniques could be used.</p>
+
+    <p class="text-gray-300">Option 1:: We operate on bits using the standard bit-wise FHE schemes, i.e. we take <span class="math">n=l=1</span> in our FHE scheme. We will then require <span class="math">l^{\\prime}\\cdot n^{\\prime}\\cdot t\\cdot N</span> bits to store our <span class="math">l^{\\prime}</span> finite field elements, and the cost of performing a single SIMD style multiplication on the <span class="math">l^{\\prime}</span> finite fields will cost around <span class="math">l^{\\prime}\\cdot T(n^{\\prime})\\cdot T_{\\mathsf{bits}}</span> multiplications.</p>
+
+    <p class="text-gray-300">Option 2:: We operate on the <span class="math">l^{\\prime}</span> finite field elements where each element uses a single ciphertext, i.e. we take <span class="math">n=n^{\\prime}</span> and <span class="math">l=1</span> in our FHE scheme. This option has the benefit that we can work with the finite field, but we are not forced to operate in a SIMD manner all the time. With such an option we will require <span class="math">l^{\\prime}\\cdot t\\cdot N</span> bits to store our <span class="math">l^{\\prime}</span> finite field elements, and performing a single SIMD style multiplication on the <span class="math">l^{\\prime}</span> finite fields will cost around <span class="math">l^{\\prime}\\cdot T_{\\mathsf{par}}(n^{\\prime},1)</span> multiplications.</p>
+
+    <p class="text-gray-300">Option 3:: We operate on all <span class="math">l^{\\prime}</span> finite fields in a SIMD fashion using only a single ciphertext, i.e. we take <span class="math">n=n^{\\prime}</span> and <span class="math">l=l^{\\prime}</span> in our FHE scheme. Thus we will require <span class="math">t\\cdot N</span> to store our <span class="math">l^{\\prime}</span> finite field elements, and performing a single SIMD style multiplication on the <span class="math">l^{\\prime}</span> finite fields will cost around <span class="math">T_{\\mathsf{par}}(n^{\\prime},l^{\\prime})</span> multiplications.</p>
+
+    <p class="text-gray-300">Option 4:: Here we operate on bits, but we operate on them in a SIMD fashion by having a ciphertext represent <span class="math">l^{\\prime}</span> bits, i.e. we take <span class="math">n=1</span> and <span class="math">l=l^{\\prime}</span> in our FHE scheme. With this option we require <span class="math">n^{\\prime}\\cdot t\\cdot N</span> bits to store the <span class="math">l^{\\prime}</span> finite field elements, and SIMD style multiplication will require <span class="math">T(n^{\\prime})\\cdot T_{\\mathsf{par}}(1,l^{\\prime})</span> multiplications.</p>
+
+    <p class="text-gray-300">We summarize the above choices, for the concrete parameters of <span class="math">n^{\\prime}=8</span> and <span class="math">l^{\\prime}=16</span>, in the following table. We select a value for <span class="math">N</span> around the size of <span class="math">2000</span>, purely to enable comparison with the work of <em>[10]</em>. We iterate this value is purely for illustrative purposes to show the difference between the various options; it should not be taken to indicate the <span class="math">N\\approx 2000</span> is a secure security level. Fixing <span class="math">n^{\\prime},l^{\\prime}</span> and <span class="math">N</span> rather than leaving them variable is done as the overhead of the SIMD operations crucially depends on the specific combination of finite field and cyclotomic field chosen, and has no nice asymptotic meaning. We select a single parameter instance simply not to overwhelm the reader with data, since our goal is purely to show feasibility of our algorithms even at low security levels.</p>
+
+    <p class="text-gray-300">Note, that for Option 1 we select <span class="math">N=2048</span> since if we are only encrypting bits then using the polynomial <span class="math">F(X)=X^{2^{n}}+1</span> will always be more efficient than using <span class="math">F(X)=\\Phi_{3485}(X)</span>. In addition we keep the parameter <span class="math">t</span> as an indeterminate, as we will be returning to that later.</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">N</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Ciphertext Space (≈ bits)</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Runtime Approx Cost</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Option 1</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">2048</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">262144 · t</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">432 · Tbits</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Option 2</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">2560</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">40960 · t</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">16 · Tpar(8,1)</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Option 3</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">2560</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">2560 · t</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">Tpar(8,16)</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Option 4</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">2560</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">20480 · t</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">27 · Tpar(1,16)</td>
+
+          </tr>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">Thus if one is solely interested in reducing the memory of the calculation one would select Option 3. To determine which one is most efficient one needs to actually implement the schemes, since the actual costs of each operation depend on the value of  <span class="math">t</span>  needed. So we implemented the above algorithms for the four cases  <span class="math">(N, n, l) = (2048, 1, 1)</span> ,  <span class="math">(2560, 8, 1)</span> ,  <span class="math">(2560, 8, 16)</span>  and  <span class="math">(2560, 1, 16)</span> , so as to compare the four options in the above analysis.</p>
+
+    <p class="text-gray-300">In all cases we found that taking  <span class="math">t = 400</span>  resulted in a scheme in which we were able to encrypt clean ciphertexts; however to enable fully homomorphic encryptions we need to encrypt dirty ciphertexts, and be able to perform some additional operations. For the first two of our four cases we found that  <span class="math">t = 600</span>  was sufficient, whilst for the second two we found that  <span class="math">t = 800</span>  was sufficient; note, we increased  <span class="math">t</span>  in multiples of 100, thus smaller values could have been sufficient.</p>
+
+    <p class="text-gray-300">In the four cases we found the following encrypt times. We also present, assuming we wished in all cases to implement operations on  <span class="math">l&#x27; = 16</span>  values in  <span class="math">\\mathbb{F}_{2^{n&#x27;}}</span> , where  <span class="math">n&#x27; = 8</span> , the actual time needed to perform the encrypt on such data and the total size of all ciphertexts needed to represent such data. In our implementation of the field algorithms for Option 1 and Option 4 we used the Karatsuba method mentioned above, and only performed encryption when implementing a multiplication using the FHE scheme; i.e. encryption was not performed upon additions. The algorithms were implemented in  <span class="math">\\mathrm{C}++</span>  using the NTL library and were run on a machine with six Intel Xeon 2.4 GHz processors and 47 GB of RAM.</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Basic FHE Scheme</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Performing Ops For (n', l') = (8, 16)</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"></th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">(N, n, l)</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">t</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">(p, S)</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">Recrypt Time (sec)</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">Method</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">Recrypt Time (sec)</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">Ciphertext Size</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">(2048, 1, 1)</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">600</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">(4, 32)</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">15</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">Option 1</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">7148</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">18.00MB</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">(2560, 8, 1)</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">600</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">(4, 32)</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">187</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">Option 2</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">2983</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">3.00MB</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">(2560, 8, 16)</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">800</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">(4, 32)</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">735</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">Option 3</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">723</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">0.25MB</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">(2560, 1, 16)</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">800</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">(4, 32)</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">89</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">Option 4</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">2406</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">2.00MB</td>
+
+          </tr>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">We end by noting the following: In our toy example we see that SIMD operations and parallel encryption offer some performance advantages. The exact benefit depends on a number of factors. Firstly the size of  <span class="math">n&#x27;</span>  and  <span class="math">l&#x27;</span> ; these are determined by an application and are often small. In turn  <span class="math">n&#x27;</span>  and  <span class="math">l&#x27;</span>  affect the choice of  <span class="math">N</span> , which also depends on the desired security level. The precise values of  <span class="math">t</span>  and  <span class="math">\\mu</span>  allowed are then determined by security analysis of lattice problems. Our toy experiments show that our ability to perform SIMD operations do not affect the size of  <span class="math">t</span>  very much and that the parallel encryption operation is as practical as standard encryption.</p>
+
+    <p class="text-gray-300">The exact choice of which Option is best however depends on an application. Just as in standard SIMD vs non-SIMD operations on a standard processor, whether one utilizes the SIMD instructions in a program depends on the program being run.</p>
+
+    <p class="text-gray-300">Before discussing two possible applications we note that one issue with SIMD operations on data is that sometimes we wish to move data between various elements in the  <span class="math">l</span>  values on which we are operating. This is often a problem, since the hardware/mathematics/software which supports the SIMD operations precludes such operations. However, in our FHE scheme such operations can be performed at no additional cost.</p>
+
+    <p class="text-gray-300">Indeed given a SIMD word consisting of  <span class="math">l</span>  elements in a finite field  <span class="math">\\mathbb{F}_{2^n}</span>  one can produce a new SIMD word which consists of any linear function of the bits creating the original SIMD word. To see this we notice that it simply requires multiplying the matrix  <span class="math">B</span>  used in the parallel encrypt procedure by the matrix defining the linear map. Thus, we can perform this linear function as part of the encryption performed for the previous operation.</p>
+
+    <p class="text-gray-300">In particular this means we can shuffle the elements in our SIMD word, or extract specific elements, or extract specific bits, etc. Indeed extracting specific bits in parallel was the core of our parallel encrypt procedure explained above.</p>
+
+    <p class="text-gray-300">We now turn to our two examples: The first example, namely homomorphic evaluation of AES under some homomorphic key, is used to demonstrate how SIMD operations in high level (<span class="math">\\mathbb{F}_{2^{8}}</span>) algebraic structures, allow us to evaluate complex operations relatively easily. Evaluation of AES circuits using FHE operations has been mentioned as a possible usage scenario in <em>[13]</em>. The second example, one of database lookup, provides an example of how data can be searched using SIMD style operations more efficiently than using the bit-wise homomorphic operations envisaged in <em>[9]</em>.</p>
+
+    <p class="text-gray-300">In this section we assume that all operations are performed with post-processing by the encryption operation. Thus we are no longer interested in the size of the circuit which implements a functionality but simply the cost of the operations involved. As explained above we have essentially three key operations; the two algebraic operations <span class="math">\\mathsf{Mult}</span> and <span class="math">\\mathsf{Add}</span>, plus the linear operations on bits mentioned above. We shall denote the cost of these three operations by <span class="math">C_{M}</span>, <span class="math">C_{A}</span> and <span class="math">C_{L}</span>, and we note that <span class="math">C_{L}</span> essentially comes for free as part of encryption. For example, if an operation requires two multiplications, one addition and three linear operations we shall denote this cost (for simplicity) by <span class="math">2\\cdot C_{M}+C_{A}+3\\cdot C_{L}</span>.</p>
+
+    <h3 id="sec-17" class="text-xl font-semibold mt-8">7.1 Bit-Slicing</h3>
+
+    <p class="text-gray-300">Any algorithm which is run on a circuit using bit operations can be run multiple times at once, by executing the algorithm on a set of parameters which supports operations on multiple bits in parallel. Such a technique is often called bit-slicing when applied to a single algorithm; however the technique is essentially also a bit-wise form of SIMD operation. Hence, <em>any</em> application performed using an FHE algorithm which supports the parallel recrrpt procedure in this paper could be potentially sped-up by at least an order of magnitude by operating on multiple versions of the same algorithm in parallel.</p>
+
+    <h3 id="sec-18" class="text-xl font-semibold mt-8">7.2 Application to AES</h3>
+
+    <p class="text-gray-300">As an example of the benefits of using FH-SIMD over the bitwise FHE we examine the case of how one would implement an AES functionality using FHE. Namely, we want a server to encrypt a message using a key which is only available via an FHE encryption. Using AES as a relatively complex example application of secure computation has also been recently suggested for a number of other related technologies; namely two and multi-party MPC <em>[7, 14]</em>. It is also particularly well suited to SIMD execution due to its overall design.</p>
+
+    <p class="text-gray-300">The method we propose is to encode the entire AES state matrix in a single ciphertext. Recall that the state matrix is a <span class="math">4</span>-by-<span class="math">4</span> matrix of elements in <span class="math">\\mathbb{F}_{2^{8}}</span>. We therefore first need to select an <span class="math">m</span> so that the ideal <span class="math">(2)</span> splits into at least <span class="math">16</span> prime ideals of degree divisible by eight in the field defined by <span class="math">\\Phi_{m}(X)</span>. There are a large number of such examples, including the example we have used in this paper of taking <span class="math">m=3485</span>. Note that since <span class="math">\\phi(m)</span> is equal to <span class="math">4\\times 16</span> we could also perform <span class="math">4</span> AES computations in parallel as well, although we will restrict ourselves to one for ease of exposition. In terms of our previous section we let <span class="math">K_{8}=\\mathbb{F}_{2^{8}}</span> denote the standard representation of <span class="math">\\mathbb{F}_{2^{8}}</span>, i.e.</p>
+
+    <p class="text-gray-300"><span class="math">K_{8}:=\\mathbb{F}_{2}[X]/(X^{8}+X^{4}+X^{3}+X+1),</span></p>
+
+    <p class="text-gray-300">and we let <span class="math">A</span> denote the algebra consisting of <span class="math">64</span> copies of <span class="math">\\mathbb{F}_{2^{40}}</span>, each with the representation induced by the given factor of <span class="math">\\Phi_{m}(X)\\pmod{2}</span>.</p>
+
+    <p class="text-gray-300">We assume the AES state matrix is given by</p>
+
+    <p class="text-gray-300">\\[ \\left(\\begin{array}[]{ccc}s_{0,0}&s_{0,1}&s_{0,2}&s_{0,3}\\\\ s_{1,0}&s_{1,1}&s_{1,2}&s_{1,3}\\\\ s_{2,0}&s_{2,1}&s_{2,2}&s_{2,3}\\\\ s_{3,0}&s_{3,1}&s_{3,2}&s_{3,3}\\end{array}\\right)\\,, \\]</p>
+
+    <p class="text-gray-300">which we encode as an element of <span class="math">K_{8}^{16}</span> as <span class="math">(s_{0,0},s_{0,1},\\ldots,s_{3,3})</span>. Using the map <span class="math">\\Gamma_{8,16}</span> we obtain an element of <span class="math">A</span>, which can then be evaluated at <span class="math">\\alpha</span> modulo <span class="math">p</span> to obtain a trivial encryption of the message state (before the first round).</p>
+
+    <p class="text-gray-300">To implement AES we assume that the round keys <span class="math">k_{i}</span> have been presented in encrypted form, using the above embedding via <span class="math">\\Gamma_{8,16}</span>. Computing the round keys from a given key can be done using the same operations needed to execute the rounds. Thus if we can implement the rounds using efficient FH-SIMD operations, then we can also compute the encryptions of the round keys given the initial key.</p>
+
+    <p class="text-gray-300">The round structure of AES is made up of four basic operations, which we now discuss in turn.</p>
+
+    <p class="text-gray-300">AddRoundKey</p>
+
+    <p class="text-gray-300">This is the simplest operation and is clearly performed for all sixteen bytes in parallel by doing a single <span class="math">\\oplus</span> operation of the FHE scheme. This step can be done at the cost of <span class="math">C_{A}</span>.</p>
+
+    <h4 id="sec-19" class="text-lg font-semibold mt-6">ShiftRows</h4>
+
+    <p class="text-gray-300">In this operation row <span class="math">i</span> is shifted left by <span class="math">i-1</span> positions. This is clearly an example of a <em>linear</em> operation from earlier, in that we map the ciphertext corresponding to</p>
+
+    <p class="text-gray-300"><span class="math">(s_{0,0},s_{0,1},s_{0,2},s_{0,3},s_{1,0},s_{1,1},s_{1,2},s_{1,3},s_{2,0},s_{2,1},s_{2,2},s_{2,3},s_{3,0},s_{3,1},s_{3,2},s_{3,3})</span></p>
+
+    <p class="text-gray-300">into a ciphertext corresponding to</p>
+
+    <p class="text-gray-300"><span class="math">(s_{0,0},s_{0,1},s_{0,2},s_{0,3},s_{1,1},s_{1,2},s_{1,3},s_{1,0},s_{2,2},s_{2,3},s_{2,0},s_{2,1},s_{3,3},s_{3,0},s_{3,1},s_{3,2}).</span></p>
+
+    <p class="text-gray-300">Since this is a reordering the cost is given by <span class="math">C_{L}</span>.</p>
+
+    <h4 id="sec-20" class="text-lg font-semibold mt-6">MixColumns</h4>
+
+    <p class="text-gray-300">In this step we perform a matrix multiplication on the left of the state matrix by a fixed matrix given by</p>
+
+    <p class="text-gray-300">\\[ \\left(\\begin{array}[]{cccc}X&X+1&1&1\\\\ 1&X&X+1&1\\\\ 1&1&X&X+1\\\\ X+1&1&1&X\\end{array}\\right). \\]</p>
+
+    <p class="text-gray-300">This is accomplished in four stages</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Compute the trivial encryption <span class="math">c_{1}</span> of <span class="math">\\Gamma_{8,16}((X,X,\\ldots,X))</span>, clearly this can be precomputed.</li>
+
+      <li>Compute <span class="math">c_{2}\\leftarrow c\\otimes c_{1}</span>.</li>
+
+      <li>By application of three <em>linear</em> operations we can create ciphertexts <span class="math">c_{3},c_{4},c_{5}</span> and <span class="math">c_{6}</span> corresponding to <span class="math">c_{2}</span> shifted up by one row, <span class="math">c</span> shifted up by two rows, and <span class="math">c</span> shifted up by four rows (where shift rows is performed with rotation).</li>
+
+      <li>Compute <span class="math">c_{2}\\oplus c_{3}\\oplus c_{4}\\oplus c_{5}\\oplus c_{6}</span> and output the result.</li>
+
+    </ol>
+
+    <p class="text-gray-300">Notice that our FH-SIMD scheme allows us to perform the <span class="math">16</span> multiplications in parallel in the second step. The cost of the MixColumns operation is then <span class="math">C_{M}+4\\cdot C_{A}+4\\cdot C_{L}</span>.</p>
+
+    <h4 id="sec-21" class="text-lg font-semibold mt-6">SubBytes</h4>
+
+    <p class="text-gray-300">This is the most complex of all the AES operations, however there is much existing literature on straight line (i.e. no branching) executions of the AES S-Boxes at byte level. For example the approach in <em>[3]</em> transforms the polynomial bases into a “nice” normal basis and then decomposes the arithmetic for inversion into <span class="math">\\mathbb{F}_{2^{4}}</span> and then <span class="math">\\mathbb{F}_{2^{2}}</span> operations. At which point all the arithmetic is just logical operations, and hence amenable to FH-SIMD operations. However, this approach is more suited to real hardware, or to FH-SIMD operations where the basic data type is a bit (e.g. when using say <span class="math">(n,l)=(1,16)</span> in our main scheme).</p>
+
+    <p class="text-gray-300">As we are restricted to operations which can be performed efficiently in our FH-SIMD scheme a more naive approach is probably to be preferred. Recall that the AES S-Box consists of inverting each state byte in <span class="math">K_{8}</span> (where we define <span class="math">0^{-1}=0</span>), followed by an <span class="math">\\mathbb{F}_{2}</span>-linear operation. Also recall that <span class="math">x^{-1}=x^{254}</span> in the field <span class="math">K_{8}</span>. We can therefore apply the S-Box operation to our encrypted state using the following method:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li><span class="math">t\\leftarrow c</span>.</li>
+
+      <li>For <span class="math">i=1</span> to <span class="math">6</span> do</li>
+
+    </ul>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li><span class="math">t\\leftarrow t\\otimes t</span>.</li>
+
+      <li><span class="math">t\\leftarrow t\\otimes c</span>.</li>
+
+      <li><span class="math">t\\leftarrow t\\otimes t</span>.</li>
+
+      <li>Extract eight ciphertexts <span class="math">t_{0},\\ldots,t_{7}</span> such that <span class="math">t_{i}</span> is the (parallel) encryption of the <span class="math">i</span>-th bit of all <span class="math">16</span> values in <span class="math">t</span>.</li>
+
+      <li>Perform the linear operation on <span class="math">t_{0},\\ldots,t_{7}</span> in parallel to produce ciphertexts <span class="math">s_{0},\\ldots,s_{7}</span>.</li>
+
+      <li>Map these ciphertexts back to an encryption of an element in <span class="math">A</span></li>
+
+    </ul>
+
+    <p class="text-gray-300">The first step, that of producing an encryption <span class="math">t</span> of <span class="math">x^{254}</span> where <span class="math">c</span> is an encryption of <span class="math">x</span>, requires at most <span class="math">13</span> fully homomorphic multiplications. The second step of extracting the ciphertexts <span class="math">t_{0},\\ldots,t_{7}</span> is essentially a single linear operation. The third step of adding the elements <span class="math">t_{0},\\ldots,t_{7}</span> together to produce <span class="math">s_{0},\\ldots,s_{7}</span>, requires <span class="math">4\\cdot 8=32</span> homomorphic additions, due to the nature of the linear operation in AES. The final step of obtaining a single ciphertext from <span class="math">s_{0},\\ldots,s_{7}</span> is also an application of a linear operation. Thus the total cost of SubBytes is given by <span class="math">13\\cdot C_{M}+32\\cdot C_{A}+2\\cdot C_{L}</span>.</p>
+
+    <p class="text-gray-300">We note that our SIMD evaluation of the AES round function not only benefits in our system from being able to execute <span class="math">16</span> operations in parallel. We also have the benefit of being able to deal directly with <span class="math">\\mathbb{F}_{2^{8}}</span> arithmetic operations, as well as decompose into bits where necessary in the linear transformation in the S-Box operation. The total cost of a round function being given by</p>
+
+    <p class="text-gray-300"><span class="math">14\\cdot C_{M}+37\\cdot C_{A}+7\\cdot C_{L},</span></p>
+
+    <p class="text-gray-300">although by interleaving operations a lower cost could probably be obtained.</p>
+
+    <h3 id="sec-22" class="text-xl font-semibold mt-8">7.3 Data Base Lookup</h3>
+
+    <p class="text-gray-300">We end by examining a more realistic application scenario, namely one of searching an encrypted database on a remote server. Suppose a user has previously encrypted a database and stored it on a cloud service provider, and now she wishes to retrieve some of the data. We first note that the usual atomic database operation of search actually consists of two operations. The first operation is one of search, whereas the second is one of retrieval. The following method performs the search using FHE and the retrieval using Private Information Retrieval (PIR).</p>
+
+    <p class="text-gray-300">We assume the database is such that one can determine beforehand which fields will be searched on. In some sense this is akin to the basic premise of public key encryption with keyword search <em>[1]</em>, however we have a more complicated data retrieval operation to perform. To simplify the discussion we assume that there is only one database field which is searchable, and another field which contains the information. Each database entry (in the clear) is then given by a tuple <span class="math">(i,s,d)</span>, where <span class="math">s</span> is the search term, <span class="math">d</span> is the data and <span class="math">i</span> is some index which is going to enable retrieval. The number of such items we denote by <span class="math">r</span>. We assume that <span class="math">i</span> and <span class="math">s</span> are <span class="math">n</span> bits in length, and thus can be encoded as an element of the finite field <span class="math">K_{n}=\\mathbb{F}_{2^{n}}</span>.</p>
+
+    <p class="text-gray-300">To encrypt the database the user picks a public/private key pair <span class="math">(\\mathsf{pk},\\mathsf{sk})</span> for our FH-SIMD scheme, as well as a symmetric key <span class="math">K</span> for a symmetric encryption scheme <span class="math">(E_{K},D_{K})</span>. Let us assume that the encryption scheme can support <span class="math">l</span> operations in <span class="math">\\mathbb{F}_{2^{n}}</span> in parallel. When placing the database on the cloud service provider the user divides the database into <span class="math">\\lceil r/l\\rceil</span> blocks of <span class="math">l</span> items. Then to actually send the server the <span class="math">j</span>th encrypted data block, for <span class="math">j=0,1,2,\\ldots,\\lceil r/l\\rceil-1</span> we send</p>
+
+    <p class="text-gray-300"><span class="math">(\\mathbf{i}_{j},c_{j},\\mathbf{E}_{j})=</span> <span class="math">\\left(i_{l\\cdot j+1},\\ldots,i_{l\\cdot(j+1)},{}\\right.</span> <span class="math">\\mathsf{Encrypt}(\\Gamma_{n,l}(s_{l\\cdot j+1},\\ldots,s_{l\\cdot(j+1)}),\\mathsf{pk}),</span> <span class="math">\\left.E_{K}(d_{l\\cdot j+1}),\\ldots,E_{K}(d_{l\\cdot(j+1)})\\right).</span></p>
+
+    <p class="text-gray-300">We now discuss how the user retrieves all data items which correspond to the search term <span class="math">s</span>. We first recover an encryption of an encoding of the index terms which contain this search term. This is done by sending the server one ciphertext, and receiving one in return. The sent “query” ciphertext is equal to</p>
+
+    <p class="text-gray-300"><span class="math">q=\\mathsf{Encrypt}(\\Gamma_{n,l}(s,\\ldots,s),\\mathsf{pk}),</span></p>
+
+    <p class="text-gray-300">i.e. an encryption of <span class="math">l</span> copies of the query term <span class="math">s</span>.</p>
+
+    <p class="text-gray-300">The server then takes each data block <span class="math">(\\mathbf{i}_{j},c_{j},\\mathbf{E}_{j})</span> and computes <span class="math">c_{j}^{(1)}=q\\oplus_{\\mathsf{pk}}c_{j}</span>. The value <span class="math">c_{j}^{(1)}</span> is then homomorphically raised to the power <span class="math">2^{n}-1</span>, by performing <span class="math">2n</span> applications of <span class="math">\\mathsf{Mult}</span>. This results in a ciphertext <span class="math">c_{j}^{(2)}</span> which is an encryption of a vector of zero and ones, with a one only occurring in position <span class="math">k</span> when <span class="math">s</span> is not equal to the <span class="math">k</span>th component of the vector underlying the ciphertext <span class="math">c_{j}</span>.</p>
+
+    <p class="text-gray-300">The server then computes <span class="math">c_{j}^{(3)}=(c_{j}^{(2)}\\oplus_{\\mathsf{pk}}\\mathsf{Encrypt}(\\Gamma_{n,l}(1,1,\\ldots,1),\\mathsf{pk}))\\otimes_{\\mathsf{pk}}\\mathsf{Encrypt}(\\Gamma_{n,l}(\\mathbf{i}_{j}),\\mathsf{pk})</span>, and the set of ciphertexts <span class="math">c_{j}^{(3)}</span> are then added together using <span class="math">\\mathsf{Add}</span> to obtain a final ciphertext <span class="math">c^{\\prime}</span>, which is returned to the user. Note, that this “search” query has a cost of <span class="math">(2\\cdot n+1)\\cdot C_{M}+2\\cdot C_{A}</span> per data block.</p>
+
+    <p class="text-gray-300">The plaintext underlying the returned ciphertext <span class="math">c^{\\prime}</span> consists of <span class="math">l</span> components, where the <span class="math">k</span>th component is given by</p>
+
+    <p class="text-gray-300"><span class="math">\\bigoplus_{s=s_{l\\cdot j+k}}i_{l\\cdot j+k}.</span></p>
+
+    <p class="text-gray-300">If there is only one match per component then we have recovered the matching indices and hence can recover the actual data by engaging in a PIR protocol <em>[4, 12]</em>. The problem arises when we have the possibility of more than one match per component per query. In this situation we need an encoding algorithm to enable us to recover the exact PIR inputs we need to recover the data.</p>
+
+    <p class="text-gray-300">In the extreme case we have a possibility of every component containing <span class="math">\\lceil r/l\\rceil</span> matches, i.e. the search term <span class="math">s</span> matches with every item in the database. In which case we obtain, via a trivial encoding, that we must have <span class="math">\\lceil r/l\\rceil\\leq n</span>. This essentially implies that the length of the database is bounded by the number of bits we can encrypt, i.e. <span class="math">r&lt;l\\cdot n</span>.</p>
+
+    <p class="text-gray-300">However, if we can ensure that a maximum of <span class="math">t</span> matches can occur per SIMD component then we can produce a more effective encoding as follows: Firstly we assume the encoding used for data retrieval in the PIR is such that we recover the data item corresponding to an index/component position pair. This simplifies our discussion as we only have to concentrate on decoding a single component.</p>
+
+    <p class="text-gray-300">We set <span class="math">m=\\lceil r/l\\rceil</span>, and to each of the <span class="math">m</span> blocks we associate an <span class="math">n</span>-bit index <span class="math">i</span>. We want to therefore be able, given an xor of the indices <span class="math">z=i_{j_{1}}\\oplus\\ldots\\oplus i_{j_{s}}</span>, with <span class="math">s\\leq t</span>, to recover the set <span class="math">\\{i_{j_{1}},\\ldots,i_{j_{s}}\\}</span>. To construct the encoding we take the parity matrix of an <span class="math">[N,K,D]</span> linear code over <span class="math">\\mathbb{F}_{2}</span> of length <span class="math">N</span>, rank <span class="math">K</span> and minimum distance <span class="math">D</span>, which we assume is greater <span class="math">2\\cdot t</span>. This is a matrix of dimension <span class="math">(N-K)\\times N</span>. We then take as our indices the columns of this matrix, which implies that these indices must fit in <span class="math">n</span> bits, hence <span class="math">N-K\\leq n</span>. Given an xor of at most <span class="math">t</span> indices we can recover which indices were xor-ed together by decoding the <span class="math">[N,K,D]</span> linear code. To see this notice that the sum of indices <span class="math">z</span> is a syndrome of a codeword in the linear code. Thus by recovering the error positions in the code from the syndrome we know which indices, i.e. which columns of the parity check matrix, were xor-ed together. Thus the total number of distinct indices we can cope with is bounded by the column size of the parity check matrix, i.e. <span class="math">N</span>. Hence, we obtain <span class="math">m=\\lceil r/l\\rceil\\leq N</span>.</p>
+
+    <p class="text-gray-300">As an example of a possible encoding scheme we take a primitive BCH code which exists for any pair of values of <span class="math">(s,t)</span> such that <span class="math">s\\geq 3</span> and <span class="math">t&lt;2^{s-1}</span>. The primitive BCH code over <span class="math">\\mathbb{F}_{2}</span> then has parameters given by <span class="math">N=2^{s}-1</span>, <span class="math">N-K\\leq s\\cdot t</span> and <span class="math">D\\geq 2\\cdot t+1</span>. If we take our FHE scheme of the previous section using the <span class="math">m</span>th cyclotomic polynomial with <span class="math">m=3485</span>, then we have <span class="math">l=64</span>, <span class="math">n\\leq d=40</span> and <span class="math">\\phi(m)=2560</span>. Given the bounds</p>
+
+    <p class="text-gray-300"><span class="math">\\lceil r/l\\rceil\\leq N=2^{s}-1\\text{ and }s\\cdot t\\leq n,</span></p>
+
+    <p class="text-gray-300">and supposing we take <span class="math">t=3</span>, so we can recover at most three collisions on search terms within each component, then by setting <span class="math">n=d=40</span> and <span class="math">(s,t)=(13,3)</span> we obtain a valid encoding. This implies that the total number of items within the database is bounded by <span class="math">l\\cdot N=524224</span>. Clearly using more optimal codes, or different cyclotomic polynomials one can obtain larger values of the whole database, or one can deal with more collisions within a component.</p>
+
+    <p class="text-gray-300">The above methodology using our FH-SIMD scheme to search on <span class="math">l</span> components at once in an efficient manner, results in a linear speed up in the search of the encrypted database. However, there is another advantage of our splitting the database into <span class="math">l</span> components; we can deal with (albeit having a probability of invalid indices being returned) having more collisions between the search terms. In the above example we could deal with up to three collisions in each component, this meant that our method would be guaranteed to be correct if there were at most three items in the database corresponding to each search item. However, if we assume that the search items are randomly distributed between the <span class="math">l</span> components, then in practice we can deal with more collisions, since our results will be correct as long as there are at most <span class="math">t</span> collisions <em>per component</em>. The generalised birthday bound <em>[17]</em> says that we can have</p>
+
+    <p class="text-gray-300"><span class="math">(t!)^{1/t}\\cdot l^{(t-1)/t}</span></p>
+
+    <p class="text-gray-300">collisions before the probability of obtaining more than <span class="math">t</span> collisions in one of the <span class="math">l</span> components is greater than <span class="math">1/2</span>. In our above numerical example, with <span class="math">t=3</span> and <span class="math">l=64</span>, this equates to just over <span class="math">29</span> matches in our database.</p>
+
+    <h2 id="sec-23" class="text-2xl font-bold">8 Acknowledgements</h2>
+
+    <p class="text-gray-300">This material is based on research sponsored by the European Commission through the ICT Programme under Contract ICT-2007-216676 ECRYPT II. The first author was also supported by the Defense Advanced Research Projects</p>
+
+    <p class="text-gray-300">Agency (DARPA) and Air Force Research Laboratory (AFRL) under agreement number FA8750-11-2-0079, by the Royal Society via a Royal Society Wolfson Merit Award, by the ERC via an Advanced Grant, and the EPSRC via grant EP/I03126X. The second author was supported by a Postdoctoral Fellowship of the Research Foundation - Flanders (FWO).</p>
+
+    <h2 id="sec-24" class="text-2xl font-bold">References</h2>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>[1] D. Boneh, G. Di Crescenzo, R. Ostrovsky, and G. Persiano. Public key encryption with keyword search. Advances in Cryptology – Eurocrypt 2004, Lecture Notes in Comput. Sci. 3027, 506–522, 2004.</li>
+
+      <li>[2] Z. Brakerski and V. Vaikuntanathan. Fully homomorphic encryption from Ring-LWE and security for key dependent messages. To appear Advances in Cryptology – Crypto 2011, Lecture Notes in Comput. Sci. XXXX, XXXX–XXXX, 2011.</li>
+
+      <li>[3] D. Canright. A very compact S-Box for AES. Cryptographic Hardware and Embedded Systems – CHES 2005, Lecture Notes in Comput. Sci. 3659, 441–455, 2005.</li>
+
+      <li>[4] B. Chor, E. Kushilevitz, O. Goldreich and M. Sudan. Private information retrieval. J. ACM, 45, 965–981, 1998.</li>
+
+      <li>[5] M. van Dijk, C. Gentry, S. Halevi, and V. Vaikuntanathan. Fully homomorphic encryption over the integers. Advances in Cryptology – Eurocrypt 2010, Lecture Notes in Comput. Sci. 6110, 24–43, 2010.</li>
+
+      <li>[6] J.W. Cooley and J.W. Tukey. An algorithm for the machine calculation of complex Fourier series. Math. Comp., 19, 297–301, 1965.</li>
+
+      <li>[7] I. Damgård and M. Keller. Secure multiparty AES. Financial Cryptography – FC 2010, Lecture Notes in Comput. Sci. 6052, 367–374, 2010.</li>
+
+      <li>[8] C. Gentry. Fully homomorphic encryption using ideal lattices. Symposium on Theory of Computing – STOC 2009, ACM, 169–178, 2009.</li>
+
+      <li>[9] C. Gentry. A fully homomorphic encryption scheme. Manuscript, 2009.</li>
+
+      <li>[10] C. Gentry and S. Halevi. Implementing Gentry’s fully-homomorphic encryption scheme. Advances in Cryptology – Eurocrypt 2011, Lecture Notes in Comput. Sci. 6632, 129–148, 2011.</li>
+
+      <li>[11] I.J. Good. The interaction algorithm and practical Fourier analysis. J.R. Stat. Soc., 20, 361–372, 1958.</li>
+
+      <li>[12] E. Kushilevitz and R. Ostrovsky. Replication is not needed: Single database, computationally-private information retrieval. Foundations of Computer Science – FoCS ’97, 364–373, 1997.</li>
+
+      <li>[13] K. Lauter, M. Naehrig, V. Vaikuntanathan. Can homomorphic encryption be practical. Preprint, 2011.</li>
+
+      <li>[14] B. Pinkas, T. Schneider, N.P. Smart, S.C. Williams. Secure two-party computation is practical. Advances in Cryptology – Asiacrypt 2009, Lecture Notes in Comput. Sci. 5912, 250-267, 2009.</li>
+
+      <li>[15] C.M. Rader. Discrete Fourier transforms when the number of data samples is prime. Proc. IEEE, 56, 1107–1108, 1968.</li>
+
+      <li>[16] N.P. Smart and F. Vercauteren. Fully homomorphic encryption with relatively small key and ciphertext sizes. Public Key Cryptography – PKC 2010, Lecture Notes in Comput. Sci. 6056, 420–443, 2010.</li>
+
+      <li>[17] K. Suzuki, D. Tonien, K. Kurosawa and K. Toyota. Birthday paradox for multi-collisions. Information Security and Cryptology – ICISC 2006, Lecture Notes in Comput. Sci. 4296, 29–40, 2006.</li>
+
+      <li>[18] L.H. Thomas. Using a computer to solve problems in physics. Application of Digital Computers, 1963.</li>
+
+    </ul>`;
+---
+
+<BaseLayout title="Fully Homomorphic SIMD Operations (2011/133)">
+  <article class="max-w-4xl mx-auto article-prose">
+    <nav class="mb-8">
+      <a href="/papers" class="text-blue-400 hover:text-blue-300">
+        &larr; Back to Papers
+      </a>
+    </nav>
+
+    <header class="mb-12">
+      <h1 class="text-3xl font-bold mb-4"
+        set:html={TITLE_HTML} />
+      <p class="text-gray-400 mb-2"
+        set:html={AUTHORS_HTML} />
+      <p class="text-gray-500 text-sm mb-4">
+        2011 &middot; eprint 2011/133
+      </p>
+      <div class="flex gap-4 text-sm">
+        <a
+          href={EPRINT_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          class="text-blue-400 hover:text-blue-300"
+        >
+          Paper (eprint) &rarr;
+        </a>
+      </div>
+      <p class="mt-4 text-xs text-gray-500">
+        All content below belongs to the original authors. This page
+        reproduces the paper for educational purposes. Always
+        <a
+          href={EPRINT_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          class="text-blue-400 hover:text-blue-300"
+        >cite the original</a>.
+      </p>
+      <p class="mt-1 text-xs text-gray-600">
+        Converted with: {CRAWLER} &middot; {CONVERTED_DATE}
+      </p>
+    </header>
+
+    <Fragment set:html={CONTENT} />
+
+  </article>
+</BaseLayout>

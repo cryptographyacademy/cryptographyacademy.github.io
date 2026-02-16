@@ -1,0 +1,639 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+
+const EPRINT_URL = 'https://eprint.iacr.org/2015/625';
+const CRAWLER = 'mistral';
+const CONVERTED_DATE = '2026-02-16';
+const TITLE_HTML = 'Ed448-Goldilocks, a new elliptic curve';
+const AUTHORS_HTML = 'Mike Hamburg';
+
+const CONTENT = `    <p class="text-gray-300">Mike Hamburg [Rambus Cryptography Research.]</p>
+
+    <h6 id="sec-2" class="text-base font-medium mt-4">Abstract</h6>
+
+    <p class="text-gray-300">Many papers have proposed elliptic curves which are faster and easier to implement than the NIST prime-order curves. Most of these curves have had fields of size around <span class="math">2^{256}</span>, and thus security estimates of around 128 bits. Recently there has been interest in a stronger curve, prompting designs such as Curve41417 and Microsoft’s pseudo-Mersenne-prime curves.</p>
+
+    <p class="text-gray-300">Here I report on the design of another strong curve, called Ed448-Goldilocks. Implementations of this curve can perform very well for its security level on many architectures. As of this writing, this curve is favored by IRTF CFRG for inclusion in future versions of TLS along with Curve25519.</p>
+
+    <h2 id="sec-3" class="text-2xl font-bold">1 Introduction</h2>
+
+    <p class="text-gray-300">Since Edwards’ discovery of a new elliptic curve form in 2007 <em>[11]</em>, implementors have produced a steady stream of implementations in this form. Edwards curves tend to be easier to implement securely than the previously used curve shapes, because they support complete addition formulas. These formulas do not have exceptional cases which would lead to a division by zero <em>[3]</em>. Edwards curves are also faster, and have marginally simpler formulas as well. However, curves in Edwards or twisted Edwards form always have a cofactor divisible by 4, so prime-order curves such as the NIST curves cannot be put in this form.</p>
+
+    <p class="text-gray-300">Until recently, most Edwards curve implementations have been for fields of size around <span class="math">2^{256}</span> <em>[2, 3, 7, 8, 12, 15, 17, 18, 22]</em>, making them comparable in security to NIST-P256 and AES-128 standards. However, recently several authors have proposed elliptic curves with field sizes ranging roughly from 336 bits to 521 bits <em>[1, 4, 9, 21]</em>.</p>
+
+    <p class="text-gray-300">Here I detail the design of an Edwards curve with a 448-bit field. I hope that this curve will provide enough security to satisfy conservative users, but still be fast enough for those who are performance-conscious. It would therefore be useful as a more conservative supplement to Curve25519 and Ed25519.</p>
+
+    <p class="text-gray-300">As of early June 2015, the Internet Research Task Force Crypto Forum Research Group (IRTF CFRG) favors Ed448-Goldilocks for inclusion in future TLS standards <em>[20]</em>.</p>
+
+    <h2 id="sec-4" class="text-2xl font-bold">2 Security rationale</h2>
+
+    <p class="text-gray-300">Before going on, it is important to consider why a stronger elliptic curve would be desirable. In particular, why would anyone need a curve stronger than the existing 256-bit-field curves? These curves are said to require about as much work to break as AES-128 (e.g. Curve25519 has work factor <span class="math">W:=\\frac{1}{2}\\log q\\approx 126</span>), but in strong attack models they may require more work than AES. Depending on the mode, symmetric encryption may be susceptible to multiple-target attacks, which</p>
+
+    <p class="text-gray-300">*Rambus Cryptography Research.</p>
+
+    <p class="text-gray-300">could allow an attacker to recover the first key of <span class="math">n</span> targets in time approximately <span class="math">2^{128}/(n+1)</span>. For elliptic curves, batch attacks do not speed up the recovery of the first key, only of subsequent ones.</p>
+
+    <p class="text-gray-300">What sorts of attacks might break an elliptic curve with a conjectured security level near 128 bits? Here are several possibilities:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>An attacker could use brute force. This is unlikely to be feasible for several decades at least, but designers might be concerned about it for very long-term security.</li>
+
+      <li>An attacker might build a quantum computer capable of running Shor’s algorithm. This would break every elliptic curve cryptosystem which could fit in that computer’s memory, so a larger curve would not be helpful.</li>
+
+      <li>A mathematical breakthrough might render all elliptic curve cryptography weak, or at least much weaker than expected. Depending on the breakthrough, a larger curve might resist attack due to its size, or it might fall along with the smaller ones.</li>
+
+      <li>A breakthrough might break only curves with special properties, such as complex multiplication or a certain field shape. Or it might break all curves which do not have those properties.</li>
+
+      <li>A protocol might have a loose security bound, and might allow an attacker to break it with only a tiny fraction of the work of solving the discrete log problem. This might enable an attack on curves which were previously out of reach, but only in that protocol.</li>
+
+      <li>Security bugs or side channels might compromise an implementation. The defense against this is simplicity, not field size.</li>
+
+      <li>Security architects might want to over-engineer a system, for marketing or just for extra confidence. Or having already done this, they might want to migrate from the NIST or Brainpool elliptic curves to an Edwards curve, without weakening their design.</li>
+
+    </ul>
+
+    <p class="text-gray-300">Some of these issues can be mitigated by using a curve which is slightly bigger, such as Scott’s curve modulo <span class="math">2^{336}-3</span> <em>[21]</em>. Others favor a curve which is significantly larger, but it is difficult to evaluate exactly how large. If a significantly larger curve is chosen, the usual work factor estimate means almost nothing, since any attempt to attack such a curve would require a significant breakthrough to obsolete that estimate.</p>
+
+    <p class="text-gray-300">I decided to design a curve in the “significantly larger” or “overkill” level. The currently popular curves in this space include NIST <em>[19]</em> and Brainpool curves <em>[10]</em> at 384, 512 and 521 bits, so I aimed for something in this range. Since it is always possible to use a larger curve at the cost of worse performance, I aimed to find the best trade-off between performance and field size. I followed the safecurves.cr.yp.to policies for curve generation to avoid known mistakes and to demonstrate that nothing is up my sleeve.</p>
+
+    <p class="text-gray-300">I propose Ed448-Goldilocks as a single high-strength curve for new designs. It is tempting to suggest a 384- and a 521-bit curve to match the existing NIST and Brainpool sizes. But there is really no need to have an “overkill” curve and a “more overkill” curve: users will just use one and not the other.</p>
+
+    <h2 id="sec-5" class="text-2xl font-bold">3 Field choice</h2>
+
+    <p class="text-gray-300">Having settled the curve shape and generation method, the remaining major choice is the field. Following Safecurves, I used a prime-order field. That leaves at least six families of desirable primes:</p>
+
+    <p class="text-gray-300">3.1 Possible prime shapes</p>
+
+    <h4 id="sec-6" class="text-lg font-semibold mt-6">Random primes.</h4>
+
+    <p class="text-gray-300">Brainpool-style random primes are an interesting option, as they would preclude hypothetical attacks based on special field forms. However, this comes at a severe performance impact, and it is more difficult to argue that the coefficients have been chosen randomly rather than maliciously. What’s more, lacking any information about attacks on “fast” fields, it seems better to spend performance on a larger field instead of on a random field. So I chose a large, fast field instead.</p>
+
+    <h4 id="sec-7" class="text-lg font-semibold mt-6">Mersenne primes.</h4>
+
+    <p class="text-gray-300">The Mersenne prime <span class="math">2^{521}-1</span> is a good option, with very good performance for its size. I implemented and tested the curve E-521 on Haswell, with benchmarks shown in Section 6. But this prime is enormous, and I believe that a less extreme level of overkill would allow wider deployment.</p>
+
+    <h4 id="sec-8" class="text-lg font-semibold mt-6">Crandall primes (<span class="math">2^{k}-c</span>).</h4>
+
+    <p class="text-gray-300">These are a very popular option, and for good reason. However, they have an important constraint to get the best possible performance. To limit carry propagation during multiply-reduce, <span class="math">c</span> should be small. This limits the fastest Crandall choices to a few options, such as <span class="math">2^{379}-19</span>, <span class="math">2^{389}-17</span>, and <span class="math">2^{414}-17</span>.</p>
+
+    <h4 id="sec-9" class="text-lg font-semibold mt-6">Special Montgomery primes (<span class="math">2^{k}c-1</span>).</h4>
+
+    <p class="text-gray-300">The advantage of special Montgomery primes is mainly in carry propagation on full-radix implementations. But primes greater than about <span class="math">2^{256}</span> favor vectorized multiplication on ARM and reduced-radix multiplication on x86-64, and these require changes to carry propagation anyway. So this prime shape loses its advantage, and has several disadvantages, particularly more complex direct reduction and more bias from hash-truncate-reduce.</p>
+
+    <h4 id="sec-10" class="text-lg font-semibold mt-6">Granger-Moss primes (<span class="math">\\Phi_{N}(k)</span>).</h4>
+
+    <p class="text-gray-300">These primes are very fast on 64-bit machines at around 240 or 360 bits <em>[13]</em>, and they vectorize reasonably well. But they require one specific implementation method, which means that they may suffer performance problems on platforms other than their target platform. Furthermore, these primes do not work as well past 360 bits of field size. This is essentially because 9 is not prime, so that <span class="math">\\Phi_{9}</span> has degree only 6.</p>
+
+    <h4 id="sec-11" class="text-lg font-semibold mt-6">Solinas primes (<span class="math">2^{k}-2^{\\ell}\\pm\\ldots\\pm 1</span>).</h4>
+
+    <p class="text-gray-300">These primes can be very fast, but only if they have few coefficients and those coefficients are on powers of the radix. For example, the NIST primes have 32-bit-aligned exponents, so they work better on 32-bit platforms using a 32-bit radix. Because I wanted a curve which would be fast on multiple platforms, I selected a prime with as few coefficients as possible (3, for non-Mersenne primes) and which aligns to several different radices.</p>
+
+    <h3 id="sec-12" class="text-xl font-semibold mt-8">3.2 The Goldilocks prime, <span class="math">2^{448}-2^{224}-1</span></h3>
+
+    <p class="text-gray-300">I chose the Solinas trinomial prime <span class="math">p:=2^{448}-2^{224}-1</span>. I call this the “Goldilocks” prime because its form defines the golden ratio <span class="math">\\phi\\equiv 2^{224}</span>. Because <span class="math">224=32\\cdot 7=28\\cdot 8=56\\cdot 4</span>, this prime supports fast arithmetic in radix <span class="math">2^{28}</span> or <span class="math">2^{32}</span> (on 32-bit machines) or <span class="math">2^{56}</span> (on 64-bit machines). With 16, 28-bit limbs it works well on vector units such as NEON. Furthermore, radix-<span class="math">2^{64}</span> implementations are possible with greater efficiency than most of the NIST primes.</p>
+
+    <p class="text-gray-300">Karatsuba</p>
+
+    <p class="text-gray-300">The main advantage of a golden-ratio prime is fast Karatsuba multiplication. Let <span class="math">\\phi=2^{224}</span> as above. Then</p>
+
+    <p class="text-gray-300"><span class="math">(a+b\\phi)\\cdot(c+d\\phi)</span> <span class="math">=ac+(ad+bc)\\phi+bd\\phi^{2}</span> <span class="math">\\equiv(ac+bd)+(ad+bc+bd)\\phi\\pmod{p}</span> <span class="math">=(ac+bd)+((a+b)(c+d)-ac)\\phi</span></p>
+
+    <p class="text-gray-300">This can be evaluated particularly efficiently by considering individual limbs spaced apart by <span class="math">\\phi</span> at the same time.</p>
+
+    <h4 id="sec-13" class="text-lg font-semibold mt-6">Implementation on 32-bit platforms</h4>
+
+    <p class="text-gray-300">The coefficients of this prime are 32-bit aligned, so it should admit a fast packed radix-<span class="math">2^{32}</span> implementation with 14 limbs. But even on most 32-bit platforms, this may not be the best option. Carry propagation is expensive, especially with a vector unit. Instead, the prime can be implemented with radix <span class="math">2^{28}</span> and 16 limbs. If each limb enters the multiplication routine less than <span class="math">2^{28}\\cdot c</span> for some <span class="math">c</span>, then the largest coefficient before reduction will be at most <span class="math">38\\cdot 2^{56}\\cdot c^{2}</span>. This will be less than <span class="math">2^{64}</span> if <span class="math">c&lt;2^{4}/\\sqrt{38}&gt;5/2</span>. A tiny correction is required to prevent overflows during carry propagation itself, but the result is still <span class="math">&gt;5/2</span>. So implementers can begin with coefficients reduced to less than <span class="math">2^{28}\\cdot 5/4</span>, and can still perform one unreduced addition to each multiplicand without the possibility of overflow.</p>
+
+    <p class="text-gray-300">Karatsuba multiplication does not change this analysis so long as the strategy is to compute each coefficient and then reduce. Even if the accumulator overflows and underflows during the computation, it will still end up correct. Overflow can still cause problems with saturating arithmetic, such as ARM NEON’s VQDMLAL, so in practice <span class="math">c</span> is bounded more tightly around 2.</p>
+
+    <p class="text-gray-300">The resulting formulas vectorize well, at least on ARM NEON. A signed-limb representation might reduce the cost of subtraction at some cost during reduction, but I haven’t tested this.</p>
+
+    <h4 id="sec-14" class="text-lg font-semibold mt-6">Implementation on 64-bit platforms</h4>
+
+    <p class="text-gray-300">Likewise, 64-bit implementations can use radix <span class="math">2^{56}</span> and 8 limbs. But they can add and subtract many times without the possibility of overflow, magnifying reduced limbs by a factor of up to <span class="math">41&lt;2^{8}/\\sqrt{38}</span>. Vectorization is less important on 64-bit platforms because the integer scalar multiplier is usually the fastest one on the core. But vectors are still useful for the initial Karatsuba additions, for the add/sub routines and for constant-time selection and swapping.</p>
+
+    <p class="text-gray-300">If only 64-bit machines need to be supported, then the even larger “Ridinghood” prime, <span class="math">2^{480}-2^{240}-1</span>, gives almost as good performance as Goldilocks.</p>
+
+    <h4 id="sec-15" class="text-lg font-semibold mt-6">Elligator compatibility and nonce choice</h4>
+
+    <p class="text-gray-300">Note that the bias in a random variable created by simply choosing a 448-bit input and reducing mod <span class="math">p</span> is about <span class="math">2^{-224}</span>, or <span class="math">1/\\sqrt{p}</span>. So noticing this bias is comparably expensive to a rho-attack on the curve. This means that <span class="math">p</span> is easy to use with Elligator <em>[5]</em>.</p>
+
+    <p class="text-gray-300">Likewise, the order <span class="math">4\\cdot q</span> of any curve modulo <span class="math">p</span> is within <span class="math">3\\cdot 2^{224}</span> of <span class="math">2^{448}</span> by Hasse’s bound. Therefore it is safe to produce scalars by truncating a random string to 446 bits. This bias mod <span class="math">q</span> from this method is a negligible <span class="math">3\\cdot 2^{-224}</span>. The more conservative method of choosing a random 512-bit number and reducing modulo <span class="math">q</span> is also safe.</p>
+
+    <p class="text-gray-300">##</p>
+
+    <p class="text-gray-300">4 Curve coefficients</p>
+
+    <p class="text-gray-300">I chose an untwisted Edwards curve, i.e. one of the form</p>
+
+    <p class="text-gray-300"><span class="math">E_{d}:y^{2}+x^{2}=1+dx^{2}y^{2}</span></p>
+
+    <p class="text-gray-300">To demonstrate that there is nothing up my sleeve, I chose <span class="math">d</span> as small as possible in absolute value so that <span class="math">E_{d}</span> and its twist both have 4<span class="math">\\cdot</span>prime order, and so that the order of the curve is less than <span class="math">p</span>. This last restriction was for ease of implementation, but it doesn’t matter because the least <span class="math">d</span> already gives a curve of order less than <span class="math">p</span>.</p>
+
+    <p class="text-gray-300">The Goldilocks <span class="math">d</span> is <span class="math">-39081</span>. The resulting curve satisfies the other Safecurves criteria, as shown on safecurves.cr.yp.to. In particular, because <span class="math">d</span> is not square in <span class="math">\\mathbb{Z}/p\\mathbb{Z}</span>, the strongly unified Edwards point addition formulas apply.</p>
+
+    <p class="text-gray-300">The order of the curve is</p>
+
+    <p class="text-gray-300">\\[ 4\\cdot q:=4\\cdot\\left(2^{446}-\\left(\\begin{array}[]{c}0\\textsf{x8335dc163bb124b651}\\\\ 29\\textsf{c96fde933d8d723a7}\\\\ 0\\textsf{aadc873d6d54a7bb0d}\\end{array}\\right)\\right) \\]</p>
+
+    <p class="text-gray-300">and the order of its twist is</p>
+
+    <p class="text-gray-300">\\[ 4\\cdot\\left(2^{446}+\\left(\\begin{array}[]{c}0\\textsf{x335dc163bb124b651}\\\\ 29\\textsf{c96fde933d8d723a7}\\\\ 0\\textsf{aadc873d6d54a7bb0d}\\end{array}\\right)\\right) \\]</p>
+
+    <p class="text-gray-300">CFRG has specified the generator on the 4-isogenous Montgomery curve to be the order-<span class="math">q</span> point with the least <span class="math">u</span>-coordinate (<span class="math">u=5</span>), as in Curve25519. This corresponds to a generator of the Edwards curve, namely</p>
+
+    <p class="text-gray-300">\\[ \\left(-\\frac{\\sqrt{5}}{3},\\begin{array}[]{c}0\\textsf{xae05e9634ad7048db359d6205086c2b0036ed7a035884dd7b7e36d7}\\\\ 28\\textsf{ad8c4b80d6565833a2a3098bbbcb2bed1cda06bdaeafbcdea9386ed}\\end{array}\\right) \\]</p>
+
+    <p class="text-gray-300">where due to the golden ratio prime shape,</p>
+
+    <p class="text-gray-300">\\[ -\\sqrt{5}/3=\\begin{array}[]{c}0\\textsf{xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa}\\\\ 955555555555555555555555555555555555555555555555\\end{array} \\]</p>
+
+    <p class="text-gray-300">Note: The base point was changed from the first revision of this paper by adding the 2-torsion element <span class="math">(-1,0)</span>. The point in the earlier revision had order <span class="math">2q</span>, but this one has order <span class="math">q</span>.</p>
+
+    <h2 id="sec-16" class="text-2xl font-bold">5 Implementation</h2>
+
+    <p class="text-gray-300">I have written and published an implementation of Ed448-Goldilocks. The implementation on most platforms uses C with assembly intrinsics for multiply-and-accumulate, and compiler extensions for vector arithmetic. However, the NEON implementation uses an assembly implementation of a complete field multiplication. This is because on most platforms, I was able to achieve nearly assembly-level performance with a mostly-C-level implementation, but on NEON I was unable to do so.</p>
+
+    <p class="text-gray-300">The implementation uses the “Decaf” strategy <em>[16]</em> to implement a prime-order group <span class="math">2\\mathcal{E}/\\mathcal{E}[2]</span> from the cofactor-4 curve. It includes a library with general point operations, complete point and</p>
+
+    <p class="text-gray-300">scalar arithmetic, scalar multiplication, point compression, and invertible maps to the curve. It includes several example crypto primitives.</p>
+
+    <p class="text-gray-300">The Decaf strategy works the same on an Edwards curve and on the 4-isogenous Montgomery and twisted Edwards curves. Therefore the implementation internally uses the slightly faster twisted Edwards form, with <span class="math">a=-1</span> and <span class="math">d=-39082</span>.</p>
+
+    <h4 id="sec-17" class="text-lg font-semibold mt-6">Key generation</h4>
+
+    <p class="text-gray-300">The key generation algorithm uses the signed all-bits-set combs algorithm. On 64-bit platforms it uses 15kiB of tables (5 comb tables, 5 teeth per comb, 3 coordinates per point, expanded to 32 bytes per coordinate). On 32-bit platforms it instead uses 12kiB of tables (8 combs, 4 teeth per comb).</p>
+
+    <h4 id="sec-18" class="text-lg font-semibold mt-6">Signing</h4>
+
+    <p class="text-gray-300">The signature algorithm produces Schnorr signatures. It uses the same combset as the key generation algorithm.</p>
+
+    <h4 id="sec-19" class="text-lg font-semibold mt-6">Verification</h4>
+
+    <p class="text-gray-300">The verification algorithm runs in variable time, using wNAF and a 6kiB precomputed table with multiples of the generator. Verification can in principle be batched, but I haven’t tested this.</p>
+
+    <h4 id="sec-20" class="text-lg font-semibold mt-6">ECDH</h4>
+
+    <p class="text-gray-300">ECDH uses the Montgomery ladder, which is marginally faster than an Edwards scalar multiplication because it doesn’t need to decompress the input point. The Montgomery ladder is enhanced to preserve sign information and to reject points on the twist, even though it is believed to be safe to allow them. It is therefore a drop-in replacement for an Edwards scalar multiplication.</p>
+
+    <h3 id="sec-21" class="text-xl font-semibold mt-8">5.1 Source code</h3>
+
+    <p class="text-gray-300">The source code for my Ed448-Goldilocks implementation is available at http://sourceforge.net/p/ed448goldilocks/code/ci/decaf/tree/ under an MIT license.</p>
+
+    <h2 id="sec-22" class="text-2xl font-bold">6 Benchmarks</h2>
+
+    <p class="text-gray-300">To assess the performance of Ed448-Goldilocks vs. alternative curves, I ran key generation, ECDH, signing and verification tests on each alternative on several benchmarking machines.</p>
+
+    <p class="text-gray-300">I measured seven different curves. It is important to note that the implementation effort, time/memory tradeoffs, particular functions measured and measurement technique differ by curve and by platform.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Goldilocks. This is a prime-order sub/quotient group of the Ed448-Goldilocks curve, using the Decaf point compression method to remove the cofactor. It is implemented in C on x86-64 and ARM scalar, with intrinsics for word multiply and accumulate. On ARM NEON, the entire field multiplication and squaring routines are written in assembly, because my attempts with intrinsics gave poor performance. I measured performance with supercop-fastbuild <em>[6]</em>.</li>
+
+      <li>E-521. This is a <span class="math">2q</span>-order subgroup of E-521, from on an older branch of the Ed448-Goldilocks code base. It implements point compression, but not complete cofactor removal. It is implemented only on x86-64 using C with intrinsics, and is specifically tuned for processors with AVX2. I measured performance with make bench.</li>
+
+    </ul>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Haswell</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">A9</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">A8+NEON</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">goldilocks_shared_secret</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">531k</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">3.5M</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1.8M</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">goldilocks_keygen</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">166k</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1.5M</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">599k</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">goldilocks_sign</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">162k</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1.5M</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">632k</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">goldilocks_verify</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">588k</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">3.8M</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1.9M</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">e521_shared_secret</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">803k</td>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">e521_keygen</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">234k</td>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">e521_sign</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">243k</td>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">e521-verify</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">875k</td>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">ed-384-mers-variable (ecdh)</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">500k</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">9.9M</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">7.9M</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">ed-384-mers-fixed (keygen)</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">185k</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">3.2M</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">2.7M</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">ed-384-mers-db (verify)</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">508k</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">9.9M</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">7.6M</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">ed-512-mers-variable (ecdh)</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1.1M</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">22 M</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">20 M</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">ed-512-mers-fixed (keygen)</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">357k</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">6.5M</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">6.5M</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">ed-512-mers-db (verify)</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1.1M</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">22 M</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">21 M</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">openssl ecdh-p256</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">236k</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">4.4M</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">4.8M</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">openssl ecdsa-sign-p256</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">133k</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1.2M</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1.3M</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">openssl ecdsa-verify-p256</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">333k</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">5.2M</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">5.8M</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">openssl ecdh-p384</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">2.1M</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">11.1M</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">12.8M</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">openssl ecdsa-sign-p384</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">618k</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">2.7M</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">3.0M</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">openssl ecdsa-verify-p384</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">2.6M</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">13.2M</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">15.4M</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">openssl ecdh-p521</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1.8M</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">24.2M</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">29.3M</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">openssl ecdsa-sign-p521</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1.1M</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">5.4M</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">6.3M</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">openssl ecdsa-verify-p521</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">2.5M</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">29.7M</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">34.4M</td>
+
+          </tr>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">Figure 1: Ed448-Goldilocks benchmarks vs OpenSSL 1.0.1f / 1.0.2 and MSR ECCLib 1.2. The Haswell measurements are on a Core i7-4790 at  <span class="math">3.6\\mathrm{GHz}</span>  with hyperthreading and TurboBoost disabled, and OpenSSL 1.0.2. The Cortex A9 numbers are from a 1GHz Tegra 2 processor in a TrimSlice, with OpenSSL 1.0.1f. The Cortex A8+NEON numbers are on an AM335x BeagleBone Black at 1GHz with OpenSSL 1.0.1f.</p>
+
+    <p class="text-gray-300">The E-521 code is particularly sensitive to compiler options, possibly due to alignment sensitivity. I've reported the most favorable time for ECDH, 803kcy, but different versions and compilation flags give up to 860kcy on the same machine.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>ed-384-mers. This is the ed-384-mers group with cofactor 4, as implemented in MSR ECCLib 1.2. On x86-64, all field arithmetic is implemented entirely in assembly language, but without the (small) benefit of the Haswell BMI2 intrinsics. On ARM it is implemented in C. MSR ECCLib does not implement point compression, which gives it an advantage in signature verification speed. However, its key generation algorithm is not as optimized as the one Goldilocks uses, and uses smaller precomputed tables. I measured performance with ./ecc tests.</li>
+
+    </ul>
+
+    <p class="text-gray-300">On ARM, I did minimal modification of the compilation flags and source to ensure that -mcpu was set correctly and that the multiplication and squaring inner loops were unrolled, but the code should not be regarded as optimized.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>NIST secp256r1, secp384r1, secp521r1. These are implementations of short Weierstrass curves</li>
+
+    </ul>
+
+    <p class="text-gray-300">without point compression. They include the Gueron and Krasnov <em>[14]</em> optimizations for secp256r1 on x86-64, but the ARM implementations are relatively unoptimized. I measured performance with openssl speed.</p>
+
+    <p class="text-gray-300">The benchmarks are shown in Figure 1. The benchmarks are taken with hyperthreading and TurboBoost disabled. The software used in this benchmark varies widely, so it is important to take these numbers with a grain of salt. It is seen that both Ed448-Goldilocks and MSR ed-384-mers are around 4x as fast as OpenSSL’s implementation of NIST-P384 on x86-64, and on ARM Goldilocks is faster even than OpenSSL’s NIST-P256. Additionally, Ed448-Goldilocks can take advantage of ARM NEON for a <span class="math">\\approx 2\\times</span> speedup.</p>
+
+    <p class="text-gray-300">Compared to ed-384-mers, Ed448-Goldilocks is some 17% faster for key generation, 16% slower for verification and 6% slower for ECDH. These differences are exaggerated by implementation details. Goldilocks’ use of point compression slows down verification, and its larger and better-tuned combset make it faster on key generation.</p>
+
+    <p class="text-gray-300">Unfortunately, while Ed448-Goldilocks had 32-bit performance as a design requirement, no fair comparison is available on 32-bit platforms because the implementations are too different. One could compare reference implementations, where Goldilocks and ed-384-mers take about the same amount of time: some 11-13 million Cortex-A9 cycles for ECDH depending on the source branch and compiler. But this is mostly a benchmark of which optimizations are still present in the reference implementation.</p>
+
+    <p class="text-gray-300">When designing Goldilocks, I hypothesized that timings within the same implementation strategy should roughly follow a power law <span class="math">t\\propto b^{k}</span>, where <span class="math">b</span> is the bits in the field size and <span class="math">k</span> is some exponent, and therefore that <span class="math">b^{k}/t</span> might be described as an “efficiency score”. I evaluated designs with Karatsuba’s <span class="math">k=1+\\log 3/\\log 2</span>, which works surprisingly well even though not all the designs use Karatsuba multiplication. In arbitrary units, Ed448-Goldilocks and E-521 score 3.3 and 3.1 by this metric. ECCLib’s ed-384-mers and ed-512-mers both score 2.3, and the optimized secp256r1 scores 1.4. By this metric, Goldilocks is about 40% more efficient than either ed-mers curve on Haswell.</p>
+
+    <h2 id="sec-23" class="text-2xl font-bold">7 Conclusions</h2>
+
+    <p class="text-gray-300">Ed448-Goldilocks is a conservatively designed elliptic curve with very competitive performance on a wide variety of platforms. It is a suitable choice for standardization as an alternative to both secp384r1 and secp521r1.</p>
+
+    <h2 id="sec-24" class="text-2xl font-bold">References</h2>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>[1] Diego F. Aranha, Paulo S. L. M. Barreto, Geovandro C. C. F. Pereira, and Jefferson E. Ricardini. A note on high-security general-purpose elliptic curves. Cryptology ePrint Archive, Report 2013/647, 2013. http://eprint.iacr.org/.</li>
+
+      <li>[2] Daniel Bernstein, Peter Birkner, Marc Joye, Tanja Lange, and Christiane Peters. Twisted edwards curves. Progress in Cryptology–AFRICACRYPT 2008, pages 389–405, 2008.</li>
+
+      <li>[3] Daniel Bernstein and Tanja Lange. Faster addition and doubling on elliptic curves. In Advances in cryptology–ASIACRYPT 2007, pages 29–50. Springer, 2007.</li>
+
+    </ul>
+
+    <p class="text-gray-300">-</p>
+
+    <p class="text-gray-300">[4] Daniel J. Bernstein, Chitchanok Chuengsatiansup, and Tanja Lange. Curve41417: Karatsuba revisited. In Lejla Batina and Matthew Robshaw, editors, Cryptographic Hardware and Embedded Systems – CHES 2014, volume 8731 of Lecture Notes in Computer Science, pages 316–334. Springer Berlin Heidelberg, 2014.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>[5] Daniel J Bernstein, Mike Hamburg, Anna Krasnova, and Tanja Lange. Elligator: Elliptic-curve points indistinguishable from uniform random strings. In Proceedings of the 2013 ACM SIGSAC conference on Computer & communications security, pages 967–980. ACM, 2013.</li>
+
+      <li>[6] Daniel J. Bernstein, Tanja Lange, and John Schanck. supercop-fastbuild, 2014. https://github.com/jschanck-si/supercop-fastbuild.</li>
+
+      <li>[7] D.J. Bernstein, N. Duif, T. Lange, P. Schwabe, and B.Y. Yang. High-speed high-security signatures. Cryptographic Hardware and Embedded Systems, CHES 2011, 2011.</li>
+
+      <li>[8] D.J. Bernstein and P. Schwabe. Neon crypto, March 20 2012. http://cryptojedi.org/papers/neoncrypto-20120320.pdf.</li>
+
+      <li>[9] Joppe W. Bos, Craig Costello, Patrick Longa, and Michael Naehrig. Selecting elliptic curves for cryptography: An efficiency and security analysis. Cryptology ePrint Archive, Report 2014/130, 2014. http://eprint.iacr.org/.</li>
+
+      <li>[10] ECC Brainpool. Ecc brainpool standard curves and curve generation, 2005. http://www.ecc-brainpool.org/download/Domain-parameters.pdf.</li>
+
+      <li>[11] H.M. Edwards. A normal form for elliptic curves. Bulletin-American Mathematical Society, 44(3):393, 2007.</li>
+
+      <li>[12] S. Galbraith, X. Lin, and M. Scott. Endomorphisms for faster elliptic curve cryptography on a large class of curves. Advances in Cryptology-EUROCRYPT 2009, pages 518–535, 2009.</li>
+
+      <li>[13] Robert Granger and Andrew Moss. Generalised mersenne numbers revisited. Cryptology ePrint Archive, Report 2011/444, 2011. http://eprint.iacr.org/.</li>
+
+      <li>[14] Shay Gueron and Vlad Krasnov. Fast prime field elliptic curve cryptography with 256 bit primes. Cryptology ePrint Archive, Report 2013/816, 2013. http://eprint.iacr.org/.</li>
+
+      <li>[15] Mike Hamburg. Fast and compact elliptic-curve cryptography. Cryptology ePrint Archive, Report 2012/309, 2012. http://eprint.iacr.org/2012/309.</li>
+
+      <li>[16] Mike Hamburg. Decaf: Eliminating cofactors through point compression. To appear in CRYPTO 2015, 2015.</li>
+
+      <li>[17] Hüseyin Hışıl. Elliptic curves, group law, and efficient computation, 2010.</li>
+
+      <li>[18] Hüsseyin Hışıl, Kenneth Wong, Gary Carter, and Ed Dawson. Twisted edwards curves revisited. Advances in Cryptology–ASIACRYPT 2008, pages 326–343, 2008.</li>
+
+      <li>[19] G Locke and P Gallagher. Fips pub 186-3: Digital signature standard (dss). Federal Information Processing Standards Publication, 2009.</li>
+
+      <li>[20] Alexey Melnikov. [cfrg] results of the poll: Elliptic curves - preferred curves around 256bit work factor (ends on march 3rd). http://www.ietf.org/mail-archive/web/cfrg/current/msg06398.html.</li>
+
+    </ul>
+
+    <p class="text-gray-300">[21] Michael Scott. A new curve. https://moderncrypto.org/mail-archive/curves/2015/000449.html.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>[22] Christopher A. Taylor. Snowshoe: Portable, secure, fast elliptic curve math library in c. https://github.com/catid/snowshoe.</li>
+
+    </ul>`;
+---
+
+<BaseLayout title="Ed448-Goldilocks, a new elliptic curve (2015/625)">
+  <article class="max-w-4xl mx-auto article-prose">
+    <nav class="mb-8">
+      <a href="/papers" class="text-blue-400 hover:text-blue-300">
+        &larr; Back to Papers
+      </a>
+    </nav>
+
+    <header class="mb-12">
+      <h1 class="text-3xl font-bold mb-4"
+        set:html={TITLE_HTML} />
+      <p class="text-gray-400 mb-2"
+        set:html={AUTHORS_HTML} />
+      <p class="text-gray-500 text-sm mb-4">
+        2015 &middot; eprint 2015/625
+      </p>
+      <div class="flex gap-4 text-sm">
+        <a
+          href={EPRINT_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          class="text-blue-400 hover:text-blue-300"
+        >
+          Paper (eprint) &rarr;
+        </a>
+      </div>
+      <p class="mt-4 text-xs text-gray-500">
+        All content below belongs to the original authors. This page
+        reproduces the paper for educational purposes. Always
+        <a
+          href={EPRINT_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          class="text-blue-400 hover:text-blue-300"
+        >cite the original</a>.
+      </p>
+      <p class="mt-1 text-xs text-gray-600">
+        Converted with: {CRAWLER} &middot; {CONVERTED_DATE}
+      </p>
+    </header>
+
+    <Fragment set:html={CONTENT} />
+
+  </article>
+</BaseLayout>

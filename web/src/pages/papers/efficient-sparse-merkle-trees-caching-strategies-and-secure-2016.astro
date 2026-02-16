@@ -1,0 +1,617 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+
+const EPRINT_URL = 'https://eprint.iacr.org/2016/683';
+const CRAWLER = 'mistral';
+const CONVERTED_DATE = '2026-02-16';
+const TITLE_HTML = 'Efficient Sparse Merkle Trees: Caching Strategies and Secure (Non-)Membership Proofs';
+const AUTHORS_HTML = 'Rasmus Dahlberg, Tobias Pulls, Roel Peeters';
+
+const CONTENT = `    <p class="text-gray-300">Rasmus Dahlberg [ Karlstad University, Dept. of Mathematics and Computer Science, Sweden, rasmus.gd.dahlberg@gmail.com ] Tobias Pulls [ Karlstad University, Dept. of Mathematics and Computer Science, Sweden, rasmus.gd.dahlberg@gmail.com ] Roel Peeters [ KU Leuven, ESAT/COSIC & iMinds, Belgium, roel.peeters@esat.kuleuven.be ]</p>
+
+    <h6 id="sec-2" class="text-base font-medium mt-4">Abstract</h6>
+
+    <p class="text-gray-300">A sparse Merkle tree is an authenticated data structure based on a perfect Merkle tree of intractable size. It contains a distinct leaf for every possible output from a cryptographic hash function, and can be simulated efficiently because the tree is sparse (i.e., most leaves are empty). We are the first to provide complete, succinct, and recursive definitions of a sparse Merkle tree and related operations. We show that our definitions enable efficient space-time trade-offs for different caching strategies, and that verifiable audit paths can be generated to prove (non-)membership in practically constant time (<span class="math">&lt;4</span> ms) when using SHA-512/256. This is despite a limited amount of space for the cache—smaller than the size of the underlying data structure being authenticated—and full (concrete) security in the multi-instance setting.</p>
+
+    <h2 id="sec-3" class="text-2xl font-bold">1 Introduction</h2>
+
+    <p class="text-gray-300">Secure HTTPS connections rely on the users’ browsers to obtain authentic domain-to-key bindings during set-up. With this in mind, trusted third parties called certificate authorities are used to vouch for the integrity of public keys by issuing X.509 certificates. Though the initial problem of establishing trust might appear to be solved, several new complications arise. Considering that there are hundreds of certificate authorities, all of which are capable of issuing certificates for any domain, it is challenging to concisely observe what has been issued for whom <em>[11]</em>. As such, a misissued or maliciously issued certificate could remain unnoticed forever, or more likely until an attack against a domain has taken place. Naturally this raises an important question: <em>who watches the watchmen</em>?</p>
+
+    <p class="text-gray-300">Google’s Certificate Transparency (CT) project proposes public logs based on append-only Merkle trees <em>[18]</em>. The basic idea is that an SSL/TLS certificate must be included in some log to be trusted by a browser, and because the infrastructure is public anyone can audit or monitor these logs to ensure correct behavior <em>[6, 16]</em>. Thus, CT allows clients to determine whether a certificate was valid at some point in time, but inclusion in the log cannot guarantee that it is current. For instance, what if a certificate has to be revoked due to a compromised private key or an entire certificate authority <em>[15, 29]</em>? Since the</p>
+
+    <p class="text-gray-300">log is both chronological and append-only, effected certificates can neither be removed nor can the absence of a revocation certificate be proven efficiently <em>[12]</em>.</p>
+
+    <p class="text-gray-300">Certificate Revocation (RT) is a proposed extension to CT by Laurie and Kasper <em>[17]</em>. The aim is to provide a separate mechanism that proves certificates unrevoked, and requires an authenticated data structure supporting efficient non-membership proofs <em>[34]</em>. As is, there are at least two approaches towards such proofs. One is based on sorted Merkle trees, and the other on tuple-based signed statements on the form “Key <span class="math">k_{i}</span> has the value <span class="math">v_{i}</span>; there are no keys in the interval <span class="math">(k_{i},k_{i+1})</span>” <em>[9, 17]</em>. We consider the former approach in terms of a sparse Merkle tree (SMT), whose scope goes far beyond RT. For example, an SMT can be used as a key building block in a wide area of applications, ranging from persistent authenticated dictionaries to secure messaging applications <em>[10, 20, 30, 32]</em>.</p>
+
+    <p class="text-gray-300">After introducing some necessary preliminaries (Section 2) and the approach taken here (Section 3), our contributions are as follows. First, building on an interesting proposal started by Laurie and Kasper <em>[17]</em>, we define efficient caching strategies and complete recursive definitions of an SMT (Section 4). Second, we evaluate the security of our definitions in the multi-instance setting, comparing our design decisions with those made in CONIKS <em>[20]</em> (Section 5). Third, we examine three caching strategies experimentally for an SMT, showing different space-time trade-offs (Section 6). Finally, we discuss related work (Section 7) and end with conclusions (Section 8).</p>
+
+    <h2 id="sec-4" class="text-2xl font-bold">2 Preliminaries</h2>
+
+    <p class="text-gray-300">We start by describing background regarding Merkle trees and audit paths, then cryptographic assumptions that our security evaluation relies on are presented.</p>
+
+    <h3 id="sec-5" class="text-xl font-semibold mt-8">2.1 Merkle Trees</h3>
+
+    <p class="text-gray-300">A Merkle tree <em>[21]</em> is a binary tree that incorporates the use of cryptographic hash functions. One or many attributes are inserted into the leaves, and every node derives a digest which is recursively dependent on all attributes in its subtree. That is, leaves compute the hash of their own attributes, and parents derive the hash of their children’s digests concatenated left-to-right. As further described in Section 5, certain digests must also be encoded with additional constants. This is to prevent indistinguishability between different types of nodes <em>[8, 20]</em>.</p>
+
+    <p class="text-gray-300">Figure 1 illustrates a Merkle tree without a proper encoding. It contains eight attributes <span class="math">\\rho</span>–<span class="math">\\omega</span>, and the <em>root digest</em> <span class="math">r\\leftarrow d_{0}^{3}</span> serves as a reference to prove membership by presenting an <em>audit path</em> <em>[18]</em>. For instance, dashed nodes are necessary to authenticate the third left-most leaf containing attribute <span class="math">\\tau</span>. More generally, an audit path comprises all siblings along the path down to the leaf being authenticated. Combined with a retrieved attribute, this forms a proof of membership which is valid if it reconstructs the root digest <span class="math">r^{\\prime}</span> such that <span class="math">r^{\\prime}=r</span>. Note that a proof is only as convincing as <span class="math">r</span>, but trust can be established using, e.g., digital signatures or by periodically publishing roots in a newspaper.</p>
+
+    <p class="text-gray-300">!<a href="img-0.jpeg">img-0.jpeg</a> Fig.1: A Merkle tree containing attributes  <span class="math">\\rho -\\omega</span>  . The digest rooted at height  <span class="math">h</span>  and index  <span class="math">i</span>  is denoted by  <span class="math">d_i^h</span></p>
+
+    <p class="text-gray-300">Inspired by Katz [13] and Melara et al. [20], we consider a computationally bounded adversary in the multi-instance setting. This means that there are many distinct SMTs, and the adversary should not gain any advantage in terms of necessary computation if she attempts to attack all SMTs at once. In other words, despite the adversary's multi-instance advantage, the goal is to provide full  <span class="math">\\lambda</span> -bit security for each SMT. For security we rely on a collision and pre-image resistant hash function  <span class="math">\\mathsf{H}</span>  with digests of size  <span class="math">N := 2\\lambda</span>  bits, and on Lemma 1.</p>
+
+    <p class="text-gray-300">Lemma 1. The security of an audit path reduces to the collision resistance of the underlying hash function  <span class="math">\\mathsf{H}</span> .</p>
+
+    <p class="text-gray-300">Proof. This follows directly from the work of Merkle [21] and Blum et al. [5].</p>
+
+    <p class="text-gray-300">First we introduce non-membership proofs that are based on sorted Merkle trees, then the notion of an SMT and our approach is incrementally described.</p>
+
+    <p class="text-gray-300">In RT and like applications, it is crucial to prove certain values absent [17,31,32]. Efficient construction of such non-membership proofs can be enabled by viewing balanced binary search trees, e.g., treaps and red-black trees, as Merkle trees. A lexicographically sorted tree structure serves the purpose of preventing all nodes from being enumerated, involving rules that rotate nodes upon insertion and removal, and the structure of that tree can be fixed by a trustworthy root due to being a Merkle tree. We prove non-membership by generating an audit path through binary search, and a verifying party accepts the proof to be valid if there is no evidence that the tree structure is unsorted or that the root is improperly reconstructed. In other words, the absence of a value is efficiently proven due to a balanced search tree, and the proofs are convincing because the structure of the tree is fixed by a cryptographically derived root.</p>
+
+    <p class="text-gray-300">While an SMT also relies on the structure of the tree together with being a Merkle tree, it is different in that it requires neither balancing techniques nor certain constants when encoding digests. This is due to an intractably large Merkle tree that reserves a unique leaf  <span class="math">\\ell</span>  for every conceivable key digest. The hash of a key  <span class="math">k</span>  determines  <span class="math">\\ell</span> , and  <span class="math">k</span>  is a (non-)member if the attribute  <span class="math">a \\in \\ell</span>  is set to  <span class="math">a_0</span>  and  <span class="math">a_1</span> , respectively. Hence, the resulting tree structure contains  <span class="math">2^N</span>  leaves at all times, and (non-)membership can be proven by presenting an audit path for leaf  <span class="math">\\mathsf{H}(k)</span> . This set-up also implies history independence [25]: a unique set of keys produce a deterministic root digest, regardless of the order in which keys have been inserted or removed. Notably history independence is not necessarily provided by a sorted Merkle tree (e.g., not the case for a red-black tree).</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Considering the intractable size of an SMT, it is not without challenges to define an efficient representation. To begin with, the only reason why this is feasible traces back to the key observation that an SMT is sparse. This means that the vast majority of all leaves represent non-members, as indicated by a shared attribute  <span class="math">a_0</span> , resulting in a construction where the empty subtrees rooted at height  <span class="math">h</span>  derive identical default digests. The basic principle is as follows. An empty leaf computes  <span class="math">d_{<em>}^{0} \\gets \\mathsf{H}(a_{0})</span> , a node rooted at an empty subtree with height one derives  $d_{</em>}^{1} \\gets \\mathsf{H}(d_{*}^{0} \\</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">d_{*}^{0})$ , and so forth. Since these default digests can be precomputed, they need neither be associated with explicit nodes nor be derived recursively by visiting all leaves. Instead, referring to Figure 2, it suffices to process the filled nodes whose digests depend on existing keys.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">!<a href="img-1.jpeg">img-1.jpeg</a> Fig.2: An illustration of how subtrees with default digest can be discarded to attain a tractable representation of an SMT.</p>
+
+    <p class="text-gray-300">Different approaches can be used to provide efficient representations of an SMT. Bauer [3] has proposed an explicit pruned tree structure where all the non-empty attributes are elevated upwards through their ancestors. The elevation stops when the root of a subtree containing a single non-empty leaf is reached, and all</p>
+
+    <p class="text-gray-300">descendants to such roots are discarded. The original SMT can be reconstructed by recording indices for the non-empty leaves in each subtree, but will require excessive amounts of memory unless they are evenly spread out. Hence, while the proposal is neat, we find the approach started by Laurie and Kasper [17] more generally applicable. It is based on maintaining a collection of keys  <span class="math">\\mathcal{K}</span> , and the collection is authenticated by simulating an SMT. As is, however, their proposal is incomplete and cannot, e.g., derive (non-)membership proofs efficiently. This is due to deriving subtrees' digests over and over again—an issue we solve in the following sections by introducing relative information.</p>
+
+    <p class="text-gray-300">We approach the SMT in terms of a simulation (Definition 1). Let us start by considering the simplest case of no relative information, then why it is necessary.</p>
+
+    <p class="text-gray-300">Definition 1. A simulated SMT is the composition of (i) a data structure  <span class="math">\\mathcal{D}</span>  containing unique keys  <span class="math">k</span> , and (ii) a collection of cached digests, referred to as the relative information  <span class="math">\\delta</span> . Both structures define operations for insertion, removal, and look-up;  <span class="math">\\mathcal{D}</span>  also supports splitting, i.e., dividing it in two based on a key.</p>
+
+    <p class="text-gray-300">Our SMT is simulated in the sense that there is no explicit tree structure, which is possible because every  <span class="math">k \\in \\mathcal{D}</span>  can be mapped to its associated subtrees recursively. For example, as shown in Figure 3, a root digest can be obtained by simulating a traversal from the root down to all the non-empty leaves. The base is initially set to all zeros and refers to the left-most leaf in a subtree. It remains the same on left-traversals, must be updated by setting the appropriate bit to one on right traversals, and is used to determine the split index. The split index is the key upon which  <span class="math">\\mathcal{D}</span>  is divided on and refers to the left-most leaf in the right subtree. Thus, as formalized in Section 4.3, it is an upper exclusive and lower inclusive bound for the keys in the left and right subtrees, respectively.</p>
+
+    <p class="text-gray-300">!<a href="img-2.jpeg">img-2.jpeg</a> Fig. 3: An illustration of a recursive traversal to obtain the root digest;  <span class="math">k_{1} = 000</span> ,  <span class="math">k_{2} = 010</span> , and  <span class="math">k_{3} = 111</span> .</p>
+
+    <p class="text-gray-300">Clearly, it is inefficient to obtain a subtree’s digest by repeatedly visiting all the non-empty leaves. Therefore relative information is necessary: a collection of cached digests with the sole purpose of preventing such inefficiency. For instance, a naïve caching strategy could record every digest that is non-default. Although that requires excessive amounts of memory, it would ensure that all siblings’ digests are available upon generating audit paths. Consequently, the number of splits will be constant, and (non-)membership can be proven with the same time complexity as the underlying split operation. Our aim when defining caching strategies is to preserve this property while reducing memory requirements.</p>
+
+    <h2 id="sec-12" class="text-2xl font-bold">4 Efficient Representations</h2>
+
+    <p class="text-gray-300">First we define caching strategies that are based on capturing <em>branches</em>, then our proposal is formalized by presenting complete recurrences for an efficient SMT.</p>
+
+    <h6 id="sec-13" class="text-base font-medium mt-4">Definition 2</h6>
+
+    <p class="text-gray-300">A branch is an interior node in a Merkle tree, for which both of the two children derive non-default digests <em>[27]</em>.</p>
+
+    <h3 id="sec-14" class="text-xl font-semibold mt-8">4.1 Caching Strategies</h3>
+
+    <p class="text-gray-300">During the design of a caching strategy it is important to consider expected and worst case scenarios. The former is somewhat straight forward since the output of H is uniformly distributed, whereas the latter is both strategy and use-case dependent. That is, the non-empty leaves will be evenly spread out in the average case, and a cluster of non-default digests will therefore be formed at the higher <span class="math">\\lceil\\log n\\rceil+1</span> layers. If these digests are captured by the relative information, the traversals down to the leaves can be prevented. The digests rooted at layers below the dense threshold are of lesser importance due to the sparse property, but can be vital if a worst-case ever occurs. For example, an intuitive caching strategy that we omit is to record the higher <span class="math">\\lceil\\log n\\rceil+1</span> layers of the SMT. Although the dense part would be captured in the average case, forcing leaves to <em>clump</em> at some subtree is trivial for an adversary that selects the keys. Hence, a large majority of the non-default digests cannot be captured, and the resulting cache will be useless if (non-)membership proofs are issued for the clumped subtree. This is the reason why our caching strategies evolve around capturing branches (Definition 2), aiming to bound the number of recursive traversals down to the leaves by a constant. As desired, it then follows that the time necessary to generate an audit path, or equivalently the time necessary to update the status of a single key, will reduce to the underlying split operation.</p>
+
+    <h4 id="sec-15" class="text-lg font-semibold mt-6">B cache.</h4>
+
+    <p class="text-gray-300">Figure 4a depicts the B cache which captures every digest rooted at a branch. It contains <span class="math">n-1</span> digests at all times, and requires at most <span class="math">N</span> traversals down to either a branch or leaf upon generating audit paths. The former follows from the observation that all but the first insertion yield a single branch, and the latter (i.e., the worst case) is discussed in Section 5.3.</p>
+
+    <p class="text-gray-300">!<a href="img-3.jpeg">img-3.jpeg</a> (a) B cache</p>
+
+    <p class="text-gray-300">!<a href="img-4.jpeg">img-4.jpeg</a> (b)  <span class="math">\\mathbf{B}^{+}</span>  cache Fig. 4: Captured digests as the circled subtrees contain a single non-empty leaf.</p>
+
+    <p class="text-gray-300"><span class="math">\\mathbf{B}^{-}</span>  cache. By discarding  <span class="math">\\mathrm{f}(n)</span>  branches from the B cache, memory requirements can be reduced at the cost of additional computation. This forms the notion of  <span class="math">\\mathbf{B}^{-}</span> , which provides trade-offs depending on how  <span class="math">\\mathrm{f}(n)</span>  is implemented. We examine a probabilistic approach where a branch is captured with probability  <span class="math">p</span> , meaning  <span class="math">\\mathrm{f}(n)</span>  is roughly  <span class="math">n(1 - p)</span> . Other variations of  <span class="math">\\mathrm{f}(n)</span>  include ignoring every other layer, as well as defining an upper bound for how many branches to ignore.</p>
+
+    <p class="text-gray-300"><span class="math">\\mathbf{B}^{+}</span>  cache. The drawback of using a B cache is that, in the average case, only the higher  <span class="math">\\lceil \\log n\\rceil</span>  layers will be captured. In other words, since the dense part also spans layer  <span class="math">\\lceil \\log n\\rceil +1</span> , we are missing out on some performance.  <span class="math">\\mathbf{B}^{+}</span>  aims to solve this issue by capturing branches together with their children. The resulting cache covers the entire dense part of the SMT, but for the sake of efficiency we also limit the worst case memory requirements by  <span class="math">2n</span>  due to discarding branches (Figure 4b). The difference is negligible with regard to time, considering that a branch can derive its digest in constant time from the cached children.</p>
+
+    <p class="text-gray-300">Implementation-wise our caching strategies are convenient. To process an interior digest, a cache function that accepts the left and right child digests can be used. Upon invocation it computes the interior digest  <span class="math">d</span> , examines if both children are non-default, deletes the previous branch if applicable, caches in case of a new branch, and outputs  <span class="math">d</span> . While this algorithm merely concerns the B cache, it extends perfectly to  <span class="math">\\mathbf{B}^{-}</span>  and  <span class="math">\\mathbf{B}^{+}</span> . Therefore these caching strategies are practical to mix: start off with  <span class="math">\\mathbf{B}^{+}</span> , switch to B as memory requirements grow larger, and finally migrate to  <span class="math">\\mathbf{B}^{-}</span>  with shrinking probability  <span class="math">p</span> . For instance, this could be interesting in real-world scenarios where memory is a limited resource.</p>
+
+    <p class="text-gray-300">Let  <span class="math">h</span>  be the height of a subtree,  <span class="math">b</span>  the base of a node, and  <span class="math">\\mathcal{D}</span>  a data structure containing unique keys' digests  <span class="math">\\mathsf{H}(k)</span> . Further denote by  <span class="math">\\alpha_{i}</span>  the  <span class="math">i^{th} \\geq 0</span>  left-most</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">bit in <span class="math">\\alpha</span>, <span class="math">\\alpha_{i=\\beta}</span> the assignment of that bit to <span class="math">\\beta\\in\\{0,1\\}</span>, and by colon (:) list concatenation. Finally, define the bit in the base that is set on right traversals as <span class="math">j:=N-h</span>, the split index as <span class="math">s:=b_{j=1}</span>, and <span class="math">\\mathcal{D}</span> divided on <span class="math">s</span> for relation <span class="math">R</span> as $\\mathcal{D}_{s}^{R}:=\\{k</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">k\\in\\mathcal{D}\\wedge kRs\\}$. Our recurrences are shown in Figure 5:</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Given a height <span class="math">h</span>, (1) derives the default digest <span class="math">d_{*}^{h}</span>. The leaf hash (LH) and interior hash (IH) functions serve the purpose of encoding digests securely, as further described in Section 5.</li>
+
+      <li>Given a height <span class="math">h</span>, a base <span class="math">b</span>, and a collection of keys <span class="math">\\mathcal{D}</span>, (2) derives the digest <span class="math">d_{b}^{h}</span>. The base case occurs if there is relative information available, if a default digest is applicable, or if a non-empty leaf is reached. Otherwise, (2) performs two recursive calls with <span class="math">\\mathcal{D}</span> divided on <span class="math">s</span>, <span class="math">b</span> updated in the event of a right traversal, and <span class="math">h</span> reduced by one.</li>
+
+      <li>Given a height <span class="math">h</span>, a base <span class="math">b</span>, a collection of keys <span class="math">\\mathcal{D}</span>, and a key <span class="math">k</span> for leaf <span class="math">\\ell</span>, (3) generates an audit path for <span class="math">\\ell</span>. Note that the siblings’ digests are gathered by list concatenation, repeatedly invoking (2) after reaching <span class="math">\\ell</span>.</li>
+
+      <li>Given a height <span class="math">h</span>, a base <span class="math">b</span>, an audit path <span class="math">P</span> for key <span class="math">k</span>, and an attribute <span class="math">a\\in\\{a_{0},a_{1}\\}</span>, (4) reconstructs the root digest by traversing the tree down to the leaf being authenticated. Every sibling’s digest is obtained from <span class="math">P[j]</span>.</li>
+
+      <li>Given a height <span class="math">h</span>, a base <span class="math">b</span>, a collection of keys <span class="math">\\mathcal{D}</span>, a subset of keys <span class="math">\\mathcal{K}\\subset\\mathcal{D}</span> where <span class="math">\\mathcal{K}\\neq\\emptyset</span>, and an attribute <span class="math">a\\in\\{a_{0},a_{1}\\}</span>, (5) outputs the new root digest and updates the relative information. This is achieved by visiting all leaves <span class="math">\\ell\\in\\mathcal{K}</span>, also invoking the cache function (C) to compute the interior digest <span class="math">d_{b}^{h}</span> and ensure that the relative information is up-to-date.</li>
+
+    </ul>
+
+    <p class="text-gray-300">The size of an audit path is <span class="math">\\mathcal{O}\\left(1\\right)</span>, but can be further reduced by discarding default digests. This yields a <em>sparse audit path</em>, and necessitates encoding of an <span class="math">N</span>-bitmap to determine whether a digest is (non-)default. We omit the details of such a recurrence since it is trivially added when (3)–(4) is provided.</p>
+
+    <h2 id="sec-18" class="text-2xl font-bold">5 Security</h2>
+
+    <p class="text-gray-300">Consider a single SMT and assume that the hash function is fixed. Then it follows that the size of an audit path is fixed by <span class="math">N</span> due to the structure of the tree, and consequently we can distinguish between leaves and interior nodes. This means that, for the case of a single SMT with a fixed hash function, no special encoding is necessary to distinguish between nodes, and that the security of an audit path reduces to the collision resistance of the underlying hash function (Lemma 1).</p>
+
+    <p class="text-gray-300">Next, to prevent an adversary from gaining any advantage when attacking several SMTs in parallel, we consider the full (concrete) security of an audit path in the multi-instance setting. Thereafter we relate our encoding of nodes to CONIKS <em>[20]</em>, and examine the impact of caching strategies for security.</p>
+
+    <p class="text-gray-300">###</p>
+
+    <div class="my-4 text-center"><span class="math-block">\\xi_ {*} ^ {h} := \\left\\{ \\begin{array}{l l} \\mathrm {L H} _ {s} ^ {*} (a _ {0}) &amp;amp; , \\text {if } h = 0 \\\\ \\mathrm {I H} _ {s} ^ {h} \\left(\\xi_ {*} ^ {h - 1}, \\xi_ {*} ^ {h - 1}\\right) &amp;amp; , \\text {else} \\end{array} . \\right. \\tag {1}</span></div>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mathbb {R} _ {b} ^ {h} (\\mathcal {D}) := \\left\\{ \\begin{array}{l l} \\delta_ {b} ^ {h} &amp; , \\text {if available} \\\\ \\xi_ {*} ^ {h} &amp; , \\text {elif }</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mathcal {D}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">= 0 \\\\ \\mathrm {L H} _ {b} ^ {*} (a _ {1}) &amp; , \\text {elif }</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mathcal {D}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">= 1 \\wedge h = 0 \\\\ \\mathrm {I H} _ {b} ^ {h} \\left(\\mathrm {R} _ {b} ^ {h - 1} \\left(\\mathcal {D} _ {s} ^ {&lt;  }\\right), \\mathrm {R} _ {s} ^ {h - 1} \\left(\\mathcal {D} _ {s} ^ {\\geq}\\right)\\right) &amp; , \\text {else} \\end{array} . \\right. \\tag {2}</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <div class="my-4 text-center"><span class="math-block">\\mathbb {A} _ {b} ^ {h} (\\mathcal {D}, k) := \\left\\{ \\begin{array}{l l} \\emptyset &amp;amp; , \\text {if } h = 0 \\\\ \\mathbb {R} _ {s} ^ {h - 1} \\left(\\mathcal {D} _ {s} ^ {\\geq}\\right): \\mathbb {A} _ {b} ^ {h - 1} \\left(\\mathcal {D} _ {s} ^ {&amp;lt;  }, k\\right) &amp;amp; , \\text {elif } k _ {j} = 0 \\\\ \\mathbb {R} _ {b} ^ {h - 1} \\left(\\mathcal {D} _ {s} ^ {&amp;lt;  }\\right): \\mathbb {A} _ {s} ^ {h - 1} \\left(\\mathcal {D} _ {s} ^ {\\geq}, k\\right) &amp;amp; , \\text {else} \\end{array} . \\right. \\tag {3}</span></div>
+
+    <div class="my-4 text-center"><span class="math-block">\\mathbb {B} _ {b} ^ {h} (P, k, a) := \\left\\{ \\begin{array}{l l} \\mathrm {L H} _ {b} ^ {*} (a) &amp;amp; , \\text {if } h = 0 \\\\ \\mathrm {I H} _ {b} ^ {h} \\left(\\mathrm {B} _ {b} ^ {h - 1} (P, k, a), P [ j ]\\right) &amp;amp; , \\text {elif } k _ {j} = 0 \\\\ \\mathrm {I H} _ {b} ^ {h} \\left(P [ j ], \\mathrm {B} _ {s} ^ {h - 1} (P, k, a)\\right) &amp;amp; , \\text {else} \\end{array} . \\right. \\tag {4}</span></div>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mathbb {U} _ {b} ^ {h} (\\mathcal {D}, \\mathcal {K}, a) := \\left\\{ \\begin{array}{l l} \\mathrm {L H} _ {b} ^ {*} (a) &amp; , \\text {if } h = 0 \\\\ \\mathrm {C} _ {b} ^ {h} \\left(\\mathrm {R} _ {b} ^ {h - 1} \\left(\\mathcal {D} _ {s} ^ {&lt;  }\\right), \\mathrm {U} _ {s} ^ {h - 1} \\left(\\mathcal {D} _ {s} ^ {\\geq}, \\mathcal {K}, a\\right)\\right) &amp; , \\text {elif } \\left</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mathcal {K} _ {s} ^ {&lt;  } \\right</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">= 0 \\wedge \\left</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mathcal {K} _ {s} ^ {\\geq} \\right</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\neq 0 \\\\ \\mathrm {C} _ {b} ^ {h} \\left(\\mathrm {U} _ {b} ^ {h - 1} \\left(\\mathcal {D} _ {s} ^ {&lt;  }, \\mathcal {K}, a\\right), \\mathrm {R} _ {s} ^ {h - 1} \\left(\\mathcal {D} _ {s} ^ {\\geq}\\right)\\right) &amp; , \\text {elif } \\left</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mathcal {K} _ {s} ^ {&lt;  } \\right</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\neq 0 \\wedge \\left</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mathcal {K} _ {s} ^ {\\geq} \\right</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">= 0 \\\\ \\mathrm {C} _ {b} ^ {h} \\left(\\mathrm {U} _ {b} ^ {h - 1} \\left(\\mathcal {D} _ {s} ^ {&lt;  }, \\mathcal {K} _ {s} ^ {&lt;  }, a\\right), \\mathrm {U} _ {s} ^ {h - 1} \\left(\\mathcal {D} _ {s} ^ {\\geq}, \\mathcal {K} _ {s} ^ {\\geq}, a\\right)\\right) &amp; , \\text {else}. \\end{array} \\right. \\tag {5}</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <p class="text-gray-300">Fig.5: Recurrences that derive default digests  <span class="math">(\\xi)</span> , root digests  <span class="math">(\\mathbb{R})</span> , audit paths  <span class="math">(\\mathbb{A})</span> , reconstructed root digests  <span class="math">(\\mathbb{B})</span> , and relative information  <span class="math">(\\mathbb{U})</span> .</p>
+
+    <h2 id="sec-19" class="text-2xl font-bold">5.1 The Merkle Prefix Tree in CONIKS</h2>
+
+    <p class="text-gray-300">As described more broadly in Section 7, CONIKS is a key verification service that uses a Merkle prefix tree (MPT) to authenticate the users' key bindings [20]. An MPT can be seen as a dynamically sized and explicit SMT where empty subtrees are replaced with empty nodes. Key-bindings are mapped by a hash function  <span class="math">\\mathsf{H}</span>  to unique indices  <span class="math">i</span> , and every (non-)empty leaf in the tree is associated with a depth  <span class="math">\\ell</span>  as well as an  <span class="math">\\ell</span> -bit unique prefix  <span class="math">j</span>  of  <span class="math">i</span> . The encoding of an empty node is defined in (6).</p>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">d \\leftarrow \\mathrm {H} \\left(C _ {\\text {empty}} \\</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">C _ {\\mathrm {tw}} \\</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">j \\</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\ell\\right) \\tag {6}</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <p class="text-gray-300"><span class="math">C_{\\mathrm{empty}}</span>  is a constant for empty leaves and  <span class="math">C_{\\mathrm{tw}}</span>  a tree-wide constant. The encoding of a non-empty node is defined in (7).</p>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">d \\leftarrow \\mathrm {H} \\left(C _ {\\text {leaf}} \\</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">C _ {\\mathrm {tw}} \\</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">i \\</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\ell \\</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">p\\right) \\tag {7}</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <p class="text-gray-300"><span class="math">C_{\\mathrm{leaf}}</span>  is a constant for non-empty leaves and  <span class="math">p</span>  a payload. Finally, the encoding of an interior node is defined in (8).</p>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">d \\leftarrow \\mathrm {H} \\left(d _ {\\text {left}} \\</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">d _ {\\text {right}}\\right) \\tag {8}</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">The constants <span class="math">C_{\\mathrm{empty}}</span> and <span class="math">C_{\\mathrm{leaf}}</span> serve the purpose of preventing indistinguishability between (non-)empty leaves, and the tree-wide constant <span class="math">C_{\\mathrm{tw}}</span> provides protection against an adversary in the multi-instance setting. In other words, if all MPTs use distinct tree-wide constants, no nodes' pre-images can be valid across different trees. Similarly, no nodes' pre-images can be valid across multiple locations because the leaves' digests are uniquely encoded by $j\\</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\ell<span class="math"> and </span>i\\</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\ell$ (the location of an interior node is implicit due to the children it commits to). Thus, as opposed to searching collisions across different trees and locations in parallel, an adversary must target a particular tree and location.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">We also need to consider different versions of the trees that are generated by updates. To accomplish full <span class="math">\\lambda</span>-bit security for an instance of an MPT, a new tree-wide constant must be selected after each update to prevent parallel attacks through past versions of the same tree structure. This means that for all updates, the entire MPT has to be recomputed from scratch.</p>
+
+    <h2 id="sec-20" class="text-2xl font-bold">5.2 A Secure Encoding for Sparse Merkle Trees</h2>
+
+    <p class="text-gray-300">Figure 6 defines a secure encoding for an SMT in the multi-instance setting. We prevent attacks across distinct trees by introducing a tree-wide constant <span class="math">C_{\\mathrm{tw}}</span>, but we do not protect against attacks on different versions of the same tree structure because <span class="math">C_{\\mathrm{tw}}</span> is reused between updates. For attacks within a particular tree, we include unique identifiers in every non-empty subtree. This differs with respect to MPTs, but is necessary to preserve the sparse property of an SMT: if unique prefixes were included in the empty subtrees, then there would no longer be any default digests. As shown in (10), we solve this issue and retain security by moving the encoding of an empty node into the non-empty parent. An interior node that is non-default will still commit properly to a certain location encoded by base and height<span class="math">^4</span>, and since the digest of an empty node is publicly known even for an MPT no security is lost. Furthermore, note that we do not encode the attributes <span class="math">a_0</span> and <span class="math">a_1</span> explicitly in (9). Inclusion of the base suffices to distinguish between (non-)empty leaves, considering that the height of an SMT is implicit.</p>
+
+    <p class="text-gray-300">$$ \\mathrm{LR}_b^e(a) := \\begin{cases} \\mathsf{H}(C_{\\mathrm{tw}}) &amp; \\text{if } a = a_0 \\\\</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mathsf{H}(C_{\\mathrm{tw}} \\</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">b) &amp; \\text{, else } \\text{.}</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">\\end{cases} \\tag{9} $$</p>
+
+    <p class="text-gray-300">$$ \\mathrm{IR}_b^h(d_{\\text{left}}, d_{\\text{right}}):= \\begin{cases}</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mathsf{H}(d_{\\text{left}} \\</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">d_{\\text{right}}) &amp; \\text{if } d_{\\text{left}} = d_{\\text{right}} = \\xi^h - 1 \\\\</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">\\end{cases} \\tag{10} $$</p>
+
+    <p class="text-gray-300">Fig. 6: Secure node encodings for an SMT.</p>
+
+    <p class="text-gray-300"><span class="math">^4</span> The height is necessary because the base is ambiguous on left traversal, i.e., it has fixed size and is only updated by setting the appropriate bit on right traversals.</p>
+
+    <p class="text-gray-300">Generally speaking, we often distinguish between best, worst, and average case complexities. For instance, a hash table has amortized constant look-up time, but can degrade to a linear construction if all entries hash to the same bucket. Likewise, a binary search tree that is probabilistically balanced is in danger of breaking down into a linked list. Though critics might claim that attacks based on such degradations are of theoretical interest alone, Crosby and Wallach [7] have already presented denial of service attacks that exploit algorithmic complexities. Thus, within security, it is of great importance to evaluate worst case behavior.</p>
+
+    <p class="text-gray-300">Let us consider the B cache. In the worst case, if there are merely  <span class="math">N</span>  keys, an adversary could force an almost perfect spine of branches as depicted in Figure 7. Whenever membership proofs are issued for the leaves on that spine, the large majority of all the non-default digests must be computed because the siblings' digests are not captured by the cache. While this is not an issue for a small SMT, the worst case efficiency actually increases as the tree grows: new insertions yield additional branches, and it is more efficient to stop traversals at a branch than at a leaf. In other words, there are two scenarios each time a sibling's digest is requested. First, the digest is default and can be requested in constant time. Second, the digest is non-default and can be derived by traversing the tree down to a branch or leaf. In either case, regardless of how an adversary selects the keys, at most  <span class="math">N</span>  traversals are necessary (one per layer). A similar analysis applies to  <span class="math">\\mathbf{B}^{+}</span> , considering that the children of all branches are captured by the relative information. For  <span class="math">\\mathbf{B}^{-}</span> , one can show that the number of traversals will be bounded by  <span class="math">\\mathrm{f}(n)</span> . As such, to prevent an adversary from causing inefficiency,  <span class="math">\\mathrm{f}(n)</span>  must be either constant or unpredictable to the adversary.</p>
+
+    <p class="text-gray-300">!<a href="img-5.jpeg">img-5.jpeg</a> Fig. 7: A branch spine, potentially caused by an adversary.</p>
+
+    <p class="text-gray-300">An almost identical analysis applies for worst case behavior during updates. This follows from the observation that (3) and (5) traverse the tree down to the leaves, invoking (2) on each layer.</p>
+
+    <p class="text-gray-300">6 Performance</p>
+
+    <p class="text-gray-300">We examined performance and space-time trade-offs experimentally using a proof-of-concept implementation in Go, selecting SHA-512/256 as the hash function, a data structure <span class="math">\\mathcal{D}</span> that supports splitting in logarithmic time, and relative information <span class="math">\\delta</span> that is maintained in constant time (a hash table). Our experiments were executed on an Intel(R) Core(TM) i7-4790 CPU at 3.60 GHz with 2x8 GB DDR4 RAM, and they utilized Go’s built-in benchmarking tool. Furthermore, the B^{-} cache was implemented probabilistically such that a branch is captured with probability <span class="math">p</span>. We tested B^{-} for <span class="math">p\\in\\{0.5\\ldots 0.9\\}</span>, denoted by <span class="math">\\mathrm{B}_{p}^{-}</span>, and included B, <span class="math">\\mathrm{B}^{+}</span>, and a hash treap in our experiments. For the relevant operations, i.e., insertion, removal, and look-up, the expected logarithmic time complexity of a hash treap makes it a good representation of other authenticated data structures that are explicitly stored in memory.</p>
+
+    <p class="text-gray-300">Figure 8(a) shows the size of the authenticated data structure as a function of the data structure being authenticated. There is essentially no distinction between the two for a hash treap, and in the case of an SMT this is the relation between <span class="math">\\delta</span> and <span class="math">\\mathcal{D}</span>. For <span class="math">2^{20}</span> keys, the hash treap needs 960 MiB, the <span class="math">\\mathrm{B}^{+}</span> cache 512 MiB, the B cache 256 MiB, and the <span class="math">\\mathrm{B}_{0.5}^{-}</span> cache 128 MiB. It is evident that the different caches double in size, and that the size of a hash treap is roughly eight times larger than that of a <span class="math">\\mathrm{B}_{0.5}^{-}</span> cache. Furthermore, it should be noted that the <span class="math">\\mathrm{B}_{p}^{-}</span> caches with <span class="math">p\\in\\{0.6\\ldots 0.9\\}</span> have sizes evenly distributed in <span class="math">[\\mathrm{B}_{0.5}^{-},\\mathrm{B}]</span>.</p>
+
+    <p class="text-gray-300">Figure 8(b) shows the time required to generate an audit path. Since the full structure is in memory for the hash treap, it is just a matter of copying the nodes along the path in negligible time (0.003 ms). Similarly, for <span class="math">\\mathrm{B}^{+}</span> and B, we see consistent results that are less than 1 ms regardless of how large <span class="math">\\mathcal{D}</span> is. This is because both caching strategies ensure that the vital non-default digests are cached, whereas additional recursive traversals down to either branches or leaves are necessary for <span class="math">\\mathrm{B}_{p}^{-}</span>. Finally, we observe the impact of selecting <span class="math">p</span>. While <span class="math">p&gt;0.6</span> gives an expected time that is less than 4 ms, <span class="math">p=0.5</span> behaves erratically. This follows from the high probability that a sibling’s digests must be derived instead of being found in the cache, as is also evident to a smaller extent for <span class="math">p=0.6</span>.</p>
+
+    <p class="text-gray-300">Figure 8(c) shows the time it takes to update <span class="math">m</span> keys in a data structure containing <span class="math">n=2^{15}</span> keys. All approaches scale as <span class="math">\\mathcal{O}\\left(m\\log n\\right)</span>, with the hash treap being the fastest. Similarly, Figure 8(d) shows the time it takes to update <span class="math">m=256</span> keys as a function of the size <span class="math">n</span>. The <span class="math">\\mathrm{B}^{+}</span> cache consistently needs less than 20 ms, as opposed to the hash treap which needs 9.5 ms for <span class="math">n=2^{20}</span>. Considering that a hash treap consumes twice as much memory, this is indeed an interesting trade-off. For the remaining caching strategies, <span class="math">p</span> together with the relation between <span class="math">n</span> and <span class="math">m</span> determines the probability of having cache misses. Simplified, larger <span class="math">p</span> yields less variance and greater efficiency in terms of time.</p>
+
+    <p class="text-gray-300">!<a href="img-6.jpeg">img-6.jpeg</a> (a) Size of the authenticated data structure.</p>
+
+    <p class="text-gray-300">!<a href="img-7.jpeg">img-7.jpeg</a> (b) Time to generate an audit path.</p>
+
+    <p class="text-gray-300">!<a href="img-8.jpeg">img-8.jpeg</a> (c) Time to update in a  <span class="math">2^{15}</span>  data structure.</p>
+
+    <p class="text-gray-300">!<a href="img-9.jpeg">img-9.jpeg</a> (d) Time to update 256 keys. Fig. 8: Space-time trade-offs for caching strategies and a hash treap (HT).</p>
+
+    <p class="text-gray-300">Google considers three categories of authenticated data structures when adding transparency to a trust model: verifiable logs, maps, and log-backed maps [12]. While CT relies on verifiable logs to support efficient consistency and membership proofs, verifiable maps based on SMTs are proposed in RT to prove non-membership. This is not without issues, however. All operations must be enumerated to determine whether a map's state is correct. The former two categories are therefore combined into a verifiable log-backed map where consistency issues can be detected by the verifiable log, (non-)membership can be proven by the verifiable map, and full audits can ensure complete correct behavior. As such, using an efficient verifiable map based on our extension of an SMT, the combination of CT and RT can prove whether a certificate's status is current. Other CT-like proposals that an SMT could be applicable to include Distributed Transparent Key Infrastructure [35] and Enhanced Certificate Transparency [32].</p>
+
+    <p class="text-gray-300">Verifiable maps are closely related to persistent authenticated dictionaries (PADs) [10]. While both are dynamic, the difference is that a PAD supports (non-)membership queries to current and past versions of the data structure. By extending our representation of an SMT to a secure key-value store, adding some</p>
+
+    <p class="text-gray-300">form of persistency yields a PAD. Crosby and Wallach <em>[9]</em> investigated caching strategies for tree-based PADs in conjunction with Sarnak and Tarjan versioned nodes <em>[33]</em>. Before that, Anagnostopoulos et al. <em>[1]</em> considered another technique known as path copying. We could use similar approaches for the cache in our SMT, relying entirely on existing persistent data structures to yield a PAD.</p>
+
+    <p class="text-gray-300">CONIKS is a privacy-preserving key-management service that allows clients to monitor their own key-bindings efficiently <em>[20]</em>. An MPT (see Section 5.1) is used for the purpose of verifiability, but prior to deriving a unique index <span class="math">i</span> the key-bindings are first transformed by a verifiable unpredictable function <em>[22]</em>. While that prevents audit paths from leaking user information, it cannot conceal the total number of users. CONIKS solves this issue and others e.g., ensuring <em>fork consistency</em> <em>[19]</em>, by defining a protocol on top of an MPT. It appears that an SMT could be a viable and attractive replacement if viewed as a dictionary.</p>
+
+    <p class="text-gray-300">The issue of proving non-membership is not only evident in CT and RT. For instance, in the context of privacy-preserving transparency logging <em>[31]</em>, Balloon plays an integral part as a provably secure append-only data structure <em>[30]</em>. This is accomplished using an approach towards authenticated data structures defined by Papamanthou et al. <em>[28]</em>, as well as combining a history tree <em>[8]</em> and a hash treap <em>[10, 30]</em>. The former is essentially a verifiable log, and the latter a treap <em>[2, 4]</em> viewed as a Merkle tree. While hash treaps and SMTs share many properties, including efficient (non-)membership proofs and history independent representations, there are some striking differences. To begin with, hash treaps store attributes in each node. Unlike in an SMT, information regarding these attributes must be provided in an audit path due to encoding digests differently (possibly leaking valuable information). There will also be exactly <span class="math">n</span> nodes at all times, and efficiency relies on a probabilistic balance. In these regards an SMT is flexible: the variable parameters <span class="math">\\mathcal{D}</span> and <span class="math">\\delta</span> determine if/when efficiency is provided, and memory requirements can be reduced to less than <span class="math">n</span> if need be.</p>
+
+    <p class="text-gray-300">More generally we could compare an SMT to any lexicographically sorted data structure viewed as a Merkle tree, e.g., including certificate revocation trees <em>[14]</em> and subsequent approaches based on 2-3 trees <em>[24]</em>. An SMT is superior to a certificate revocation tree because the update process cannot cause the entire tree structure to be recomputed. When compared to 2-3 trees and other balanced binary search trees, the analysis is similar to that of a hash treap. Note, however, that an SMT should not be confused with authenticated data structures that are unable to prove non-membership efficiently. This means that an SMT is not intended for applications such as Bitcoin <em>[23]</em>: the transactions of separate blocks are grouped together in Merkle trees for the purpose of efficient integrity guarantees, not the ability to prove certain transactions absent.</p>
+
+    <p class="text-gray-300">Finally, this work is an extension of the Bachelor’s thesis by Dahlberg <em>[27]</em>. Apart from improving terminology, we defined recursions for batch updates and reconstruction of root digests, as well as caching strategies based on branches. We also added a security evaluation for full (concrete) security in the multi-instance setting, provided a publicly available implementation that uses a memory safe language, and compared our results with a related authenticated data structure.</p>
+
+    <p class="text-gray-300">Our definition of an SMT builds upon and extends the principles provided by Laurie and Kasper <em>[17]</em>. The proposal is generic in the sense that an arbitrary data structure supporting insertion, removal, look-up, and splitting can be used, and different caching strategies (B, B^{-}, and B^{+}) provide fine-grained control over consumed space contra run time. In other words, rather than having an explicit tree structure, the resulting SMT is simulated. While this comes at the cost of additional computation when compared to other explicit tree-based data structures, our performance benchmark and worst case analysis show that our definitions are efficient regardless of how an adversary selects the keys. In addition, we prove that these definitions are secure in the multi-instance setting.</p>
+
+    <p class="text-gray-300">There is nothing that prevents further space-time trade-offs as an SMT evolves. In principle, the relation B^{-} <span class="math">\\subset</span> B <span class="math">\\subset</span> B^{+} holds. Therefore, it is simple to go from one strategy to another, e.g., depending on how much memory is available at the time being. This is a major difference with respect to explicit tree structures, which have no previous constructions that are alike. Furthermore, the succinct recursions used to simulate an SMT yield limited implementation complexity, and history independence is a prevalent property if parallelized and distributed solutions are considered for large-scale applications.</p>
+
+    <p class="text-gray-300">We would like to thank Stefan Lindskog for his valuable feedback. Rasmus Dahlberg and Tobias Pulls have received funding from the HITS research profile funded by the Swedish Knowledge Foundation.</p>
+
+    <h2 id="sec-24" class="text-2xl font-bold">References</h2>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>[1] Anagnostopoulos, A., Goodrich, M.T., Tamassia, R.: Persistent authenticated dictionaries and their applications. In: ISC. pp. 379–393 (2001)</li>
+
+      <li>[2] Aragon, C.R., Seidel, R.: Randomized search trees. In: FOCS. pp. 540–545 (1989)</li>
+
+      <li>[3] Bauer, M.: Proofs of zero knowledge. CoRR cs.CR/0406058 (2004)</li>
+
+      <li>[4] Blelloch, G.E., Reid-Miller, M.: Fast set operations using treaps. In: SPAA. pp. 16–26 (1998)</li>
+
+      <li>[5] Blum, M., Evans, W.S., Gemmell, P., Kannan, S., Naor, M.: Checking the correctness of memories. Algorithmica 12(2/3), 225–244 (1994)</li>
+
+      <li>[6] Chuat, L., Szalachowski, P., Perrig, A., Laurie, B., Messeri, E.: Efficient gossip protocols for verifying the consistency of certificate logs. In: CNS. pp. 415–423 (2015)</li>
+
+      <li>[7] Crosby, S.A., Wallach, D.S.: Denial of service via algorithmic complexity attacks. In: USENIX Security Symposium. pp. 29–44 (2003)</li>
+
+      <li>[8] Crosby, S.A., Wallach, D.S.: Efficient data structures for tamper-evident logging. In: USENIX Security Symposium. pp. 317–334 (2009)</li>
+
+      <li>[9] Crosby, S.A., Wallach, D.S.: Super-efficient aggregating history-independent persistent authenticated dictionaries. In: ESORICS. pp. 671–688 (2009)</li>
+
+      <li>[10] Crosby, S.A., Wallach, D.S.: Authenticated dictionaries: Real-world costs and trade-offs. ACM TISSEC 14(2), 17:1–17:30 (2011)</li>
+
+    </ul>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>[11] Eckersley, P.: How secure is HTTPS today? How often is it attacked? EFF (2011), https://www.eff.org/deeplinks/2011/10/how-secure-https-today</li>
+
+      <li>[12] Eijdenberg, A., Laurie, B., Cutter, A.: Verifiable data structures. Google Research (2015), https://github.com/google/trillian/blob/master/docs/VerifiableDataStructures.pdf</li>
+
+      <li>[13] Katz, J.: Analysis of a proposed hash-based signature standard (2014), http://cvs.cs.umd.edu/~jkatz/papers/HashBasedSigs.pdf</li>
+
+      <li>[14] Kocher, P.C.: On certificate revocation and validation. In: FC. pp. 172–177 (1998)</li>
+
+      <li>[15] Langely, A.: Enhancing digital certificate security. Google Research (2013), https://security.googleblog.com/2013/01/enhancing-digital-certificate-security.</li>
+
+      <li>[16] Laurie, B.: Certificate transparency. ACM Queue 12(8), 10–19 (2014)</li>
+
+      <li>[17] Laurie, B., Kasper, E.: Revocation transparency. Google Research (2012), http://www.links.org/files/RevocationTransparency.pdf</li>
+
+      <li>[18] Laurie, B., Langley, A., Kasper, E.: Certificate transparency. RFC 6962 (2013)</li>
+
+      <li>[19] Li, J., Krohn, M.N., Mazières, D., Shasha, D.: Secure untrusted data repository (SUNDR). In: OSDI. pp. 121–136 (2004)</li>
+
+      <li>[20] Melara, M.S., Blankstein, A., Bonneau, J., Felten, E.W., Freedman, M.J.: CONIKS: Bringing key transparency to end users. In: USENIX Security Symposium. pp. 383–398 (2015)</li>
+
+      <li>[21] Merkle, R.C.: A digital signature based on a conventional encryption function. In: CRYPTO. pp. 369–378 (1987)</li>
+
+      <li>[22] Micali, S., Rabin, M.O., Vadhan, S.P.: Verifiable random functions. In: FOCS. pp. 120–130 (1999)</li>
+
+      <li>[23] Nakamoto, S.: Bitcoin: A peer-to-peer electronic cash system (2008)</li>
+
+      <li>[24] Naor, M., Nissim, K.: Certificate revocation and certificate update. J-SAC 18(4), 561–570 (2000)</li>
+
+      <li>[25] Naor, M., Teague, V.: Anti-persistence: History independent data structures. In: STOC. pp. 492–501 (2001)</li>
+
+      <li>[26] NIST: FIPS PUB 180-4: Secure Hash Standard. Federal Information Processing Standards Publication 180-4, U.S. Department of Commerce (2012), http://csrc.nist.gov/publications/fips/fips180-4/fips-180-4.pdf</li>
+
+      <li>[27] Östersjö/Dahlberg, R.: Sparse Merkle Trees: Definitions and Space-Time Trade-Offs with Applications for Balloon. Bachelor’s thesis, Karlstad University (2016)</li>
+
+      <li>[28] Papamanthou, C., Tamassia, R., Triandopoulos, N.: Optimal verification of operations on dynamic sets. In: CRYPTO. pp. 91–110 (2011)</li>
+
+      <li>[29] Prins, R.: DigiNotar certificate authority breach—“operation black tulip”. Fox-IT (2011)</li>
+
+      <li>[30] Pulls, T., Peeters, R.: Balloon: A forward-secure append-only persistent authenticated data structure. In: ESORICS. pp. 622–641 (2015)</li>
+
+      <li>[31] Pulls, T., Peeters, R.: Insynd: Privacy-preserving transparency logging using Balloons. To appear in ESORICS (2016)</li>
+
+      <li>[32] Ryan, M.D.: Enhanced certificate transparency and end-to-end encrypted mail. In: NDSS (2014)</li>
+
+      <li>[33] Sarnak, N., Tarjan, R.E.: Planar point location using persistent search trees. Commun ACM 29(7), 669–679 (1986)</li>
+
+      <li>[34] Tamassia, R.: Authenticated data structures. In: ESA. pp. 2–5 (2003)</li>
+
+      <li>[35] Yu, J., Cheval, V., Ryan, M.: DTKI: a new formalized PKI with no trusted parties. CoRR abs/1408.1023 (2014)</li>
+
+    </ul>`;
+---
+
+<BaseLayout title="Efficient Sparse Merkle Trees: Caching Strategies and Secure... (2016/683)">
+  <article class="max-w-4xl mx-auto article-prose">
+    <nav class="mb-8">
+      <a href="/papers" class="text-blue-400 hover:text-blue-300">
+        &larr; Back to Papers
+      </a>
+    </nav>
+
+    <header class="mb-12">
+      <h1 class="text-3xl font-bold mb-4"
+        set:html={TITLE_HTML} />
+      <p class="text-gray-400 mb-2"
+        set:html={AUTHORS_HTML} />
+      <p class="text-gray-500 text-sm mb-4">
+        2016 &middot; eprint 2016/683
+      </p>
+      <div class="flex gap-4 text-sm">
+        <a
+          href={EPRINT_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          class="text-blue-400 hover:text-blue-300"
+        >
+          Paper (eprint) &rarr;
+        </a>
+      </div>
+      <p class="mt-4 text-xs text-gray-500">
+        All content below belongs to the original authors. This page
+        reproduces the paper for educational purposes. Always
+        <a
+          href={EPRINT_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          class="text-blue-400 hover:text-blue-300"
+        >cite the original</a>.
+      </p>
+      <p class="mt-1 text-xs text-gray-600">
+        Converted with: {CRAWLER} &middot; {CONVERTED_DATE}
+      </p>
+    </header>
+
+    <Fragment set:html={CONTENT} />
+
+  </article>
+</BaseLayout>

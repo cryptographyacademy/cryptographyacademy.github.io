@@ -1,0 +1,1321 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+
+const EPRINT_URL = 'https://eprint.iacr.org/2017/1146';
+const CRAWLER = 'mistral';
+const CONVERTED_DATE = '2026-02-16';
+const TITLE_HTML = 'A Zero-Knowledge Version of vSQL';
+const AUTHORS_HTML = 'Yupeng Zhang, Daniel Genkin, Jonathan Katz, Dimitrios Papadopoulos, Charalampos Papamanthou';
+
+const CONTENT = `    <p class="text-gray-300">Yupeng Zhang University of Maryland zhangyp@umd.edu Daniel Genkin University of Pennsylvania and University of Maryland danielg3@cis.upenn.edu Jonathan Katz University of Maryland jkatz@cs.umd.edu Dimitrios Papadopoulos Hong Kong University of Science and Technology dipapado@cse.ust.hk Charalampos Papamanthou University of Maryland cpap@umd.edu</p>
+
+    <h6 id="sec-2" class="text-base font-medium mt-4">Abstract</h6>
+
+    <p class="text-gray-300">Zero-knowledge arguments of knowledge are powerful cryptographic primitives that allow a computationally strong prover to convince a weaker verifier for the validity of an NP statement, without revealing anything about the corresponding witness (beyond its existence). Most state-of-the art implementations of such arguments that achieve succinct communication and verification cost follow the quadratic arithmetic program paradigm. One notable exception to this is the vSQL system of <em>[x20]</em> which takes an entirely different approach resulting is significantly fewer cryptographic operations. However, it has the notable downside that is not zero-knowledge (i.e., it does not hide the witness from the verifier), a property that has proven to be of utmost importance in many application (e.g., in cryptocurrencies). In this work, we present a zero-knowledge version of the argument upon which vSQL is based. Our construction utilizes two separate techniques: (i) a novel zero-knowledge verifiable polynomial delegation protocol, and (ii) running parts of the argument of vSQL over homomorphic commitments, thus hiding the committed values.</p>
+
+    <h2 id="sec-3" class="text-2xl font-bold">1 Introduction</h2>
+
+    <p class="text-gray-300">Protocols for <em>verifiable computation (VC)</em> allow a computationally weak verifier to outsource the execution of a program to a powerful but untrusted prover (e.g., a cloud provider) while being assured that the result was computed correctly. Somewhat more formally, a verifier <span class="math">\\mathcal{V}</span> and prover <span class="math">\\mathcal{P}</span> agree on a circuit <span class="math">C</span> and an input <span class="math">x</span>. The prover then sends a result <span class="math">y</span> to the verifier, and proves that there exists some <span class="math">w</span> for which <span class="math">y=C(x;w)</span>. (Here, <span class="math">w</span> represents some auxiliary input chosen by the prover.) Starting with the work of Kilian <em>[23]</em>, there has been a long line of work constructing VC protocols for arbitrary computations. For VC protocols that support general programs, the most prominent such works rely on succinct arguments-of-knowledge (SNARKs) <em>[5]</em> based on quadratic arithmetic programs <em>[17]</em>. This has resulted in several optimized systems that achieve excellent performance. See <em>[29]</em> and followup works. Most constructions use a preprocessing phase during which a trusted party (possibly the verifier itself) generates a set of public parameters corresponding to the specific circuit <span class="math">C</span> of interest. This can be used in two ways:</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Computation-specific circuit. If the verifier knows ahead of time the circuit <span class="math">C</span> he wants to evaluate, he can simply execute the preprocessing phase for <span class="math">C</span>. Numerous works follow this approach, e.g., <em>[26, 13]</em>.</li>
+
+      <li>Universal circuit. If the computation to be verified cannot be determined during preprocessing, the verifier can always preprocess the universal circuit <span class="math">C_{U}</span> that takes as input a circuit <span class="math">C</span> and an input <span class="math">x</span> and outputs <span class="math">C(x)</span>. Example works that follow this approach include <em>[2, 4, 3]</em>.</li>
+
+    </ol>
+
+    <p class="text-gray-300">Both these approaches have significant drawbacks. In the first case, the verifier is unable to adaptively change the computation to be verified without re-running the preprocessing phase (which is typically much more costly than evaluating the function). The second approach imposes large concrete overheads, since <span class="math">C_{U}</span> requires many more gates than <span class="math">C</span>. For implemented systems, the only exception to the above is the recent work of Ben-Sasson et al. <em>[1]</em> that does not utilize a preprocessing phase. However, the concrete cost of their techniques remains significantly higher then the above preprocessing-based approaches.</p>
+
+    <p class="text-gray-300">An Argument System with Circuit Independent Preprocessing. Recently, Zhang et al <em>[30]</em> introduced vSQL, a system for verifying the execution of arbitrary SQL queries over outsourced databases. Their construction combines the “CMT protocol” of Cormode et al. <em>[12]</em> (which itself extends the work of Goldwasser et al. <em>[18]</em>) for verifying the evaluation of arithmetic circuits with a new verifiable polynomial delegation (VPD) scheme in a way that can accommodate auxiliary input. While not explicitly stated in their paper, it can be shown that their underlying construction is an <em>argument of knowledge</em> for NP, which is <em>succinct</em> if the circuit is “parallelizable” (i.e., can be expressed as parallel copies of smaller circuits, possibly followed by a small “aggregation” circuit), which is the case for SQL queries. An important feature of the argument system resulting from their work is that it has a preprocessing phase that only depends on an upper bound on the size of the input, but not on the specific circuit to be evaluated. This allows obtaining performance which is similar to (1) above, but in the setting of (2) where the circuit to be verified is not known during the preprocessing phase. Another attractive property of vSQL is its improved performance. In contrast to state-of-the-art arguments based on quadratic-arithmetic programs <em>[2, 26]</em>, the number of cryptographic operations used by vSQL is linear in the input size (as opposed to linear in the number of multiplication gates of the circuit). As demonstrated in <em>[30]</em> for the case of verifying SQL queries, this translates in practice to a reduction in prover time by 5–121<span class="math">\\times</span>.</p>
+
+    <p class="text-gray-300">Zero-Knowledge Verifiable Computation. The scheme of <em>[30]</em> lacks one crucial property: it is not <em>zero-knowledge</em>. Moreover, while state-of-the-art <em>succinct non-interactive arguments of knowledge</em> (SNARKs) from quadratic-arithmetic programs can be made zero-knowledge by simply randomizing proof elements, this approach is not directly compatible with vSQL.</p>
+
+    <p class="text-gray-300">Our Contribution. Here, we show a zero-knowledge version of the argument of knowledge implicitly presented in vSQL <em>[30]</em>. At a high level, our protocol maintains the same structure as vSQL and combines a CMT-like protocol with a VPD scheme. However, in order to obtain a zero-knowledge property we replace both of the underlying components with zero-knowledge variants. For the CMT component, this can be achieved by running the entire protocol inside homomorphic commitments (as first observed in a a more general context by Cramer and Damgård <em>[14]</em>). For the VPD part, we devise a new construction that we call zk-VPD which is used to allow the prover to produce a proof about the correctness of a <em>commitment</em> to the correct evaluation of a polynomial (rather than proving correctness of the evaluation itself).</p>
+
+    <p class="text-gray-300">Asymptotically, our protocol has the same performance as that of <em>[30]</em> and has a preprocessing phase that only depends on an upper bound on the size of the input, but not on the specific circuit to be evaluated. In practice, we would expect it to have a slightly larger overhead for both parties (due to the increased number of cryptographic operations).</p>
+
+    <p class="text-gray-300">Other Approaches to Making CMT Zero-knowledge. Chiesa et al. <em>[11]</em> showed how a large class of algebraic protocols (including sum-check and CMT) can be made zero-knowledge using only information theoretic techniques. While this is a very attractive property, it is not clear how to make their approach compatible with a VPD protocol such as the one from <em>[30]</em> and the one we present here. Next, in a concurrent and independent work, Wahby et al. <em>[28]</em> presented an efficient zero-knowledge argument for sufficiently “parallel” circuits that utilizes the CMT protocol and uses the same general approach for making it zero-knowledge as the one used in this work (i.e., running the CMT protocol over homomorphic commitments). Unlike our construction which has a trusted preprocessing phase and relies on non-standard knowledge-of-exponent assumptions, the construction of <em>[28]</em> does not require any preprocessing and its security is based solely on the DDH assumption. However, while our construction</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">achieves communication size and verification time that are polylogarithmic in the size of the witness <span class="math">w</span> of the NP-relation being verified, the communication size and verification time of <em>[28]</em> scale with $O(\\sqrt{</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">w</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">})$ which might be prohibitive for some applications.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <h2 id="sec-4" class="text-2xl font-bold">2 Preliminaries</h2>
+
+    <h3 id="sec-5" class="text-xl font-semibold mt-8">2.1 Cryptographic Assumptions</h3>
+
+    <p class="text-gray-300">We use the following hardness assumption over elliptic curve groups with pairings, originally introduced in <em>[8, 20]</em></p>
+
+    <h6 id="sec-6" class="text-base font-medium mt-4">Assumption 1.</h6>
+
+    <p class="text-gray-300">(q-Strong Diffie-Hellman) For any probabilistic polynomial time adversary <span class="math">\\mathcal{A}</span>, the following probability is negligible:</p>
+
+    <p class="text-gray-300">\\[ \\Pr\\left[\\begin{array}[]{c}\\mathsf{bp}\\leftarrow\\mathsf{BilGen}(1^{\\lambda});\\\\ s\\xleftarrow{R}\\mathbb{Z}_{p}^{*};\\qquad\\qquad\\qquad\\qquad\\qquad\\qquad\\qquad\\qquad\\qquad\\qquad\\qquad\\qquad\\qquad\\qquad\\qquad\\qquad\\qquad\\qquad\\qquad\\qquad\\qquad\\qquad\\qquad\\qquad\\qquad\\qquad\\qquad\\qquad\\qquad\\qquad\\qquad\\qquad\\qquad\\qquad\\qquad\\qquad\\qquad\\qquad\\qquad\\qquad\\qquad\\qquad\\qquad\\qquad\\qquad\\qquad\\qquad\\qquad\\qquad\\qquad\\qquad\\end{array}\\right]. \\]</p>
+
+    <p class="text-gray-300">We also use a “knowledge-type” assumption, which is a slightly modified version of an assumption originally introduced in <em>[30]</em>. The latter, in turn, is a generalization of Groth’s <span class="math">q</span>-PKE assumption <em>[21]</em> for the case of multivariate polynomials. In the following, <span class="math">\\mathcal{W}_{\\ell,d}</span> denotes the set of all multisets of <span class="math">\\{1,\\ldots,\\ell\\}</span> where the cardinality of each element is at most <span class="math">d</span>.</p>
+
+    <h6 id="sec-7" class="text-base font-medium mt-4">Assumption 2 (<span class="math">(d,\\ell)</span>-Extended Power Knowledge of Exponent).</h6>
+
+    <p class="text-gray-300">For any ppt adversary <span class="math">\\mathcal{A}</span> there is a polynomial-time algorithm <span class="math">\\mathcal{E}</span> (running on the same random tape) such that for all benign auxiliary inputs <span class="math">z\\in\\{0,1\\}^{\\text{poly}(\\lambda)}</span> the following probability is negligible:</p>
+
+    <p class="text-gray-300">\\[ \\Pr\\left[\\begin{array}[]{c}\\mathsf{bp}\\leftarrow\\mathsf{BilGen}(1^{\\lambda});\\\\ s_{1},\\ldots,s_{\\ell},s_{\\ell+1},\\alpha\\xleftarrow{R}\\mathbb{Z}_{p}^{*},s_{0}=1;\\\\ \\sigma_{1}=(\\{g^{\\prod_{i\\in W}s_{i}}\\}_{W\\in\\mathcal{W}_{\\ell,d}},g^{s_{\\ell+1}});\\\\ \\sigma_{2}=(\\{g^{\\alpha}\\prod_{i\\in W}s_{i}\\}_{W\\in\\mathcal{W}_{\\ell,d}},g^{\\alpha s_{\\ell+1}});\\\\ \\sigma=(\\mathsf{bp},\\sigma_{1},\\sigma_{2},g^{\\alpha});\\\\ \\mathbb{G}\\times\\mathbb{G}\\ni(h,\\tilde{h})\\leftarrow\\mathcal{A}(1^{\\lambda},\\sigma,z);\\\\</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">(a_{0},\\ldots,a_{</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mathcal{W}_{\\ell,d}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">},b)\\leftarrow\\mathcal{E}(1^{\\lambda},\\sigma,z)\\end{array}\\right].\\end{array}\\right]. \\]</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">The results of <em>[10, 7]</em> show the impossibility of knowledge assumptions with respect to arbitrary auxiliary inputs. In the above definition we use the notion of a benign auxiliary input (or, alternatively, a benign state generator), similar to <em>[13, 22, 15]</em>, to refer to auxiliary inputs that make extraction possible, avoiding these negative results. Concretely, our proofs hold assuming the auxiliary input of the extractor comes from a benign distribution (in practice, the auxiliary inputs in our construction will consist of hiding commitments).</p>
+
+    <h3 id="sec-8" class="text-xl font-semibold mt-8">2.2 Interactive Proofs and Argument Systems</h3>
+
+    <h4 id="sec-9" class="text-lg font-semibold mt-6">Interactive proofs.</h4>
+
+    <p class="text-gray-300">An interactive proof <em>[19]</em> is a protocol between a prover <span class="math">\\mathcal{P}</span> and a verifier <span class="math">\\mathcal{V}</span> which convinces <span class="math">\\mathcal{V}</span> of the validity of a statement <span class="math">f(x)=1</span> where <span class="math">f</span> and <span class="math">x</span> are common inputs known to both parties.</p>
+
+    <h6 id="sec-10" class="text-base font-medium mt-4">Definition 1.</h6>
+
+    <p class="text-gray-300">A pair of algorithms <span class="math">(\\mathcal{P},\\mathcal{V})</span> is an interactive proof system for a function <span class="math">f</span> with soundness <span class="math">\\epsilon</span> if the following properties hold:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>[leftmargin=*]</li>
+
+      <li>Completeness. For any <span class="math">x</span> such that <span class="math">f(x)=1</span> it holds that <span class="math">\\Pr[\\langle\\mathcal{P},\\mathcal{V}\\rangle(x)=1]=1</span>.</li>
+
+    </ul>
+
+    <p class="text-gray-300">-</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li><em>Soundness.</em> For any <span class="math">x</span> such that <span class="math">f(x)\\neq 1</span> and for any prover <span class="math">\\mathcal{P}^{<em>}</span> it holds that <span class="math">\\Pr[\\langle\\mathcal{P}^{</em>},\\mathcal{V}\\rangle(x)=1]\\leq\\epsilon</span>.</li>
+
+    </ul>
+
+    <h4 id="sec-11" class="text-lg font-semibold mt-6">Argument Systems.</h4>
+
+    <p class="text-gray-300">Let <span class="math">R</span> be an NP relation. An argument system for <span class="math">R</span> is a protocol between computationally bounded prover <span class="math">\\mathcal{P}</span> and a verifier <span class="math">\\mathcal{V}</span> at the end of which <span class="math">\\mathcal{V}</span> is convinced in the validity of a statement made by <span class="math">\\mathcal{P}</span> of the from “there exists <span class="math">w</span> such that <span class="math">(x;w)\\in R</span>” for some input <span class="math">x</span>. In the sequel we focus on <em>arguments of knowledge</em> which have the stronger property that if the prover manages to convince the verifier of the statement’s validity, then the prover must know <span class="math">w</span>. We use the definition of <em>[17]</em> which includes a parameter-generation phase executed by a trusted party, the preprocessor. Formally, consider Definition 2 below.</p>
+
+    <h6 id="sec-12" class="text-base font-medium mt-4">Definition 2.</h6>
+
+    <p class="text-gray-300">Let <span class="math">R</span> be an NP relation and let <span class="math">\\lambda</span> be a security parameter. A tuple of algorithms <span class="math">(\\mathcal{G},\\mathcal{P},\\mathcal{V})</span> is a zero knowledge <em>argument</em> for <span class="math">R</span> if the following holds.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li><em>Completeness.</em> For every <span class="math">(\\mathsf{pk},\\mathsf{vk})</span> outout by <span class="math">\\mathcal{G}(1^{\\lambda})</span> and all <span class="math">(x;w)\\in R</span> we have</li>
+
+    </ul>
+
+    <p class="text-gray-300"><span class="math">\\langle\\mathcal{P}(\\mathsf{pk},w),\\mathcal{V}(\\mathsf{vk})\\rangle(x)=\\mathsf{accept}.</span></p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">- <em>Knowledge soundness.</em> For any probabilistic polynomial time prover <span class="math">\\mathcal{P}^{<em>}</span> there exists a probabilistic polynomial extractor <span class="math">\\mathcal{E}</span> which runs on the same randomness as <span class="math">\\mathcal{P}^{</em>}</span> such that for any <span class="math">x</span> it holds that $\\Pr[\\langle\\mathcal{P}^{*}(\\mathsf{pk}),\\mathcal{V}(\\mathsf{vk})\\rangle(x)=\\mathsf{accept}\\wedge(x,w)\\notin L</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">(\\mathsf{pk},\\mathsf{vk})\\leftarrow\\mathcal{G}(1^{\\lambda}),w\\leftarrow\\mathcal{E}(\\mathsf{pk},x)]\\leq\\mathsf{neg}(\\lambda)$.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li><em>Zero knowledge.</em> There exists a probabilistic polynomial simulator <span class="math">\\mathcal{S}</span> such that for any probabilistic polynomial time adversary <span class="math">\\mathcal{A}</span>, auxiliary input <span class="math">z\\in\\{0,1\\}^{\\mathsf{poly}(\\lambda)}</span> the following holds</li>
+
+    </ul>
+
+    <p class="text-gray-300"><span class="math">\\Pr\\left[(x;w)\\in R;\\langle\\mathcal{P}(\\mathsf{pk},w),\\mathcal{A}(\\sigma)\\rangle(x)=\\mathsf{accept}:(\\mathsf{pk},\\mathsf{vk})\\leftarrow\\mathcal{G}(1^{\\lambda});(x,w,\\sigma)\\leftarrow\\mathcal{A}(z,\\mathsf{pk},\\mathsf{vk})\\right]\\approx</span> <span class="math">\\Pr\\left[(x;w)\\in R;\\langle\\mathcal{S}(\\mathsf{trap},z,\\mathsf{pk}),\\mathcal{A}(\\sigma)\\rangle(x)=\\mathsf{accept}:(\\mathsf{pk},\\mathsf{vk},\\mathsf{trap})\\leftarrow\\mathcal{S}(1^{\\lambda});(x,w,\\sigma)\\leftarrow\\mathcal{A}(z,\\mathsf{pk},\\mathsf{vk})\\right]</span></p>
+
+    <p class="text-gray-300">where <span class="math">\\approx</span> denotes computational indistinguishability (and the definition can be extended in a straightforward manner for statistical and perfect zero-knowledge).</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">We call <span class="math">(\\mathcal{G},\\mathcal{P},\\mathcal{V})</span> a <em>succinct</em> argument system if the running time of <span class="math">\\mathcal{V}</span> is $\\mathsf{poly}(\\lambda,</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">x</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">,\\log</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">w</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">)$.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <h3 id="sec-13" class="text-xl font-semibold mt-8">2.3 Building Blocks</h3>
+
+    <h4 id="sec-14" class="text-lg font-semibold mt-6">Linearly homomorphic commitment scheme.</h4>
+
+    <p class="text-gray-300">We assume the existence of a commitment scheme <span class="math">\\mathcal{Comm}=(\\mathcal{Setup},\\mathcal{Com},\\mathcal{Open})</span> that has <span class="math">\\mathbb{Z}_{q}</span> (for prime <span class="math">q</span>) as its message space. This could be instantiated by the Pedersen commitment scheme <em>[27]</em>, for example. We assume:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li><span class="math">\\mathcal{Setup}(1^{\\lambda})</span> outputs public commitment parameters <span class="math">\\mathsf{cp}</span>.</li>
+
+      <li><span class="math">\\mathcal{Com}(\\mathsf{cp},m,r)</span> on input a message <span class="math">m\\in\\mathbb{Z}_{q}</span> and randomness <span class="math">r</span> outputs a commitment <span class="math">\\mathsf{com}</span>.</li>
+
+      <li><span class="math">\\mathcal{Open}(\\mathsf{cp},\\mathsf{com},m,r)</span> accepts iff <span class="math">\\mathcal{Com}(\\mathsf{cp},m,r)=\\mathsf{com}</span>.</li>
+
+    </ul>
+
+    <p class="text-gray-300">We also require that there exists an efficient algorithm <span class="math">\\mathcal{E}val(\\mathsf{cp},\\mathsf{com}_{1},\\ldots,\\mathsf{com}_{n},x_{1},\\ldots,x_{n})</span> that on input <span class="math">n</span> valid commitments (for some randomness values <span class="math">r_{i}</span>) for <span class="math">m_{1},\\ldots,m_{n}</span> and coefficients <span class="math">x_{.}\\ldots,x_{n}\\in\\mathbb{F}</span>, outputs new commitment <span class="math">\\mathsf{com}^{\\prime}</span> such that <span class="math">\\mathcal{Open}(\\mathsf{cp},\\mathsf{com}^{\\prime},\\sum_{1}^{n}x_{i}m_{i},r^{\\prime})</span> accepts, where <span class="math">r^{\\prime}</span> is computed as a function of <span class="math">(r_{1},\\ldots,r_{n},x_{1},\\ldots,x_{n})</span>. For Pedersen commitments, this can be easily achieved by having <span class="math">\\mathcal{E}val(\\mathsf{cp},\\mathsf{com}_{1},\\ldots,\\mathsf{com}_{n},x_{1},\\ldots,x_{n})</span> outputs <span class="math">\\mathsf{com}^{\\prime}=\\prod_{1}^{n}\\mathsf{com}_{i}^{x_{i}}</span> and <span class="math">r^{\\prime}=\\sum_{1}^{n}x_{i}r_{i}</span>.</p>
+
+    <p class="text-gray-300">Zero-knowledge argument for commitment-preimage equality. We assume the existence of a zero-knowledge argument <span class="math">\\mathcal{ZK}_{eq}</span> for proving that two commitments produced with <span class="math">\\mathcal{Comm}</span> have the same pre-image. Somewhat informally, we write <span class="math">\\mathcal{ZK}_{eq}(m,r_{1},r_{2};\\mathsf{com}_{1},\\mathsf{com}_{2})\\rightarrow\\mathsf{accept}/\\mathsf{reject}</span> to denote the</p>
+
+    <p class="text-gray-300">interaction between a prover that holds <span class="math">\\mathsf{cp},m,r_{1},r_{2},\\mathsf{com}_{1},\\mathsf{com}_{2}</span> such that <span class="math">\\mathcal{O}pen(\\mathsf{cp},\\mathsf{com}_{i},m,r_{i})</span> accepts for <span class="math">i=1,2</span>, and a verifier that holds <span class="math">\\mathsf{cp},\\mathsf{com}_{1},\\mathsf{com}_{2}</span> will eventually accept if he believes they have the same preimage and he will reject otherwise. For completeness, we require that the verifier accepts with probability <span class="math">1</span> for a valid statement. For soundness, we require that for any probabilistic polynomial-time (cheating) prover algorithm, the verifier will accept a false statement with probability negligible in <span class="math">\\lambda</span>. Zero-knowledge dictates that the verifier learns nothing about <span class="math">m_{1},m_{2}</span>. For the Pedersen commitment scheme, such a protocol can be instantiated by first using a sigma-protocol (e.g., the one from <em>[9]</em>) and then using standard techniques to make it full zero-knowledge (e.g., <em>[16]</em>).</p>
+
+    <p class="text-gray-300">Zero-knowledge argument for product of preimages. We assume the existence of a zero-knowledge argument <span class="math">\\mathcal{ZK}_{prod}</span> for proving that for three commitments <span class="math">\\mathsf{com}_{1},\\mathsf{com}_{2},\\mathsf{com}_{3}</span> produced with <span class="math">\\mathcal{C}omm</span> it holds that the preimage of the last is the product (in <span class="math">\\mathbb{F}</span>) of the preimages of the first two. We write <span class="math">\\mathcal{ZK}_{eq}(m_{1},m_{2},r_{1},r_{2},r_{3};\\mathsf{com}_{1},\\mathsf{com}_{2},\\mathsf{com}_{3})\\to\\mathsf{accept}/\\mathsf{reject}</span> to denote the interaction between a prover that holds <span class="math">\\mathsf{cp},m_{1},m_{2},r_{1},r_{2},r_{3},\\mathsf{com}_{1},\\mathsf{com}_{2},\\mathsf{com}_{3}</span> such that <span class="math">\\mathcal{O}pen(\\mathsf{cp},\\mathsf{com}_{i},m_{i},r_{i})</span> accepts for <span class="math">i=1,2</span>, and <span class="math">\\mathcal{O}pen(\\mathsf{cp},\\mathsf{com}_{3},m_{1}\\cdot m_{2},r_{3})</span> accepts, and a verifier that holds <span class="math">\\mathsf{cp},\\mathsf{com}_{1},\\mathsf{com}_{2},\\mathsf{com}_{3}</span>. For completeness, we require that the verifier accepts with probability <span class="math">1</span> for a valid statement. For soundness, we require that for any probabilistic polynomial-time (cheating) prover algorithm, the verifier will accept a false statement with probability negligible in <span class="math">\\lambda</span>. Zero-knowledge dictates that the verifier learns nothing about <span class="math">m_{1},m_{2}</span>. For the Pedersen commitment scheme, this can again be instantiated via a standard combination of <em>[9, 16]</em>.</p>
+
+    <h4 id="sec-15" class="text-lg font-semibold mt-6">Exractability.</h4>
+
+    <p class="text-gray-300">Finally, we want the commitment scheme to be <em>extractable</em> in the manner described in <em>[6]</em> for the case of collision-resistant functions, i.e., it should not be possible to output a valid commitment without knowing a corresponding pre-image. Somewhat informally, this is captured by the existence of an adversary-specific extractor that (given access to the adversary’s code, random tape and auxiliary input) can output a pre-image for any commitment value the adversary produces with all but negligible probability. For the Pedersen commitment scheme this can be achieved, under Assumption 2, via the following modifications. (1) Parameters <span class="math">\\mathsf{cp}</span> also include value <span class="math">g^{\\beta}</span> for <span class="math">\\beta\\in\\mathbb{F}</span> chosen uniformly at random. (2) Commitments consist of a pair of values from <span class="math">\\mathsf{com},\\mathsf{com}^{\\prime}\\in\\mathbb{G}</span> such that <span class="math">\\mathsf{com}^{\\prime}=\\mathsf{com}^{\\beta}</span>. (3) Upon receiving such a commitment <span class="math">\\mathsf{com},\\mathsf{com}^{\\prime}</span>, the receiving party must check the relation <span class="math">e(\\mathsf{com},g^{\\beta})=e(\\mathsf{com},g)</span> and abort if the check fails. To ease notation, in the following when describing a commitment value we will only refer to <span class="math">\\mathsf{com}</span> and we will omit the above validity check from the description of our protocols.</p>
+
+    <h3 id="sec-16" class="text-xl font-semibold mt-8">2.4 Circuit and Polynomial Notation</h3>
+
+    <p class="text-gray-300">Let <span class="math">C</span> be an arithmetic circuit. We denote the number of gates in the <span class="math">i</span>-th layer of <span class="math">C</span> by <span class="math">S_{i}</span> and we set <span class="math">s_{i}=\\lceil\\log S_{i}\\rceil</span> (that is, <span class="math">s_{i}</span> bits are sufficient in order to uniquely identify each gate is the <span class="math">i</span>-th layer). The evaluation of <span class="math">C</span> on an input <span class="math">x</span> assigns (in the natural way) a value from <span class="math">\\mathbb{F}</span> to each gate in <span class="math">C</span>. For each layer <span class="math">i</span> in <span class="math">C</span>, we define the function <span class="math">V_{i}:\\{0,1\\}^{s_{i}}\\to\\mathbb{F}</span> that takes as input a gate <span class="math">g\\in\\{0,1\\}^{s_{i}}</span> and outputs its value. Note that the values returned by <span class="math">V_{d}</span> correspond to the values of the input layer of <span class="math">C</span>, i.e., <span class="math">x</span>. Finally, for each layer <span class="math">i</span> we define functions <span class="math">\\mathsf{add}_{i}</span>, <span class="math">\\mathsf{mult}_{i}</span> to which we refer as <span class="math">C</span>’s <em>wiring predicates</em>. The function <span class="math">\\mathsf{add}_{i}:\\{0,1\\}^{s_{i-1}+2s_{i}}\\to\\{0,1\\}</span> takes as input a gate <span class="math">g_{1}</span> from layer <span class="math">i-1</span> and two gates <span class="math">g_{2},g_{3}</span> from layer <span class="math">i</span> and outputs <span class="math">1</span> if <span class="math">g_{1}</span> is an addition gate whose inputs are connected to <span class="math">g_{2}</span> and <span class="math">g_{3}</span>. The function <span class="math">\\mathsf{mult}_{i}</span> is defined similarly for multiplication gates. Finally, we notice that the value of a gate <span class="math">g</span> at layer <span class="math">i&lt;d</span> can be computed as a function of the values of gates at layer <span class="math">i+1</span> as</p>
+
+    <p class="text-gray-300"><span class="math">V_{i}(g)=\\sum_{u,v\\in\\{0,1\\}^{s_{i+1}}}(\\mathsf{add}_{i+1}(g,u,v)\\cdot(V_{i+1}(u)+V_{i+1}(v))+\\mathsf{mult}_{i+1}(g,u,v)\\cdot(V_{i+1}(u)\\cdot V_{i+1}(v))).</span></p>
+
+    <p class="text-gray-300">In the following, we define the <em>variable-degree</em> of a multivariate polynomial <span class="math">f</span> to be the maximum degree of <span class="math">f</span> in any of its variables, and use <span class="math">\\mathcal{W}_{\\ell,d}</span> to denote the collection of all multisets of <span class="math">\\{1,\\ldots,\\ell\\}</span> for which the multiplicity of any element is at most <span class="math">d</span>. The following useful lemma is due to Papamanthou et al. *[25]</p>
+
+    <h6 id="sec-17" class="text-base font-medium mt-4">Lemma 1 (<em>[25]</em>).</h6>
+
+    <p class="text-gray-300">Let <span class="math">f:\\mathbb{F}^{\\ell}\\to\\mathbb{F}</span> be a polynomial of variable degree <span class="math">d</span>. For all <span class="math">t\\in\\mathbb{F}^{\\ell}</span> there exist efficiently computable polynomials <span class="math">q_{1},\\ldots,q_{\\ell}</span> such that: <span class="math">f(x)-f(t)=\\sum_{i=1}^{\\ell}(x_{i}-t_{i})q_{i}(x)</span> where <span class="math">t_{i}</span> is the <span class="math">i</span>th element of <span class="math">t</span>.</p>
+
+    <h2 id="sec-18" class="text-2xl font-bold">3 Zero-Knowledge Polynomial Delegation Commitment Scheme</h2>
+
+    <p class="text-gray-300">In this section we present our zero knowledge polynomial delegation scheme. At a high level, the main idea is to modify the polynomial delegation scheme of <em>[30]</em> to output a commitment to the evaluation instead of the evaluation itself. That is, instead of having <span class="math">\\mathsf{Evaluate}</span> output the value <span class="math">y</span> of the polynomial <span class="math">f</span> when evaluated on the input <span class="math">x</span> together with a suitable proof <span class="math">\\pi</span>, the zero-knowledge polynomial delegation commitment scheme outputs a statistically hiding and computationally binding commitment <span class="math">\\mathsf{com}_{y}</span> to the value of <span class="math">y</span> (in addition to the proof <span class="math">\\pi</span>). This hides the value of <span class="math">y</span> but still supports verifying that <span class="math">\\mathsf{com}_{y}</span> is indeed a commitment to <span class="math">f(x)</span>.</p>
+
+    <p class="text-gray-300">Figure 3 contains our definition of a zero-knowledge polynomial delegation scheme. Next, consider the following theorem.</p>
+
+    <h6 id="sec-19" class="text-base font-medium mt-4">Theorem 1.</h6>
+
+    <p class="text-gray-300">Under Assumptions 1 and 2, Construction 1 is a zero-knowledge extractable verifiable polynomial-delegation protocol. Moreover, for a variable-degree-<span class="math">d</span> <span class="math">\\ell</span>-variate polynomial <span class="math">f\\in\\mathcal{F}</span> containing <span class="math">m</span> monomials, algorithm <span class="math">\\mathsf{KeyGen}</span> runs in time <span class="math">O(\\binom{\\ell(d+1)}{\\ell d})</span>, <span class="math">\\mathsf{CommitPoly}</span> in time <span class="math">O(m)</span>, <span class="math">\\mathsf{CommitValue}</span> in time <span class="math">O(\\ell dm)</span>, <span class="math">\\mathsf{Ver}</span> in time <span class="math">O(\\ell)</span> and <span class="math">\\mathsf{CheckCom}</span> in time <span class="math">O(1)</span>. If <span class="math">d=1</span>, <span class="math">\\mathsf{CommitValue}</span> can be made to run in time <span class="math">O(2^{\\ell})</span>. The commitment produced by <span class="math">\\mathsf{CommitPoly}</span> consists of <span class="math">O(1)</span> group elements, and the proof produced by <span class="math">\\mathsf{CommitPoly}</span> consists of <span class="math">O(\\ell)</span> elements of <span class="math">\\mathbb{G}</span>.</p>
+
+    <h6 id="sec-20" class="text-base font-medium mt-4">Proof.</h6>
+
+    <p class="text-gray-300">Completeness follows by close inspection of the algorithms. Next, we prove the rest of the properties of Definition 3.</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Polynomial Extractability. Let <span class="math">\\mathcal{A}</span> be a ppt adversary that on input <span class="math">(1^{\\lambda},\\mathsf{pp})</span>, where <span class="math">(\\mathsf{pp},\\mathsf{vp})</span> is the output of <span class="math">\\mathsf{KeyGen}(1^{\\lambda},\\ell,d)</span>, outputs commitment <span class="math">\\mathsf{com}_{f}^{<em>}</span> such that <span class="math">\\mathsf{CheckCom}(\\mathsf{com}_{f}^{</em>},\\mathsf{vp})</span> accepts. This implies that <span class="math">e(\\mathsf{com}_{f,1},g^{\\alpha})=e(\\mathsf{com}_{f,2},g)</span>. By Assumption 2, there exists ppt extractor <span class="math">\\mathcal{E}</span> for <span class="math">\\mathcal{A}</span> such that upon the same input as <span class="math">\\mathcal{A}</span>, and with access to same random tape, outputs $a_{0},\\ldots,a_{</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mathcal{W}_{\\ell,d}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">},b\\in\\mathbb{F}<span class="math"> such that </span>\\prod_{W\\in\\mathcal{W}_{\\ell,d}}g^{a_{W}\\prod_{i\\in W}s_{i}}g^{bs_{\\ell+1}}=\\mathsf{com}_{f,1}<span class="math">, except with negligible probability. Note that, the coefficients </span>(a_{0},\\ldots,a_{</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mathcal{W}_{\\ell,d}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">},b)<span class="math"> can always be encoded as an </span>(\\ell+1)<span class="math">-variate polynomial that consist of the sum of two polynomials: an </span>\\ell<span class="math">-variate one with degree-variable </span>d<span class="math"> that is defined over variables </span>x_{1},\\ldots,x_{\\ell}<span class="math"> and has values </span>a_{i}<span class="math"> as its monomial coefficients, and the univariate, degree-</span>1<span class="math"> polynomial </span>bx_{\\ell+1}$.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Binding. Next, we prove the binding property. Let <span class="math">\\mathcal{A}</span> be a ppt adversary that wins the binding game with non-negligible probability. For <span class="math">i=1,\\ldots,\\ell+1</span> we define adversary <span class="math">\\mathcal{A}_{i}</span> that receives the same input as <span class="math">\\mathcal{A}</span> and executes the same code, but outputs only <span class="math">\\mathsf{com}_{i}\\in\\pi^{<em>}</span> (where <span class="math">\\pi^{</em>}</span> is the proof output by <span class="math">\\mathcal{A}</span>). Moreover, since <span class="math">\\mathcal{A}</span> is ppt, all these adversaries are also ppt. Thus, for <span class="math">i=1,\\ldots,\\ell+1</span>, from Assumption 2 there exists ppt <span class="math">\\mathcal{E}_{i}</span> (running on the same random tape as <span class="math">\\mathcal{A}_{i}</span>) which on input <span class="math">(1^{\\lambda},\\mathsf{pp})</span> outputs $a_{0,i},\\ldots,a_{</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mathcal{W}_{\\ell,d}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">,i},b_{i}\\in\\mathbb{F}<span class="math"> such that the following holds: If </span>e(\\mathsf{com}_{i,1},g^{\\alpha})=e(\\mathsf{com}_{i,2},g)<span class="math"> then </span>\\prod_{W\\in\\mathcal{W}_{\\ell,d}}g^{a_{W,i}\\prod_{j\\in W}s_{j}}\\cdot g^{b_{i}s_{\\ell+1}}\\neq\\mathsf{com}_{i,1}<span class="math">, except with negligible probability. By the same reasoning as above, the coefficients </span>(a_{0,i},\\ldots,a_{</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mathcal{W}_{\\ell,d}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">,i}b_{i})<span class="math"> for each </span>i=1,\\ldots,\\ell<span class="math"> can always be encoded as an </span>(\\ell+1)<span class="math">-variate </span>q_{i}^{\\prime}<span class="math"> that can be expressed as the sum of an </span>\\ell<span class="math">-variate polynomial with variable-degree </span>d<span class="math"> that is defined over variables </span>x_{1},\\ldots,x_{\\ell}<span class="math"> and a univariate degree-</span>1<span class="math"> polynomial defined over </span>x_{\\ell+1}$.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">We now proceed to build an adversary <span class="math">\\mathcal{B}</span> that breaks Assumption 1 for parameter <span class="math">(\\ell+1)\\cdot d</span>. Upon input <span class="math">(1^{\\lambda},\\mathsf{bp},g^{s},g^{s^{2}},\\ldots,g^{s^{(\\ell+1)\\cdot d}})</span>, <span class="math">\\mathcal{B}</span> proceeds as follows:</p>
+
+    <p class="text-gray-300">Parameter Generation. <span class="math">\\mathcal{B}</span> implicitly sets <span class="math">s_{1}=s</span> and for <span class="math">i=2,\\ldots,\\ell+1</span> he chooses <span class="math">\\rho_{i}\\in\\mathbb{F}</span> uniformly at random and sets (also implicitly) <span class="math">s_{i}=s\\cdot\\rho_{i}</span>. Then he chooses uniformly at random values <span class="math">\\alpha,\\beta\\in\\mathbb{F}</span>. Next <span class="math">\\mathcal{B}</span> needs to generate the terms in <span class="math">\\mathbb{P}=\\{g^{\\prod_{i\\in W}s_{i}}</span>, <span class="math">g^{\\alpha\\cdot\\prod_{i\\in W}s_{i}}\\}_{W\\in\\mathcal{W}_{\\ell,d}}</span>. Since the exponent of each term is a product of at most <span class="math">\\ell\\cdot d</span> factors where each factor is one of the values <span class="math">s_{i}=s\\cdot r_{i}</span> (for <span class="math">i=1,\\ldots,\\ell</span>), it can</p>
+
+    <p class="text-gray-300">Definition 3. Let  <span class="math">\\mathbb{F}</span>  be a finite field,  <span class="math">\\mathcal{F}</span>  be a family of  <span class="math">\\ell</span> -variate polynomials over  <span class="math">\\mathbb{F}</span> , and  <span class="math">d</span>  be a variable-degree parameter. (KeyGen, Commit, Evaluate, CheckCom, Ver) constitute a zero-knowledge verifiable polynomial-delegation protocol for  <span class="math">\\mathcal{F}</span>  if:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Perfect Completeness. For any polynomial  <span class="math">f \\in \\mathcal{F}</span>  and value  <span class="math">t</span> ,</li>
+
+    </ul>
+
+    <div class="my-4 text-center"><span class="math-block">\\Pr_ {r _ {f}, r _ {y}} \\left[ \\begin{array}{c} (\\mathsf {p p}, \\mathsf {v p}) \\leftarrow \\mathsf {K e y G e n} (1 ^ {\\lambda}, \\ell , d) \\\\ \\mathsf {c o m} _ {f} \\leftarrow \\mathsf {C o m m i t P o l y} (f, r _ {f}, \\mathsf {p p}) \\\\ (\\mathsf {c o m} _ {y}, \\pi) \\leftarrow \\mathsf {C o m m i t V a l u e} (f, t, f (t), r _ {f}, r _ {y}, \\mathsf {p p}) \\end{array} : \\begin{array}{l} \\mathsf {C h e c k C o m} (\\mathsf {c o m} _ {f}, \\mathsf {v p}) = \\mathsf {a c c e p t} \\wedge \\\\ \\mathsf {V e r} (\\mathsf {c o m} _ {f}, t, \\mathsf {c o m} _ {y}, \\pi , \\mathsf {v p}) = \\mathsf {a c c e p t} \\end{array} \\right] = 1.</span></div>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Binding. For any PPT adversary  <span class="math">\\mathcal{A}</span>  and benign auxiliary inputs  <span class="math">z_{1}, z_{2}</span>  the following probability is negligible:</li>
+
+    </ul>
+
+    <div class="my-4 text-center"><span class="math-block">\\Pr \\left[ \\begin{array}{c c} (\\mathsf {p p}, \\mathsf {v p}) \\leftarrow \\mathsf {K e y G e n} (1 ^ {\\lambda}, \\ell , d) &amp;amp; \\mathsf {C h e c k C o m} (\\mathsf {c o m} _ {f} ^ {*}, \\mathsf {v p}) = \\mathsf {a c c e p t} \\wedge \\\\ (\\pi^ {*}, \\mathsf {c o m} _ {f} ^ {*}, \\mathsf {c o m} _ {y} ^ {*}, \\mathsf {s t a t e}) \\leftarrow \\mathcal {A} (1 ^ {\\lambda}, z _ {1}, \\mathsf {p p}) &amp;amp; \\mathsf {V e r} (\\mathsf {c o m} _ {f} ^ {*}, t ^ {*}, \\mathsf {c o m} _ {y} ^ {*}, \\pi^ {*}, \\mathsf {v p}) = \\mathsf {a c c e p t} \\wedge \\\\ (f ^ {*}, t ^ {*}, y ^ {*}, r _ {f} ^ {*}, r _ {y} ^ {*}) \\leftarrow \\mathcal {A} (1 ^ {\\lambda}, z _ {2}, \\mathsf {s t a t e}, \\mathsf {p p}) &amp;amp; \\mathsf {c o m} _ {f} ^ {*} = \\mathsf {C o m m i t P o l y} (f ^ {*}, r _ {f} ^ {*}, \\mathsf {p p}) \\wedge \\\\ &amp;amp; (\\mathsf {c o m} _ {y} ^ {*}, \\pi) = \\mathsf {C o m m i t V a l u e} (f ^ {*}, t ^ {*}, y ^ {*}, r _ {f} ^ {*}, r _ {y} ^ {*}, \\mathsf {p p}) \\wedge f ^ {*} (t ^ {*}) \\neq y ^ {*} \\end{array} \\right].</span></div>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Zero Knowledge. For security parameter  <span class="math">\\lambda</span> , polynomial  <span class="math">f</span> , adversary  <span class="math">\\mathcal{A}</span> , and simulator Sim consider the two experiments  <span class="math">\\operatorname{Real}_{\\mathcal{A},f}(1^{\\lambda})</span> ,  <span class="math">\\operatorname{Ideal}_{\\mathcal{A}}(1^{\\lambda})</span> , defined as follows.</li>
+
+    </ul>
+
+    <p class="text-gray-300">Real  <span class="math">\\mathcal{A},f(1^{\\lambda})</span>  ..</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li><span class="math">(\\mathsf{pp},\\mathsf{vp})\\gets \\mathsf{KeyGen}(1^{\\lambda},\\ell ,d)</span></li>
+
+      <li>Generate  <span class="math">r_f</span>  uniformly at random</li>
+
+      <li><span class="math">\\mathsf{com}_f\\gets \\mathsf{CommitPoly}(f,r_f,\\mathsf{pp})</span></li>
+
+      <li><span class="math">k\\gets \\mathcal{A}(1^{\\lambda},\\mathrm{com}_f,\\mathrm{vp})</span></li>
+
+      <li>For  <span class="math">i = 1,\\dots ,k</span>  repeat:</li>
+
+    </ol>
+
+    <p class="text-gray-300">(a) Generate  <span class="math">r_i</span>  uniformly at random (b)  <span class="math">t_i \\gets \\mathcal{A}(1^\\lambda, \\operatorname{com}_f, \\operatorname{com}_{y_1}, \\dots, \\operatorname{com}_{y_{i-1}}, \\pi_1, \\dots, \\pi_{i-1}, \\mathsf{vp})</span> (c)  <span class="math">(\\mathsf{com}_{y_i},\\pi_i)\\gets \\mathsf{CommitValue}(f,t_i,f(t_i),r_f,r_i,\\mathsf{pp})</span></p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li><span class="math">b\\gets \\mathcal{A}(1^{\\lambda},\\mathrm{com}_f,(\\mathrm{com}_{y_1}\\dots ,\\mathrm{com}_{y_k},\\pi_1,\\dots ,\\pi_k),\\mathrm{vp})</span></li>
+
+      <li>Output  <span class="math">b</span></li>
+
+    </ol>
+
+    <p class="text-gray-300">Ideal  <span class="math">\\mathcal{A},\\mathrm{Sim}(1^{\\lambda})</span></p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li><span class="math">(\\mathsf{com}_f,\\mathsf{pp},\\mathsf{vp},\\sigma)\\gets \\mathsf{Sim}(1^{\\lambda},\\ell ,d)</span></li>
+
+      <li><span class="math">k\\gets \\mathcal{A}(1^{\\lambda},\\mathrm{com}_f,\\mathrm{vp})</span></li>
+
+      <li>For  <span class="math">i = 1,\\dots ,k</span>  repeat:</li>
+
+    </ol>
+
+    <p class="text-gray-300">(a)  <span class="math">t_i \\gets \\mathcal{A}(1^\\lambda, \\mathrm{com}_f, \\mathrm{com}_{y_1}, \\dots, \\mathrm{com}_{y_{i-1}}, \\pi_1, \\dots, \\pi_{i-1}, \\mathrm{vp})</span> (b)  <span class="math">(\\mathsf{com}_{y_i},\\pi_i,\\sigma)\\gets \\mathsf{Sim}(t_i,\\sigma ,\\mathsf{pp})</span></p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li><span class="math">b\\gets \\mathcal{A}(1^{\\lambda},\\mathrm{com}_f,(\\mathrm{com}_{y_1}\\dots ,\\mathrm{com}_{y_k},\\pi_1,\\dots ,\\pi_k),\\mathrm{vp})</span></li>
+
+      <li>Output  <span class="math">b</span></li>
+
+    </ol>
+
+    <p class="text-gray-300">We require that for any PPT adversary  <span class="math">\\mathcal{A}</span>  and all  <span class="math">f\\in \\mathbb{F}</span> , there exists a simulator Sim such that the following is negligible</p>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\left</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\Pr \\left[ \\operatorname {R e a l} _ {\\mathcal {A}, f} \\left(1 ^ {\\lambda}\\right) = 1 \\right] - \\Pr \\left[ \\operatorname {I d e a l} _ {\\mathcal {A}, \\operatorname {S i m}} \\left(1 ^ {\\lambda}\\right) = 1 \\right] \\right</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <p class="text-gray-300">Finally, we say that (KeyGen, Commit, Evaluate, CheckCom, Ver) are an extractable zero-knowledge verifiable polynomial-delegation protocol for  <span class="math">\\mathcal{F}</span>  if (KeyGen, Commit, Evaluate, CheckCom, Ver) satisfy the following extraction requirements instead of the above defined soundness requirement.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Polynomial Extractability. For any PPT adversary  <span class="math">\\mathcal{A}</span>  there exists a polynomial-time algorithm  <span class="math">\\mathcal{E}</span>  with access to  <span class="math">\\mathcal{A}&#x27;s</span>  random tape such that for all benign auxiliary inputs  <span class="math">z\\in \\{0,1\\}^{poly(\\lambda)}</span>  the following probability is negligible:</li>
+
+    </ul>
+
+    <div class="my-4 text-center"><span class="math-block">\\Pr \\left[ \\begin{array}{c} (\\mathsf {p p}, \\mathsf {v p}) \\leftarrow \\mathsf {K e y G e n} (1 ^ {\\lambda}, \\ell , d); \\\\ \\mathsf {c o m} _ {f} ^ {*} \\leftarrow \\mathcal {A} (1 ^ {\\lambda}, \\mathsf {p p}, z); \\\\ (f, r _ {f}) \\leftarrow \\mathcal {E} (1 ^ {\\lambda}, \\mathsf {p p}, z) \\end{array} : \\begin{array}{c} \\mathsf {C h e c k C o m} (\\mathsf {c o m} ^ {*}, \\mathsf {v p}) = \\mathsf {a c c e p t} \\wedge \\\\ \\mathsf {c o m} _ {f} ^ {*} \\neq \\mathsf {C o m m i t P o l y} (f, r _ {f}, \\mathsf {p p}) \\end{array} \\right].</span></div>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Evaluation Extractability. For any PPT adversary  <span class="math">\\mathcal{A}</span>  there exists a polynomial-time algorithm  <span class="math">\\mathcal{E}</span>  with access to  <span class="math">\\mathcal{A}&#x27;s</span>  random tape such that for all benign auxiliary inputs  <span class="math">z\\in \\{0,1\\}^{poly(\\lambda)}</span>  the following probability is negligible:</li>
+
+    </ul>
+
+    <div class="my-4 text-center"><span class="math-block">\\Pr \\left[ \\begin{array}{c c} (\\mathsf {p p}, \\mathsf {v p}) \\leftarrow \\mathsf {K e y G e n} (1 ^ {\\lambda}, \\ell , d) &amp;amp; \\mathsf {C h e c k C o m} (\\mathsf {c o m} _ {f} ^ {*}, \\mathsf {v p}) = \\mathsf {a c c e p t} \\wedge \\\\ (t ^ {*}, \\pi^ {*}, \\mathsf {c o m} _ {f} ^ {*}, \\mathsf {c o m} _ {y} ^ {*}) \\leftarrow \\mathcal {A} (1 ^ {\\lambda}, \\mathsf {p p}, z) &amp;amp; \\mathsf {V e r} (\\mathsf {c o m} _ {f} ^ {*}, t ^ {*}, \\mathsf {c o m} _ {y} ^ {*}, \\pi^ {*}, \\mathsf {v p}) = \\mathsf {a c c e p t} \\wedge \\\\ (f, r _ {f}, y, r _ {y}) \\leftarrow \\mathcal {E} (1 ^ {\\lambda}, \\mathsf {p p}, z) &amp;amp; (f (t ^ {*}) \\neq y \\lor \\mathsf {c o m} _ {f} ^ {*} \\neq \\mathsf {C o m m i t P o l y} (f, r _ {f}, \\mathsf {p p}) \\lor \\\\ &amp;amp; (\\pi^ {*}, \\mathsf {c o m} _ {y} ^ {*}) \\neq \\mathsf {C o m m i t V a l u e} (f, t ^ {*}, y, r _ {f}, r _ {y}, \\mathsf {p p})) \\end{array} \\right].</span></div>
+
+    <p class="text-gray-300">Construction 1 (Zero-knowledge Verifiable Polynomial-Delegation Protocol). Let  <span class="math">\\mathbb{F}</span>  be a prime-order finite field,  <span class="math">\\ell</span>  be a variable parameter, and  <span class="math">d</span>  be a variable-degree parameter such that  <span class="math">O\\left(\\binom{\\ell(d+1)}{\\ell d}\\right)</span>  is polynomial in  <span class="math">\\lambda</span> . Consider the following protocol for the family  <span class="math">\\mathcal{F}</span>  containing  <span class="math">\\ell</span> -variate polynomials of variable-degree  <span class="math">d</span>  over  <span class="math">\\mathbb{F}</span> .</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>KeyGen(1 <span class="math">\\lambda</span> ,  <span class="math">\\ell, d</span> ): Select  <span class="math">\\alpha, \\beta, s_1, \\ldots, s_\\ell, s_{\\ell+1} \\in \\mathbb{F}</span>  uniformly at random, run bp  <span class="math">\\leftarrow</span>  BilGen(1 <span class="math">\\lambda</span> ) and compute  <span class="math">\\mathbb{P} = \\{g^{\\prod_{i \\in W} s_i}, g^{\\alpha \\cdot \\prod_{i \\in W} s_i}\\}_{W \\in \\mathcal{W}_{\\ell,d}}</span> . The public parameters are set to be  <span class="math">\\mathsf{pp} = (\\mathsf{bp}, \\mathbb{P}, g^\\alpha, g^\\beta, g^{s_{\\ell+1}}, g^{\\alpha s_{\\ell+1}}, g^{\\beta s_{\\ell+1}})</span>  and the verifier parameters are set to be  <span class="math">\\mathsf{vp} = (\\mathsf{bp}, g^{s_1}, \\dots, g^{s_\\ell}, g^{s_{\\ell+1}}, g^\\alpha, g^\\beta)</span> .</li>
+
+      <li>CommitPoly  <span class="math">(f, r_f, \\mathsf{pp})</span> : If  <span class="math">f \\notin \\mathcal{F}</span>  output null. Else, compute  <span class="math">c_1 = g^{f(s_i, \\ldots, s_\\ell) + r_f s_{\\ell+1}}</span>  and  <span class="math">c_2 = g^{\\alpha \\cdot (f(s_i, \\ldots, s_\\ell) + r_f s_{\\ell+1})}</span> , and output the commitment  <span class="math">\\mathsf{com}_f = (c_1, c_2)</span> .</li>
+
+      <li>CheckCom(comf, vp): On input a commitment  <span class="math">\\mathsf{com}_f = (\\mathsf{com}_{f,1},\\mathsf{com}_{f,2})</span> , check whether it is well-formed, i.e., output accept if  <span class="math">e(\\mathsf{com}_{f,1},g^{\\alpha}) = e(\\mathsf{com}_{f,2},g)</span>  and reject otherwise.</li>
+
+      <li>CommitValue  <span class="math">(f, t, y, r_f, r_y, \\mathsf{pp})</span> : Choose  <span class="math">r_1, \\ldots, r_\\ell \\in \\mathbb{F}</span>  uniformly at random. Next, using Lemma 1 compute polynomials  <span class="math">q_i</span>  such that</li>
+
+    </ol>
+
+    <p class="text-gray-300"><span class="math">f(x_{1},\\ldots ,x_{\\ell}) + r_{f}x_{\\ell +1} - (y + r_{y}x_{\\ell +1}) = \\sum_{i = 1}^{\\ell}(x_{i} - t_{i})\\cdot (q_{i}(x_{i},\\ldots ,x_{\\ell}) + r_{i}x_{\\ell +1}) + x_{\\ell +1}(r_{f} - r_{y} - \\sum_{i = 1}^{\\ell}r_{i}(x_{i} - t_{i}))</span></p>
+
+    <p class="text-gray-300">Set  <span class="math">\\mathsf{com}_y\\gets (g^{y + r_y s_{\\ell +1}},g^{\\beta y + \\beta r_y s_{\\ell +1}})</span> . For  <span class="math">i = 1,\\ldots ,\\ell</span>  compute  <span class="math">\\mathsf{com}_i\\gets \\mathsf{CommitPoly}(q_i,r_i,\\mathsf{pp})</span> . Compute  <span class="math">\\mathsf{com}_{\\ell +1}\\gets (g^{r_f - r_y - \\sum_{i = 1}^{\\ell}r_i(s_i - t_i)},g^{\\alpha (r_f - r_y - \\sum_{i = 1}^{\\ell}r_i(s_i - t_i))})</span> . Output  <span class="math">\\mathsf{com}_y</span>  and the proof  <span class="math">\\pi \\coloneqq (\\mathsf{com}_1,\\dots ,\\mathsf{com}_{\\ell +1})</span> .</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Ver  <span class="math">(\\mathsf{com}_f, t, \\mathsf{com}_y, \\pi, \\mathsf{vp})</span> : Parse the proof  <span class="math">\\pi</span>  as  <span class="math">(\\mathsf{com}_1, \\ldots, \\mathsf{com}_{\\ell + 1})</span> . For  <span class="math">i = 1, \\ldots, \\ell + 1</span>  run CheckCom  <span class="math">(\\mathsf{com}_i, \\mathsf{pp})</span> . If any of them outputs reject, output reject. Otherwise, parse  <span class="math">\\mathsf{com}_f</span>  as  <span class="math">(\\mathsf{com}_{f,1}, \\mathsf{com}_{f,2})</span>  and  <span class="math">\\mathsf{com}_y</span>  as  <span class="math">(\\mathsf{com}_{y,1}, \\mathsf{com}_{y,2})</span>  and for  <span class="math">i = 1, \\ldots, \\ell + 1</span>  parse  <span class="math">\\mathsf{com}_i</span>  as  <span class="math">(\\mathsf{com}_{i,1}, \\mathsf{com}_{i,2})</span> . If  <span class="math">e(\\mathsf{com}_{y,1}, g^\\beta) \\stackrel{?}{=} e(\\mathsf{com}_{y,2}, g)</span>  and  <span class="math">e(\\mathsf{com}_{f,1} / \\mathsf{com}_{y,1}, g) \\stackrel{?}{=} e(g^{s_{\\ell + 1}}, \\mathsf{com}_{\\ell + 1,1}) \\prod_{i = 1}^{\\ell} e(g^{s_i - t_i}, \\mathsf{com}_i)</span>  output accept, otherwise output reject.</li>
+
+    </ol>
+
+    <p class="text-gray-300">be written as a polynomial in  <span class="math">s</span>  with degree at most  <span class="math">\\ell \\cdot d</span> . Therefore,  <span class="math">\\mathcal{B}</span>  can compute these terms from the values  <span class="math">g, g^s, g^{s^2}, \\ldots, g^{s^{\\ell \\cdot d}}</span>  and  <span class="math">\\alpha</span> . Then, he computes  <span class="math">g^{s_{\\ell + 1}}, g^{\\alpha s_{\\ell + 1}}, g^{\\beta s_{\\ell + 1}}</span> . Finally,  <span class="math">\\mathcal{B}</span>  runs  <span class="math">\\mathcal{A}</span>  on input  <span class="math">(1^{\\lambda}, \\mathsf{pp})</span> , where  <span class="math">\\mathsf{pp} = (\\mathsf{bp}, \\mathbb{P}, g^{\\alpha}, g^{\\beta}, g^{s_{\\ell + 1}}, g^{\\alpha s_{\\ell + 1}}, g^{\\beta s_{\\ell + 1}})</span> .</p>
+
+    <p class="text-gray-300">Query Evaluation. Upon eventually receiving  <span class="math">(f^{<em>},t^{</em>},y^{<em>},\\pi^{</em>},\\mathsf{com}_{f}^{<em>},\\mathsf{com}_{y}^{</em>},r_{f}^{<em>},r_{y}^{</em>})</span>  from  <span class="math">\\mathcal{A}</span> ,  <span class="math">\\mathcal{B}</span>  first checks whether CommitPoly  <span class="math">(f^{<em>},r_{f}^{</em>},\\mathsf{pp}) = \\mathsf{com}_{f}^{<em>}</span>  and CommitValue  <span class="math">(f^{</em>},t^{<em>},r_{y}^{</em>},\\mathsf{pp}) = \\mathsf{com}_{f}^{<em>}</span>  and aborts if any of the checks fails. Then, he runs  <span class="math">\\mathsf{Ver}(\\mathsf{com}_{f}^{</em>},t^{<em>},\\mathsf{com}_{y}^{</em>},\\pi^{*},\\mathsf{vp})</span>  where  <span class="math">\\mathsf{vp} = (\\mathsf{bp},g^{s_1},\\ldots ,g^{s^{\\ell +1}},g^{\\alpha},g^{\\beta})</span> . If Ver rejects  <span class="math">\\mathcal{B}</span>  aborts, else he runs extractors  <span class="math">\\mathcal{E}_1,\\dots,\\mathcal{E}_{\\ell +1}</span>  (defined above) on the same input as  <span class="math">\\mathcal{A}</span>  and receives polynomials  <span class="math">q_1^{\\prime},\\ldots ,q_{\\ell +1}^{\\prime}</span> .</p>
+
+    <p class="text-gray-300">If for the output of any of the  <span class="math">\\mathcal{E}_i</span>  it holds that  <span class="math">\\prod_{W\\in \\mathcal{W}_{\\ell ,d}}g^{a_{W,i}}\\prod_{j\\in W}s_jg^{b_is_{\\ell +1}}\\neq \\mathsf{com}_{i,1}</span> ,  <span class="math">\\mathcal{B}</span>  aborts. Let  <span class="math">\\delta = y^{<em>} - f^{</em>}(t^{<em>})</span> . If  <span class="math">\\delta = 0</span>  (i.e.,  <span class="math">y^{</em>} = f^{<em>}(t^{</em>})</span> ),  <span class="math">\\mathcal{B}</span>  aborts.</p>
+
+    <p class="text-gray-300">Otherwise, let  <span class="math">K(\\mathbf{x}) \\stackrel{\\mathrm{def}}{=} f^{<em>}(\\mathbf{x}) - \\sum_{i=1}^{\\ell}(x_{i} - t_{i})q_{i}&#x27;(\\mathbf{x}) - x_{\\ell+1}q_{\\ell+1}&#x27;(\\mathbf{x}) + (r_{f} - r_{y})x_{\\ell+1} - f^{</em>}(t^{*})</span> . Note that by setting  <span class="math">s_{1} = s</span> ,  <span class="math">s_{2} = \\rho_{2} \\cdot s</span> , ...,  <span class="math">s_{\\ell+1} = \\rho_{\\ell+1} \\cdot s</span> , we implicitly set variables  <span class="math">x_{2}, \\ldots, x_{\\ell+1}</span>  to  <span class="math">\\rho_{2} \\cdot x_{1}, \\ldots, x_{\\ell} = \\rho_{\\ell+1} \\cdot x_{1}</span> . Thus,  <span class="math">K(\\mathbf{x})</span>  can be interpreted as an (efficiently computable) univariate polynomial of degree at most  <span class="math">(\\ell+1) \\cdot d</span>  over variable  <span class="math">x_{1}</span> , which we refer to as  <span class="math">K&#x27;(x_{1})</span> .</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"><span class="math">\\mathcal{B}</span>  then proceeds as follows. He chooses  <span class="math">\\tau \\in \\mathbb{F}</span>  uniformly at random. If  <span class="math">g^{\\tau} = g^{-s}</span> , he aborts. Else, he computes univariate polynomial  <span class="math">Q</span>  of degree at most  <span class="math">(\\ell + 1) \\cdot d</span>  and value  <span class="math">R \\in \\mathbb{F}</span>  such that  <span class="math">K&#x27;(x_1) = (x_1 + \\tau)Q(x_1) + R</span> . We then distinguish two cases. (1) If  <span class="math">R = \\delta</span>  then  <span class="math">\\mathcal{B}</span>  factorizes the polynomial  <span class="math">K&#x27;</span>  and let  <span class="math">Y \\subset \\mathbb{F}</span>  be the set of its roots ( $</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Y</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\leq (\\ell + 1) \\cdot d<span class="math"> ). For each  </span>y \\in Y<span class="math"> ,  </span>\\mathcal{B}<span class="math">  tests whether  </span>g^y = g^s<span class="math"> . If so, he outputs  </span>(\\tau, e(g, g)^{\\frac{1}{y + \\tau}})<span class="math">  as a challenge tuple for Assumption 1 and halts. If all these checks fail, he aborts. (2) Else, (if  </span>R \\neq \\delta<span class="math"> ) he outputs  </span>(\\tau, e(g, g)^{Q(s_1) \\cdot (\\delta - R)^{-1}})<span class="math">  as a challenge tuple for Assumption 1 and halts. Recall that, (as explained above) the expression in the exponent is a  </span>(\\ell + 1) \\cdot d$  degree polynomial thus</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">the challenge value is computable in polynomial time from <span class="math">(1^{\\lambda},p,\\mathbb{G},\\mathbb{G}_{T},e,g,g^{s},g^{s^{2}},\\ldots,g^{s^{(\\ell+1)\\cdot d}})</span>.</p>
+
+    <p class="text-gray-300"><span class="math">\\mathcal{B}</span> is clearly ppt since all of <span class="math">\\mathcal{E}_{i}</span> are ppt and he performs polynomially many operations in <span class="math">\\mathbb{F},\\mathbb{G},\\mathbb{G}_{T}</span>. Next, we analyze the success probability of <span class="math">\\mathcal{B}</span>. Recall that, by assumption <span class="math">\\mathcal{A}</span> succeeds in breaking the binding property of the scheme with non-negligible probability <span class="math">\\epsilon</span>. We observe that, <em>conditioned on not aborting</em>, <span class="math">\\mathcal{B}</span> perfectly emulates the binding game to <span class="math">\\mathcal{A}</span> and moreover <span class="math">\\mathcal{B}</span>’s output is always a valid tuple for breaking Assumption 1. Let us argue why this is true.</p>
+
+    <p class="text-gray-300">Since verification succeeded, it holds that</p>
+
+    <p class="text-gray-300"><span class="math">e(\\mathsf{com}_{f,1}/\\mathsf{com}_{y,1},g)=e(g^{s_{\\ell+1}},\\mathsf{com}_{\\ell+1,1})\\prod_{i=1}^{\\ell}e(g^{s_{i}-t_{i}},\\mathsf{com}_{i,1})</span></p>
+
+    <p class="text-gray-300">and since extraction succeeded this can be replaced with</p>
+
+    <p class="text-gray-300"><span class="math">e(g,g)^{f^{<em>}(s_{1},\\ldots,s_{\\ell})+r_{f}x_{\\ell+1}-y^{</em>}-r_{y}x_{\\ell+1}}</span> <span class="math">=e(g,g)^{s_{\\ell+1}q^{\\prime}_{\\ell+1}(s_{1},\\ldots,s_{\\ell+1})}\\prod_{i=1}^{\\ell}e(g,g)^{(s_{i}-t_{i})q^{\\prime}_{i}(s_{1},\\ldots,s_{\\ell+1})}</span> <span class="math">e(g,g)^{f^{<em>}(s_{1},\\ldots,s_{\\ell})-y^{</em>}}</span> <span class="math">=e(g,g)^{s_{\\ell+1}q^{\\prime}_{\\ell+1}(s_{1},\\ldots,s_{\\ell+1})}\\prod_{i=1}^{\\ell}e(g,g)^{(s_{i}-t_{i})q^{\\prime}_{i}(s_{1},\\ldots,s_{\\ell+1})}e(g,g)^{(r_{y}-r_{f})x_{\\ell+1}}</span> <span class="math">e(g,g)^{f^{<em>}(s_{1},\\ldots,s_{\\ell})-y^{</em>}}</span> <span class="math">=e(g,g)^{s_{\\ell+1}q^{\\prime}_{\\ell+1}(s_{1},\\ldots,s_{\\ell+1})+(r_{y}-r_{f})x_{\\ell+1}+\\sum_{i=1}^{\\ell}(s_{i}-t_{i})q^{\\prime}_{i}(s_{1},\\ldots,s_{\\ell+1})}</span> <span class="math">e(g,g)^{-y^{<em>}}</span> <span class="math">=e(g,g)^{s_{\\ell+1}q^{\\prime}_{\\ell+1}(s_{1},\\ldots,s_{\\ell+1})+(r_{y}-r_{f})x_{\\ell+1}+\\sum_{i=1}^{\\ell}(s_{i}-t_{i})q^{\\prime}_{i}(s_{1},\\ldots,s_{\\ell+1})-f^{</em>}(s_{1},\\ldots,s_{\\ell})}</span> <span class="math">e(g,g)^{-\\delta-f^{<em>}(t^{</em>})}</span> <span class="math">=e(g,g)^{s_{\\ell+1}q^{\\prime}_{\\ell+1}(s_{1},\\ldots,s_{\\ell+1})+(r_{y}-r_{f})x_{\\ell+1}+\\sum_{i=1}^{\\ell}(s_{i}-t_{i})q^{\\prime}_{i}(s_{1},\\ldots,s_{\\ell+1})-f^{<em>}(s_{1},\\ldots,s_{\\ell})}</span> <span class="math">e(g,g)^{-\\delta}</span> <span class="math">=e(g,g)^{s_{\\ell+1}q^{\\prime}_{\\ell+1}(s_{1},\\ldots,s_{\\ell+1})+(r_{y}-r_{f})x_{\\ell+1}+\\sum_{i=1}^{\\ell}(s_{i}-t_{i})q^{\\prime}_{i}(s_{1},\\ldots,s_{\\ell+1})-f^{</em>}(s_{1},\\ldots,s_{\\ell})+f^{<em>}(t^{</em>})}</span> <span class="math">e(g,g)^{\\delta}</span> <span class="math">=e(g,g)^{K(s_{1},\\ldots,s_{\\ell+1})}</span> <span class="math">e(g,g)^{\\delta}</span> <span class="math">=e(g,g)^{K^{\\prime}(s_{1})}=e(g,g)^{(x_{1}+tau)Q(s_{1})+R}</span></p>
+
+    <p class="text-gray-300">In order for the last substitution to be possible, it must the case that <span class="math">K^{\\prime}(x_{1})</span>, and correspondingly <span class="math">K^{\\prime}(\\mathbf{x})</span> is non-constant polynomial (i.e., with degree <span class="math">&gt;0</span>). Recall, that for polynomials defined over finite fields division is always possible assuming that the divident’s degree is at least as large as that of the divisor’s. Moreover, the degree of the quotient is at most that of the divident’s and that of the remainder is strictly smaller than that of the divisor (i.e., <span class="math">R</span> is a constant in this case).</p>
+
+    <p class="text-gray-300">Let us assume that <span class="math">K^{\\prime}(\\mathbf{x})</span> is a constant polynomial. Since, <span class="math">e(g,g)^{\\delta}=e(g,g)^{K(s_{1},\\ldots,s_{\\ell+1})}</span> and <span class="math">e(g,g)</span> is a generator or <span class="math">\\mathbb{G}_{T}</span>, it must be that <span class="math">K^{\\prime}(\\mathbf{x})\\stackrel{{\\scriptstyle\\rm def}}{{=}}\\delta</span> therefore we can write</p>
+
+    <p class="text-gray-300"><span class="math">f^{<em>}(x_{1},\\ldots,x_{\\ell})-\\delta-f^{</em>}(x_{1},\\ldots,x_{\\ell})</span> <span class="math">=x_{\\ell+1}q^{\\prime}_{\\ell+1}(x_{1},\\ldots,x_{\\ell+1})+(r_{y}-r_{f})x_{\\ell+1}+\\sum_{i=1}^{\\ell}(x_{i}-t_{i})q^{\\prime}_{i}(x_{1},\\ldots,x_{\\ell+1})</span> <span class="math">f^{<em>}(x_{1},\\ldots,x_{\\ell})-y^{</em>}</span> <span class="math">=x_{\\ell+1}q^{\\prime}_{\\ell+1}(x_{1},\\ldots,x_{\\ell+1})+(r_{y}-r_{f})x_{\\ell+1}+\\sum_{i=1}^{\\ell}(x_{i}-t_{i})q^{\\prime}_{i}(x_{1},\\ldots,x_{\\ell+1})</span> <span class="math">f^{<em>}(x_{1},\\ldots,x_{\\ell})-(r_{y}-r_{f})x_{\\ell+1}-y^{</em>}</span> <span class="math">=x_{\\ell+1}q^{\\prime}_{\\ell+1}(x_{1},\\ldots,x_{\\ell+1})+\\sum_{i=1}^{\\ell}(x_{i}-t_{i})q^{\\prime}_{i}(x_{1},\\ldots,x_{\\ell+1}).</span></p>
+
+    <p class="text-gray-300">Now let <span class="math">f^{\\prime}</span> be the <span class="math">\\ell+1</span> variable polynomial defined as <span class="math">f^{\\prime}(x_{1},\\ldots,x_{\\ell+1})\\stackrel{{\\scriptstyle\\rm def}}{{=}}f^{<em>}(x_{1},\\ldots,x_{\\ell})-(r_{y}-r_{f})x_{\\ell+1}</span> and let <span class="math">t^{\\prime}\\in\\mathbb{F}^{\\ell+1}</span> defined as <span class="math">t^{\\prime}=(t_{1}^{</em>},\\ldots,t_{\\ell}^{<em>},0)</span>. From the above relation it follows that <span class="math">f^{\\prime}(x_{1},\\ldots,x_{\\ell+1})-y^{</em>}=\\sum_{i=1}^{\\ell+1}(x_{i}-t^{\\prime}_{i})q^{\\prime}_{i}(x_{1},\\ldots,x_{\\ell+1})</span>, therefore <span class="math">t^{\\prime}</span> is a root of the polynomial <span class="math">f^{\\prime\\prime}\\stackrel{{\\scriptstyle\\rm def}}{{=}}f^{\\prime}(x_{1},\\ldots,x_{\\ell+1})-y^{*}</span>, i.e.,</p>
+
+    <p class="text-gray-300"><span class="math">f^{\\prime}(t^{\\prime})=0</span> which implies that</p>
+
+    <p class="text-gray-300"><span class="math">f^{\\prime}(t_{1},\\ldots,t_{\\ell+1})-y^{<em>}</span> <span class="math">=0</span> <span class="math">f^{</em>}(t_{1},\\ldots,t_{\\ell})-(r_{y}-r_{f})\\cdot 0-y^{<em>}</span> <span class="math">=0</span> <span class="math">f^{</em>}(t_{1},\\ldots,t_{\\ell})</span> <span class="math">=y^{*}</span></p>
+
+    <p class="text-gray-300">which implies that <span class="math">y^{<em>}</span> is the correct evaluation of <span class="math">f^{</em>}</span> on <span class="math">t^{*}</span>, i.e., <span class="math">\\delta=0</span>. If that is the case, <span class="math">\\mathcal{B}</span> has already aborted, therefore conditioned on not aborting this will never happen.</p>
+
+    <p class="text-gray-300">In all other cases, the polynomial division is possible therefore we can write</p>
+
+    <p class="text-gray-300"><span class="math">e(g,g)^{\\delta}</span> <span class="math">=e(g,g)^{(s_{1}+\\tau)Q(s_{1})+R}</span> <span class="math">e(g,g)^{\\frac{\\delta}{s_{1}+\\tau}}</span> <span class="math">=e(g,g)^{Q(s_{1})+\\frac{R}{s_{1}+\\tau}}</span> <span class="math">e(g,g)^{\\frac{\\delta-R}{s_{1}+\\tau}}</span> <span class="math">=e(g,g)^{Q(s_{1})}.</span></p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">If <span class="math">\\delta=R</span> (case (1) above), then it follows that <span class="math">e(g,g)^{0}=e(g,g)^{Q(s_{1})}</span>, i.e., <span class="math">s_{1}=s</span> is root of <span class="math">Q</span>. Therefore, <span class="math">s=y</span> for some <span class="math">y\\in Y</span> (and therefore $</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Y</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">>0<span class="math">). Since factorization can be done in deterministic polynomial time </span>\\mathcal{B}<span class="math"> always succeeds in computing this </span>y<span class="math"> and </span>e(g,g)^{\\frac{1}{y+\\tau}}=e(g,g)^{\\frac{1}{s+\\tau}}<span class="math"> thus </span>\\mathcal{B}<span class="math"> succeeds in breaking Assumption 1 in this case. If </span>\\delta\\neq R$ (case (2) above), from the above it holds that</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300"><span class="math">e(g,g)^{\\frac{\\delta-R}{s_{1}+\\tau}}=e(g,g)^{Q(s_{1})}</span> <span class="math">e(g,g)^{\\frac{1}{s_{1}+\\tau}}=e(g,g)^{Q(s_{1})\\cdot(\\delta-R)^{-1}}</span></p>
+
+    <p class="text-gray-300">therefore, in this case too, <span class="math">\\mathcal{B}</span> succeeds in breaking Assumption 1 in this case.</p>
+
+    <p class="text-gray-300">Since the two cases are complementary, <span class="math">\\mathcal{B}</span> always succeeds, conditioned on not aborting. Thus, it remains to bound the probability of aborting. <span class="math">\\mathcal{B}</span> can only abort in three cases. If extraction fails, if <span class="math">y^{<em>}=f^{</em>}(t^{*})</span>, or if <span class="math">\\tau=-y</span>. The former can only happen with negligible probability. This holds since, if verification succeeds it must be that <span class="math">e(\\mathsf{com}_{i,2},g)=e(\\mathsf{com}_{i,1},g^{\\alpha})</span> for <span class="math">i=1,\\ldots,\\ell+1</span> and by Assumption 2, extraction for any of <span class="math">\\mathcal{E}_{1},\\ldots,\\mathcal{E}_{\\ell+1}</span> fails with negligible probability. Since <span class="math">\\ell</span> is polynomial in <span class="math">\\lambda</span> it follows that the probability any of them fails (which by a union bound is at most equal to the sum of each individual failure probability) is also negligible. The second happens by assumption with probability at most <span class="math">1-\\epsilon</span> (as <span class="math">\\mathcal{A}</span> wins with probability at least <span class="math">\\epsilon</span>), whereas the third happens with negligible probability <span class="math">O(2^{-\\lambda})</span> as <span class="math">\\tau</span> is chosen uniformly at random from <span class="math">\\mathbb{F}</span>. By a union bound, the abort probability is at most <span class="math">(1-\\epsilon)+\\mathsf{neg}(\\lambda)</span>. Thus the success probability of <span class="math">\\mathcal{B}</span> is <span class="math">\\epsilon-\\mathsf{neg}(\\lambda)</span> which is non-negligible as we assumed that <span class="math">\\epsilon</span> is non-negligible. Since <span class="math">\\mathcal{B}</span> succeeds in breaking Assumption 1 this contradicts our original assumption and our proof is complete.</p>
+
+    <p class="text-gray-300">Evaluation Extractability. This follows almost directly from soundness and polynomial extractability. In particular, let <span class="math">\\mathcal{A}</span> be an ppt adversary that plays the evaluation extractability game. Let <span class="math">\\mathcal{A}_{f}</span>, <span class="math">\\mathcal{A}_{y}</span> be two adversaries that on input the same input as <span class="math">\\mathcal{A}</span>, run <span class="math">\\mathcal{A}</span>’s code internally but only output <span class="math">\\mathsf{com}_{f}^{<em>}</span>, <span class="math">\\mathsf{com}_{y}^{</em>}</span> respectively and then halt. Clearly, both adversaries are ppt. Moreover, whenever <span class="math">\\mathsf{CheckCom}(\\mathsf{com}_{f}^{<em>},\\mathsf{vp})</span> and <span class="math">\\mathsf{Ver}(\\mathsf{com}_{f}^{</em>},t^{<em>},\\mathsf{com}_{y}^{</em>},\\pi^{<em>},\\mathsf{vp})</span> output accept, it follows that: (1) by polynomial extractability there exist extractor <span class="math">\\mathcal{E}_{f}</span> with access to the code and random tape of <span class="math">\\mathcal{A}_{f}</span> that with all but negligible probability outputs <span class="math">f,r_{f}</span> such that <span class="math">\\mathsf{CommitPoly}(f,r_{f},\\mathsf{pp})=\\mathsf{com}_{f}^{</em>}</span>, and (2) by Assumption 2, since <span class="math">\\mathsf{Ver}</span> accepted (and recall that as a sub-routine, <span class="math">\\mathsf{Ver}</span> checks that <span class="math">e(\\mathsf{com}_{y,1},g^{\\beta})=e(\\mathsf{com}_{y,2},g)</span>) there exists ppt extractor with access to the code and random tape of <span class="math">\\mathcal{A}_{y}</span> that with all but negligible probability, outputs <span class="math">y,r_{y}\\in\\mathbb{F}</span> such that <span class="math">g^{y+r_{y}s_{\\ell+1}}=\\mathsf{com}_{y,1}</span>.</p>
+
+    <p class="text-gray-300">It remains to show that the event <span class="math">E=\\{f(t^{*})\\neq y</span>, where <span class="math">f</span> is the output of <span class="math">\\mathcal{E}_{f}</span> and <span class="math">y</span> is the output of <span class="math">\\mathcal{E}_{y}\\}</span> occurs with negligible probability. For contradiction, assume <span class="math">\\Pr[E]=\\epsilon</span>, for some non-negligible <span class="math">\\epsilon</span>. Then we can build adversary <span class="math">\\mathcal{A}^{\\prime}</span> that breaks the binding property of our scheme, as follows.</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>On input <span class="math">(1^{\\lambda},\\mathsf{pp})</span>, <span class="math">\\mathcal{A}^{\\prime}</span> runs <span class="math">\\mathcal{A}</span> internally and receives <span class="math">(t^{<em>},\\pi^{</em>},\\mathsf{com}_{f}^{<em>},\\mathsf{com}_{y}^{</em>})</span>.</li>
+
+      <li><span class="math">\\mathcal{A}^{\\prime}</span> runs <span class="math">\\mathcal{E}_{f},\\mathcal{E}_{y}</span> on the same input as <span class="math">\\mathcal{A}</span> to receive <span class="math">f,r_{f},y,r_{y}</span>.</li>
+
+      <li><span class="math">\\mathcal{A}^{\\prime}</span> outputs <span class="math">(f,t^{<em>},y,\\pi^{</em>},\\mathsf{com}_{f}^{<em>},\\mathsf{com}_{y}^{</em>},r_{f},r_{y})</span> as a challenge for the soundness game.</li>
+
+    </ol>
+
+    <p class="text-gray-300"><span class="math">\\mathcal{A}^{\\prime}</span> is clearly ppt as <span class="math">\\mathcal{A},\\mathcal{E}_{f},\\mathcal{E}_{y}</span> are all ppt. Note that whenever <span class="math">E</span> occurs, <span class="math">\\mathcal{A}^{\\prime}</span> wins. Assuming that <span class="math">\\Pr[E]=\\epsilon</span>, it follows that <span class="math">\\mathcal{A}^{\\prime}</span> breaks the binding property, for which we proved above that it can only happen with negligible probability. This concludes our proof.</p>
+
+    <p class="text-gray-300">Zero Knowledge. We build our simulator <span class="math">\\mathsf{Sim}</span> that operates as follows.</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>On input <span class="math">(1^{\\lambda},\\ell,d)</span>, run <span class="math">\\mathsf{KeyGen}(1^{\\lambda},\\ell,d)</span> and receive <span class="math">\\mathsf{pp},\\mathsf{vp}</span>. Set <span class="math">\\sigma=\\alpha,\\beta,s_{1},\\ldots,s_{\\ell+1}</span>. Choose <span class="math">r_{f}\\in\\mathbb{F}</span> uniformly at random and set <span class="math">\\mathsf{com}_{f}=(g^{r_{f}},g^{\\alpha\\cdot r_{f}})</span>. Send <span class="math">\\mathsf{vp},\\mathsf{com}_{f}</span> to <span class="math">\\mathcal{A}</span>.</li>
+
+      <li>Receive <span class="math">k</span> from <span class="math">\\mathcal{A}</span>.</li>
+
+      <li>For <span class="math">i=1,\\ldots,k</span> repeat:</li>
+
+    </ol>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Receive <span class="math">t_{i}</span> from <span class="math">\\mathcal{A}</span>.</li>
+
+      <li>Choose <span class="math">r_{1i},\\ldots,r_{\\ell i},r_{yi}\\in F</span> uniformly at random.</li>
+
+      <li>Compute <span class="math">\\mathsf{com}_{yi}=(g^{r_{yi}s_{\\ell+1}},g^{\\beta r_{yi}s_{\\ell+1}})</span>, <span class="math">\\mathsf{com}_{ji}=(g^{r_{ji}s_{\\ell+1}},g^{\\alpha r_{ji}s_{\\ell+1}})</span> for <span class="math">j=1,\\ldots,\\ell</span> and <span class="math">\\mathsf{com}_{\\ell+1i}=(g^{r_{f}-r_{yi}-\\sum_{j=1}^{\\ell}r_{ji}(s_{j}-t_{ij})},g^{\\alpha(r_{f}-r_{yi}-\\sum_{j=1}^{\\ell}r_{ji}(s_{j}-t_{ij}))})</span>.</li>
+
+      <li>Output <span class="math">(\\mathsf{com}_{yi},\\pi_{i}=(\\mathsf{com}_{1i},\\ldots,\\mathsf{com}_{\\ell+1i}),\\sigma)</span>.</li>
+
+    </ol>
+
+    <p class="text-gray-300"><span class="math">\\mathsf{Sim}</span> is clearly ppt as all the above steps can be computed in time polynomial in <span class="math">\\lambda</span>. Next, note that since <span class="math">r_{f}</span> and <span class="math">r_{1i},\\ldots,r_{\\ell i}</span>, for all <span class="math">i</span>, are chosen uniformly at random, it follows that <span class="math">\\mathsf{com}_{f},\\mathsf{com}_{1i},\\ldots,\\mathsf{com}_{\\ell i}</span> are indistinguishable from uniformly chosen elements from <span class="math">\\mathbb{G}</span>. Moreover, this holds both in the real and the ideal game execution since in the former the discrete logs of these elements are computed as the sum of a polynomial evaluation in <span class="math">\\mathbb{F}</span> and an element of <span class="math">\\mathbb{F}</span> chosen uniformly at random. Finally, note that in both games, for any <span class="math">i</span>, fixing <span class="math">\\mathsf{com}_{f},\\mathsf{com}_{1i},\\ldots,\\mathsf{com}_{\\ell i}</span> also fixes a unique element <span class="math">\\mathsf{com}_{\\ell+1i}\\in\\mathbb{G}</span>. From the above, it follows that for any (even unbounded) adversary <span class="math">\\mathcal{A}</span> and all <span class="math">f\\in\\mathbb{F}</span>, it holds that the view from the execution of <span class="math">\\mathsf{Real}_{\\mathcal{A},f}(1^{\\lambda})</span> and <span class="math">\\mathsf{Ideal}_{\\mathcal{A},\\mathsf{Sim}}(1^{\\lambda})</span> is indistinguishable, thus Construction 1 is perfect zero-knowledge.</p>
+
+    <p class="text-gray-300">∎</p>
+
+    <h2 id="sec-21" class="text-2xl font-bold">4 A Sum-check Protocol over Homomorphic Commitments</h2>
+
+    <p class="text-gray-300">Overview. The sum-check protocol <em>[24]</em> is an interactive protocol which allows a prover <span class="math">\\mathcal{P}</span> to convince a verier <span class="math">\\mathcal{V}</span> of the validity of statements of the form <span class="math">H=\\sum_{b_{1}\\in\\{0,1\\}}\\cdots\\sum_{b_{\\ell}\\in\\{0,1\\}}g(b_{1},\\cdots,b_{\\ell})</span> where <span class="math">g:\\mathbb{F}^{\\ell}\\to\\mathbb{F}</span> is an <span class="math">\\ell</span>-variate polynomial over some finite field <span class="math">\\mathbb{F}</span>. While <span class="math">\\mathcal{V}</span> can directly compute <span class="math">H</span> using <span class="math">O(2^{\\ell})</span> evaluation of <span class="math">g</span>, the sum-check protocol reduces <span class="math">\\mathcal{V}</span>’s work to be polynomial in <span class="math">\\ell</span>. Indeed, the protocol proceeds as follows (in <span class="math">\\ell</span> rounds). In in the first round, <span class="math">\\mathcal{P}</span> sends <span class="math">\\mathcal{V}</span> the univariate polynomial <span class="math">g_{1}(x)=\\sum_{b_{2}\\in\\{0,1\\}}\\cdots\\sum_{b_{\\ell}\\in\\{0,1\\}}g(x,b_{2},\\cdots,b_{\\ell})</span>. <span class="math">\\mathcal{V}</span> then checks that the degree of <span class="math">g_{1}</span> is the same as the variable degree of <span class="math">x_{1}</span> in <span class="math">g</span>, rejecting otherwise. <span class="math">\\mathcal{V}</span> then proceeds in sending <span class="math">\\mathcal{P}</span> a uniform challenge <span class="math">r_{1}\\in\\mathbb{F}</span>. Next, during the <span class="math">i</span>th round of the sum-check protocol, <span class="math">i=2,\\cdots,\\ell</span>, <span class="math">\\mathcal{P}</span> sends the univariate polynomial <span class="math">g_{i}(x)=\\sum_{b_{i+1}\\in\\{0,1\\}}\\cdots\\sum_{b_{\\ell}\\in\\{0,1\\}}g(r_{1},\\cdots,r_{i-1},x,b_{i+1},\\cdots,b_{\\ell})</span>. Upon receiving <span class="math">g_{i}</span>, <span class="math">\\mathcal{V}</span> checks that <span class="math">g_{i-1}(r_{i-1})=g_{i}(0)+g_{i}(1)</span>, rejecting otherwise. <span class="math">\\mathcal{V}</span> then proceeds to send a uniform <span class="math">r_{i}</span> to <span class="math">\\mathcal{P}</span>, which is the challenge to be used in the next round. Finally, at the last round, <span class="math">\\mathcal{V}</span> accepts only if <span class="math">g(r_{1},\\cdots,r_{\\ell})=g_{\\ell}(r_{\\ell})</span>.</p>
+
+    <p class="text-gray-300">In the sequel, we define the degree of each monomial of <span class="math">g</span> as the sum of the powers of its variables. We then define <span class="math">g</span>’s total degree as the maximal degree of any of its monomials. The following theorem is due to *[24]</p>
+
+    <h6 id="sec-22" class="text-base font-medium mt-4">Construction 2 (Sum-check Protocol Over Homomorphic Commitment Schemes).</h6>
+
+    <p class="text-gray-300">Let <span class="math">\\mathbb{F}</span> be a prime-order finite field, and let <span class="math">\\lambda</span> be a security parameter. In addition, let <span class="math">\\mathsf{Comm}</span> be a linearly homomorphic commitment scheme as described in Section 2.3, <span class="math">\\mathsf{cp}\\leftarrow\\mathsf{Setup}(1^{\\lambda})</span>, and let <span class="math">g(b_{1},\\cdots,b_{\\ell})</span> be an <span class="math">\\ell</span>-variate total-degree-<span class="math">d</span> polynomial over <span class="math">\\mathbb{F}</span> which is represented using <span class="math">m</span> coefficients <span class="math">a_{0},\\cdots,a_{m}</span>. Consider the following protocol between <span class="math">\\mathcal{P}</span> and <span class="math">\\mathcal{V}</span> for convincing <span class="math">\\mathcal{V}</span> that <span class="math">t_{0}=\\sum_{b_{1}\\in\\{0,1\\}}\\cdots\\sum_{b_{\\ell}\\in\\{0,1\\}}g(b_{1},\\cdots,b_{\\ell})</span> is a valid opening to some commitment <span class="math">\\mathsf{com}_{0}</span>. That is, that he knows <span class="math">\\rho_{0}</span> such that <span class="math">\\mathsf{com}_{0}=\\mathsf{Com}(\\mathsf{cp},t_{0},\\rho_{0})</span>.</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>For all <span class="math">i=1,\\cdots,\\ell</span> perform the following.</li>
+
+    </ol>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Define <span class="math">g_{i}(x)=\\sum_{b_{i+1},\\cdots,b_{\\ell}\\in\\{0,1\\}}g(r_{1},\\cdots,r_{i-1},x,b_{i+1},\\cdots,b_{\\ell})</span> and let <span class="math">a_{0},\\cdots,a_{m}</span> be the coefficients of <span class="math">g_{i}</span>.</li>
+
+      <li>For every <span class="math">0\\leq j\\leq m</span> <span class="math">\\mathcal{P}</span> computes <span class="math">\\mathsf{com}_{a_{j}}\\leftarrow\\mathsf{Com}(\\mathsf{cp},a_{j},\\rho_{a_{j}})</span> where <span class="math">\\rho_{a_{j}}\\in\\mathbb{F}</span> is selected uniformly at random and sends <span class="math">(\\mathsf{com}_{a_{0}},\\cdots,\\mathsf{com}_{a_{m}})</span> to <span class="math">\\mathcal{V}</span>.</li>
+
+      <li><span class="math">\\mathcal{V}</span> computes <span class="math">\\mathsf{com}^{*}_{i-1}\\leftarrow\\mathsf{com}_{a_{0}}\\cdot\\prod_{k=0}^{m}\\mathsf{com}_{a_{k}}</span> which is a commitment to <span class="math">g_{i}(0)+g_{i}(1)</span>.</li>
+
+      <li><span class="math">\\mathcal{V}</span> and <span class="math">\\mathcal{P}</span> perform <span class="math">\\mathcal{ZK}_{eq}(\\mathsf{cp},t_{i-1},\\rho_{i-1},\\rho_{a_{0}}+\\sum_{j=0}^{m}\\rho_{a_{j}};\\mathsf{com}_{i-1},\\mathsf{com}^{*}_{i-1})</span>.</li>
+
+      <li><span class="math">\\mathcal{V}</span> generates a random value <span class="math">r_{i}</span> and sends it to <span class="math">\\mathcal{P}</span>.</li>
+
+      <li>Both <span class="math">\\mathcal{V}</span> and <span class="math">\\mathcal{P}</span> compute <span class="math">\\mathsf{com}_{i}\\leftarrow\\mathcal{Eval}(\\mathsf{cp},\\mathsf{com}_{a_{0}},\\cdots,\\mathsf{com}_{a_{m}},1,r_{i},\\cdots,r_{i}^{m})</span>.</li>
+
+      <li><span class="math">\\mathcal{P}</span> sets <span class="math">t_{i}\\leftarrow g_{i}(r_{i})</span> and <span class="math">\\rho_{i}\\leftarrow\\sum_{j=0}^{m}\\rho_{a_{j}}r_{i}^{j}</span></li>
+
+      <li><span class="math">\\mathcal{V}</span> computes <span class="math">\\mathsf{com}^{<em>}_{\\ell}\\leftarrow\\mathsf{Com}(\\mathsf{cp},g(r_{1},\\cdots,r_{\\ell}),\\rho_{\\ell+1})</span> and sends <span class="math">\\mathsf{com}^{</em>}_{\\ell}</span> and <span class="math">\\rho_{\\ell+1}</span> to <span class="math">\\mathcal{P}</span>.</li>
+
+      <li>Both <span class="math">\\mathcal{V}</span> and <span class="math">\\mathcal{P}</span> perform <span class="math">\\mathcal{ZK}_{eq}(\\mathsf{cp},g(r_{1},\\cdots,r_{\\ell}),\\rho_{\\ell},\\rho_{\\ell+1};\\mathsf{com}_{\\ell},\\mathsf{com}^{*}_{\\ell})</span>.</li>
+
+    </ol>
+
+    <h6 id="sec-23" class="text-base font-medium mt-4">Theorem 2.</h6>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">For any <span class="math">\\ell</span>-variate, total-degree-<span class="math">d</span> polynomial <span class="math">g:\\mathbb{F}^{\\ell}\\rightarrow\\mathbb{F}</span>, the sum-check protocol is an interactive proof for the (no-input) function <span class="math">\\sum_{b_{1},\\cdots,b_{\\ell}\\in\\{0,1\\}}g(b_{1},\\cdots,b_{\\ell})</span> with soundness $d\\cdot\\ell/</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mathbb{F}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"><span class="math">. Moreover, </span>\\mathcal{P}<span class="math"> performs </span>O(2^{\\ell}\\cdot poly(\\ell))<span class="math"> arithmetic operations over </span>\\mathbb{F}<span class="math"> and </span>\\mathcal{V}<span class="math"> performs </span>poly(\\ell)<span class="math"> arithmetic operations over </span>\\mathbb{F}<span class="math"> and one evaluation of </span>g<span class="math"> on a random point </span>r$.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <h4 id="sec-24" class="text-lg font-semibold mt-6">The Sum-check Protocol over Homomorphic Commitments.</h4>
+
+    <p class="text-gray-300">Unfortunately the messages exchanged during the sum check protocol reveal the coefficients of <span class="math">g_{1},\\cdots,g_{\\ell}</span>, thus leaking additional information about the values of <span class="math">g</span>, beyond <span class="math">H</span>. This is problematic since we would like to use the sum-check protocol as part of a zero-knowledge argument system of NP, where leaking additional evaluations of <span class="math">g</span> might leak information about the prover’s witness. To that end, we execute the sum-check protocol over an additively homomorphic commitment scheme. In particular, we consider the Pedersen commitment scheme, modified as described in Section 2.3. The modified protocol starts by having <span class="math">\\mathcal{P}</span> commit to the coefficients of <span class="math">g</span> and by providing a commitment <span class="math">\\mathsf{com}_{0}</span> to the value <span class="math">H</span>. Next, at round <span class="math">i</span>, instead of having <span class="math">\\mathcal{P}</span> send to <span class="math">\\mathcal{V}</span> the coefficients of <span class="math">g_{i}</span>, we modify the sum-check protocol and have <span class="math">\\mathcal{P}</span> send commitments to these coefficients to <span class="math">\\mathcal{V}</span>. Since Pedersen commitments are linearly homomorphic, <span class="math">\\mathcal{V}</span> can locally compute a commitment <span class="math">\\mathsf{com}^{<em>}</span> to <span class="math">g_{i}(0)+g_{i}(1)</span> and then check (using the <span class="math">\\mathcal{ZK}_{eq}</span> protocol) that <span class="math">\\mathsf{com}^{</em>}</span> commits to the same value as <span class="math">\\mathsf{com}_{i-1}</span>, thus verifying that indeed <span class="math">g_{i-1}(r_{i-1})=g_{i}(0)+g_{i}(1)</span>. In case this verification succeeds, <span class="math">\\mathcal{V}</span> sends a uniformly random challenge <span class="math">r_{i}</span> to <span class="math">\\mathcal{P}</span>, and both <span class="math">\\mathcal{P}</span> and <span class="math">\\mathcal{V}</span> use the homomorphic properties of the Pedersen commitment scheme in order to obtain a commitment <span class="math">\\mathsf{com}_{i}</span> to the evaluation of <span class="math">g_{i}</span> on <span class="math">r_{i}</span>. <span class="math">\\mathcal{P}</span> and <span class="math">\\mathcal{V}</span> repeat the above, using <span class="math">\\mathsf{com}_{i}</span> and <span class="math">r_{i}</span> in round <span class="math">i+1</span>.</p>
+
+    <p class="text-gray-300">Formally, consider the protocol presented in Construction 2. We now state the following theorem (we are only interested in proving “regular” soundness and not knowledge soundness).</p>
+
+    <h6 id="sec-25" class="text-base font-medium mt-4">Theorem 3.</h6>
+
+    <p class="text-gray-300">For any <span class="math">\\ell</span>-variate, total-degree-<span class="math">d</span> polynomial <span class="math">g:\\mathbb{F}^{\\ell}\\rightarrow\\mathbb{F}</span> with <span class="math">m</span> non-zero coefficients, assuming <span class="math">\\mathsf{Comm}</span> is a linearly homomorphic commitment scheme, as described in Section 2.3, and <span class="math">\\mathcal{ZK}_{eq}</span> is a zero-knowledge non-interactive argument for testing equality of commitments for <span class="math">\\mathsf{Comm}</span>, Construction 2</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">is an interactive argument with soundness $d \\cdot \\ell /</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mathbb{F}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">$ for the following language</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="my-4 text-center"><span class="math-block">L = \\left\\{(\\mathsf{cp}, \\mathsf{com}_0, g; \\rho_0): \\mathsf{com}_0 \\leftarrow \\mathcal{Com} \\left(\\mathsf{cp}, \\sum_{b_1, \\dots, b_\\ell \\in \\{0, 1\\}} g(b_1, \\dots, b_\\ell), \\rho_0\\right) \\text{ and } \\mathsf{cp} \\leftarrow \\mathcal{Setup}(1^\\lambda) \\right\\}</span></div>
+
+    <p class="text-gray-300">where <span class="math">\\lambda</span> is the security parameter.</p>
+
+    <p class="text-gray-300"><strong>Proof Sketch.</strong> The completeness property immediately follows from Construction 2. We now proceed to argue about the soundness property.</p>
+
+    <p class="text-gray-300"><strong>Soundness.</strong> Let <span class="math">g(b_1, \\dots, b_\\ell)</span> be an <span class="math">\\ell</span>-variate total-degree-<span class="math">d</span> polynomial over a finite field <span class="math">\\mathbb{F}</span>. We begin by observing that the commitment <span class="math">\\mathsf{com}_0</span> and all coefficient commitments <span class="math">\\mathsf{com}_{a_j,i}</span> for <span class="math">i = 1, \\ldots, \\ell</span>, <span class="math">j = 1, \\ldots, m</span> are extractable. That is, for each of them there exists a polynomial-time extractor that receives the same input as the adversary <span class="math">\\mathcal{A}</span> and outputs with all but negligible probability a valid pre-image from <span class="math">\\mathbb{F}</span>, whenever <span class="math">\\mathcal{A}</span> succeeds in convincing <span class="math">\\mathcal{V}</span>. This follows under Assumption 2 using the same argument as in the proof of Theorem 1 (recall that, as explained in Section 2.3, we implicitly assume that whenever <span class="math">\\mathcal{V}</span> receives a commitment he checks whether it is well-formed and rejects otherwise).</p>
+
+    <p class="text-gray-300">Next, we distinguish between the following two complementary cases.</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li><strong>There exists <span class="math">0 \\leq i \\leq \\ell</span> such that the extracted pre-images for <span class="math">\\mathsf{com}_i, \\mathsf{com}_i^*</span> are not equal.</strong> In this case, this directly contradicts the soundness of the <span class="math">\\mathcal{Z}\\mathcal{K}_{eq}</span> protocol executed in Steps 1d and 3 of Construction 2. This means that <span class="math">\\mathcal{A}</span> can be used to construct a black box adversary <span class="math">\\mathcal{A}&#x27;</span> which breaks the soundness of the <span class="math">\\mathcal{Z}\\mathcal{K}_{eq}</span> protocol.</li>
+
+    </ol>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li><strong>For all <span class="math">0 \\leq i \\leq \\ell</span> it holds that the extracted pre-images for <span class="math">\\mathsf{com}_i, \\mathsf{com}_i^<em></span> are equal.</strong> In this case let <span class="math">t_0^</em></span> be the extracted pre-image of <span class="math">\\mathsf{com}_0</span>, and let <span class="math">h_i^<em></span> be the extracted pre-image of <span class="math">\\mathsf{com}_i</span> for all <span class="math">i = 0, \\dots, \\ell - 1</span>. Also, let <span class="math">g_i^</em></span> be the polynomial defined by coefficients <span class="math">a_0, \\dots, a_m</span> which are the pre-images extracted from the commitments <span class="math">\\mathsf{com}_{a_0}, \\dots, \\mathsf{com}_{a_m}</span> sent by <span class="math">\\mathcal{P}</span> in Step 1b of Construction 2 during the <span class="math">(i + 1)</span>th round. Notice that since <span class="math">\\mathsf{com}_i</span> and <span class="math">\\mathsf{com}_i^<em></span> have the same pre-image <span class="math">h^</em></span>, by construction of <span class="math">\\mathsf{com}_i^<em></span> it holds that <span class="math">h_i^</em> = g_i^<em>(0) + g_i^</em>(1)</span>. Due to this, notice that <span class="math">(t_0^<em>, g, (r_i, g_i^</em>, h_i^<em>)_{i=1,\\dots,\\ell})</span> is a valid transcript for a (possibly) cheating prover <span class="math">\\mathcal{P}^</em></span> controlled by <span class="math">\\mathcal{A}</span> trying to convince a verifier <span class="math">\\mathcal{V}</span> that indeed <span class="math">t_0 = \\sum_{b_1 \\in \\{0,1\\}} \\dots \\sum_{b_\\ell \\in \\{0,1\\}} g(b_1, \\dots, b_\\ell)</span>.</li>
+
+    </ol>
+
+    <p class="text-gray-300">Thus, if <span class="math">t_0 \\neq \\sum_{b_1 \\in \\{0,1\\}, \\ldots, b_\\ell \\{0,1\\}} g(b_1 \\ldots, b_\\ell)</span> then <span class="math">\\mathcal{A}</span> can be used in a black-box manner in order to break the soundness property of the sum-check interactive proof protocol.</p>
+
+    <p class="text-gray-300">Moreover, we prove the following lemma that will be helpful for us while proving the zero-knowledge property of our argument.</p>
+
+    <p class="text-gray-300"><strong>Lemma 2.</strong> For every verifier <span class="math">\\mathcal{V}^<em></span> and for every <span class="math">\\ell</span>-variate, total-degree-<span class="math">d</span> polynomial <span class="math">g: \\mathbb{F}^\\ell \\to \\mathbb{F}</span> with <span class="math">m</span> non-zero coefficients, there exists a simulator <span class="math">\\mathsf{Sim}</span> such that <span class="math">\\mathsf{Sim}</span> is capable of simulating from <span class="math">\\mathsf{cp}, \\mathsf{com}_0, m</span> and <span class="math">t_0</span> (without using <span class="math">g</span>) the partial view of <span class="math">\\mathcal{V}^</em></span> defined by <span class="math">\\mathsf{cp}, \\mathsf{com}_0</span> as well as the messages obtained during only Step 1 of Construction 2.¹</p>
+
+    <p class="text-gray-300"><strong>Proof Sketch.</strong> We build simulator <span class="math">\\mathsf{Sim}</span> which simulates the view of <span class="math">\\mathcal{V}</span> during Step 1 of Construction 2 as follows. First, <span class="math">\\mathsf{Sim}</span> receives as input commitment parameters <span class="math">\\mathsf{cp}</span>, commitment <span class="math">\\mathsf{com}_0</span>, an upper bound <span class="math">m</span> on the number of coefficients of <span class="math">g</span>, as well as the value <span class="math">t_0 = \\sum_{b_1,\\dots ,b_\\ell \\in \\{0,1\\}}g(b_1,\\dots ,b_\\ell)</span>. <span class="math">\\mathsf{Sim}</span> proceeds to simulate Step 1 of Construction 2 as follows.</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>For <span class="math">i = 1, \\ldots, \\ell</span>:</li>
+
+    </ol>
+
+    <p class="text-gray-300">¹Notice that the partial view does not include the coefficients <span class="math">a_1, \\dots, a_m</span> of <span class="math">g</span>.</p>
+
+    <p class="text-gray-300">13</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Sim chooses coefficients <span class="math">a_{0},\\ldots a_{m-1}</span> chosen uniformly at random from <span class="math">\\mathbb{F}</span> and sets <span class="math">a_{m}</span> such that <span class="math">t_{i-1}=a_{0}+a_{m}+\\sum_{j=0}^{m-1}a_{j}</span>. Let <span class="math">g_{i}(x)</span> be the polynomial denoted by coefficients <span class="math">a_{0},\\ldots,a_{m}</span> and notice that <span class="math">t_{i-1}=g_{i}(0)+g_{i}(1)</span>.</li>
+
+      <li>For every <span class="math">0\\leq j\\leq m</span>, Sim computes <span class="math">\\mathsf{com}_{a_{j}}\\leftarrow\\mathcal{C}om(\\mathsf{cp},a_{j},\\rho_{a_{j}})</span> where <span class="math">\\rho_{a_{j}}\\in\\mathbb{F}</span> is selected uniformly at random, and sends <span class="math">(\\mathsf{com}_{a_{0}},\\cdots,\\mathsf{com}_{a_{m}})</span> to <span class="math">\\mathcal{V}^{*}</span>.</li>
+
+      <li>Sim computes <span class="math">\\mathsf{com}^{*}_{i-1}\\leftarrow\\mathsf{com}_{a_{0}}\\cdot\\prod_{k=0}^{m}\\mathsf{com}_{a_{k}}</span>.</li>
+
+      <li>Let <span class="math">\\mathsf{Sim}_{eq}</span> be the simulator guaranteed from the zero knowledge property of <span class="math">\\mathcal{ZK}_{eq}</span>. Sim runs simulator <span class="math">\\mathsf{Sim}_{eq}</span> on inputs <span class="math">(\\mathsf{cp},\\mathsf{com}^{<em>}_{i-1},\\mathsf{com}_{i-1})</span> in order to simulate <span class="math">\\mathcal{V}^{</em>}</span>’s view during the execution of <span class="math">\\mathcal{ZK}_{eq}</span> the <span class="math">i</span>th round.</li>
+
+      <li>Upon receiving <span class="math">r_{i}</span> from <span class="math">\\mathcal{V}^{*}</span>, Sim computes <span class="math">\\mathsf{com}_{i}\\leftarrow\\mathcal{E}val(\\mathsf{cp},\\mathsf{com}_{a_{0}},\\cdots,\\mathsf{com}_{a_{m}},1,r_{i},\\cdots,r_{i}^{m})</span> and sets <span class="math">t_{i}\\leftarrow g_{i}(r_{i})</span> and <span class="math">\\rho_{i}\\leftarrow\\sum_{j=0}^{m}\\rho_{a_{j}}r_{i}^{j}</span>.</li>
+
+    </ul>
+
+    <p class="text-gray-300">The produced transcript is indistinguishable from the one <span class="math">\\mathcal{V}^{<em>}</span> gets while interacting with <span class="math">\\mathcal{P}</span> since: (i) the coefficients <span class="math">a_{0},\\ldots,a_{m}</span> for each round <span class="math">i</span> satisfy the same relation with respect to <span class="math">t_{i-1}</span> in both cases, (ii) <span class="math">\\mathcal{C}omm</span> is statistically hiding, i.e., each commitment is indistinguishable from a commitment to a random value, and (iii) the output of <span class="math">\\mathsf{Sim}_{eq}</span> for round <span class="math">i</span> is indistinguishable from the messages received by <span class="math">\\mathcal{V}^{</em>}</span> while running <span class="math">\\mathcal{ZK}_{eq}</span> on the same values. In the following, we consider a slightly modified simulator Sim that outputs as secret state the values <span class="math">(t_{\\ell},\\rho_{\\ell})</span> to be used when building a larger simulator that runs Sim as a black box. ∎</p>
+
+    <h2 id="sec-26" class="text-2xl font-bold">5 A CMT Protocol over Homomorphic Commitments</h2>
+
+    <p class="text-gray-300">Cormode et al.<em>[12]</em> present an efficient interactive proof protocol (to which we shall refer in the sequel as the CMT protocol) for a prover <span class="math">\\mathcal{P}</span> to convince a verifier <span class="math">\\mathcal{V}</span> of the validity of a statement of the form “<span class="math">y=C(x)</span>” for some depth-<span class="math">d</span> arithmetic circuit <span class="math">C</span> and input <span class="math">x</span>. The protocol proceeds in <span class="math">d</span> rounds, processing one circuit layer at a time, from the output layer (layer 0) to the input layer (layer <span class="math">d</span>). At round <span class="math">i</span>, <span class="math">\\mathcal{P}</span> reduces the claim about the values of <span class="math">C</span> at the <span class="math">i</span>th layer to a claim about the values of <span class="math">C</span>’s values in layer <span class="math">i+1</span>. At the final round (round <span class="math">d</span>), the protocol terminates with a claim about the input wires of <span class="math">C</span>. Since the input <span class="math">x</span> is known to <span class="math">\\mathcal{V}</span>, <span class="math">\\mathcal{V}</span> directly checks the validity of this claim, rejecting otherwise.</p>
+
+    <p class="text-gray-300">Concretely (using the notation of Section 2.4), at the <span class="math">i</span>th round (corresponding to the <span class="math">i</span>th layer of <span class="math">C</span>) <span class="math">\\mathcal{V}</span> verifies that for every gate <span class="math">g</span> in the <span class="math">i</span>th layer of <span class="math">C</span>, <span class="math">V_{i}(g)</span> correctly outputs the values of <span class="math">g</span>. Next, since <span class="math">V_{i}</span> already represents the values of <span class="math">g</span> as summation of wiring predicates and gate values, <span class="math">\\mathcal{V}</span> can verify the correct computation of <span class="math">i</span>th layer, using the sum-check protocol from Section 4. However, since the soundness guarantee of the sum-check protocol depends on the size of the underlying field <span class="math">\\mathbb{F}</span>, we replace <span class="math">V_{i}</span> (which is defined over <span class="math">\\mathsf{GF}(2)</span>) with its multilinear extension <span class="math">\\tilde{V}_{i}</span> which is defined over a finite field <span class="math">\\mathbb{F}</span> as</p>
+
+    <p class="text-gray-300"><span class="math">\\tilde{V}_{i}(z)=\\sum_{g\\in\\{0,1\\}^{s_{i}}\\atop u,v\\in\\{0,1\\}^{s_{i+1}}}f_{i,z}(g,u,v)\\stackrel{{\\scriptstyle\\rm def}}{{=}}\\sum_{g\\in\\{0,1\\}^{s_{i}}\\atop u,v\\in\\{0,1\\}^{s_{i+1}}}\\tilde{\\beta}_{i}(z,g)\\cdot\\Big{(}\\mathsf{add}_{i+1}(g,u,v)\\cdot(\\tilde{V}_{i+1}(u)+\\tilde{V}_{i+1}(v))</span> (1) <span class="math">\\qquad\\qquad\\qquad\\qquad\\qquad\\qquad+\\mathsf{mult}_{i+1}(g,u,v)\\cdot(\\tilde{V}_{i+1}(u)\\cdot\\tilde{V}_{i+1}(v))\\Big{)},</span></p>
+
+    <p class="text-gray-300">where <span class="math">\\mathsf{add}_{i}</span> (resp., <span class="math">\\mathsf{mult}_{i}</span>) is the multilinear extension of <span class="math">\\mathsf{add}_{i}</span> (resp., <span class="math">\\mathsf{mult}_{i}</span>) and <span class="math">\\tilde{\\beta}_{i}</span> is the multilinear extension of the selector function that takes two <span class="math">s_{i}</span>-bit inputs <span class="math">a,b</span> and outputs <span class="math">1</span> if <span class="math">a=b</span> and <span class="math">0</span> else.</p>
+
+    <p class="text-gray-300">Assume that the output of <span class="math">C</span> is a single value. At a high level, the protocol proceeds as follows. At the first round, <span class="math">\\mathcal{P}</span> claims that <span class="math">y=\\tilde{V}_{0}(0)</span> for some value <span class="math">y</span>. <span class="math">\\mathcal{V}</span> and <span class="math">\\mathcal{P}</span> now execute the sum-check protocol, verifying that <span class="math">\\tilde{V}_{0}(r_{0})=\\sum_{g\\in\\{0,1\\}^{s_{0}}}\\ f_{0,r_{0}}(g,u,v)</span> at a random point <span class="math">r_{0}\\in\\mathbb{F}^{s_{0}}</span> which is generated by <span class="math">\\mathcal{V}</span>. At the last step of the sum-check protocol, the sum-check verifier <span class="math">\\mathcal{V}_{sc}</span> needs to evaluate <span class="math">f_{0,r_{0}}</span> at a random</p>
+
+    <p class="text-gray-300">point <span class="math">\\rho_{0}\\in\\mathbb{F}^{s_{0}+2s_{1}}</span> generated by <span class="math">\\mathcal{V}_{sc}</span>. Next, since <span class="math">f_{0,r_{0}}</span> depends on <span class="math">\\tilde{V}_{1}</span>, in order to evaluate <span class="math">f_{0,r_{0}}(\\rho_{0})</span> it is the case that <span class="math">\\mathcal{V}_{sc}</span> needs to evaluate <span class="math">\\tilde{V}_{1}(q_{1})</span> and <span class="math">\\tilde{V}_{1}(q_{2})</span> where <span class="math">(q_{1},q_{2})\\in\\mathbb{F}^{2s_{1}}</span> are the last <span class="math">2s_{1}</span> entries of <span class="math">\\rho_{0}</span>. However, since <span class="math">\\mathcal{V}</span> does not have access to the correct gate values of layer-1 and thus cannot evaluate <span class="math">\\tilde{V}_{1}</span> on his own, he relies on <span class="math">\\mathcal{P}</span> to provide him with two values <span class="math">a_{1},a_{2}</span> claiming that <span class="math">a_{1}=\\tilde{V}_{1}(q_{1})</span> and <span class="math">a_{2}=\\tilde{V}_{1}(q_{2})</span>. Finally, <span class="math">\\mathcal{P}</span> and <span class="math">\\mathcal{V}</span> now again execute the sum-check protocol in order to verify the validity of the two claims made by <span class="math">\\mathcal{P}</span>’ thus reducing <span class="math">\\mathcal{P}</span>’s claims regarding the correct computation of the <span class="math">i</span>th layer of <span class="math">C</span> to claims about correct computation of layer <span class="math">i-1</span>. Applying this method repeatedly for <span class="math">d</span> rounds, the final claim made by <span class="math">\\mathcal{P}</span> is with regards to an evaluation of <span class="math">\\tilde{V}</span> (the multilinear extension of the circuits inputs) which can be directly checked by <span class="math">\\mathcal{V}</span> since he has access to <span class="math">x</span>.</p>
+
+    <p class="text-gray-300">Unfortunately, utilizing the above-described approach directly leads to the number of claims being verified by <span class="math">\\mathcal{V}</span> to double with each circuit layer. For a depth-<span class="math">d</span> circuit, this results in a total of <span class="math">2^{d}</span> executions of the sum-check protocol. We now describe the method for condensing the CMT protocol to use a single claim to be verified by <span class="math">\\mathcal{V}</span> per layer. Indeed, instead of having <span class="math">\\mathcal{V}</span> verify <span class="math">\\tilde{V}_{1}(q_{1})</span> and <span class="math">\\tilde{V}_{1}(q_{2})</span> directly, let <span class="math">\\gamma:\\mathbb{F}\\to\\mathbb{F}^{s_{1}}</span> be the unique line such that <span class="math">\\gamma(0)=q_{1}</span> and <span class="math">\\gamma(1)=q_{2}</span>. <span class="math">\\mathcal{P}</span> then sends <span class="math">\\mathcal{V}</span> the degree-<span class="math">s_{1}</span> polynomial <span class="math">h(x)=\\tilde{V}_{1}(\\gamma(x))</span>. <span class="math">\\mathcal{V}</span> then checks that <span class="math">h(0)=a_{1}</span> and that <span class="math">h(1)=a_{2}</span>. Next, <span class="math">\\mathcal{V}</span> generates a random point <span class="math">r</span> and both <span class="math">\\mathcal{P}</span> and <span class="math">\\mathcal{V}</span> perform a single execution of the sum-check protocol in order to verify that <span class="math">h(r_{1})=\\tilde{V}_{1}(\\gamma(r))</span>. Thus, this procedure reduces the total number of the invocations of the sum-check protocol from <span class="math">O(2^{d})</span> to <span class="math">O(d)</span>.</p>
+
+    <p class="text-gray-300">Formally, consider the following theorem.</p>
+
+    <h6 id="sec-27" class="text-base font-medium mt-4">Theorem 4 (<em>[18, 12]</em>).</h6>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Let <span class="math">C:\\mathbb{F}^{n}\\to\\mathbb{F}^{k}</span> be a depth-<span class="math">d</span> layered arithmetic circuit over a finite field <span class="math">\\mathbb{F}</span>. The CMT protocol described above is an interactive proof for the function computed by <span class="math">C</span> with soundness $O(d\\cdot\\log S/</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mathbb{F}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">)<span class="math">, where </span>S<span class="math"> is the maximal number of gates per circuit layer. Moreover, </span>\\mathcal{P}<span class="math">’s running time is </span>O(</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">C</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\log S)<span class="math"> and the protocol uses </span>O(d\\log S)<span class="math"> rounds of interaction. Finally, in case </span>\\mathsf{add}_{i}<span class="math"> and </span>\\mathsf{mult}_{i}<span class="math"> are computable in time </span>O(\\mathrm{polylog}\\,S)<span class="math"> for all the layers of </span>C<span class="math">, then the running time of the verifier </span>\\mathcal{V}<span class="math"> is </span>O(n+k+d\\cdot\\mathrm{polylog}\\,S)$.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <h4 id="sec-28" class="text-lg font-semibold mt-6">The CMT Protocol over Homomorphic Commitments.</h4>
+
+    <p class="text-gray-300">Similarly to the case of the standard sum-check protocol, the messages exchanged during the CMT execution leak information about the intermediate values of the circuit <span class="math">C</span> and thus potentially about the circuit’s input (which in our case will include the prover’s witness). Thus, similarly to Section 4, we execute the CMT protocol over homomorphic commitments and use the commitment’s hiding property to conceal from <span class="math">\\mathcal{V}</span> information regarding the circuit’s internal wires.</p>
+
+    <p class="text-gray-300">The modified protocol proceed as follows. First, <span class="math">\\mathcal{P}</span> sends to <span class="math">\\mathcal{V}</span> commitments <span class="math">\\mathsf{com}_{x_{1}},\\ldots,\\mathsf{com}_{x_{n}}</span> to the <span class="math">n</span> inputs of <span class="math">C</span> and a commitment <span class="math">\\mathsf{com}_{0}</span> to <span class="math">1</span> (the claimed output of the circuit when evaluated on <span class="math">x</span>). Next, at round-<span class="math">i</span>, both <span class="math">\\mathcal{P}</span> and <span class="math">\\mathcal{V}</span> use the first step of the sum-check protocol over homomorphic commitments, resulting in <span class="math">\\mathcal{V}</span> obtaining a commitment <span class="math">\\mathsf{com}_{i}^{\\prime}</span> on <span class="math">a_{i}</span> which is claimed by <span class="math">\\mathcal{P}</span> to be equal to <span class="math">\\tilde{V}_{i-1}(r_{i}^{\\prime})</span>, where <span class="math">r_{i}^{\\prime}</span> is uniformly generated by <span class="math">\\mathcal{V}</span>. Let <span class="math">q_{1},q_{2}</span> be the last <span class="math">2s_{i}</span> elements of <span class="math">r_{i}^{\\prime}</span>. <span class="math">\\mathcal{P}</span> then computes <span class="math">t_{1}=\\tilde{V}_{i}(q_{1})</span>, <span class="math">t_{2}=\\tilde{V}_{i}(q_{2})</span>, <span class="math">t_{3}=t_{1}\\cdot t_{2}</span> and commits to <span class="math">t_{1},t_{2},t_{3}</span> resulting in <span class="math">\\mathsf{com}_{t_{1}},\\mathsf{com}_{t_{2}},\\mathsf{com}_{t_{3}}</span>. <span class="math">\\mathcal{V}</span> then verifies (using the <span class="math">\\mathcal{ZK}_{prod}</span> protocol) that indeed <span class="math">\\mathsf{com}_{t_{3}}</span> is a commitment to the multiplication of <span class="math">t_{1}</span> and <span class="math">t_{2}</span> and uses the homomorphic properties of the commitment scheme and the <span class="math">\\mathcal{ZK}_{eq}</span> protocol in order to check that the value <span class="math">\\mathsf{com}_{i}^{\\prime}</span> provided earlier by <span class="math">\\mathcal{P}</span> is indeed a commitment to the evaluation of <span class="math">\\tilde{V}_{i-1}(r_{i}^{\\prime})</span>. Both <span class="math">\\mathcal{V}</span> and <span class="math">\\mathcal{P}</span> then use the homomorphic properties of the commitment scheme and the <span class="math">\\mathcal{ZK}_{eq}</span> protocol in order for <span class="math">\\mathcal{V}</span> to obtain a commitment <span class="math">\\mathsf{com}_{i}</span> to a value <span class="math">a_{i}=\\tilde{V}_{i}(\\gamma(r_{i}^{\\prime\\prime}))</span>, where <span class="math">r_{i}^{\\prime\\prime}</span> is generated by <span class="math">\\mathcal{V}</span>, and proceed to the next round of the protocol using <span class="math">a_{i}</span> and random point <span class="math">r_{i}=\\gamma(r_{i}^{\\prime\\prime})</span>. Finally <span class="math">\\mathcal{P}</span> reveals <span class="math">x</span> and <span class="math">r_{0}</span> to <span class="math">\\mathcal{V}</span> who then checks their consistency with the initial commitments, evaluates the polynomial <span class="math">\\tilde{V}_{x}</span> on the last random point established <span class="math">r_{d}</span> and both parties use <span class="math">\\mathcal{ZK}_{eq}</span> to establish that a commitment to this evaluation has the same pre-image as <span class="math">\\mathsf{com}_{d}</span>. We stress that this entire last step (which clearly would violate any notion of zero-knowledge) will not be a step of our final construction; it will instead by replaced with appropriate evocations of zk-VPD.</p>
+
+    <p class="text-gray-300">Formally, consider the protocol presented in Construction 3 and the following theorem.</p>
+
+    <p class="text-gray-300">Construction 3 (CMT Protocol Over Homomorphic Commitment Schemes). Let  <span class="math">\\mathbb{F}</span>  be a prime-order finite field, and let  <span class="math">\\lambda</span>  be a security parameter,  <span class="math">\\mathcal{C}</span>  om be a linearly homomorphic commitment scheme as described in Section 2.3, and let  <span class="math">\\mathsf{cp} \\gets \\mathcal{S}\\mathsf{etup}(1^{\\lambda})</span> . In addition, let  <span class="math">C: \\mathbb{F}^n \\to \\mathbb{F}</span>  be a depth- <span class="math">d</span>  layered arithmetic circuit and let  <span class="math">x \\in \\mathbb{F}^n</span>  be inputs of  <span class="math">C</span>  such that  <span class="math">C(x) = 1</span> . Consider the following protocol between  <span class="math">\\mathcal{P}</span>  and  <span class="math">\\mathcal{V}</span>  for convincing  <span class="math">\\mathcal{V}</span>  that  <span class="math">x</span>  is a valid opening to a series of commitments  <span class="math">\\mathsf{com}_{x_i} \\gets \\mathcal{C}\\mathsf{om}(\\mathsf{cp}, x_i, \\rho_{x_i})</span> , where  <span class="math">x_i \\in \\mathbb{F}</span>  is the  <span class="math">i</span> -th element of input  <span class="math">x</span> .</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Both parties set  <span class="math">a_0 = 1</span>  and  <span class="math">r_0 = 0</span> .  <span class="math">\\mathcal{P}</span>  generates  <span class="math">\\rho_0</span>  uniformly at random, computes  <span class="math">\\mathsf{com}_0 \\gets \\mathcal{C}\\mathsf{comm}(\\mathsf{cp}, a_0, \\rho_0)</span>  and sends it to  <span class="math">\\mathcal{V}</span> .</li>
+
+      <li>For all  <span class="math">i = 1,\\dots ,d</span>  perform the following.</li>
+
+    </ol>
+
+    <p class="text-gray-300">(a)  <span class="math">\\mathcal{V}</span>  and  <span class="math">\\mathcal{P}</span>  execute Step 1 of Construction 2 on input  <span class="math">a_{i-1}</span> , polynomial  <span class="math">\\tilde{V}_{i-1}</span>  (as per Equation 1), and randomness  <span class="math">\\rho_{i-1}</span>  for  <span class="math">\\mathcal{P}</span>  and  <span class="math">\\mathsf{com}_{i-1}, r_{i-1}</span>  for  <span class="math">\\mathcal{V}</span> . As a result,  <span class="math">\\mathcal{V}</span>  obtains a commitment  <span class="math">\\mathsf{com}_i&#x27; = \\mathsf{Com}(t, \\rho_i)</span>  (where  <span class="math">t</span>  and  <span class="math">\\rho_i</span>  are known to  <span class="math">\\mathcal{P}</span>  and not to  <span class="math">\\mathcal{V}</span> ) where  <span class="math">\\mathcal{P}</span>  claims that  <span class="math">t = \\tilde{V}_{i-1}(r_i&#x27;)</span>  with  <span class="math">r_i&#x27;</span>  having been selected uniformly at random by  <span class="math">\\mathcal{V}</span> . (b) Let  <span class="math">(q_{1}, q_{2})</span>  be the last  <span class="math">2s_{i}</span>  elements of  <span class="math">r_{i}^{\\prime}</span> .  <span class="math">\\mathcal{P}</span>  computes  <span class="math">t_{1} = \\tilde{V}_{i}(q_{1})</span> ,  <span class="math">t_{2} = \\tilde{V}_{i}(q_{2})</span> , and  <span class="math">t_{3} = t_{1} \\cdot t_{2}</span> .  <span class="math">\\mathcal{P}</span>  then computes commitments  <span class="math">\\mathsf{com}_{t_{1}} \\gets \\mathsf{Com}(\\mathsf{cp}, t_{1}, \\rho_{t_{1}})</span> ,  <span class="math">\\mathsf{com}_{t_{2}} \\gets \\mathsf{Com}(\\mathsf{cp}, t_{2}, \\rho_{t_{2}})</span> , and  <span class="math">\\mathsf{com}_{t_{3}} \\gets \\mathsf{Com}(\\mathsf{cp}, t_{3}, \\rho_{t_{3}})</span>  which he sends to  <span class="math">\\mathcal{V}</span> . (c)  <span class="math">\\mathcal{V}</span>  and  <span class="math">\\mathcal{P}</span>  perform  <span class="math">\\mathcal{ZK}_{\\text{prod}}(\\mathsf{cp}, t_1, t_2, t_3, \\rho_{t_1}, \\rho_{t_2}, \\rho_{t_3}; \\mathsf{com}_{t_1}, \\mathsf{com}_{t_2}, \\mathsf{com}_{t_3})</span> . (d) Using Equation 1  <span class="math">\\mathcal{V}</span>  can express  <span class="math">\\tilde{V}_{i-1}(r_i&#x27;)</span>  as a linear function of  <span class="math">r_i&#x27;</span> ,  <span class="math">\\tilde{V}_i(q_1)</span> ,  <span class="math">\\tilde{V}_i(q_2)</span> ,  <span class="math">\\tilde{V}_i(q_1)</span> ,  <span class="math">\\tilde{V}_i(q_2)</span> . Thus, using  <span class="math">\\mathcal{E}</span>  val,  <span class="math">\\mathcal{V}</span>  can obtain a new commitment  <span class="math">\\mathsf{com}_i^<em></span>  to the evaluation of  <span class="math">\\tilde{V}_{i-1}(r_i&#x27;)</span>  and let  <span class="math">\\rho_i^</em></span>  be the corresponding randomness. (e)  <span class="math">\\mathcal{V}</span>  and  <span class="math">\\mathcal{P}</span>  perform  <span class="math">\\mathcal{ZK}_{eq}(\\mathsf{cp},\\tilde{V}_{i - 1}(r_i&#x27;),\\rho_i,\\rho_i^<em>;\\mathsf{com}_i&#x27;,\\mathsf{com}_i^</em>)</span> (f) Let  <span class="math">\\gamma : \\mathbb{F} \\to \\mathbb{F}^{s_i}</span>  be the line defined by  <span class="math">\\gamma(0) = q_1</span>  and  <span class="math">\\gamma(1) = q_2</span>  and let  <span class="math">h(x)</span>  be the degree- <span class="math">s_i</span>  polynomial such that  <span class="math">h(x) = \\tilde{V}_i(\\gamma(x))</span>  and  <span class="math">h_0, \\ldots, h_{s_i}</span>  be its coefficients. For  <span class="math">j = 0, \\ldots, s_i</span> ,  <span class="math">\\mathcal{P}</span>  computes commitments  <span class="math">\\operatorname{com}_{h_j} \\gets \\operatorname{Com}(\\mathsf{cp}, h_j, \\rho_{h_j})</span>  and sends them to  <span class="math">\\mathcal{V}</span> . (g)  <span class="math">\\mathcal{V}</span>  computes  <span class="math">\\mathsf{com}_{h(0)}\\gets \\mathsf{com}_{h_0}</span>  and  <span class="math">\\mathsf{com}_{h(1)}\\gets \\prod_{j = 0}^{s_i}\\mathsf{com}_{h_j}</span>  which are commitments to  <span class="math">h(0)</span>  and  <span class="math">h(1)</span>  respectively. (h)  <span class="math">\\mathcal{V}</span>  and  <span class="math">\\mathcal{P}</span>  perform  <span class="math">\\mathcal{ZK}_{eq}(\\mathsf{cp},t_1,\\rho_{t_1},\\rho_{h_0};\\mathsf{com}_{t_1},\\mathsf{com}_{h(0)})</span>  and  <span class="math">\\mathcal{ZK}_{eq}(\\mathsf{cp},t_2,\\rho_{t_2},\\sum_{j = 0}^{s_i}\\rho_{h_j};\\mathsf{com}_{t_2},\\mathsf{com}_{h(1)})</span> (i)  <span class="math">\\mathcal{V}</span>  chooses  <span class="math">r_i&#x27;&#x27; \\in \\mathbb{F}</span>  uniformly at random, sets  <span class="math">r_i \\gets \\gamma(r_i&#x27;&#x27;)</span>  and sets  <span class="math">\\mathsf{com}_i \\gets \\mathcal{Eval}(\\mathsf{cp}, \\mathsf{com}_{h_0}, \\dots, \\mathsf{com}_{h_{s_i}}, 1, r_i&#x27;&#x27;, \\dots, r&#x27;&#x27;s_i)</span> . (j)  <span class="math">\\mathcal{V}</span>  sends  <span class="math">r_i&#x27;&#x27;</span>  and  <span class="math">\\mathsf{com}_i</span>  to  <span class="math">\\mathcal{P}</span> .  <span class="math">\\mathcal{P}</span>  sets  <span class="math">r_i \\gets \\gamma(r_i&#x27;&#x27;)</span> ,  <span class="math">a_i \\gets \\tilde{V}_i(\\gamma(r_i&#x27;&#x27;))</span>  and  <span class="math">\\rho_i \\gets \\sum_{j=0}^{s_i} r&#x27;&#x27;j \\rho_{h_j}</span> .</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li><span class="math">\\mathcal{P}</span>  sends to  <span class="math">\\mathcal{V}</span>  the input  <span class="math">x</span>  and randomness  <span class="math">\\rho_0</span>  and  <span class="math">\\rho_{x_i}</span>  for  <span class="math">1\\leq i\\leq n</span> .  <span class="math">\\mathcal{V}</span>  verifies that  <span class="math">\\mathsf{com}_{x_i} = \\mathcal{C}\\mathsf{om}(\\mathsf{cp},x_i,\\rho_{x_i})</span>  for  <span class="math">1\\leq i\\leq n</span>  and that  <span class="math">\\mathsf{com}_0 = \\mathcal{C}\\mathsf{om}(\\mathsf{cp},1,\\rho_0)</span> .</li>
+
+      <li>Let  <span class="math">\\tilde{V}_x</span>  be the multilinear extension of the polynomial  <span class="math">V_x</span>  satisfying  <span class="math">V_x(i) = x_i</span>  for all  <span class="math">i = 1, \\dots, n</span> . The verifier computes  <span class="math">\\mathsf{com}_x^<em> \\gets \\mathcal{C}\\mathsf{om}(\\mathsf{cp}, \\tilde{V}_x(r_d), \\rho_d^</em>)</span>  where  <span class="math">\\rho_d^*</span>  is chosen uniformly at random.</li>
+
+      <li><span class="math">\\mathcal{V}</span>  and  <span class="math">\\mathcal{P}</span>  perform  <span class="math">\\mathcal{ZK}_{eq}(\\mathsf{cp},\\tilde{V}_x(r_d),\\rho_d,\\rho_x;\\mathsf{com}_x^*,\\mathsf{com}_d)</span> .  <span class="math">\\mathcal{V}</span>  accepts if the protocol accepts and rejects otherwise.</li>
+
+    </ol>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Theorem 5. Let  <span class="math">C: \\mathbb{F}^n \\to \\mathbb{F}^k</span>  be a depth- <span class="math">d</span>  layered arithmetic circuit over a finite field  <span class="math">\\mathbb{F}</span> . Assuming  <span class="math">\\mathcal{C}</span>  is an linearly homomorphic commitment scheme as described in Section 2.3,  <span class="math">\\mathcal{Z}\\mathcal{K}_{eq}</span>  is a zero-knowledge argument for testing equality of committed values, and  <span class="math">\\mathcal{Z}\\mathcal{K}_{prod}</span>  is a zero-knowledge argument for testing the product relation between three commitments in  <span class="math">\\mathcal{C}</span>  and the CMT protocol presented in Construction 3 is an interactive argument with soundness  $O(d \\cdot \\log S /</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mathbb{F}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">)$  for the following relation</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="my-4 text-center"><span class="math-block">\\mathcal {R} = \\left\\{\\left((\\mathsf {c p}, C, \\mathsf {c o m} _ {x _ {1}}, \\ldots , \\mathsf {c o m} _ {x _ {n}}); (x _ {1}, \\dots , x _ {n}, \\rho_ {x _ {1}}, \\ldots , \\rho_ {x _ {n}})\\right): C (x _ {1}, \\dots , x _ {n}) = 1 \\wedge \\bigwedge_ {i = 1} ^ {n} \\mathsf {c o m} _ {x _ {i}} = \\mathcal {C} o m (\\mathsf {c p}, x _ {i}, \\rho_ {x _ {i}}) \\right\\}</span></div>
+
+    <p class="text-gray-300">where  <span class="math">\\mathsf{cp} \\gets \\mathcal{S}\\mathsf{etup}(1^{\\lambda})</span> ,  <span class="math">\\lambda</span>  is the security parameter,  <span class="math">n</span>  is the input size of  <span class="math">C</span> , and  <span class="math">S</span>  is the maximal number</p>
+
+    <p class="text-gray-300">of gates per circuit layer in <span class="math">C</span>.</p>
+
+    <p class="text-gray-300">Proof Sketch. The completeness property immediately follows from Construction 3. We now proceed to argue about the soundness property.</p>
+
+    <p class="text-gray-300">Soundness. Soundness follows by a similar argument as in Theorem 3. Indeed, let <span class="math">\\mathcal{P}^{<em>}</span> be an cheating prover which convinces <span class="math">\\mathcal{V}</span> (with non-negligible probability) of a claim “<span class="math">1=C(x)</span>” for some <span class="math">x</span> and <span class="math">C</span>, such that <span class="math">1\\neq C(x)</span>. Using Assumption 2, for each commitment that <span class="math">\\mathcal{V}</span> receives from <span class="math">\\mathcal{P}^{</em>}</span>, there exists a polynomial-time extractor with access to <span class="math">\\mathcal{P}^{*}</span>’s code and random tape that outputs (with all but negligible probability) a corresponding commitment pre-image.</p>
+
+    <p class="text-gray-300">Next, we define the following events.</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Event <span class="math">A</span> takes place if the extracted pre-image for <span class="math">\\mathsf{com}_{d}</span> is not equal to <span class="math">\\tilde{V}_{x}(r_{d})</span> or there exists <span class="math">1\\leq i\\leq d</span> such that the extracted pre-images for <span class="math">\\mathsf{com}^{\\prime}_{i},\\mathsf{com}^{*}_{i}</span> during Step 2e, or the extracted pre-images for <span class="math">\\mathsf{com}_{t_{1}},\\mathsf{com}_{h(0)}</span> or <span class="math">\\mathsf{com}_{t_{2}},\\mathsf{com}_{h(1)}</span> during Step 2h are not equal.</li>
+
+      <li>Event <span class="math">B</span> takes place if there exists <span class="math">1\\leq i\\leq d</span> such that the extracted pre-image for <span class="math">\\mathsf{com}_{t_{3}}</span> is not equal to the product of the extracted pre-images for <span class="math">\\mathsf{com}_{t_{1}},\\mathsf{com}_{t_{2}}</span> during Step 2c</li>
+
+      <li>Event <span class="math">C_{i}</span> (for <span class="math">0\\leq i\\leq d</span>) takes place if <span class="math">\\tilde{V}_{i}(r_{i})=a_{i}</span> (where <span class="math">\\tilde{V}_{i}</span> is as defined in Equation 1) when evaluating <span class="math">C</span> on the extracted pre-image of <span class="math">\\mathsf{com}_{x}</span> and <span class="math">a_{i}</span> is the extracted pre-image of <span class="math">\\mathsf{com}_{i}</span>.</li>
+
+    </ol>
+
+    <p class="text-gray-300">Note that assuming <span class="math">C(x)\\neq 1</span> is equivalent to assuming <span class="math">\\tilde{V}_{0}(r_{0})\\neq a_{0}</span> i.e., that <span class="math">\\neg C_{0}</span> occurred. Next, we study the following (exhaustive) cases.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Event <span class="math">A</span> occurs. We argue about this case in exactly the same manner as in the proof of Theorem 3. That is, this directly contradicts the soundness of the <span class="math">\\mathcal{ZK}_{eq}</span> protocol executed in Steps 5, 2e, or 2h of Construction 2 since <span class="math">\\mathcal{P}^{*}</span> can be used in a black box manner to construct an adversary <span class="math">\\mathcal{A}</span> which breaks the soundness of the <span class="math">\\mathcal{ZK}_{eq}</span> protocol.</li>
+
+      <li>Event <span class="math">B</span> occurs. Again, this directly contradicts the soundness of the <span class="math">\\mathcal{ZK}_{prod}</span> protocol executed in Step 2c of Construction 2 since <span class="math">\\mathcal{P}^{*}</span> can thus be used in a black box manner to construct an adversary <span class="math">\\mathcal{A}</span> which breaks the soundness of the <span class="math">\\mathcal{ZK}_{prod}</span> protocol.</li>
+
+      <li>There exist <span class="math">1\\leq i\\leq d</span> such that <span class="math">\\neg C_{i-1}</span> occurs and events <span class="math">A</span>, <span class="math">B</span> do not. We will now prove that this case contradicts the soundness property of Construction 2. Note that since <span class="math">\\mathcal{V}</span> computes <span class="math">\\tilde{V}_{x}(r_{d})\\stackrel{{\\scriptstyle\\rm def}}{{=}}\\tilde{V}_{d}(r_{d})</span> himself and since event <span class="math">A</span> did not occur, <span class="math">C_{d}</span> must occur. Therefore in this case it holds <span class="math">\\neg A\\wedge\\neg B\\wedge\\neg C_{i}\\wedge\\neg C_{0}\\wedge C_{d}</span>. Therefore, there must exist <span class="math">i^{\\prime}</span> such that <span class="math">\\neg C_{i^{\\prime}-1}\\wedge C_{i^{\\prime}}</span>.</li>
+
+    </ul>
+
+    <p class="text-gray-300">Let <span class="math">a^{<em>}_{i^{\\prime}-1}</span> be the extracted pre-image of <span class="math">\\mathsf{com}_{i^{\\prime}-1}</span>, <span class="math">a^{</em>}_{i^{\\prime}}</span> be the extracted pre-image of <span class="math">\\mathsf{com}_{i^{\\prime}}</span>. Since <span class="math">\\neg C_{i^{\\prime}-1}\\wedge C_{i^{\\prime}}</span> holds we obtain that <span class="math">a^{<em>}_{i^{\\prime}}=\\tilde{V}_{i^{\\prime}}(r_{i})</span> and that <span class="math">a^{</em>}_{i^{\\prime}-1}\\neq\\tilde{V}_{i^{\\prime}-1}(r_{i^{\\prime}-1})</span>. Next, since <span class="math">a^{*}_{i^{\\prime}}=\\tilde{V}_{i^{\\prime}}(r_{i})</span> from Steps 2f-2h we obtain that (except with negligible probability) it holds that the extracted pre-images of <span class="math">\\mathsf{com}_{t_{1}},\\mathsf{com}_{t_{2}}</span> are indeed equal to <span class="math">\\tilde{V}_{i^{\\prime}}(q_{1}),\\tilde{V}_{i^{\\prime}}(q_{2})</span> (where <span class="math">(q_{1},q_{2})</span> are the last <span class="math">2s_{i}</span> elements of <span class="math">r^{\\prime}_{i}</span>).</p>
+
+    <p class="text-gray-300">We now claim that <span class="math">\\mathcal{P}^{<em>}</span> can be used in black-box manner to construct an adversary <span class="math">\\mathcal{A}</span> that succeeds in falsely proving that <span class="math">a^{</em>}_{i^{\\prime}-1}</span> is equal to <span class="math">\\tilde{V}_{i^{\\prime}-1}(r_{i^{\\prime}-1})</span>, thus contradicting the soundness of Construction 2. Indeed, let <span class="math">\\mathcal{V}_{sum-check}</span> be a verifier for Construction 3 using the coefficients of <span class="math">\\tilde{V}_{i^{\\prime}-1}</span>. <span class="math">\\mathcal{A}</span> then performs (using the code of <span class="math">\\mathcal{P}^{<em>}</span>) Step 1 of Construction 2. Since the verifier <span class="math">\\mathcal{V}</span> for Construction 3 did not reject while interacting with <span class="math">\\mathcal{P}^{</em>}</span> (and in particular, did not reject during Step 2a with <span class="math">i=i^{\\prime}</span>), <span class="math">\\mathcal{V}_{sum-check}</span> will not reject as well. Notice that, at this point in Construction 2, it is the case that <span class="math">\\mathsf{com}_{\\ell}</span> is a commitment to <span class="math">\\tilde{V}_{i^{\\prime}-1}(r^{\\prime}_{i})</span> and so is <span class="math">\\mathsf{com}^{\\prime}_{i^{\\prime}}</span> (defined in Step 2a of Construction 3 with <span class="math">i=i^{\\prime}</span>).</p>
+
+    <p class="text-gray-300">Next, <span class="math">\\mathcal{V}_{sum-check}</span> and <span class="math">\\mathcal{A}</span> proceed by performing Steps 2 and 3 of Construction 2. We now argue that <span class="math">\\mathcal{V}_{sum-check}</span> will not reject during Step 3 of Construction 2. Indeed, since the extracted pre-images</p>
+
+    <p class="text-gray-300"><span class="math">t_{1}, t_{2}</span> of <span class="math">\\mathsf{com}_{t_{1}}, \\mathsf{com}_{t_{2}}</span> are equal to <span class="math">\\tilde{V}_{i&#x27;}(q_{1}), \\tilde{V}_{i&#x27;}(q_{2})</span> and since <span class="math">\\mathcal{V}</span> did not reject during Step 2c and 2d of Construction 3 with <span class="math">i = i&#x27;</span>, we obtain that <span class="math">\\mathcal{V}</span> successfully performed a step which is equivalent to Step 2 of Construction 2. Thus, <span class="math">\\mathcal{V}</span> holds a commitment <span class="math">\\mathsf{com}_{\\ell&#x27;}^<em></span> to <span class="math">\\tilde{V}_{i&#x27; - 1}(r_i&#x27;)</span> (using the notation of Construction 3) and <span class="math">\\mathcal{V}_{sum-check}</span> holds a commitment <span class="math">\\mathsf{com}_{\\ell}^</em></span> to the same value <span class="math">\\tilde{V}_{i&#x27; - 1}(r_i&#x27;)</span>. At this point, as explained above we also have that the pre-images of <span class="math">\\mathsf{com}_{\\ell}</span> and <span class="math">\\mathsf{com}_{i&#x27;}&#x27;</span> are both equal to <span class="math">\\tilde{V}_{i&#x27; - 1}(r_i&#x27;)</span> as well. Since event <span class="math">A</span> did not occur, it holds that the pre-images of <span class="math">\\mathsf{com}_{i&#x27;}&#x27;</span> and <span class="math">\\mathsf{com}_{i&#x27;}^<em></span> also have the same pre-image. By transitivity, we obtain that <span class="math">\\mathsf{com}_{\\ell}^</em></span> is a commitment to the same value as <span class="math">\\mathsf{com}_t</span>, thus <span class="math">\\mathcal{V}_{sum-check}</span> will not reject during Step 3 of Construction 2. Therefore, we have violated the soundness of Construction 2 by allowing <span class="math">\\mathcal{A}</span> to falsely prove that <span class="math">a_{i&#x27; - 1}^* = \\tilde{V}_{i&#x27; - 1}(r_{i&#x27; - 1})</span>. <span class="math">\\square</span></p>
+
+    <p class="text-gray-300">Moreover, we prove the following lemma that will be helpful for us while proving the zero-knowledge property of our argument.</p>
+
+    <p class="text-gray-300"><strong>Lemma 3.</strong> For every verifier <span class="math">\\mathcal{V}^<em></span> and for every depth-<span class="math">d</span> layered circuit <span class="math">C: \\mathbb{F}^n \\to \\mathbb{F}^k</span> over a finite field <span class="math">\\mathbb{F}</span> there exists a simulator <span class="math">\\mathsf{Sim}</span> such that <span class="math">\\mathsf{Sim}</span> is capable of simulating the view of <span class="math">\\mathcal{V}^</em></span> in steps 1 and 2 of Construction 3 from <span class="math">C</span>, without access to <span class="math">x</span>.</p>
+
+    <p class="text-gray-300"><strong>Proof Sketch.</strong> We build simulator <span class="math">\\mathsf{Sim}</span> that simulates the view of <span class="math">\\mathcal{V}</span> during Steps 1 and 2 of Construction 3. The simulator gets as input commitment parameters <span class="math">\\mathsf{cp}</span> and a circuit <span class="math">C</span> and proceeds as follows.</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li><span class="math">\\mathsf{Sim}</span> sets <span class="math">a_0 = 1</span> and <span class="math">r_0 = 0</span>, and computes <span class="math">\\mathsf{com}_x \\gets \\mathcal{C}om(\\mathsf{cp}, 0, \\rho_x)</span> for some <span class="math">\\rho_x</span> generated at random. <span class="math">\\mathsf{Sim}</span> then sends <span class="math">\\mathsf{com}_x</span> to <span class="math">\\mathcal{V}^*</span>.</li>
+
+      <li><span class="math">\\mathsf{Sim}</span> generates <span class="math">\\rho_0</span> uniformly at random, computes <span class="math">\\mathsf{com}_0 \\gets \\mathcal{C}om(\\mathsf{cp}, a_0, \\rho_0)</span> and sends it to <span class="math">\\mathcal{V}</span>.</li>
+
+      <li><span class="math">\\mathsf{Sim}</span> proceeds to simulate Step 2 of Construction 3 as follows. For all <span class="math">i = 1, \\dots, d</span> <span class="math">\\mathsf{Sim}</span> performs the following.</li>
+
+    </ol>
+
+    <p class="text-gray-300">(a) Let <span class="math">\\mathsf{Sim}_{sum-check}</span> be the simulator from the proof of Lemma 2. <span class="math">\\mathsf{Sim}</span> runs <span class="math">\\mathsf{Sim}_{sum-check}</span> on input <span class="math">(\\mathsf{cp}, \\mathsf{com}_{i-1}, s_{i-1}, a_{i-1})</span>, in order to simulate <span class="math">\\mathcal{V}^<em></span>'s view during the execution of Step 2a. In addition to the final message <span class="math">\\mathsf{com}_i&#x27;</span> sent to <span class="math">\\mathcal{V}^</em></span>, <span class="math">\\mathsf{Sim}_{sum-check}</span> also outputs a secret state <span class="math">(a_i, \\rho_i)</span> which is not forwarded to <span class="math">\\mathcal{V}^<em></span>. Notice that <span class="math">a_i</span> is the simulated value of <span class="math">\\tilde{V}_{i-1}(r_i&#x27;)</span> where <span class="math">r_i&#x27;</span> was chosen by <span class="math">\\mathcal{V}^</em></span>.</p>
+
+    <p class="text-gray-300">(b) Let <span class="math">(q_1, q_2)</span> be the last <span class="math">2s_i</span> elements of <span class="math">r_i&#x27;</span>. <span class="math">\\mathsf{Sim}</span> chooses simulated values <span class="math">t_1, t_2 \\in \\mathbb{F}</span> for <span class="math">\\tilde{V}_i(q_1)</span> and <span class="math">\\tilde{V}_i(q_2)</span> such that <span class="math">a_i</span> (which is the simulated value <span class="math">\\tilde{V}_{i-1}(r_i&#x27;)</span>), <span class="math">t_1, t_2</span> (which are the simulated values for <span class="math">\\tilde{V}_i(q_1)</span> and <span class="math">\\tilde{V}_i(q_2)</span>) and <span class="math">r_i&#x27;</span> satisfy Equation 1.</p>
+
+    <p class="text-gray-300">(c) <span class="math">\\mathsf{Sim}</span> then computes <span class="math">\\mathsf{com}_{t_j} \\gets \\mathcal{C}om(\\mathsf{cp}, t_j, \\rho_{t_j})</span> for <span class="math">j = 1, 2, 3</span>, where <span class="math">t_3 = t_1 \\cdot t_2</span> and <span class="math">\\rho_{t_1}, \\rho_{t_2}, \\rho_{t_3}</span> are chosen uniformly at random from <span class="math">\\mathbb{F}</span>, and forwards them to <span class="math">\\mathcal{V}^*</span>.</p>
+
+    <p class="text-gray-300">(d) Let <span class="math">\\mathsf{Sim}_{prod}</span> be the simulator guaranteed from the zero knowledge property of <span class="math">\\mathcal{ZK}_{prod}</span>. <span class="math">\\mathsf{Sim}</span> runs simulator <span class="math">\\mathsf{Sim}_{prod}</span> on input <span class="math">\\mathsf{cp}, \\mathsf{com}_{t_1}, \\mathsf{com}_{t_2}, \\mathsf{com}_{t_3}</span> in order to simulate <span class="math">\\mathcal{V}^*</span>'s view during the execution of Step 2c of Construction 3).</p>
+
+    <p class="text-gray-300">(e) <span class="math">\\mathsf{Sim}</span> performs Step 2d of Construction 3 using the values <span class="math">r_i&#x27;, t_1, t_2, t_3</span>. This results in a commitment <span class="math">\\mathsf{com}_i^*</span> to the value of <span class="math">\\tilde{V}_{i-1}(r_i&#x27;)</span>.</p>
+
+    <p class="text-gray-300">(f) <span class="math">\\mathsf{Sim}</span> runs simulator <span class="math">\\mathsf{Sim}_{eq}</span> on input <span class="math">\\mathsf{cp}, \\mathsf{com}_i&#x27;, \\mathsf{com}_i^<em></span> in order to simulate <span class="math">\\mathcal{V}^</em></span>'s view during the execution of Step 2e of Construction 3).</p>
+
+    <p class="text-gray-300">(g) <span class="math">\\mathsf{Sim}</span> computes <span class="math">\\mathsf{com}_{h(0)}</span> as a fresh commitment to <span class="math">t_1</span>. For <span class="math">j = 1, \\ldots, s_i - 1</span>, <span class="math">\\mathsf{Sim}</span> chooses values <span class="math">h_j \\in \\mathbb{F}</span> uniformly at random. Moreover, he chooses <span class="math">h_{s_i}</span> such that <span class="math">\\sum_{j=1}^{s_i} h_j + t_1 = t_2</span> and for <span class="math">j = 1, \\ldots, s_i</span> he computes <span class="math">\\mathsf{com}_{h_j} \\gets \\mathcal{C}om(\\mathsf{cp}, h_j, \\rho_{h_j})</span>. <span class="math">\\mathsf{Sim}</span> then sends <span class="math">\\mathsf{com}_{h_0}, \\ldots, \\mathsf{com}_{h_{s_i}}</span> to <span class="math">\\mathcal{V}^*</span>.</p>
+
+    <p class="text-gray-300">(h) <span class="math">\\mathsf{Sim}</span> computes <span class="math">\\mathsf{com}_{h(1)} \\gets \\mathsf{com}_{h(0)} \\cdot \\prod_{j=1}^{s_i} \\mathsf{com}_{h_j}</span>.</p>
+
+    <p class="text-gray-300">(i) <span class="math">\\mathsf{Sim}</span> runs simulator <span class="math">\\mathsf{Sim}_{eq}</span> on input <span class="math">\\mathsf{cp}, \\mathsf{com}_{t_1}, \\mathsf{com}_{h(0)}</span> and on input <span class="math">\\mathsf{cp}, \\mathsf{com}_{t_2}, \\mathsf{com}_{h(1)}</span> in order to simulate <span class="math">\\mathcal{V}^*</span>'s view during the execution of Step 2h of Construction 3).</p>
+
+    <p class="text-gray-300">18</p>
+
+    <p class="text-gray-300">Finally, <span class="math">\\mathsf{Sim}</span> sets <span class="math">r_{i}\\leftarrow\\gamma(r_{i}^{\\prime\\prime})</span> (where <span class="math">r_{i}^{\\prime\\prime}</span> was sent by <span class="math">\\mathcal{V}^{*}</span> in Step 2j of Construction 3) and <span class="math">a_{i}\\leftarrow H(r_{i}^{\\prime\\prime})</span> (where <span class="math">H</span> is the degree-<span class="math">s_{i}</span> polynomial that has as coefficients <span class="math">t_{1}=h_{0},h_{1},\\ldots,h_{s_{i}}</span>) and <span class="math">\\rho_{i}\\leftarrow\\sum_{j=0}^{s_{i}}r^{\\prime\\prime j}\\rho_{h_{j}}</span>. Finally, <span class="math">\\mathsf{Sim}</span> computes <span class="math">\\mathsf{com}_{i}\\leftarrow\\mathcal{C}omm(a_{i},\\rho_{i})</span>.</p>
+
+    <p class="text-gray-300">We claim that the view of <span class="math">\\mathcal{V}^{<em>}</span> while interacting with <span class="math">\\mathsf{Sim}</span> (for Steps 1,2 of Construction 2) is indistinguishable from the view he gets while interacting with the honest prover <span class="math">\\mathcal{P}</span> since: (i) All triplets <span class="math">a_{i}</span> and <span class="math">t_{1},t_{2}</span> (for each round <span class="math">i</span>) chosen by <span class="math">\\mathsf{Sim}</span> satisfy Equation 1, (ii) All values <span class="math">h_{j}</span> (for each round <span class="math">i</span>) satisfy the condition <span class="math">h_{0}=t_{1}</span> and <span class="math">\\sum_{j=1}^{s_{i}}h_{j}+t_{1}=t_{2}</span>, (iii) by assumption, the messages received by <span class="math">\\mathcal{V}^{</em>}</span> by <span class="math">\\mathsf{Sim}_{eq},\\mathsf{Sim}_{prod},\\mathsf{Sim}_{sum-check}</span> (forwarded via <span class="math">\\mathsf{Sim}</span>) are indistinguishable form the ones received while running <span class="math">\\mathcal{ZK}_{eq},\\mathcal{ZK}_{prod}</span> and Construction 2 with the honest prover, and (iv) (ii) <span class="math">\\mathcal{C}omm</span> is statistically hiding. ∎</p>
+
+    <h2 id="sec-29" class="text-2xl font-bold">6 A Zero-knowledge Argument with Function Independent Preprocessing</h2>
+
+    <p class="text-gray-300">In this section we construct our zero knowledge proof system with function independent preprocessing. At a high level, similarly to <em>[30]</em>, we observe that it is possible to use the CMT protocol in order to verify the correct evaluation of a circuit <span class="math">C</span> on input <span class="math">x</span> and a witness <span class="math">w</span> assuming that <span class="math">\\mathcal{V}</span> can somehow evaluate a specific polynomial <span class="math">P</span> (which only depends on <span class="math">x</span> and <span class="math">w</span> but not on <span class="math">C</span>) on a random point <span class="math">r</span> generated by <span class="math">\\mathcal{V}</span>. Adopting the approach of <em>[30]</em>, we observe that the evaluation of <span class="math">P</span> can be done using a verifiable polynomial evaluation protocol (VPD). Since the CMT protocol does not require any preprocessing, the only part of our construction where preprocessing is required is the VPD protocol. Next, since the VPD protocol is only used to verify the input layer of the circuit, our preprocessing depends only on (an upper bound on) the length of the circuit’s input and witness, and not on the circuit’s size of specific wiring pattern.</p>
+
+    <p class="text-gray-300">While the above-outlined construction does produce an argument with function independent preprocessing, the messages exchanged during the CMT and VPD protocol leak information about the values of the internal wires of <span class="math">C</span> and thus can potentially leak information about the witness <span class="math">w</span>. We remove such leakdge, by running the CMT protocol over homomorphic commitments, as described in Sections 4 and 5, and by replacing the VPD construction of <em>[30]</em> with our zk-VPD construction from Section 3. Formally, consider the protocol presented in Construction 4 and the following theorem.</p>
+
+    <h6 id="sec-30" class="text-base font-medium mt-4">Theorem 6.</h6>
+
+    <p class="text-gray-300">For any circuit size parameter <span class="math">t</span>, input size <span class="math">n</span> and finite field <span class="math">\\mathbb{F}</span>, Construction 4 is a zero-knowledge argument system for the relation</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">$\\mathcal{R}=\\{(C,x;w):C\\in\\mathcal{C}_{\\mathbb{F}}\\wedge</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">C</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\leq t\\wedge\\mathsf{inp}(C)\\leq n\\wedge C(x;w)=1\\}.$</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Moreover, for every <span class="math">(C,x;w)\\in R</span> the running time of <span class="math">\\mathcal{P}</span> is $O(</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">C</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\cdot\\log(\\mathsf{width}(C)))<span class="math"> and if </span>C<span class="math"> is log-space uniform then the running time of </span>\\mathcal{V}<span class="math"> is </span>O(</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">x</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">+d\\cdot\\mathrm{poylog}(</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">C</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">))<span class="math">. Finally </span>\\mathcal{P}<span class="math"> and </span>\\mathcal{V}<span class="math"> interact </span>O(d\\log(\\mathsf{width}(C)))<span class="math"> rounds where </span>d<span class="math"> is the depth of </span>C<span class="math">. In case </span>d<span class="math"> is </span>\\mathrm{polylog}\\left(</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">C</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\right)$, the above construction is a <em>succinct</em> argument.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">Proof Sketch. The completeness property immediately follows from Construction 4. We now proceed to argue about the knowledge soundness property.</p>
+
+    <p class="text-gray-300">Knowledge Soundness. Let <span class="math">\\mathcal{A}</span> be a reduced version of <span class="math">\\mathcal{P}^{<em>}</span> that aborts right after outputting <span class="math">\\mathsf{com}_{\\tilde{V}_{d}}</span>. By the polynomial extractability property of Construction 1, there exists extractor <span class="math">\\mathcal{E}^{\\prime}</span> that upon the same input as <span class="math">\\mathcal{P}^{</em>}</span> and the same random tape, outputs a <span class="math">n</span>-variable degree-variable 1, polynomial <span class="math">f</span> and randomness <span class="math">\\rho_{f}</span> such that <span class="math">\\mathsf{CommitPoly}(f,\\rho_{f},\\mathsf{pp})=\\mathsf{com}_{\\tilde{V}_{d}}</span> with all but negligible probability. We are now ready to build our extractor <span class="math">\\mathcal{E}</span> as follows:</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Run <span class="math">\\mathcal{E}^{\\prime}(1^{\\lambda},\\mathsf{pp})</span> and receive polynomial <span class="math">f</span> and randomness <span class="math">\\rho_{f}</span>. If <span class="math">f</span> is not a <span class="math">n</span>-variable degree-variable 1, polynomial <span class="math">f</span>, abort.</li>
+
+    </ol>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Construction 4 (Zero-knowledge Delegation Protocol). Let <span class="math">\\lambda</span> be a security parameter and let <span class="math">\\mathbb{F}</span> be a prime order field such that $</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mathbb{F}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"><span class="math"> is exponential in </span>\\lambda<span class="math">. In additional, let </span>n<span class="math"> be an input size parameter and let </span>t<span class="math"> be a circuit size parameter. In the following, for simplicity of exposition we assume that </span>n<span class="math"> is a power of </span>2<span class="math">. Consider the algorithms </span>\\mathcal{G},\\mathcal{P},\\mathcal{V}$ described below.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Preprocessing Phase. The parameter generator <span class="math">\\mathcal{G}</span> on input <span class="math">1^{n},1^{t},1^{\\lambda}</span> runs <span class="math">(\\mathsf{pp},\\mathsf{vp})\\leftarrow\\mathsf{KeyGen}(1^{\\lambda},n,1)</span>. The proving key <span class="math">\\mathsf{pk}</span> is set to be <span class="math">\\mathsf{pp}</span> and the verification key <span class="math">\\mathsf{vk}</span> is set to be <span class="math">\\mathsf{vp}</span>.</li>
+
+    </ul>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">- Evaluation Phase. Let <span class="math">C:\\mathbb{F}^{n_{x}+n_{w}}\\to\\mathbb{F}</span> be a depth-<span class="math">d</span> layered arithmetic circuit over <span class="math">\\mathbb{F}</span> such that $</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">C</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\leq t<span class="math"> and </span>n_{x}+n_{w}\\leq n<span class="math">. In addition, let </span>x\\in\\mathbb{F}^{n_{x}}<span class="math"> and </span>w\\in\\mathbb{F}^{n_{w}}<span class="math"> such that </span>C(x;w)=1<span class="math">. Assume that </span>n_{w}/n_{x}=2^{m}-1<span class="math"> for some </span>m\\in\\mathbb{N}<span class="math">. Consider the following protocol between </span>\\mathcal{P}<span class="math"> and </span>\\mathcal{V}$.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Let <span class="math">\\hat{V}_{d}</span> be the multilinear extension of the input layer of <span class="math">C</span> evaluated on <span class="math">(x;w)</span>. <span class="math">\\mathcal{P}</span> commits to the values of <span class="math">\\hat{V}_{d}</span> by executing <span class="math">\\mathsf{com}_{\\hat{V}_{d}}\\leftarrow\\mathsf{CommitPoly}(\\hat{V}_{d},\\rho_{\\hat{V}_{d}},\\mathsf{pp})</span> where <span class="math">\\rho_{\\hat{V}_{d}}</span> is generated uniformly at random. <span class="math">\\mathcal{P}</span> then sends <span class="math">\\mathsf{com}_{\\hat{V}_{d}}</span> to <span class="math">\\mathcal{V}</span>.</li>
+
+      <li><span class="math">\\mathcal{V}</span> runs <span class="math">\\mathsf{CheckCom}(\\mathsf{com}_{\\hat{V}_{d}},\\mathsf{vp})</span>. In case <span class="math">\\mathsf{CheckCom}</span> rejects, <span class="math">\\mathcal{V}</span> rejects as well.</li>
+
+      <li><span class="math">\\mathcal{V}</span> and <span class="math">\\mathcal{P}</span> execute Steps 1 and 2 of Construction 3. In case Construction 3 rejects, so does <span class="math">\\mathcal{V}</span>. Otherwise, at the end of Step 2 of Construction 3 <span class="math">\\mathcal{V}</span> holds a commitment <span class="math">\\mathsf{com}_{d}</span> of an evaluation of <span class="math">\\hat{V}_{d}</span> at a random point <span class="math">r_{d}</span> chosen by <span class="math">\\mathcal{V}</span> while <span class="math">\\mathcal{P}</span> holds the randomness <span class="math">\\rho_{d}</span> used to generate <span class="math">\\mathsf{com}_{d}</span>.</li>
+
+      <li><span class="math">\\mathcal{P}</span> executes <span class="math">(\\mathsf{com}_{d}^{<em>},\\pi)\\leftarrow\\mathsf{CommitValue}(\\hat{V}_{d},r_{d},\\hat{V}_{d}(r_{d}),\\rho_{\\hat{V}_{d}},\\rho_{\\hat{V}_{d}(r_{d})},\\mathsf{pp})</span> where <span class="math">\\rho_{\\hat{V}_{d}(r_{d})}</span> is generated uniformly at random and sends <span class="math">(\\mathsf{com}_{d}^{</em>},\\pi)</span> to <span class="math">\\mathcal{V}</span>.</li>
+
+      <li>Upon receiving <span class="math">(\\mathsf{com}_{d}^{<em>},\\pi)</span>, <span class="math">\\mathcal{V}</span> executes <span class="math">\\mathsf{Ver}(\\mathsf{com}_{d}^{</em>},r_{d},\\mathsf{com}_{\\hat{V}_{d}},\\pi,\\mathsf{vp})</span>. In case <span class="math">\\mathsf{Ver}</span> rejects, so does <span class="math">\\mathcal{V}</span>.</li>
+
+      <li><span class="math">\\mathcal{P}</span> and <span class="math">\\mathcal{V}</span> perform <span class="math">\\mathcal{ZK}_{eq}(\\mathsf{cp},\\hat{V}_{d}(r_{d}),\\rho_{d},\\rho_{\\hat{V}_{d}(r_{d})};\\mathsf{com}_{d}^{*},\\mathsf{com}_{d})</span>. (Note that <span class="math">\\mathsf{cp}</span> is a subset of <span class="math">\\mathsf{vp}</span>.) In case <span class="math">\\mathcal{ZK}_{eq}</span> rejects so does <span class="math">\\mathcal{V}</span>.</li>
+
+      <li><span class="math">\\mathcal{V}</span> computes the multilinear extension <span class="math">\\tilde{x}</span> of the input <span class="math">x</span>, generates a random point <span class="math">r_{x}\\in(\\mathbb{F}^{\\log n_{x}}\\times 0^{\\log n_{w}})</span> and sends <span class="math">r</span> to <span class="math">\\mathcal{P}</span>.</li>
+
+      <li>Upon receiving <span class="math">r_{x}</span>, <span class="math">\\mathcal{P}</span> executes <span class="math">(\\mathsf{com}_{x}^{<em>},\\pi_{x})\\leftarrow\\mathsf{CommitValue}(\\hat{V}_{d},r_{x},r_{\\hat{V}_{d}},\\rho_{r_{x}},\\mathsf{pp})</span> where <span class="math">\\rho_{r_{x}}</span> is generated uniformly at random and sends <span class="math">(\\mathsf{com}_{x}^{</em>},\\pi_{x})</span> to <span class="math">\\mathcal{V}</span>. Next, <span class="math">\\mathcal{V}</span> executes <span class="math">\\mathsf{Ver}(\\mathsf{com}_{x}^{*},r_{x},\\mathsf{com}_{\\hat{V}_{d}},\\pi_{x},\\mathsf{vp})</span>. In case <span class="math">\\mathsf{Ver}</span> rejects, so does <span class="math">\\mathcal{V}</span>.</li>
+
+      <li><span class="math">\\mathcal{V}</span> computes <span class="math">\\mathsf{com}_{x}\\leftarrow\\mathcal{Com}(\\mathsf{vp},\\tilde{x}(r_{x}^{\\prime}),\\rho_{x}^{\\prime})</span> where <span class="math">\\rho_{x}^{\\prime}</span> is generated uniformly at random and <span class="math">r_{x}^{\\prime}</span> is defined to be the first <span class="math">\\log n_{x}</span> elements of <span class="math">r_{x}</span>. <span class="math">\\mathcal{V}</span> sends <span class="math">\\rho_{x}^{\\prime}</span> to <span class="math">\\mathcal{P}</span>.</li>
+
+      <li>Both <span class="math">\\mathcal{P}</span> and <span class="math">\\mathcal{V}</span> perform <span class="math">\\mathcal{ZK}_{eq}(\\mathsf{cp},\\hat{V}_{d}(r_{x}),\\rho_{r_{x}},\\rho_{x}^{\\prime};\\mathsf{com}_{x},\\mathsf{com}_{x}^{*})</span>. In case <span class="math">\\mathcal{ZK}_{eq}</span> rejects so does <span class="math">\\mathcal{V}</span>.</li>
+
+    </ol>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Output <span class="math">w=(f(n_{x}),\\ldots,f(n_{w}-1))</span>.</li>
+
+    </ol>
+
+    <p class="text-gray-300">We now argue that assuming <span class="math">\\mathcal{P}^{*}</span> successfully convinced a verifier <span class="math">\\mathcal{V}</span>, it is indeed the case that <span class="math">C(x,w)=1</span>.</p>
+
+    <p class="text-gray-300">First, notice that <span class="math">\\mathsf{com}_{x}^{<em>}</span> (produced via <span class="math">\\mathsf{CommitValue}</span>) and <span class="math">\\mathsf{com}_{x}</span> are of the same format, i.e., regular Pedersen commitments under the same <span class="math">\\mathsf{cp}</span> parameters (as described in Section 2.3). Thus, by the soundness property of the <span class="math">\\mathcal{ZK}_{eq}</span> protocol we obtain that <span class="math">\\mathsf{com}_{x}</span> and <span class="math">\\mathsf{com}_{x}^{</em>}</span> are commitments to the same pre-image. Next, let <span class="math">\\mathcal{E}_{vpd,x}</span> be the extractor for <span class="math">\\mathcal{P}^{<em>}</span> (limited to Steps 1 and 8 of Construction 4) guaranteed by the evaluation extractability of property of Construction 1, as per Definition 3. Since <span class="math">\\mathcal{P}^{</em>}</span> convinces <span class="math">\\mathcal{V}</span> we obtain that <span class="math">\\mathcal{E}_{vpd,x}</span> on the same inputs as <span class="math">\\mathcal{P}^{<em>}</span> outputs <span class="math">f(r_{x})</span> as the pre-image of <span class="math">\\mathsf{com}_{x}^{</em>}</span> (with high probability).</p>
+
+    <p class="text-gray-300">We now argue that <span class="math">(f(0),\\cdots,f(n_{x}-1))=x</span>. Indeed, notice that <span class="math">f</span> is an <span class="math">n</span>-variate variable-degree-<span class="math">1</span> polynomial and it is thus a multilinear extension. In addition, by construction of <span class="math">\\tilde{x}</span> (Step 7 of Construction 4) it holds that <span class="math">(\\tilde{x}(0),\\cdots,\\tilde{x}(n_{x}-1))=x</span>. Next, since <span class="math">\\mathsf{com}_{x}</span> and <span class="math">\\mathsf{com}_{x}^{*}</span> are commitments to the same value, we obtain that <span class="math">\\tilde{x}(r_{x}^{\\prime})=f(r_{x})</span>. Thus, by the properties of multilnear extensions we obtain that with high probability it holds that <span class="math">(f(0),\\cdots,f(n_{x}-1))=(\\tilde{x}(0),\\cdots,\\tilde{x}(n_{x}-1))=x</span>.</p>
+
+    <p class="text-gray-300">We now proceed to argue that <span class="math">C(x,w)=1</span>. Let <span class="math">x^{\\prime}=(x,w)</span>. We now show how to construct a prover <span class="math">\\mathcal{P}_{cmt}^{*}</span> which will convince a verifier <span class="math">\\mathcal{V}_{cmt}</span> from Construction 3 that <span class="math">C(x^{\\prime})=1</span>. Using the soundness</p>
+
+    <p class="text-gray-300">property of Construction 3 we shall obtain that <span class="math">C(x,w)=C(x^{\\prime})=1</span> with high probability. Indeed, let <span class="math">x^{\\prime}=(x^{\\prime}_{1},\\cdots,x^{\\prime}_{n})</span>, <span class="math">\\mathcal{P}^{<em>}_{cmt}</span> starts by computing <span class="math">\\mathsf{com}_{x^{\\prime}_{i}}\\leftarrow\\mathcal{C}om(\\mathsf{cp},x^{\\prime}_{i},\\rho_{x^{\\prime}_{i}})</span> where <span class="math">\\rho_{x^{\\prime}_{i}}</span> is generated uniformly at random and <span class="math">\\mathsf{cp}</span> was given to <span class="math">\\mathcal{P}^{</em>}</span> by the parameter generator <span class="math">\\mathcal{G}</span>. <span class="math">\\mathcal{P}^{*}_{cmt}</span> then sends <span class="math">\\mathsf{com}_{x^{\\prime}_{1}},\\cdots,\\mathsf{com}_{x^{\\prime}_{n}}</span> to <span class="math">\\mathcal{V}_{cmt}</span> and proceeds as follows.</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li><span class="math">\\mathcal{P}^{<em>}_{cmt}</span> sets <span class="math">a_{0}=1,r_{0}=0</span>, generates <span class="math">\\rho_{0}</span> uniformly at random, computes <span class="math">\\mathsf{com}_{0}\\leftarrow\\mathcal{C}omm(\\mathsf{cp},a_{0},\\rho_{0})</span> and sends it to <span class="math">\\mathcal{V}_{cmt}</span>. <span class="math">\\mathcal{P}^{</em>}_{cmt}</span> then emulates <span class="math">\\mathcal{G}</span> and runs <span class="math">P^{*}</span> until Step 3 of Construction 4, discarding messages sent to <span class="math">\\mathcal{V}_{cmt}</span>.</li>
+
+      <li>Using <span class="math">\\mathcal{P}</span> (restricted to Step 3 of Construction 4), <span class="math">\\mathcal{P}^{<em>}_{cmt}</span> now interacts with <span class="math">\\mathcal{V}_{cmt}</span> during Step 2 of Construction 3 by forwarding messages between <span class="math">\\mathcal{V}_{cmt}</span> and <span class="math">\\mathcal{P}</span>. At the end of this step <span class="math">\\mathcal{P}^{</em>}_{cmt}</span> and <span class="math">\\mathcal{V}_{cmt}</span> hold a commitment <span class="math">\\mathsf{com}_{d}</span> and a random point <span class="math">r_{d}</span> chosen by <span class="math">\\mathcal{V}^{*}_{cmt}</span>.</li>
+
+      <li><span class="math">\\mathcal{P}^{*}_{cmt}</span> then sends <span class="math">x^{\\prime}</span> and the randomness <span class="math">\\rho_{x^{\\prime}_{1}},\\cdots,\\rho_{x^{\\prime}_{n}}</span> to <span class="math">\\mathcal{V}_{cmt}</span>.</li>
+
+      <li><span class="math">\\mathcal{P}^{<em>}_{cmt}</span> then runs <span class="math">P^{</em>}</span> until Step 6 of Construction 4 again discarding messages sent to <span class="math">\\mathcal{V}_{cmt}</span>.</li>
+
+      <li>Using <span class="math">\\mathcal{P}</span> (restricted to Step 6 of Construction 4), <span class="math">\\mathcal{P}^{*}_{cmt}</span> now interacts with <span class="math">\\mathcal{V}_{cmt}</span> during Step 5 of Construction 3 by forwarding messages between <span class="math">\\mathcal{V}_{cmt}</span> and <span class="math">\\mathcal{P}</span>.</li>
+
+    </ol>
+
+    <p class="text-gray-300">We now proceed to argue that since <span class="math">\\mathcal{P}</span> convinces <span class="math">\\mathcal{V}</span> it is the case that <span class="math">\\mathcal{P}^{<em>}_{cmt}</span> convinces <span class="math">\\mathcal{V}_{cmt}</span>. Indeed, first notice that since Step 2 of Construction 4 involve running running Steps 1 and 2 of Construction 3 and since <span class="math">\\mathcal{V}</span> did not reject we have that <span class="math">\\mathcal{V}^{</em>}_{cmt}</span> will not reject as well. Next, since the commitments <span class="math">\\mathsf{com}_{x^{\\prime}_{1}},\\cdots,\\mathsf{com}_{x^{\\prime}_{n}}</span> to <span class="math">\\mathcal{V}_{cmt}</span> sent by <span class="math">\\mathcal{P}^{<em>}_{cmt}</span> to <span class="math">\\mathcal{V}_{cmt}</span> are honestly computed commitments to the values of <span class="math">x^{\\prime}</span> using the randomness <span class="math">\\rho_{x^{\\prime}_{1}},\\cdots,\\rho_{x^{\\prime}_{n}}</span>, we obtain that <span class="math">\\mathcal{V}^{</em>}_{cmt}</span> will not reject during Step 3 of Construction 3. It remains to show that <span class="math">\\mathcal{V}^{*}_{cmt}</span> will not reject during Step 5 of Construction 3.</p>
+
+    <p class="text-gray-300">Indeed, notice that <span class="math">f</span> is the unique multilinear extension of <span class="math">x^{\\prime}=(x,w)</span>. Thus we have that the polynomial <span class="math">\\tilde{V}_{x}</span> defined in Step 4 of Construction 3 actually equals <span class="math">f</span>. Let <span class="math">\\mathcal{E}_{vpd,d}</span> be the extractor for <span class="math">\\mathcal{P}^{<em>}</span> (limited to Steps 1 and 4 of Construction 4) guaranteed by the evaluation extractability of property of Construction 1, as per Definition 3. Since <span class="math">\\mathcal{P}</span> convinces <span class="math">\\mathcal{V}</span> we have that with high probability <span class="math">\\mathcal{E}_{vpd,d}</span> on the same inputs as <span class="math">\\mathcal{P}^{</em>}</span> outputs <span class="math">f(r_{d})</span> as the pre-image of <span class="math">\\mathsf{com}^{<em>}_{d}</span>. Next, by uniqueness property of multilinear extensions, we have that the multilinear extension <span class="math">\\tilde{V}_{x^{\\prime}}</span> of <span class="math">x^{\\prime}</span> computed in Step 2 of Construction 3 equals <span class="math">f</span>. This implies that commitment <span class="math">\\mathsf{com}^{</em>}_{x^{\\prime}}</span> computed in Step 4 of Construction 3 (executed on input <span class="math">x^{\\prime}</span>) is also to a commitment to <span class="math">\\tilde{V}_{x^{\\prime}}(r_{d})=f(r_{d})</span>. Overall, since <span class="math">\\mathsf{com}_{d}</span> is produced the same way in Construction 3 and Construction 4, we obtain that the <span class="math">\\mathcal{ZK}_{eq}</span> protocol is executed on commitments to the same values. Thus, if <span class="math">\\mathcal{P}</span> convinces <span class="math">\\mathcal{V}</span> we obtain that <span class="math">\\mathcal{V}_{cmt}</span> will also be convinced by <span class="math">\\mathcal{P}^{*}_{cmt}</span>.</p>
+
+    <p class="text-gray-300">Zero Knowledge. Let <span class="math">\\mathsf{Sim}_{vpd}</span> be the simulator from Theorem 1 and <span class="math">\\mathsf{Sim}_{cmt}</span> be the simulator from Lemma 3. Consider the simulator <span class="math">\\mathsf{Sim}</span> which is defined as follows.</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>On input <span class="math">(1^{\\lambda},C,x)</span>, <span class="math">\\mathsf{Sim}</span> runs <span class="math">\\mathsf{Sim}_{vpd}</span> on input <span class="math">(1^{\\ell},n,1)</span> where <span class="math">n</span> is the input size of <span class="math">C</span> and receives commitment <span class="math">\\mathsf{com}_{\\tilde{V}_{d}}</span>, parameters <span class="math">\\mathsf{pp},\\mathsf{vp}</span>, and state <span class="math">\\sigma</span>. Note that <span class="math">\\mathsf{pp}</span> contains commitment parameters <span class="math">\\mathsf{cp}</span> for the Pedersen commitment scheme, as defined in Section 2.3. <span class="math">\\mathsf{Sim}</span> sends <span class="math">\\mathsf{vp}</span> to <span class="math">\\mathcal{V}^{*}</span>.</li>
+
+      <li><span class="math">\\mathsf{Sim}</span> runs <span class="math">\\mathsf{Sim}_{cmt}</span> on input <span class="math">(\\mathsf{cp},C)</span>, in order to simulate <span class="math">\\mathcal{V}^{<em>}</span>’s view during the execution of Step 3 of Construction 4. Let <span class="math">\\mathsf{com}_{d}</span> be the corresponding output forwarded to <span class="math">\\mathcal{V}^{</em>}</span> and <span class="math">r_{d}</span> be the last random point chosen by <span class="math">\\mathcal{V}^{*}</span>.</li>
+
+      <li>In order to simulate <span class="math">\\mathcal{V}^{<em>}</span>’s view during Step 4 of Construction 4, <span class="math">\\mathsf{Sim}</span> runs <span class="math">\\mathsf{Sim}_{vpd}</span> on input <span class="math">(r_{d},\\sigma,\\mathsf{pp})</span> and receives commitment <span class="math">\\mathsf{com}^{</em>}_{d}</span>, proof <span class="math">\\pi</span>, and new state <span class="math">\\sigma</span>. <span class="math">\\mathsf{Sim}</span> then forwards <span class="math">(\\mathsf{com}^{<em>}_{d},\\pi)</span> to <span class="math">\\mathcal{V}^{</em>}</span>.</li>
+
+      <li><span class="math">\\mathsf{Sim}</span> runs simulator <span class="math">\\mathsf{Sim}_{eq}</span> on input <span class="math">\\mathsf{com}_{d},\\mathsf{com}^{<em>}_{d}</span> in order to simulate <span class="math">\\mathcal{V}^{</em>}</span>’s view during the execution of Step 6 of Construction 4.</li>
+
+    </ol>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Upon receiving <span class="math">r_{x}</span> from <span class="math">\\mathcal{V}^{<em>}</span>, <span class="math">\\mathsf{Sim}</span> simulates <span class="math">\\mathcal{V}^{</em>}</span>’s view during Step 8 of Construction 4. To that end, <span class="math">\\mathsf{Sim}</span> runs <span class="math">\\mathsf{Sim}_{vpd}</span> on input <span class="math">(r_{x},\\sigma,\\mathsf{pp})</span> and receives commitment <span class="math">\\mathsf{com}_{x}^{<em>}</span>, proof <span class="math">\\pi_{x}</span>, and new state <span class="math">\\sigma</span>. <span class="math">\\mathsf{Sim}</span> then forwards <span class="math">(\\mathsf{com}_{x}^{</em>},\\pi_{x})</span> to <span class="math">\\mathcal{V}^{*}</span>.</li>
+
+      <li>Upon receiving <span class="math">\\rho_{x}^{\\prime}</span> from <span class="math">\\mathcal{V}^{<em>}</span>, <span class="math">\\mathsf{Sim}</span> computes <span class="math">\\mathsf{com}_{x}\\leftarrow\\mathcal{C}omm(\\mathsf{vp},\\tilde{x}(r_{x}),\\rho_{x}^{\\prime})</span>. Next, <span class="math">\\mathsf{Sim}</span> runs simulator <span class="math">\\mathsf{Sim}_{eq}</span> on input <span class="math">\\mathsf{com}_{x},\\mathsf{com}_{x}^{</em>}</span> in order to simulate <span class="math">\\mathcal{V}^{*}</span>’s view during the execution of Step 10 of Construction 4.</li>
+
+    </ol>
+
+    <p class="text-gray-300">We claim that the view of <span class="math">\\mathcal{V}^{<em>}</span> while interacting with <span class="math">\\mathsf{Sim}</span> is indistinguishable from the view he gets while interacting with the honest prover <span class="math">\\mathcal{P}</span> since: (i) <span class="math">\\mathcal{C}omm</span> is statistically hiding, (ii) the messages received by <span class="math">\\mathcal{V}^{</em>}</span> by <span class="math">\\mathsf{Sim}_{eq}</span> (forwarded via <span class="math">\\mathsf{Sim}</span>) are indistinguishable from the ones received while running <span class="math">\\mathcal{ZK}_{eq}</span> with the honest prover, (iii) the messages received by <span class="math">\\mathcal{V}^{<em>}</span> by <span class="math">\\mathsf{Sim}_{cmt}</span> (forwarded via <span class="math">\\mathsf{Sim}</span>) are indistinguishable from the ones received while running Construction 3 with the honest prover, and (iv) the messages received by <span class="math">\\mathcal{V}^{</em>}</span> by <span class="math">\\mathsf{Sim}_{vpd}</span> (forwarded via <span class="math">\\mathsf{Sim}</span>) are indistinguishable from the ones received while running Construction 1 with the honest prover. Note that the values of commitments <span class="math">\\mathsf{com}_{d},\\mathsf{com}_{d}^{<em>},\\mathsf{com}_{x},\\mathsf{com}_{x}^{</em>}</span> are independent of each other (modulo the common commitment parameters <span class="math">\\mathsf{cp}</span>) in both the real and the ideal execution. In particular, the messages exchanged during Step 3 of Construction 1 do not depend on the value of <span class="math">\\mathsf{com}_{x}</span> (<span class="math">\\mathsf{com}_{\\hat{V}_{d}}</span> in the real execution). <span class="math">\\square</span></p>
+
+    <p class="text-gray-300">Asymptotic Complexity. Firstly, we note that Pedersen commitments, as well as protocols <span class="math">\\mathcal{ZK}_{eq}</span>, <span class="math">\\mathcal{ZK}_{prod}</span>, require a constant number of exponentiations and field operations (when instantiated as explained in Section 2.3). Then, the analysis of the asymptotic complexity of our argument follows in a straight forward manner from: (i) the analysis of CMT <em>[12]</em>, (ii) the analysis of the standard VPD <em>[30]</em>, (iii) the fact that the zk-VPD protocol of Section 3 has the same asymptotic behavior as the plain VPD of <em>[30]</em>.</p>
+
+    <h2 id="sec-31" class="text-2xl font-bold">Acknowledgments</h2>
+
+    <p class="text-gray-300">This work was supported in part by NSF awards #1514261 and #1526950, financial assistance award 70NANB15H328 from the U.S. Department of Commerce, National Institute of Standards and Technology, the 2017-2018 Rothschild Postdoctoral Fellowship, and the Defense Advanced Research Project Agency (DARPA) under Contract #FA8650-16-C-7622.</p>
+
+    <h2 id="sec-32" class="text-2xl font-bold">References</h2>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>[1] E. Ben-Sasson, I. Bentov, A. Chiesa, A. Gabizon, D. Genkin, M. Hamilis, E. Pergament, M. Riabzev, M. Silberstein, E. Tromer, and M. Virza. Computational integrity with a public random string from quasi-linear PCPs. In Advances in Cryptology—Eurocrypt 2017, pages 551–579, 2017.</li>
+
+      <li>[2] E. Ben-Sasson, A. Chiesa, D. Genkin, E. Tromer, and M. Virza. SNARKs for C: Verifying program executions succinctly and in zero knowledge. In CRYPTO 2013, pages 90–108. 2013.</li>
+
+      <li>[3] E. Ben-Sasson, A. Chiesa, E. Tromer, and M. Virza. Scalable zero knowledge via cycles of elliptic curves. In CRYPTO 2014, pages 276–294. 2014.</li>
+
+      <li>[4] E. Ben-Sasson, A. Chiesa, E. Tromer, and M. Virza. Succinct non-interactive zero knowledge for a von Neumann architecture. In USENIX Security 2014, 2014.</li>
+
+      <li>[5] N. Bitansky, R. Canetti, A. Chiesa, and E. Tromer. From extractable collision resistance to succinct non-interactive arguments of knowledge, and back again. In ITCS 2012, pages 326–349, 2012.</li>
+
+      <li>[6] N. Bitansky, R. Canetti, A. Chiesa, and E. Tromer. From extractable collision resistance to succinct non-interactive arguments of knowledge, and back again. In Innovations in Theoretical Computer Science 2012, Cambridge, MA, USA, January 8-10, 2012, pages 326–349, 2012.</li>
+
+    </ul>
+
+    <p class="text-gray-300">-</p>
+
+    <p class="text-gray-300">[7] N. Bitansky, R. Canetti, O. Paneth, and A. Rosen. On the existence of extractable one-way functions. STOC 2014, pages 505–514.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>[8] D. Boneh and X. Boyen. Short signatures without random oracles. In EUROCRYPT 2004, pages 56–73, 2004.</li>
+
+      <li>[9] J. Bootle, A. Cerulli, P. Chaidos, and J. Groth. Efficient zero-knowledge proof systems. In Foundations of Security Analysis and Design VIII - FOSAD 2014/2015/2016 Tutorial Lectures, pages 1–31, 2016.</li>
+
+      <li>[10] E. Boyle and R. Pass. Limits of extractability assumptions with distributional auxiliary input. In ASIACRYPT 2015, pages 236–261.</li>
+
+      <li>[11] A. Chiesa, M. A. Forbes, and N. Spooner. A zero knowledge sumcheck and its applications. Cryptology ePrint Archive, Report 2017/305, 2017. http://eprint.iacr.org/2017/305.</li>
+
+      <li>[12] G. Cormode, M. Mitzenmacher, and J. Thaler. Practical verified computation with streaming interactive proofs. In ITCS 2012, pages 90–112, 2012.</li>
+
+      <li>[13] C. Costello, C. Fournet, J. Howell, M. Kohlweiss, B. Kreuter, M. Naehrig, B. Parno, and S. Zahur. Geppetto: Versatile verifiable computation. In S&P 2015, pages 253–270, 2015.</li>
+
+      <li>[14] R. Cramer and I. Damgård. Zero-knowledge proofs for finite field arithmetic; or: Can zero-knowledge be for free? In Advances in Cryptology - CRYPTO ’98, 18th Annual International Cryptology Conference, Santa Barbara, California, USA, August 23-27, 1998, Proceedings, pages 424–441, 1998.</li>
+
+      <li>[15] D. Fiore, C. Fournet, E. Ghosh, M. Kohlweiss, O. Ohrimenko, and B. Parno. Hash first, argue later: Adaptive verifiable computations on outsourced data. Cryptology ePrint Archive, 2016.</li>
+
+      <li>[16] J. A. Garay, P. D. MacKenzie, and K. Yang. Strengthening zero-knowledge protocols using signatures. J. Cryptology, 19(2):169–209, 2006.</li>
+
+      <li>[17] R. Gennaro, C. Gentry, B. Parno, and M. Raykova. Quadratic span programs and succinct nizks without pcps. In Advances in Cryptology - EUROCRYPT 2013, 32nd Annual International Conference on the Theory and Applications of Cryptographic Techniques, Athens, Greece, May 26-30, 2013. Proceedings, pages 626–645, 2013.</li>
+
+      <li>[18] S. Goldwasser, Y. T. Kalai, and G. Rothblum. Delegating computation: interactive proofs for muggles. In STOC 2008, pages 113–122, 2008.</li>
+
+      <li>[19] S. Goldwasser, S. Micali, and C. Rackoff. The knowledge complexity of interactive proof-systems. In STOC 1985, pages 291–304.</li>
+
+      <li>[20] V. Goyal. Reducing trust in the PKG in identity based cryptosystems. In Advances in Cryptology - CRYPTO 2007, 27th Annual International Cryptology Conference, Santa Barbara, CA, USA, August 19-23, 2007, Proceedings, pages 430–447, 2007.</li>
+
+      <li>[21] J. Groth. Short pairing-based non-interactive zero-knowledge arguments. In Advances in Cryptology - ASIACRYPT 2010 - 16th International Conference on the Theory and Application of Cryptology and Information Security, Singapore, December 5-9, 2010. Proceedings, pages 321–340, 2010.</li>
+
+      <li>[22] J. Groth. On the size of pairing-based non-interactive arguments. In EUROCRYPT 2016, pages 305–326, 2016.</li>
+
+    </ul>
+
+    <p class="text-gray-300">[23] J. Kilian. A note on efficient zero-knowledge proofs and arguments (extended abstract). In Proceedings of the 24th Annual ACM Symposium on Theory of Computing, May 4-6, 1992, Victoria, British Columbia, Canada, pages 723–732, 1992.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>[24] C. Lund, L. Fortnow, H. Karloff, and N. Nisan. Algebraic methods for interactive proof systems. J. ACM, 39(4):859–868, 1992.</li>
+
+      <li>[25] C. Papamanthou, E. Shi, and R. Tamassia. Signatures of correct computation. In TCC 2013, pages 222–242, 2013.</li>
+
+      <li>[26] B. Parno, J. Howell, C. Gentry, and M. Raykova. Pinocchio: Nearly practical verifiable computation. In S&P 2013, pages 238–252, 2013.</li>
+
+      <li>[27] T. P. Pedersen. Non-interactive and information-theoretic secure verifiable secret sharing. In Advances in Cryptology - CRYPTO ’91, 11th Annual International Cryptology Conference, Santa Barbara, California, USA, August 11-15, 1991, Proceedings, pages 129–140, 1991.</li>
+
+      <li>[28] R. S. Wahby, I. Tzialla, abhi shelat, J. Thaler, and M. Walfish. Doubly-efficient zksnarks without trusted setup. Cryptology ePrint Archive, Report 2017/1132, 2017. https://eprint.iacr.org/2017/1132.</li>
+
+      <li>[29] M. Walfish and A. J. Blumberg. Verifying computations without reexecuting them. Commun. ACM, 58(2):74–84, 2015.</li>
+
+      <li>[30] Y. Zhang, D. Genkin, J. Katz, D. Papadopoulos, and C. Papamanthou. vSQL: Verifying arbitrary SQL queries over dynamic outsourced databases. In IEEE Symposium on Security and Privacy (S&P) 2017, 2017.</li>
+
+    </ul>`;
+---
+
+<BaseLayout title="A Zero-Knowledge Version of vSQL (2017/1146)">
+  <article class="max-w-4xl mx-auto article-prose">
+    <nav class="mb-8">
+      <a href="/papers" class="text-blue-400 hover:text-blue-300">
+        &larr; Back to Papers
+      </a>
+    </nav>
+
+    <header class="mb-12">
+      <h1 class="text-3xl font-bold mb-4"
+        set:html={TITLE_HTML} />
+      <p class="text-gray-400 mb-2"
+        set:html={AUTHORS_HTML} />
+      <p class="text-gray-500 text-sm mb-4">
+        2017 &middot; eprint 2017/1146
+      </p>
+      <div class="flex gap-4 text-sm">
+        <a
+          href={EPRINT_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          class="text-blue-400 hover:text-blue-300"
+        >
+          Paper (eprint) &rarr;
+        </a>
+      </div>
+      <p class="mt-4 text-xs text-gray-500">
+        All content below belongs to the original authors. This page
+        reproduces the paper for educational purposes. Always
+        <a
+          href={EPRINT_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          class="text-blue-400 hover:text-blue-300"
+        >cite the original</a>.
+      </p>
+      <p class="mt-1 text-xs text-gray-600">
+        Converted with: {CRAWLER} &middot; {CONVERTED_DATE}
+      </p>
+    </header>
+
+    <Fragment set:html={CONTENT} />
+
+  </article>
+</BaseLayout>

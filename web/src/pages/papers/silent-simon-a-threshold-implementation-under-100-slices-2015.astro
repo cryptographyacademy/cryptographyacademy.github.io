@@ -1,0 +1,521 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+
+const EPRINT_URL = 'https://eprint.iacr.org/2015/172';
+const CRAWLER = 'mistral';
+const CONVERTED_DATE = '2026-02-16';
+const TITLE_HTML = 'Silent Simon: A Threshold Implementation under 100 Slices';
+const AUTHORS_HTML = 'Aria Shahverdi, Mostafa Taha, Thomas Eisenbarth';
+
+const CONTENT = `    <p class="text-gray-300">Aria Shahverdi Mostafa Taha and Thomas Eisenbarth</p>
+
+    <h6 id="sec-2" class="text-base font-medium mt-4">Abstract</h6>
+
+    <p class="text-gray-300">Lightweight Cryptography aims at achieving security comparable to conventional cryptography at a much lower cost. Simon is a lightweight alternative to AES, as it shares same cryptographic parameters, but has been shown to be extremely area-efficient on FPGAs. However, in the embedded setting, protection against side channel analysis is often required. In this work we present a threshold implementation of Simon. The proposed core splits the information between three shares and achieves provable security against first order side-channel attacks. The core can be implemented in less than 100 slices of a low-cost FPGA, making it the world smallest threshold implementation of a block-cipher. Hence, the proposed core perfectly suits highly-constrained embedded systems including sensor nodes and RFIDs. Security of the proposed core is validated by provable arguments as well as practical DPA attacks and tests for leakage quantification.</p>
+
+    <h2 id="sec-3" class="text-2xl font-bold">1 Introduction</h2>
+
+    <p class="text-gray-300">Simon is a block cipher recently published by NSA as a lightweight alternative to the widely-used AES <em>[1]</em>. Simon is very promising for hardware-based embedded applications as its internal structure is very simple and bit-oriented. Indeed, its authors show that the ASIC implementation of Simon requires only 1234 GE (Gate Equivalent) for 128 bits of security, compared to 2400 GE for the smallest AES to date <em>[2]</em>. Also, it was shown that a bit-serialized FPGA implementation of Simon sets a new area record with only 36 slices for 128 bits of security <em>[3]</em>, compared to 264 equivalent slices for AES (including the BRAMs) <em>[4]</em> and 117 slices for Present <em>[5]</em>. However, in order to actually implement Simon on practical embedded platforms, protection against side-channel analysis must be taken into account.</p>
+
+    <p class="text-gray-300">Side-channel analysis (SCA) can break cryptosystems by exploiting vulnerabilities in the practical implementation of cryptographic schemes. SCA harvests the information leaked through variations in the power consumption, electromagnetic radiation, or execution time. Typically, the adversary builds a power model using a key hypothesis and compares the result with the actual power consumption until the correct key is found. An SCA attack that is mounted using a single trace is called Simple Power Analysis (SPA), while an attack that</p>
+
+    <p class="text-gray-300">combines information across many traces at different inputs is called Differential Power Analysis (DPA). Attacks analyzing the first moment of a single point in the leakage trace are called first order attacks. Higher order DPA attacks extract information from the higher order moments of one or more leakage points. However, higher order attacks suffer from higher noise levels and hence have a worse key distinguishability.</p>
+
+    <p class="text-gray-300">Side-channel analysis of Simon has been studied in <em>[6]</em> and <em>[7]</em>. Moreover, a side-channel countermeasure for Simon was proposed in <em>[6]</em>. They proposed a low-cost realization of the masking scheme. The scheme uses only one data-path and works by partially unmasking the internal variables just before the non-linear operation, and using the input mask to re-randomize the internal state following the Feistel structure. This scheme may practically work if the demasking, processing, and remasking are performed within a single table look-up. Hence, it depends on the realization and is not provably secure. Furthermore, the mask value is fixed throughout the cipher which is not recommended in masking schemes. Moreover, it is not clear how to map the scheme to other hardware architectures.</p>
+
+    <p class="text-gray-300">In this paper, we propose a provably secure masking scheme for Simon using secret-sharing with three shares. Our design achieves all the requirements for being a threshold implementation, which is a special class of secret-sharing countermeasures that are provably secure against first-order SCA attacks <em>[8]</em>. Our core can be realized in less than 100 slices of a low-cost FPGA, making it the smallest protected implementation of a block cipher to date. In fact, the size of our core is comparable to most unprotected block ciphers. Hence, the proposed core perfectly suits highly-constrained embedded systems including sensor nodes and RFIDs. Security of the proposed scheme is validated by provable arguments, and practical tests for leakage quantification.</p>
+
+    <p class="text-gray-300">The paper is organized as follows. Section 2 reviews some background about Simon, the previous unprotected implementation and the requirements for threshold implementations. Section 3 introduces the required equations for the threshold implementation of Simon. Section 4 discusses details of the two FPGA designs proposed in this paper, along with a thorough comparison to previous designs. In Section 5, we study the practical security of the proposed designs with both differential power analysis and leakage quantification. The paper is concluded in Section 6.</p>
+
+    <h2 id="sec-4" class="text-2xl font-bold">2 Background</h2>
+
+    <h3 id="sec-5" class="text-xl font-semibold mt-8">2.1 Simon</h3>
+
+    <p class="text-gray-300">Simon is a block cipher based on the Feistel structure. Simon accepts plaintexts of size 32, 48, 64, 96 and 128 bits. For each input size, Simon has a set of allowable key sizes ranging from 64 bits to 256 bits. The input is evenly split into two words, following the principles of Feistel structure. The key is also split into two to four words, which are used in the first rounds of Simon. The key</p>
+
+    <p class="text-gray-300">scheduling algorithm is used to generate the following round keys. The number of rounds in Simon ranges from 32 rounds to 72 rounds. For example, Simon 64/128 accepts 64 bits of plaintext at a word size of 32 bits and 128 bits of key (four words). It generates a ciphertext after 44 rounds.</p>
+
+    <p class="text-gray-300">Assuming that the input words of round <span class="math">i</span> are <span class="math">l_{i}</span> and <span class="math">r_{i}</span>, the output words are:</p>
+
+    <p class="text-gray-300"><span class="math">l_{i+1}=r_{i}\\oplus l_{i}^{2}\\oplus(l_{i}^{1}\\wedge l_{i}^{8})\\oplus k_{i}\\qquad r_{i+1}=l_{i}</span></p>
+
+    <p class="text-gray-300">The upper index <span class="math">X^{s}</span> indicates left circular shift by <span class="math">s</span> bits. This can be expressed in GF(2), where the XOR operation becomes addition and the AND operation becomes multiplication, as:</p>
+
+    <p class="text-gray-300"><span class="math">l_{i+1}=r_{i}+l_{i}^{2}+(l_{i}^{1}*l_{i}^{8})+k_{i}\\qquad r_{i+1}=l_{i}</span></p>
+
+    <p class="text-gray-300">Also, assuming that the input words of the key, which are also the first round keys, are <span class="math">k_{0}</span> and <span class="math">k_{1}</span> (and possibly <span class="math">k_{2}</span> and <span class="math">k_{3}</span>, depending on the key size), the next round key is computed as:</p>
+
+    <p class="text-gray-300"><span class="math">k_{i+2}=k_{i}+k_{i+1}^{-3}+k_{i+1}^{-4}+c_{i}\\quad\\text{Two and Three Words}</span> <span class="math">k_{i+4}=k_{i}+k_{i+1}+k_{i+1}^{-1}+k_{i+3}^{-3}+k_{i+3}^{-4}+c_{i}\\quad\\text{Four Words}</span></p>
+
+    <p class="text-gray-300">where <span class="math">c_{i}</span> is a round constant.</p>
+
+    <h3 id="sec-6" class="text-xl font-semibold mt-8">2.2 Bit-Serialized Implementation</h3>
+
+    <p class="text-gray-300">Aysu et al. in <em>[3]</em> proposed a bit-serialized implementation of Simon where only one bit of the internal state is processed in each clock cycle. Hence, a single round of Simon completes after <span class="math">n</span> cycles, where <span class="math">n</span> is the size of input word. Moreover, two shift-registers were used to store the internal states to simplify the control of sequentially processing and storing individual bits. In fact, the left share of the internal state is passed over as-is to the right share, hence only one shift register of the same size as the input block is actually needed. Here, Simon is implemented as a special class of non-linear feedback shift registers, where the output of the feedback function changes the state only after completing the round function. Since the feedback function requires only four bits of the state, namely <span class="math">r_{i}</span>, <span class="math">l_{i}^{1}</span>, <span class="math">l_{i}^{2}</span> and <span class="math">l_{i}^{8}</span>, only those bits need to be stored. This storage is realized by an extra 8-bit shift register. An overview of this implementation is shown in Fig. 1 in Section 4.</p>
+
+    <h3 id="sec-7" class="text-xl font-semibold mt-8">2.3 Threshold Implementation</h3>
+
+    <p class="text-gray-300">The Threshold Implementation (TI) countermeasure was proposed by Nikova et al. in <em>[8]</em>. TI applies secret-sharing to achieve provable resistance against first order side channel attacks if the following three requirements are fulfilled:</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Correctness: Correctness means that combining the output of the different shares retrieves the original output in a correct way.</li>
+
+    </ol>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Non-completeness: Non-completeness means that the equation used to evaluate any output share should be missing at least one input share. This requirement enforces that the information required to compute the secret value (all the shares) is not present in the system at any time instant. Hence, any vulnerability in the implementation (e.g. glitches) cannot leak the secret key.</li>
+
+      <li>Uniformity: If the input shares are uniformly distributed, the output shares must also be uniformly distributed.</li>
+
+    </ol>
+
+    <p class="text-gray-300">Threshold Implementation of block ciphers have been published for AES <em>[2, 9]</em> and Present <em>[10]</em>, as well as for Keccak <em>[11]</em>.</p>
+
+    <h2 id="sec-8" class="text-2xl font-bold">3 Threshold Implementation of Simon</h2>
+
+    <p class="text-gray-300">We propose the required equations to process Simon as a threshold implementation. Although a three-shares implementation is required to overcome glitches in hardware modules, we start with a two-shares implementation as a preliminary step.</p>
+
+    <h3 id="sec-9" class="text-xl font-semibold mt-8">3.1 Simon with Two Shares</h3>
+
+    <p class="text-gray-300">In order to process Simon in two shares, we use the following equations. We denote the random mask that affects the input plaintext as <span class="math">m[p][1]</span> and <span class="math">m[p][2]</span>. The input words are given as:</p>
+
+    <p class="text-gray-300"><span class="math">r[a]_{0}=m[p][1]</span> <span class="math">r[b]_{0}=m[p][1]+r_{0}</span> <span class="math">l[a]_{0}=m[p][2]</span> <span class="math">l[b]_{0}=m[p][2]+l_{0}</span></p>
+
+    <p class="text-gray-300">Then, the round functions can be expressed as:</p>
+
+    <p class="text-gray-300"><span class="math">r[a]_{i+1}=l[a]_{i}</span> <span class="math">r[b]_{i+1}=l[b]_{i}</span> <span class="math">l[a]_{i+1}=r[a]_{i}+l[a]_{i}^{2}+l[a]_{i}^{1}<em>l[a]_{i}^{8}+l[a]_{i}^{1}</em>l[b]_{i}^{8}+k[a]_{i}</span> <span class="math">l[b]_{i+1}=r[b]_{i}+l[b]_{i}^{2}+l[b]_{i}^{1}<em>l[b]_{i}^{8}+l[b]_{i}^{1}</em>l[a]_{i}^{8}+k[b]_{i}</span></p>
+
+    <p class="text-gray-300">where <span class="math">k[a]</span> and <span class="math">k[b]</span> are the two shares of the round key. We use a different mask to process the key schedule, denoted by <span class="math">m[k]</span>. The size of the mask should be equal to the size of the key. Equations for splitting the key schedule into two shares are straightforward, being an entirely linear operation.</p>
+
+    <p class="text-gray-300">This masking scheme is correct and uniform. However, it is not <em>non-complete</em> because the two input shares are required to process any output share. This masking scheme can work in software implementations if we enforce the order of processing the equation to be from left to right. Hence, we ensure that the compiler does not generate any intermediate variable that is free from the random mask. However, this masking scheme is not provable in hardware implementations where glitches can leak the relation between the two shares. In order for the secret-sharing scheme to provably work in hardware implementations, we need to enforce the requirement of <em>non-completeness</em>. Hence, we propose the three-sharing scheme in the next subsection.</p>
+
+    <p class="text-gray-300">3.2 Simon with Three Shares</p>
+
+    <p class="text-gray-300">The equations used to process Simon in three shares follow the same reasoning of the two shares. Here, we use two random variables, each with the same size as the input plaintext. This generates three shares of each word, denoted by <span class="math">[a]</span>, <span class="math">[b]</span> and <span class="math">[c]</span>. The equations used to process the <span class="math">r</span> part are straightforward and hence omitted. The equations to process the <span class="math">l</span> part are as follows:</p>
+
+    <p class="text-gray-300"><span class="math">l[a]_{i+1}</span> <span class="math">=r[b]_{i}+l[b]_{i}^{2}+l[b]_{i}^{1}<em>l[b]_{i}^{8}+l[b]_{i}^{1}</em>l[c]_{i}^{8}+l[c]_{i}^{1}<em>l[b]_{i}^{8}+k[b]_{i}</span> <span class="math">l[b]_{i+1}</span> <span class="math">=r[c]_{i}+l[c]_{i}^{2}+l[c]_{i}^{1}</em>l[c]_{i}^{8}+l[c]_{i}^{1}<em>l[a]_{i}^{8}+l[a]_{i}^{1}</em>l[c]_{i}^{8}+k[c]_{i}</span> <span class="math">l[c]_{i+1}</span> <span class="math">=r[a]_{i}+l[a]_{i}^{2}+l[a]_{i}^{1}<em>l[a]_{i}^{8}+l[a]_{i}^{1}</em>l[b]_{i}^{8}+l[b]_{i}^{1}*l[a]_{i}^{8}+k[a]_{i}</span></p>
+
+    <p class="text-gray-300">This masking scheme is correct, uniform and non-complete. It is non-complete because the equation used to process any output share (e.g. <span class="math">[a]</span>) does not include at least one input share (<span class="math">[a]</span>). Although the system of equations in the data-path (every term in the equations aside from the key) is not invertible, i.e., its mapping is not guaranteed to be one-to-one, which suggests non-uniformity, uniformity is guaranteed by the randomness brought by the key shares (<span class="math">k[a],k[b]</span> and <span class="math">k[c]</span>). The key shares are uniformly distributed as the system of equations to generate them is linear and invertible (assuming that the input random masks are uniform). Then, it is easy to prove that the result of addition in GF(2) between an arbitrary variable that is not necessarily uniform (the data-path) and a uniformly distributed random variable (the key shares), is uniformly distributed. This implies that the above system of equations is uniform. Although the random variable used in one round depends the random variables used in the previous rounds, this does not result in any vulnerability for univariate attacks that harvest information from a single point in the trace.</p>
+
+    <h2 id="sec-10" class="text-2xl font-bold">4 FPGA Implementation</h2>
+
+    <p class="text-gray-300">Fig. 1 shows the structure of the Simon implementation. At first, the input is loaded into the Shift Register Up (SRU), FIFO1 and FIFO2. During the first 8 cycles (phase 1), the look-up table (LUT) processes three bits from the SRU, a key bit and the output of FIFO2, and the result is stored in the Shift Register Down (SRD). During this phase, SRD stores the new values, while SRU stores the old ones for further processing. Once the SRD is full and before overflowing occurs, instead of SRU, SRD will be connected to FIFO1, where the new values will be stored (phase 2). SRU will still work as the old register for storing old bit values from FIFO1 output. This phase continues for 56 cycles until the round is completed. In the next round, the functionality of SRU and SRD will be flipped, representing phase 3 and 4 as shown in the Fig. 1.</p>
+
+    <p class="text-gray-300">In order to design a threshold implementation for Simon there are two choices, parallel and serial. In both cases the state will be divided into three shares.</p>
+
+    <p class="text-gray-300">!<a href="img-0.jpeg">img-0.jpeg</a> Fig. 1. Data-path of the SIMON cipher. In each round, after the first 8 cycles the input of FIFO1 will change. Based on the round, the SRU and SRD will function as input or output of the LUT block.</p>
+
+    <p class="text-gray-300">The parallel implementation uses three copies of the data-path and key schedule units, i.e. one for each share. Note that the three data path units and key schedule units need only one instance of the control unit. Throughout this section we use  <span class="math">f(s,k)</span>  to denote the modular addition between key bit  <span class="math">k</span>  and state bit  <span class="math">s</span>  ( <span class="math">f(s,k) = s + k</span> ). The state bit and key bit are as follows:</p>
+
+    <div class="my-4 text-center"><span class="math-block">s = r [ \\alpha ] + l [ \\alpha ] ^ {2} + l [ \\alpha ] ^ {1} * l [ \\alpha ] ^ {8} + l [ \\alpha ] ^ {1} * l [ \\beta ] ^ {8} + l [ \\beta ] ^ {1} * l [ \\alpha ] ^ {8}</span></div>
+
+    <div class="my-4 text-center"><span class="math-block">k = k [ \\alpha ]</span></div>
+
+    <p class="text-gray-300">where  <span class="math">\\alpha</span>  and  <span class="math">\\beta</span>  denote different input shares.</p>
+
+    <p class="text-gray-300">As can be seen in Fig. 2, the input to the function block comes from two shares (denoted by old) based on the above equation along with one bit from the key. The output is written into one share (denoted by new). The function block is implemented using LUTs. The old share is SRU (or SRD) and the new share is SRD (SRU), if the round is even (odd). The parameters  <span class="math">\\alpha</span>  and  <span class="math">\\beta</span>  can be extracted from equations in Section 3.2. At each clock cycle the key schedule unit and data-path unit are enabled to ensure that new values are written for all three shares at each clock cycle.</p>
+
+    <p class="text-gray-300">In order to ensure that each output share is independent of at least one input share the "Keep Hierarchy" property of synthesize tool should be enabled. The keep hierarchy property ensures that parallel LUTs are synthesized so that they never share in one slice. The resistance analysis presented in the next section shows that this level of separation is sufficient for security. Although no component of this core receives all three shares as an input, hence preventing glitches from leaking first-order information, the core as a whole still processes all three</p>
+
+    <p class="text-gray-300">!<a href="img-1.jpeg">img-1.jpeg</a> Fig. 2. Parallel SIMON. All the three shares are processed at the same time. Each output share is independent of at least one input share.</p>
+
+    <p class="text-gray-300">shares in the same clock cycle. Under rare circumstances, this might result in remaining first order leakage. For this reason, we propose the serialized version of the protected core where each share is strictly accessed in different clock cycles.</p>
+
+    <p class="text-gray-300">The serial SIMON processes only one share at each clock cycle as opposed to parallel implementation. More specifically, in each clock cycle, only one bit is computed and only one register is being shifted. So, updating the three shares takes three clock cycles. To ensure the correctness of the design, Read After Write (RAW) hazard should be prevented. This requires one extra register, added to one of the shares to save the previous value of that share. In order to reduce the overhead caused by the mentioned register, we modify the non-completeness of the equations in Section 3.2, such that shares  <span class="math">[a]</span> ,  <span class="math">[b]</span>  and  <span class="math">[c]</span>  are independent of shares  <span class="math">[c]</span> ,  <span class="math">[a]</span>  and  <span class="math">[b]</span> , respectively. Based on the new set of equations, only share  <span class="math">[a]</span>  will face the RAW hazard, so the extra register is added for share  <span class="math">[a]</span> . Fig. 3 illustrates the new architecture. Since the design is based on shift registers, adding an extra register is achieved by taking one register out of FIFO1 and adding it to SRU and SRD.</p>
+
+    <p class="text-gray-300">The design ensures that at each cycle only one key bit along with proper states will go through the MUX. The computed result will then be routed in the DEMUX unit and written into the proper share.</p>
+
+    <p class="text-gray-300">The mentioned designs were implemented in Verilog HDL and synthesized for Spartan-3 xc3s50 using ISE 14.7. Table 1 summarizes the results and provides a comparison to previous implementations on the same platform. Our proposed parallel implementation needs 87 slices when synthesized by setting the optimization goal to area and picking slices using PlanAhead. The occupied slices are less than three times of the unprotected design, since the control logic is</p>
+
+    <p class="text-gray-300">!<a href="img-2.jpeg">img-2.jpeg</a> Fig. 3. Serial SIMON. Only one share is processed at a time. The extra register is added to share [a] for saving purposes. At each cycle only one key bit along with proper states will go through the MUX. The DEMUX will route the result to the proper share.</p>
+
+    <p class="text-gray-300">not replicated for the parallel design. We also synthesized the parallel design by choosing speed as the main optimization goal, letting synthesize tool pick slices. The serial design is slightly larger than the parallel one, because of the overhead in control logic and some minor changes in the data-path, as discussed above. As highlighted in Table 1, our implementation is more compact than some unprotected ciphers, namely AES and PRESENT. In fact, the small AES implementation from [4] is also outperformed in all compared metrics, though that implementation is not protected against SCA.</p>
+
+    <p class="text-gray-300">Table 1. Implementation results of Parallel and Serial SIMON and comparison with the previous work.</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Design</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Area (Slices)</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Max. Frequency (MHz)</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Throughput (Mbps)</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">AES [4]</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">264</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">67</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">2.2</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">PRESENT [5]</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">117</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">113</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">28.4</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Unpro-SIMON [3]</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">36</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">136</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">3.6</td>
+
+          </tr>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">|  TI-SIMON |  |  |   |</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Parallel (area)</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">87</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">108</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">3</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Serial (area)</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">131</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">84</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">0.7</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Serial (speed)</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">137</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">110</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1</td>
+
+          </tr>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">5 Resistance Analysis</p>
+
+    <p class="text-gray-300">In this section, we propose a practical attack against the unprotected core of Simon 128/128 as defined in <em>[3]</em>. We highlight that, the previous SCA attacks proposed in <em>[6]</em> and <em>[7]</em> were developed against the full-state implementation, and cannot be used against the bit-serialized version of our focus. Then, we show the results of this attack against the protected core along with a thorough leakage quantification. We implemented this design in a way that the input to the core is already in masked form and the random masks are applied from an external source. Here, we use <span class="math">x(a)_{b}</span> to denote bit number <span class="math">b\\in[0:63]</span> of the word <span class="math">x:l\\vee r</span> in round number <span class="math">a\\in[1:64]</span>. <span class="math">x</span> can also denote the key <span class="math">k</span>. The practical test setup consists of a SASEBO-GII board to develop the hardware design, a Tektronix DPO-5104 oscilloscope to collect the power traces and a ZFL-1000LN amplifier to improve resolution of the collected traces.</p>
+
+    <h3 id="sec-14" class="text-xl font-semibold mt-8">5.1 Practical Attack</h3>
+
+    <p class="text-gray-300">The first step in DPA is to identify a sensitive intermediate variable, which depends on both the input data and the secret key in a non-linear equation with as low confusion as possible. Linear equations can also work (as used in <em>[6]</em>), but the attack in this case will need more traces to distinguish between the correct key and close-by ones. Low confusion means that the non-linear operation processes a small number of the key-bits. This is recommended to break the complexity of the secret key into smaller portions (divide-and-conquer).</p>
+
+    <p class="text-gray-300">Hence, we focus on attacking the output of the non-linear operation (the AND gate) in the second round of Simon, where the first key word (<span class="math">k(1)</span>) becomes part of <span class="math">l(2)</span> to compute <span class="math">l(3)</span>. We do this analysis bit-by-bit following the bit-serialized implementation. The equation for the first bit of <span class="math">l(3)</span> is:</p>
+
+    <p class="text-gray-300"><span class="math">l(3)_{0}=r(2)_{0}+k(2)_{0}+l(2)_{62}+(l(2)_{63}*l(2)_{56})</span></p>
+
+    <p class="text-gray-300">where</p>
+
+    <p class="text-gray-300"><span class="math">r(2)_{0}</span> <span class="math">=l(1)_{0}\\ \\ ,</span> and <span class="math">l(2)_{i}</span> <span class="math">=k(1)_{i}+r(1)_{i}+l(1)_{i-2}+(l(1)_{i-1}*l(1)_{i-8})</span></p>
+
+    <p class="text-gray-300">where <span class="math">i\\in\\{62,63,56\\}</span> for this particular bit and the subtraction in indexes is done modulo 64. A similar equation can be written for all the bits of the internal state. In short, one bit of the left word in round three (e.g. <span class="math">l(3)_{0}</span>) depends non-linearly on two key-bits (<span class="math">k(1)_{63}</span> and <span class="math">k(1)_{56}</span>) and linearly on another two key bits (<span class="math">k(2)_{0}</span> and <span class="math">k(1)_{62}</span>), along with some input data.</p>
+
+    <p class="text-gray-300">The second step of a successful DPA attack is to select an accurate power model, which is a function that converts the sensitive intermediate variable into relative power consumption. In this work, we use the Hamming Distance (HD) power model which is suitable for hardware modules. The HD represents the number of bit-flips between two clock cycles. For example, we focus on the activity of the first register of the left word, representing the operation of overwriting</p>
+
+    <p class="text-gray-300">bit <span class="math">l(3)_{0}</span> by bit <span class="math">l(3)_{1}</span> between cycle 65 and 66. However, we first need to consider an equation for the system power consumption.</p>
+
+    <p class="text-gray-300">The system power equation of the unprotected structure (only one share) is:</p>
+
+    <p class="text-gray-300"><span class="math">P=P_{SRU}+P_{SRD}+P_{FIFO1}+P_{FIFO2}+N</span></p>
+
+    <p class="text-gray-300">where <span class="math">P_{SRU},P_{SRD},P_{FIFO1}</span> and <span class="math">P_{FIFO2}</span> represent the power consumption of the SRU, the SRD and the FIFO registers, respectively. <span class="math">N</span> is a noise component which represents the measurement noise along with all on-board activities that do not depend on the input data including the key-schedule circuit. We did not write a separate term for the LUT as its effect can be included in its output register, which is the first register of SRU or SRD depending on the clock cycle (SRU in our example). During the update of cycle 65/66 and following the HD model, the power consumption of each component is:</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">$P_{SRU}=HW\\Big{(}\\big{(}l(3)_{0}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">r(2)_{63:55}\\big{)}\\oplus\\big{(}l(3)_{1}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">l(3)_{0}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">r(2)_{63:54}\\big{)}\\Big{)}$</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300"><span class="math">P_{SRD}+P_{FIFO1}=HW\\big{(}l(2)^{1}\\oplus l(2)^{2}\\big{)}</span></p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">$P_{FIFO2}=HW\\Big{(}\\left</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">(l(2)_{0}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">r(2))\\right</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">_{64}\\oplus\\left</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">(l(2)_{1}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">l(2)_{0}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">r(2))\\right</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">_{64}\\Big{)}$</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">where HW is the Hamming weight function (the number of set-bits), <span class="math">X^{s}</span> is a circular shift right by <span class="math">s</span> bits and $</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">x</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">_{64}<span class="math"> denotes trimming </span>x<span class="math"> to the first 64 bits. </span>P_{SRD}+P_{FIFO1}<span class="math"> and </span>P_{FIFO2}<span class="math"> depend linearly on the plaintexts and the bits of </span>k(1)<span class="math">. </span>P_{SRU}$ is the only component in the system power consumption that depends non-linearly on key bits.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">Fig. 4 gives the results of attacking the studied Simon cores with Correlation Power Analysis (CPA) <em>[12]</em>. In this attack, we used a 4-bit key hypothesis to represent the non-linear key-bits involved in the computation of <span class="math">l(3)_{0}</span> and <span class="math">l(3)_{1}</span>. Figures (a) and (b) show results for attacking the unprotected core. Figure 4(a) shows the correlation coefficient as a function of time. Figure 4(b) shows the correlation associated with the correct key against those of the incorrect keys as the number of analyzed traces increases. Although the results highlight the success rate of recovering only four bits of the secret key, the remaining key-bits could also be recovered by selecting another points in the algorithm using the same number of traces. These results shows that the unprotected core can be broken with less than 1200 traces. Figures 4(c) and 4(d) show the results of the same attacks against the protected core. In this experiment, we collected 500,000 traces of the parallel version synthesized with speed optimization. If this core passes the attack and the leakage quantification tests, the serialized version will pass for being designed with more conservative assumptions. It is clear that the attack fails to recover any secret key, which supports our claim of secrecy.</p>
+
+    <h3 id="sec-15" class="text-xl font-semibold mt-8">5.2 Leakage Quantification</h3>
+
+    <p class="text-gray-300">Although the aforementioned DPA attack is necessary to prove the SCA-security of the proposed module, the attack examines the leakage of a single point in the</p>
+
+    <p class="text-gray-300">!<a href="img-3.jpeg">img-3.jpeg</a> (a)</p>
+
+    <p class="text-gray-300">!<a href="img-4.jpeg">img-4.jpeg</a> (b)</p>
+
+    <p class="text-gray-300">!<a href="img-5.jpeg">img-5.jpeg</a> (c)</p>
+
+    <p class="text-gray-300">!<a href="img-6.jpeg">img-6.jpeg</a> (d) Fig. 4. CPA results for the studied cores: (a) and (b) show the results against the unprotected core. (c) and (d) show the results against the protected core.</p>
+
+    <p class="text-gray-300">trace which is not sufficient. In contrary, the technique of leakage quantification examines the entire trace searching for any point where the leakage can be distinguished from random. Here, we do not use any key-recovery attack, but we use statistical tools to prove the indistinguishably of the collected traces.</p>
+
+    <p class="text-gray-300">We use the test suite developed in [13] and previously used in [14, 15]. The test suite consists of two different experiments: Fixed Versus Random (FVR) and Random Versus Random (RVR).</p>
+
+    <p class="text-gray-300">The FVR test depends on collecting two sets of leakage traces, one with a fixed plaintext while the other with randomly varying plaintexts. The traces are collected in an interleaved way to minimize the effect of noise. We compute the sample mean  <span class="math">(\\mu)</span>  and sample standard deviation  <span class="math">(\\sigma)</span>  of the traces in each set. Then, we compute the result of Welch's t-test:</p>
+
+    <div class="my-4 text-center"><span class="math-block">t = \\frac {\\mu_ {a} - \\mu_ {b}}{\\sqrt {(\\sigma_ {a} ^ {2} / N _ {a}) + (\\sigma_ {b} ^ {2} / N _ {b})}}</span></div>
+
+    <p class="text-gray-300">!<a href="img-7.jpeg">img-7.jpeg</a> (a)</p>
+
+    <p class="text-gray-300">!<a href="img-8.jpeg">img-8.jpeg</a> (b)</p>
+
+    <p class="text-gray-300">!<a href="img-9.jpeg">img-9.jpeg</a> (c)</p>
+
+    <p class="text-gray-300">!<a href="img-10.jpeg">img-10.jpeg</a> (d) Fig. 5. Results of leakage quantification. (a) and (b) report results of the FVR and RVR tests for the unprotected core. (c) and (d) results for the protected core.</p>
+
+    <p class="text-gray-300">where  <span class="math">a</span>  and  <span class="math">b</span>  denote the two sets and  <span class="math">N_{i}</span>  denote the number of traces in set  <span class="math">i: a \\vee b</span> . The device fails the FVR test if the value of  <span class="math">t</span>  exceeds a certain threshold. In this paper, we follow the threshold of  <span class="math">\\pm 4.5</span>  used in [13] and [14].</p>
+
+    <p class="text-gray-300">The RVR test applies the same analysis as above however, all the traces are collected with randomly varying plaintexts. In this case, the two groups of traces are separated based on an intermediate variable. We apply the RVR test to the HD between the first bits of the left and right words of the first two rounds. We also apply the RVR test to the HW of these bits.</p>
+
+    <p class="text-gray-300">These tests are stronger than the previous DPA attack, as they search for the distinguishability in any trace point that may or may not lead to a full key recovery. Fig. 5 shows the results of the FVR and the RVR tests against the studied cores. Figures 5(a) and 5(b) report results of the FVR and the RVR tests for the unprotected core at 100,000 traces, respectively. Figures 5(c) and 5(d) report results for the protected core at 2,000,000 traces. We applied all the aforementioned RVR tests, however, we report results of only one intermediate variable due to space limitation (the HD in the first register during cycle 65/66).</p>
+
+    <p class="text-gray-300">The unprotected core failed all the leakage quantification tests (as expected), while the protected code did pass all the tests which again supports our claim of secrecy.</p>
+
+    <h2 id="sec-16" class="text-2xl font-bold">6 Conclusion</h2>
+
+    <p class="text-gray-300">In this paper, we proposed a threshold implementation of Simon block cipher that can be implemented in less than 100 slices of a low-cost FPGA platform. The proposed core perfectly suits highly-constrained embedded systems that require protection against side-channel attacks including sensor nodes and RFIDs. We showed that the protected core is secure against all first order attacks using provable arguments, practical DPA attacks and tests for leakage quantification.</p>
+
+    <h2 id="sec-17" class="text-2xl font-bold">Acknowledgment</h2>
+
+    <p class="text-gray-300">This material is based upon work supported by the National Science Foundation under Grant No. #1261399 and #1314770.</p>
+
+    <h2 id="sec-18" class="text-2xl font-bold">References</h2>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>[1] R. Beaulieu, D. Shors, J. Smith, S. Treatman-Clark, B. Weeks, and L. Wingers, “The SIMON and SPECK Families of Lightweight Block Ciphers.,” IACR Cryptology ePrint Archive, vol. 2013, p. 404, 2013.</li>
+
+      <li>[2] A. Moradi, A. Poschmann, S. Ling, C. Paar, and H. Wang, “Pushing the Limits: A Very Compact and a Threshold Implementation of AES,” in Advances in Cryptology — EUROCRYPT 2011 (K. G. Paterson, ed.), vol. 6632 of Springer LNCS, pp. 69–88, 2011.</li>
+
+      <li>[3] A. Aysu, E. Gulcan, and P. Schaumont, “SIMON Says: Break Area Records of Block Ciphers on FPGAs,” Embedded Systems Letters, IEEE, vol. 6, pp. 37–40, June 2014.</li>
+
+      <li>[4] T. Good and M. Benaissa, “AES on FPGA from the Fastest to the Smallest,” in Cryptographic Hardware and Embedded Systems CHES 2005 (J. Rao and B. Sunar, eds.), vol. 3659 of Springer LNCS, pp. 427–440, 2005.</li>
+
+      <li>[5] P. Yalla and J. Kaps, “Lightweight Cryptography for FPGAs,” in International Conference on Reconfigurable Computing and FPGAs, 2009. ReConFig ’09., pp. 225–230, Dec 2009.</li>
+
+      <li>[6] S. Bhasin, T. Graba, J.-L. Danger, and Z. Najm, “A look into SIMON from a side-channel perspective,” in IEEE International Symposium on Hardware-Oriented Security and Trust (HOST), 2014, pp. 56–59, May 2014.</li>
+
+      <li>[7] D. Shanmugam, R. Selvam, and S. Annadurai, “Differential Power Analysis Attack on SIMON and LED Block Ciphers,” in Security, Privacy, and Applied Cryptography Engineering (R. Chakraborty, V. Matyas, and P. Schaumont, eds.), vol. 8804 of Springer LNCS, pp. 110–125, 2014.</li>
+
+      <li>[8] S. Nikova, C. Rechberger, and V. Rijmen, “Threshold Implementations Against Side-Channel Attacks and Glitches,” in Information and Communications Security (P. Ning, S. Qing, and N. Li, eds.), vol. 4307 of Springer LNCS, pp. 529–545, 2006.</li>
+
+      <li>[</li>
+
+    </ul>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>[9] B. Bilgin, B. Gierlichs, S. Nikova, V. Nikov, and V. Rijmen, “A More Efficient AES Threshold Implementation,” in Progress in Cryptology –AFRICACRYPT 2014 (D. Pointcheval and D. Vergnaud, eds.), vol. 8469 of Springer LNCS, pp. 267–284, 2014.</li>
+
+      <li>[10] S. Kutzner, P. Nguyen, A. Poschmann, and H. Wang, “On 3-Share Threshold Implementations for 4-Bit S-boxes,” in Constructive Side-Channel Analysis and Secure Design (E. Prouff, ed.), vol. 7864 of Springer LNCS, pp. 99–113, 2013.</li>
+
+      <li>[11] B. Bilgin, J. Daemen, V. Nikov, S. Nikova, V. Rijmen, and G. Van Assche, “Efficient and First-Order DPA Resistant Implementations of Keccak,” in Smart Card Research and Advanced Applications (A. Francillon and P. Rohatgi, eds.), Springer LNCS, pp. 187–199, 2014.</li>
+
+      <li>[12] E. Brier, C. Clavier, and F. Olivier, “Correlation Power Analysis with a Leakage Model,” in Cryptographic Hardware and Embedded Systems — CHES 2004 (M. Joye and J.-J. Quisquater, eds.), vol. 3156 of Springer LNCS, pp. 135–152, 2004.</li>
+
+      <li>[13] G. Goodwill, B. Jun, J. Jaffe, and P. Rohatgi, “A testing methodology for sidechannel resistance validation.” Non-Invasive Attack Testing Workshop, 2011. http://www.cryptography.com/public/pdf/a-testing-methodology-for-side-channel-resistance-validation.pdf.</li>
+
+      <li>[14] A. J. Leiserson, M. E. Marson, and M. A. Wachs, “Gate-Level Masking under a Path-Based Leakage Metric,” in Cryptographic Hardware and Embedded Systems – CHES 2014 (L. Batina and M. Robshaw, eds.), vol. 8731 of Springer LNCS, pp. 580–597, 2014.</li>
+
+      <li>[15] B. Bilgin, B. Gierlichs, S. Nikova, V. Nikov, and V. Rijmen, “Higher-order threshold implementations,” in Advances in Cryptology – ASIACRYPT 2014 (P. Sarkar and T. Iwata, eds.), vol. 8874 of Springer LNCS, pp. 326–343, 2014.</li>
+
+    </ul>`;
+---
+
+<BaseLayout title="Silent Simon: A Threshold Implementation under 100 Slices (2015/172)">
+  <article class="max-w-4xl mx-auto article-prose">
+    <nav class="mb-8">
+      <a href="/papers" class="text-blue-400 hover:text-blue-300">
+        &larr; Back to Papers
+      </a>
+    </nav>
+
+    <header class="mb-12">
+      <h1 class="text-3xl font-bold mb-4"
+        set:html={TITLE_HTML} />
+      <p class="text-gray-400 mb-2"
+        set:html={AUTHORS_HTML} />
+      <p class="text-gray-500 text-sm mb-4">
+        2015 &middot; eprint 2015/172
+      </p>
+      <div class="flex gap-4 text-sm">
+        <a
+          href={EPRINT_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          class="text-blue-400 hover:text-blue-300"
+        >
+          Paper (eprint) &rarr;
+        </a>
+      </div>
+      <p class="mt-4 text-xs text-gray-500">
+        All content below belongs to the original authors. This page
+        reproduces the paper for educational purposes. Always
+        <a
+          href={EPRINT_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          class="text-blue-400 hover:text-blue-300"
+        >cite the original</a>.
+      </p>
+      <p class="mt-1 text-xs text-gray-600">
+        Converted with: {CRAWLER} &middot; {CONVERTED_DATE}
+      </p>
+    </header>
+
+    <Fragment set:html={CONTENT} />
+
+  </article>
+</BaseLayout>

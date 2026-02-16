@@ -1,0 +1,1743 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+
+const EPRINT_URL = 'https://eprint.iacr.org/2018/260';
+const CRAWLER = 'mistral';
+const CONVERTED_DATE = '2026-02-16';
+const TITLE_HTML = 'MDS Matrices with Lightweight Circuits';
+const AUTHORS_HTML = 'Sébastien Duval, Gaëtan Leurent';
+
+const CONTENT = `    <p class="text-gray-300">MDS Matrices with Lightweight Circuits</p>
+
+    <p class="text-gray-300">Sébastien Duval and Gaëtan Leurent</p>
+
+    <p class="text-gray-300">Inria, France</p>
+
+    <p class="text-gray-300">{sebastien.duval,gaetan.leurent}@inria.fr</p>
+
+    <p class="text-gray-300">Abstract. MDS matrices are an important element for the design of block ciphers such as the AES. In recent years, there has been a lot of work on the construction of MDS matrices with a low implementation cost, in the context of lightweight cryptography. Most of the previous efforts focused on local optimization, constructing MDS matrices with coefficients that can be efficiently computed. In particular, this led to a matrix with a direct xor count of only 106, while a direct implementation of the MixColumn matrix of the AES requires 152 bitwise xors.</p>
+
+    <p class="text-gray-300">More recently, techniques based on global optimization have been introduced, were the implementation can reuse some intermediate variables. In particular, Kranz et al. used optimization tools to a find good implementation from the description of an MDS matrix. They have lowered the cost of implementing the MixColumn matrix to 97 bitwise xors, and proposed a new matrix with only 72 bitwise xors, the lowest cost known so far.</p>
+
+    <p class="text-gray-300">In this work we propose a different approach to global optimization. Instead of looking for an optimized circuit of a given matrix, we run a search through a space of circuits, to find optimal circuits yielding MDS matrices. This results in MDS matrices with an even lower cost, with only 67 bitwise xors.</p>
+
+    <p class="text-gray-300">Keywords: MDS matrix <span class="math">\\cdot</span> lightweight cryptography</p>
+
+    <h2 id="sec-1" class="text-2xl font-bold">1 Introduction</h2>
+
+    <p class="text-gray-300">Since the 1990s, Substitution-Permutation Networks have been a prominent structure to build symmetric-key ciphers. These networks have been thoroughly studied and extensively instantiated, as in the current standard AES (Advanced Encryption Standard) <em>[x10]</em>. SPNs are made of three main components: a key schedule, a small (typically 4- or 8-bit) non-linear function called S-Box, and a large (typically 128-bit) linear function called the diffusion matrix. The role of the S-Box is to mix the bits inside 4- or 8-bit words and the role of the diffusion matrix is to mix words.</p>
+
+    <p class="text-gray-300">The security of SPN ciphers against classical attacks (differential and linear in particular) can be reduced to criteria on its components, following the wide trail design strategy <em>[x10]</em>. The S-Box needs to have a small differential uniformity and a large non-linearity; optimal S-Boxes are called APN (Almost Perfect Nonlinear). The diffusion matrix needs to create dependency between input and output words, with a high branch number; optimal diffusion matrices are called MDS (because they are related to a Maximum Distance Separable code). MDS matrices are not only widely used in SPN ciphers but also in Feistel ciphers (Camellia <em>[AIK^{+}01]</em>, Twofish <em>[SKW^{+}99]</em>), in hash functions (Whirlpool <em>[x22]</em>, Grøstl<em>[GKM^{+}]</em>) and even in stream ciphers (MUGI <em>[WFY^{+}02]</em>).</p>
+
+    <p class="text-gray-300">Over the last decade, the urge for increasingly smaller electronic devices manipulating private data has triggered the exploration of novel cryptographic primitives with low implementation costs. Indeed, despite the standardization of resilient primitives, such as the AES <em>[x10]</em>, constrained environments require some lighter cripytographic primitives. In particular, a natural means of lowering the cost of the SPN structure is to lower the</p>
+
+    <p class="text-gray-300">cost of its main components: the S-Box and the diffusion matrix. Considerable effort has been dedicated to finding such light components, for S-Boxes in <em>[UDI^{+}11, x14, x1]</em> and for diffusion matrices in <em>[x12, x21, x13, x16, x15, x16, x17]</em>. Such improvements of the building blocks allowed for some new cipher proposals (such as Noekeon <em>[x7]</em>, Present <em>[BKL^{+}07]</em>, HIGHT <em>[HSH^{+}06]</em>, KATAN <em>[x10]</em>, LED <em>[x12]</em>, LBlock <em>[x21]</em>, Twine <em>[x22]</em>, Prince <em>[BCG^{+}12]</em>, Fantomas <em>[x14]</em>, Skinny <em>[BJK^{+}16]</em> and many others), which are candidates to achieve security in constrained environments.</p>
+
+    <p class="text-gray-300">In this article, we consider the problem of building lightweight linear layers for SPN ciphers. More precisely we look for new MDS matrices allowing a very efficient implementation; these matrices can be used in future cipher designs to reduce the implementation cost. We focus on hardware implementation, and assume that the full MDS matrix will be implemented so that it can be computed in a single cycle.</p>
+
+    <h4 id="sec-2" class="text-lg font-semibold mt-6">Our contributions.</h4>
+
+    <p class="text-gray-300">While there has been a number of works on the topic already <em>[x17, x3, x15, x16, x17]</em>, most of them focus on the coefficients of the matrix, looking for MDS matrices with many coefficients that are easy to evaluate (such as <span class="math">1</span> or <span class="math">2</span>). The underlying assumption is that, for each line of the matrix, a circuit will evaluate all the coefficients and add them together, resulting in a minimal cost of <span class="math">k\\times(k-1)</span> XORs on words for a <span class="math">k\\times k</span> matrix.</p>
+
+    <p class="text-gray-300">This assumption was recently challenged by Kranz et al. <em>[x18]</em>. They applied off-the-shelf optimization tools to classes of previously proposed MDS matrices, and the global optimization performed by the tools gave a very significant improvement compared to previous local optimization. In particular, these circuits are much smaller than the <span class="math">k\\times(k-1)</span> XORs on words that was considered a minimum in previous works.</p>
+
+    <p class="text-gray-300">In this work we take a different approach to find MDS matrices with a globally optimized implementation. Instead of optimizing a given MDS matrix, we run a search through a set of circuits, ordered by hardware cost, until we find a circuit corresponding to an MDS matrix. The circuit can reuse some intermediate values, which leads to global optimization reducing the number of gates required. Because the circuit for a full 32-bit linear layer is quite large, we consider a class of circuits that can be represented at the word level, using XORs and fixed linear mappings. The computational cost of the exploration is still high (in particular, in terms of memory usage), but with some optimization we can reach MDS matrices of sizes <span class="math">3\\times 3</span> and <span class="math">4\\times 4</span> over any word size. By construction, these matrices are optimal in the class of matrices considered, and they improve significantly over previous results, as seen in Table 1.</p>
+
+    <p class="text-gray-300">Our work combines ideas coming from different lines of research. The idea of exploring implementations until a suitable cryptographic component is found was notably applied to S-Boxes by Ullrich et al. in <em>[UDI^{+}11]</em> and to linear functions for instance in <em>[ADK^{+}14]</em>, while the class of matrices we consider is inspired by previous works on recursive MDS matrices <em>[x12, x21, x13]</em>.</p>
+
+    <h4 id="sec-3" class="text-lg font-semibold mt-6">Organization of the paper.</h4>
+
+    <p class="text-gray-300">We begin with preliminaries in Section 2, to define MDS matrices and cost metrics, and review previous works. In Section 3 we discuss the AES MixColumn matrix, and compare the effect of local and global optimization. We then explain our search algorithm in Section 4 and present results in Section 5. Finally, we discuss concrete instantiation of our results in Section 6.</p>
+
+    <h2 id="sec-4" class="text-2xl font-bold">2 Preliminaries</h2>
+
+    <p class="text-gray-300">In this work we focus on the linear layer used in SPN ciphers. We consider that the linear layer operates on <span class="math">k</span> words of <span class="math">n</span> bits; the state is an element of <span class="math">(\\mathbb{F}_{2}^{n})^{k}</span>, but we can also</p>
+
+    <p class="text-gray-300">Sébastien Duval and Gaëtan Leurent</p>
+
+    <p class="text-gray-300">Table 1: Comparison of the lightest MDS matrices ( <span class="math">A_4</span>  is the companion matrix of  <span class="math">X^4 + X + 1</span> ,  <span class="math">A_8</span>  is the companion matrix of  <span class="math">X^8 + X^2 + 1 = (X^4 + X + 1)^2</span> ).</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Size</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Ring</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Matrix</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Cost</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Ref</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+            <td class="px-3 py-2 border-b border-gray-700">Naive</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">Best</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">Depth</td>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">M4(F28)</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">GF(28)</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">MAES</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">152</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">97</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">3</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">[KLSW17]</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+            <td class="px-3 py-2 border-b border-gray-700">F2[α]</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">MAES</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">136</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">100</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">3</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">Section 3</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+            <td class="px-3 py-2 border-b border-gray-700">GL(8,F2)</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">Circulant</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">106</td>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+            <td class="px-3 py-2 border-b border-gray-700">[LW16]</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+            <td class="px-3 py-2 border-b border-gray-700">GL(8,F2)</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">Subfield</td>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+            <td class="px-3 py-2 border-b border-gray-700">72</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">6</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">[KLSW17]</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+            <td class="px-3 py-2 border-b border-gray-700">F2[α]</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">M8,34,6</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">161</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">67</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">6</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">Fig. 7 with α = A8 or A8-1</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+            <td class="px-3 py-2 border-b border-gray-700">F2[α]</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">M8,34,5</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">202</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">68</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">5</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">Fig. 9 with α,β,γ = A8, A8-1, A8-2</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+            <td class="px-3 py-2 border-b border-gray-700">F2[α]</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">M8,44,4</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">198</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">70</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">4</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">Fig. 12 with α = A8</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+            <td class="px-3 py-2 border-b border-gray-700">F2[α]</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">M9,54,3</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">154</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">77</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">3</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">Fig. 15 with α = A8 or A8-1</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">M4(F24)</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">GF(24)</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">M4,n,4</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">58</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">58</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">3</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">[JPST17]</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+            <td class="px-3 py-2 border-b border-gray-700">GF(24)</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">Toeplitz</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">58</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">58</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">3</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">[SS16]</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+            <td class="px-3 py-2 border-b border-gray-700">GF(24)</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">Hadamard</td>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+            <td class="px-3 py-2 border-b border-gray-700">36</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">6</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">[KLSW17]</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+            <td class="px-3 py-2 border-b border-gray-700">F2[α]</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">M8,34,6</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">89</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">35</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">6</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">Fig. 7 with α = A4 or A4-1</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+            <td class="px-3 py-2 border-b border-gray-700">F2[α]</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">M8,3-14,5</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">114</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">36</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">5</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">Fig. 9 with α,β,γ = A4, A4-1, A4-2</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+            <td class="px-3 py-2 border-b border-gray-700">F2[α]</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">M8,44,4</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">110</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">38</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">4</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">Fig. 12 with α = A4</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+            <td class="px-3 py-2 border-b border-gray-700">F2[α]</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">M9,54,3</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">82</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">41</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">3</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">Fig. 15 with α = A4 or A4-1</td>
+
+          </tr>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">consider it as a vector of  <span class="math">nk</span>  bits in  <span class="math">\\mathbb{F}_2^{nk}</span> . Similarly, the linear layer can be represented by a square  <span class="math">nk \\times nk</span>  binary matrix — i.e. an element of  <span class="math">M_{nk}(\\mathbb{F}_2)</span>  — or by a square  <span class="math">k \\times k</span>  matrix whose coefficients are linear mappings over  <span class="math">\\mathbb{F}_2^n</span>  — i.e. an element of  <span class="math">M_k\\big(M_n(\\mathbb{F}_2)\\big)</span> .</p>
+
+    <p class="text-gray-300">For a given  <span class="math">k</span> -word state  <span class="math">x \\in (\\mathbb{F}_2^n)^k</span>  we define its weight  <span class="math">w(x)</span>  as the number of non-zero words. Following [DR01], the differential branch number and linear branch number of a linear mapping  <span class="math">L \\in M_k\\big(M_n(\\mathbb{F}_2)\\big)</span>  are defined as:</p>
+
+    <div class="my-4 text-center"><span class="math-block">\\mathcal {B} _ {d} (L) = \\min  _ {x \\neq 0} \\{w (x) + w (L (x)) \\} \\qquad \\mathcal {B} _ {l} (L) = \\min  _ {x \\neq 0} \\{w (x) + w (L ^ {\\top} (x)) \\},</span></div>
+
+    <p class="text-gray-300">where  <span class="math">L^{\\top}</span>  is the linear mapping whose binary matrix representation is the transposed of that of  <span class="math">L</span> .</p>
+
+    <p class="text-gray-300">These notions are important in the context of linear and differential cryptanalysis: the number of non-zero elements in a state difference, or in a linear mask, corresponds to the number of active S-Boxes; and the differential (resp. linear) branch number corresponds to the minimum number of active S-Boxes in two consecutive rounds of an SPN cipher for differential (resp. linear) cryptanalysis. In particular the branch number is at most  <span class="math">k + 1</span> , and the differential branch number is maximal if and only if the linear branch number is maximal.</p>
+
+    <p class="text-gray-300">Since linear mappings with maximum branch number can be built from MDS codes (Maximum Distance Separable), the matrix of a linear mapping with maximum branch number is called an MDS matrix. In particular, as MDS codes are defined over a field, we usually consider linear mappings over the field  <span class="math">\\mathrm{GF}(2^n)</span> , i.e. the coefficients of the matrix are multiplications by an element of the field, rather than arbitrary linear mappings in  <span class="math">M_{n}(\\mathbb{F}_{2})</span> . In this case, an efficient characterization is that a matrix in  <span class="math">M_{k}\\bigl (\\mathrm{GF}(2^{n})\\bigr)</span>  is MDS if and only if all the minors (determinants of square submatrices) are non-zero.</p>
+
+    <p class="text-gray-300">A similar characterization is also valid over a commutative ring: a linear mapping has maximal branch number as long as all the minors are invertible <em>[x1]</em>. When the elements of the matrix are arbitrary linear mappings in <span class="math">M_{n}(\\mathbb{F}_{2})</span>, we have to compute the determinants of the square submatrices as binary matrices, rather than as matrices over <span class="math">M_{n}(\\mathbb{F}_{2})</span>; again the mapping has maximum branch number if and only if all the determinants are non-zero.</p>
+
+    <h3 id="sec-6" class="text-xl font-semibold mt-8">2.2 Lightweight MDS matrices</h3>
+
+    <p class="text-gray-300">Since the linear layer of a cipher represents a significant part of the implementation cost, much effort has been made to reduce the implementation cost of MDS matrices. There are two main approaches towards lightweight MDS matrices. On the one hand, one can start from a given MDS matrix (for instance, the matrix used by the AES MixColumn operation) and lower its cost by finding a better implementation. On the other hand one can look for new matrices that allow a good implementation by design. The first approach is used to optimize the implementation of a standardized cipher, while the second can lead to new ciphers with better implementation properties.</p>
+
+    <p class="text-gray-300">In this paper we mostly focus on the cost of a hardware implementation, estimated as the number of bitwise xor gates necessary to implement the linear mapping. We also focus on hardware implementations where the full MDS matrix is implemented (i.e. the datapath of the implementation is larger than the size of the MDS matrix). This is usually the case for implementations targeting a good ratio between the size and the speed of the implementation.</p>
+
+    <h4 id="sec-7" class="text-lg font-semibold mt-6">2.2.1 Previous works.</h4>
+
+    <p class="text-gray-300">MDS matrices have a long history in cryptography, and there have been a number of articles devoted to finding efficient MDS matrices. In particular, a common theme is to find MDS matrices with many coefficients that can be computed efficiently (such as 1, 2, or 4).</p>
+
+    <h5 id="sec-8" class="text-base font-semibold mt-4">Recursive MDS matrices.</h5>
+
+    <p class="text-gray-300">An important idea to reduce the implementation footprint of MDS matrices was introduced by Guo, Peyrin and Poschmann in the lightweight hash function PHOTON <em>[x11]</em>, and later used in the lightweight block cipher LED <em>[x12]</em>. They proposed to design an MDS matrix <span class="math">M</span> that can be written as <span class="math">M=A^{k}</span> for some efficiently implementable matrix <span class="math">A</span> (and some integer <span class="math">k</span>). This allows to trade some implementation speed against implementation size: instead of implementing directly <span class="math">M</span>, one can implement the lighter matrix <span class="math">A</span>, and iterate it over <span class="math">k</span> clock cycles.</p>
+
+    <p class="text-gray-300">This idea was later revisited to further reduce the cost of the implementation of <span class="math">A</span>. In particular, a series of works <em>[x22, x34, x1]</em> introduce the notion of a formal MDS matrix, where the coefficients are written as an abstract expression of an undefined linear function <span class="math">\\alpha</span>. This allows to derive a set of conditions on <span class="math">\\alpha</span> such that the matrix is MDS, and to select an <span class="math">\\alpha</span> with very low implementation cost (typically a single bitwise xor). In particular, this generalizes the MDS notion from matrices over a field to general linear mappings.</p>
+
+    <h5 id="sec-9" class="text-base font-semibold mt-4">Optimizing coefficients.</h5>
+
+    <p class="text-gray-300">In the context where the full MDS matrix will be implemented, several works looked for efficient MDS matrices in some special classes of matrices, such as circulant, Hadamard, or Toeplitz matrices <em>[x30, x23, x24]</em>, using coefficients that can be efficiently computed. In particular, some of these results consider involutory matrices, that are equal to their inverse.</p>
+
+    <p class="text-gray-300">Moreover, the idea of moving away from finite field operations to more general linear operations has also been applied <em>[x5, x21]</em>, and leads to the lightest reported</p>
+
+    <p class="text-gray-300">MDS matrix in <span class="math">M_{4}\\big{(}M_{8}(\\mathbb{F}_{2})\\big{)}</span> at the time, with 106 bitwise xors <em>[x10]</em>. In particular, the techniques of Li and Wang can be used when the coefficients in the matrix do not commute.</p>
+
+    <h4 id="sec-10" class="text-lg font-semibold mt-6">Search of lightweight implementations.</h4>
+
+    <p class="text-gray-300">In the design of PRIDE <em>[ADK^{+}14]</em>, the authors used a search over small hardware implementations using operations on bits to find an efficient matrix on 16 bits with branch number 4 (not MDS).</p>
+
+    <h4 id="sec-11" class="text-lg font-semibold mt-6">Optimizing the implementation with automatic tools.</h4>
+
+    <p class="text-gray-300">Another approach is to use tools to automatically find lightweight implementations of a linear function. This kind of tools was first used for the implementation of cryptographic functions in <em>[x2]</em>, where the authors used linear straight line programs to globally optimize the implementation of a predefined linear function. In this paper, the authors show that finding the optimal implementation for a given linear function is NP-hard, and they develop heuristics to optimize an implementation using linear operations at the bit level which allows cancellations (of variables in <span class="math">\\mathbb{F}_{2}</span>).</p>
+
+    <p class="text-gray-300">There had been early attempts to use synthesis tools to optimize existing MDS matrices (in particular, the AES MixColumn matrix <em>[x16, x17]</em>), but a large step was made very recently by Kranz, Leander, Stoffelen and Wiemer <em>[x12]</em>. They applied straight line programs optimization tools to the AES MixColumn matrix, and to a number of known MDS matrices, and obtained significantly improved implementations. In particular, they reduced the cost of the AES MixColumn matrix from 103 to 97 bitwise xors, and found an MDS matrix that can be implemented with 67 bitwise xors while the best previous result required 106 bitwise xors.</p>
+
+    <h4 id="sec-12" class="text-lg font-semibold mt-6">Our approach.</h4>
+
+    <p class="text-gray-300">Our work starts from the same observation as the work of <em>[x12]</em>, and was done independently. We observe that most of the previous works consider the cost of an MDS matrix as the sum of the costs of evaluating each coefficient on the one hand, and the cost of <span class="math">k\\times(k-1)</span> XORs on <span class="math">n</span>-bit words on the other hand. While this is a valid upper bound on the cost, a globally optimized implementation can be significantly cheaper, because common intermediate values can be computed once and reused.</p>
+
+    <p class="text-gray-300">In <em>[x12]</em>, the authors used automatic tools to optimize previously proposed MDS matrices. On the other hand, we aim to design a better MDS matrix while looking for a globally optimized implementation. Therefore, our goal will be to find a strategy to build new MDS matrices with a globally optimized implementation. As can be seen in Table 1, we very significantly improved previous results using local optimizations, but we also obtain better results than <em>[x12]</em>.</p>
+
+    <p class="text-gray-300">In some way, our work can be seen as finding good linear straight line programs, however we limit the number of simultaneously available variables and only use operations on words rather than on bits (alternatively, we could say that we find straight line programs on a ring using additions in the ring and multiplications by constants). We note that our straight line programs also use cancellations.</p>
+
+    <p class="text-gray-300">Contrarily to previous works on searches of small implementations such as <em>[ADK^{+}14]</em>, we focus on a word-wise level rather than on bits, without fixing the word size.</p>
+
+    <h4 id="sec-13" class="text-lg font-semibold mt-6">2.2.2 Metrics used.</h4>
+
+    <p class="text-gray-300">In order to estimate the hardware cost of a linear operation, we count the number of bitwise xors used in an implementation. In general, an implementation can be described as a sequence of operations <span class="math">x_{i}\\leftarrow x_{a_{i}}\\oplus x_{b_{i}}</span> with <span class="math">a_{i},b_{i}&lt;i</span>, where <span class="math">x_{1},\\ldots x_{n\\times k}</span> is the input, and the output is some subset of the <span class="math">x_{i}</span>’s. This corresponds to a linear straight line program. Ideally, we would like to compute the minimum cost of any implementation, but this is</p>
+
+    <p class="text-gray-300">not always achievable in practice, and more practical metrics evaluate the number of xors in a more restricted class of implementations.</p>
+
+    <h4 id="sec-14" class="text-lg font-semibold mt-6">Direct xor count.</h4>
+
+    <p class="text-gray-300">A direct xor count was introduced by Sim, Khoo, Oggier and Peyrin in <em>[x21]</em>. It corresponds to counting the number of gates used in a naive implementation of the linear mapping. When considering the binary matrix representing the linear mapping in <span class="math">M_{nk}(\\mathbb{F}_{2})</span>, each line gives a formula to compute one output bit, and if there are <span class="math">t</span> non-zero bits in a line, this formula is computed with <span class="math">t-1</span> xor gates. Therefore, the direct xor count is defined as the number of <span class="math">1</span> bits in the binary matrix, minus <span class="math">k\\times n</span>.</p>
+
+    <p class="text-gray-300">The above metric was used in many works on lightweight MDS matrices, such as <em>[x21, x16, x17, x18]</em>. Interestingly, with this metric, the cost of an MDS matrix is equal to the cost of the evaluation of each coefficient plus the cost of <span class="math">k\\times(k-1)</span> XORs on <span class="math">n</span>-bit words</p>
+
+    <h4 id="sec-15" class="text-lg font-semibold mt-6">Sequential xor count.</h4>
+
+    <p class="text-gray-300">A better approximation of the optimal implementation cost is the sequential xor count defined in <em>[x13]</em>, and used to optimize the field multiplications used in an MDS matrix <em>[x1, x13]</em>. The sequential xor count is the number of bitwise xors in a sequential program limited to in-place operations without extra registers. This can be significantly lower than the direct xor count, but the restriction to in-place operations is still a strong one.</p>
+
+    <p class="text-gray-300">In the context of MDS matrices, this metric has been used to optimize the cost of field multiplications, but due to the computational cost it has not been used to optimize full MDS matrices (In <em>[x13]</em>, the cost is still computed as the cost of each coefficient, plus the cost of the <span class="math">n</span>-bit word XORs).</p>
+
+    <h4 id="sec-16" class="text-lg font-semibold mt-6">Global optimization.</h4>
+
+    <p class="text-gray-300">More recently, heuristic tools to find good straight line programs have been used to find good implementations of a given MDS matrix <em>[x15]</em>. This leads to much better results than the previous implementation with only local optimization.</p>
+
+    <p class="text-gray-300">In our work we consider a slightly restricted class of implementations. We decompose the evaluation of an MDS matrix as a sequence of simple steps: word-wise xors and simple linear operations generalizing multiplication by a field element. We will also use some extra registers, to allow the reuse of intermediate values. We then perform an exhaustive search in this class of implementations, looking for an MDS matrix. As we will see, this class contains implementations of MDS matrices much lighter than those previously used.</p>
+
+    <h4 id="sec-17" class="text-lg font-semibold mt-6">Metric comparison.</h4>
+
+    <p class="text-gray-300">In order to compare some of these metrics, we consider two MDS matrices in <span class="math">M_{3}(\\mathbb{F}_{4})</span> in Table 2. The first matrix is optimal for the direct xor count and for any metric that considers the coefficients independently, with a cost of <span class="math">3+4\\times 3</span>, while the second matrix is one of the matrices discovered by our tool, <span class="math">M_{3,4}^{5,1}</span>, that can be implemented efficiently as shown in Figure 3. For each matrix, we evaluate the direct xor count (corresponding to a naive implementation), the sequential xor count given by the LIGHTER tool <em>[x13]</em> (since the size is small, we can compute the sequential xor count of the full matrix, rather than just the field multiplications), and the cost of the naive optimization after processing by synthesis tools Yosys and ABC. For the second matrix, we evaluate the implementation found by our tool, and we try to further optimize it with synthesis tools Yosys and ABC.</p>
+
+    <p class="text-gray-300">We can see several important results in the table. First, performing global optimization of the matrix, rather than optimization of the coefficients only, has a huge impact, reducing the xor count from 21 or 15 to 10. In particular, the best implementations we found require fewer bitwise xors than the 6 XORs on 2-bit words that are considered a fixed cost in many</p>
+
+    <p class="text-gray-300">Sébastien Duval and Gaëtan Leurent</p>
+
+    <p class="text-gray-300">Table 2: Comparison of metrics. Results shown as “+Yosys” have been optimized with synthesis tool Yosys (using ABC as a subroutine).</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Matrix</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Xor count</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">GF(4)</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">F2</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">Naive</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">Naive+Yosys</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">LIGHTER</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">Ours</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">Ours+Yosys</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">[2 1 1]1 2 11 1 2</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">0 1</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1 0</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1 0</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">15</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">12</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">10</td>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">1 1</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">0 1</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">0 1</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">1 0</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">0 1</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1 0</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">0 1</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1 1</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">0 1</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">1 0</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1 0</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">0 1</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">[3 2 2]2 3 22 2 3</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1 1</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">0 1</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">0 1</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">21</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">14</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">11</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">11</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">10</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">1 0</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1 1</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1 1</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">0 1</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1 1</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">0 1</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">1 1</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1 0</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1 1</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">0 1</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">0 1</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">1 1</td>
+
+          </tr>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">previous works. We also see that using additional registers can be helpful: the second matrix has an optimum cost of 11 without extra registers, but there is an implementation with only 10 xors using extra registers. Finally, we note that our new constructions are similar to previous MDS matrices in this small scale comparison, but the advantage of our approach is that it can be scaled up to matrices of size 4 over 8-bit words, while LIGHTER can only optimize linear layers with up to 8 inputs.</p>
+
+    <p class="text-gray-300">Limitations. Unfortunately, counting the number of xor gates of a circuit is not necessarily a good estimation of the true hardware cost of an implementation, for several reasons. First, the hardware design tools try to optimize the circuit. In particular, all the metrics considered are an overestimation of the minimal number of bitwise xors, and the relative cost of two circuits can change if further optimizations are found (as a concrete example, a naive implementation of the AES MDS matrix requires 152 bitwise xors, but synthesis tools Yosys and ABC can reduce it to 115 bitwise xors). Secondly, hardware circuits can use other gates than two-input xors. In particular, modern FPGA have relatively large LUT (look-up tables), so that a multi-input xor gate is not much more expensive than a two-input one. Again, this can change the relative cost of two circuits, but we expect this effect to be rather limited in the case of ASIC synthesis (where a three-input xor gate is almost twice as big as a two-input xor gate). Finally, another important criterion is the depth of the circuit. It impacts the propagation delay of signals, which defines the maximum frequency at which a circuit can be run, and strongly impacts performances (in particular, the throughput per area). This will be addressed in our work by proposing several MDS matrices reaching various trade-offs between the xor count and the depth of the implementation.</p>
+
+    <p class="text-gray-300">In general, our constructions offer a significant gain over previous proposals, and we expect to see real gains in concrete implementations, despite the limitations discussed above. We will use the number of xor gates as an evaluation metric in this paper because it has been widely used in previous work on lightweight MDS matrices, and it is hard to define a better estimation generically. We leave a more accurate comparison with real hardware implementations of various matrices to future work.</p>
+
+    <p class="text-gray-300">We denote the size of the MDS matrix as  <span class="math">k</span> , and the size of the words as  <span class="math">n</span>  (e.g. the matrix of the AES MixColumn corresponds to  <span class="math">k = 4</span>  and  <span class="math">n = 8</span> ). We use "XOR" to denote the addition of  <span class="math">n</span> -bit words, and "bitwise xor" to denote a single xor gate. In particular, the</p>
+
+    <p class="text-gray-300">implementation of an XOR operation requires <span class="math">n</span> bitwise xors.</p>
+
+    <p class="text-gray-300">Instead of considering MDS matrices over a field (i.e. each coefficient is a multiplication by a field element), we consider a more general class of matrices where each coefficient corresponds to a linear operation in <span class="math">M_{n}(\\mathbb{F}_{2})</span>. For technical reasons, and following previous works <em>[x10, x23, x1, x2]</em>, we restrict the coefficients to powers of a single linear operation (in particular, this ensures that the coefficients commute). Therefore, the coefficients can be written as polynomials in <span class="math">\\mathbb{F}_{2}[\\alpha]</span>, where the unknown <span class="math">\\alpha</span> represents an undefined linear operation.</p>
+
+    <p class="text-gray-300">Our search of MDS matrices has two steps: we first look for a formal MDS matrix <span class="math">M</span> with coefficients in <span class="math">\\mathbb{F}_{2}[\\alpha]</span> (as explained in Section 4), and we later select a suitable linear mapping <span class="math">A</span> so that <span class="math">M(A)</span> (the matrix where <span class="math">\\alpha</span> is replaced by <span class="math">A</span>) is MDS (as explained in Section 6).</p>
+
+    <p class="text-gray-300">In particular, if <span class="math">\\alpha</span> is instantiated by the multiplication <span class="math">F</span> by a generator of a field, <span class="math">\\mathbb{F}_{2}[F]</span> is isomorphic to the corresponding field. For a compact notation, we represent a polynomial by the integer with the same bit representation; for instance <span class="math">2</span> represents element <span class="math">\\alpha</span> and <span class="math">3</span> represents <span class="math">\\alpha+1</span>.</p>
+
+    <h2 id="sec-19" class="text-2xl font-bold">3 On the AES MixColumn matrix</h2>
+
+    <p class="text-gray-300">An important MDS matrix is the one used as the MixColumn operation in Rijndael, standardized as the AES. This matrix is defined as:</p>
+
+    <p class="text-gray-300">\\[ M_{\\text{AES}}=\\begin{bmatrix}2&3&1&1\\\\ 1&2&3&1\\\\ 1&1&2&3\\\\ 3&1&1&2\\end{bmatrix}, \\]</p>
+
+    <p class="text-gray-300">where <span class="math">1</span>, <span class="math">2</span> and <span class="math">3</span> represent elements of the finite field <span class="math">\\text{GF}(2^{8})</span>. More precisely, the finite field is built as <span class="math">\\mathbb{F}_{2}[\\alpha]/(\\alpha^{8}+\\alpha^{4}+\\alpha^{3}+\\alpha+1)</span>, and <span class="math">2</span> and <span class="math">3</span> denote elements <span class="math">\\alpha</span> and <span class="math">\\alpha+1</span>, respectively.</p>
+
+    <p class="text-gray-300">A naive implementation of this matrix requires <span class="math">1</span> multiplication by <span class="math">2</span>, <span class="math">1</span> multiplication by <span class="math">3</span>, and <span class="math">3</span> XORs for each row. In hardware, a simple implementation of these operations requires respectively <span class="math">3</span> and <span class="math">11</span> bitwise xors, leading to a full cost of <span class="math">4\\times(3+11+3\\times 8)=152</span> bitwise xors.</p>
+
+    <p class="text-gray-300">However, the best known implementations of the multiplication by <span class="math">3</span> in the AES field requires only <span class="math">9</span> bitwise xors <em>[x12]</em>, leading to a full cost of <span class="math">144</span> bitwise xors. Alternatively, Zhao, Wu, Zhang and Zhang used a heuristic approach to find a good sequence of bitwise xors to evaluate the AES MDS matrix (seen as a Boolean <span class="math">32\\times 32</span> matrix). They found a representation with only <span class="math">132</span> bitwise xors in <em>[x24]</em>.</p>
+
+    <p class="text-gray-300">Actually, we can get better results just by looking for common sub-expressions in the computation. Indeed, an evaluation of <span class="math">M_{\\text{AES}}</span> can be written as:</p>
+
+    <p class="text-gray-300">\\[ M_{\\text{AES}}\\begin{bmatrix}a\\\\ b\\\\ c\\\\ d\\end{bmatrix}=\\begin{bmatrix}2&3&1&1\\\\ 1&2&3&1\\\\ 1&1&2&3\\\\ 3&1&1&2\\end{bmatrix}\\begin{bmatrix}a\\\\ b\\\\ c\\\\ d\\end{bmatrix}=\\begin{bmatrix}2a\\oplus 3b\\oplus&c\\oplus&d\\\\ a\\oplus 2b\\oplus 3c\\oplus&d\\\\ a\\oplus&b\\oplus 2c\\oplus 3d\\\\ 3a\\oplus&b\\oplus&c\\oplus 2d\\end{bmatrix}=\\begin{bmatrix}2a\\oplus 2b\\oplus b\\oplus c\\oplus d\\\\ a\\oplus 2b\\oplus 2c\\oplus c\\oplus d\\\\ a\\oplus b\\oplus 2c\\oplus 2d\\oplus d\\\\ 2a\\oplus a\\oplus b\\oplus c\\oplus 2d\\end{bmatrix}. \\]</p>
+
+    <p class="text-gray-300">With this expression, the evaluation of <span class="math">M_{\\text{AES}}</span> requires only <span class="math">4</span> multiplications by <span class="math">2</span> (the values <span class="math">2a</span>, <span class="math">2b</span>, <span class="math">2c</span>, <span class="math">2d</span> are used twice) and <span class="math">16</span> XORs; this translates to <span class="math">140</span> bitwise xors, which is lower than a naive implementation. Furthermore, some intermediate values can also be reused. In particular, each of the values <span class="math">a\\oplus b</span>, <span class="math">b\\oplus c</span>, <span class="math">c\\oplus d</span>, and <span class="math">d\\oplus a</span> is used twice</p>
+
+    <p class="text-gray-300">if we slightly rewrite the output:</p>
+
+    <p class="text-gray-300">\\[ \\begin{bmatrix}2a\\oplus 3b\\oplus&c\\oplus&d\\\\ a\\oplus 2b\\oplus 3c\\oplus&d\\\\ a\\oplus&b\\oplus 2c\\oplus 3d\\\\ 3a\\oplus&b\\oplus&c\\oplus 2d\\end{bmatrix}=\\begin{bmatrix}2(a\\oplus b)\\oplus b\\oplus(c\\oplus d)\\\\ 2(b\\oplus c)\\oplus c\\oplus(d\\oplus a)\\\\ 2(c\\oplus d)\\oplus d\\oplus(a\\oplus b)\\\\ 2(d\\oplus a)\\oplus a\\oplus(b\\oplus c)\\end{bmatrix}. \\]</p>
+
+    <p class="text-gray-300">With this formula, the matrix can be evaluated with just 12 XORs and 4 multiplications by 2, leading to a full cost of only 108 bitwise xors. As far as we can tell, this trick was first described in 2001 <em>[x20]</em>, and is used in the Atomic-AES implementation <em>[x1]</em>.</p>
+
+    <p class="text-gray-300">For reference, the best currently known <span class="math">4\\times 4</span> MDS matrix over 8-bit words obtained without global optimizations requires 106 bitwise xors <em>[x18]</em>. This shows that optimizing the implementation of an MDS matrix can have a similar effect to optimizing the choice of the MDS matrix.</p>
+
+    <h4 id="sec-20" class="text-lg font-semibold mt-6">Choice of the field or ring.</h4>
+
+    <p class="text-gray-300">The choice of the field – or ring – also plays an important role in the implementation cost of an MDS matrix. MDS matrices are typically defined over a finite field (as mentioned above, the AES MixColumn matrix is defined over <span class="math">\\mathrm{GF}(2^{8})</span>), but this is not necessary and better results can be achieved over commutative rings.</p>
+
+    <p class="text-gray-300">In particular, the sub-field construction used in <em>[BBG^{+}09, BNN^{+}10, x15]</em> corresponds to using a product ring. It can be applied to <span class="math">M_{\\mathrm{AES}}</span> as follows: the inputs are considered as elements of the ring <span class="math">\\mathrm{GF}(2^{4})\\times\\mathrm{GF}(2^{4})</span>, and the coefficients <span class="math">1</span> in the matrix are interpreted as <span class="math">(1,1)</span>, <span class="math">2</span> as <span class="math">(\\alpha,\\alpha)</span> and <span class="math">3</span> as <span class="math">(\\alpha\\oplus 1,\\alpha\\oplus 1)</span>, with <span class="math">\\alpha</span> a generator of the field. This actually corresponds to applying two copies of <span class="math">M_{\\mathrm{AES}}</span> defined over <span class="math">\\mathrm{GF}(2^{4})</span>, independently on each nibble of the input. It is interesting because multiplication by <span class="math">\\alpha</span> in <span class="math">\\mathrm{GF}(2^{4})</span> requires a single bitwise xor (there exist irreducible trinomials of degree 4 in <span class="math">\\mathbb{F}_{2}[X]</span>), while multiplication by <span class="math">2</span> in <span class="math">\\mathrm{GF}(2^{8})</span> requires three bitwise xors (there are no irreducible trinomials of degree 8 in <span class="math">\\mathbb{F}_{2}[X]</span>). Therefore multiplication by <span class="math">2</span> in the ring requires only 2 bitwise xors rather than 3 in <span class="math">\\mathrm{GF}(2^{8})</span>.</p>
+
+    <p class="text-gray-300">More generally, we can consider the matrix <span class="math">M_{\\mathrm{AES}}</span> as a formal matrix, where <span class="math">1</span> represents the identity, <span class="math">2</span> an arbitrary linear operation <span class="math">\\alpha</span>, and <span class="math">3</span> the linear operation <span class="math">x\\mapsto\\alpha(x)\\oplus x</span> (using ideas and formalism from <em>[x22, x24, x1, x3]</em>). The coefficients of the matrix are now polynomials in <span class="math">\\alpha</span>, <em>i.e.</em> elements of <span class="math">\\mathbb{F}_{2}[\\alpha]</span>. When instantiating the matrix with a given transformation <span class="math">\\alpha</span>, the matrix will be MDS if and only if all the minors are invertible. The minors can be easily evaluated as polynomials; in this case they are: <span class="math">1,\\alpha,\\alpha\\oplus 1,\\alpha^{2},\\alpha^{2}\\oplus 1,\\alpha^{2}\\oplus\\alpha\\oplus 1,\\alpha^{3}\\oplus 1,\\alpha^{3}\\oplus\\alpha\\oplus 1,\\alpha^{3}\\oplus\\alpha^{2}\\oplus 1,\\alpha^{3}\\oplus\\alpha^{2}\\oplus\\alpha</span>.</p>
+
+    <p class="text-gray-300">In particular, if all the irreducible factors of the minimal polynomial of <span class="math">\\alpha</span> are of degree 4 or higher, then all the minors will be invertible. Concretely, if <span class="math">\\alpha</span> is the multiplication by a primitive element of a finite field <span class="math">\\mathrm{GF}(2^{n})</span>, the minimal polynomial of <span class="math">\\alpha</span> is irreducible and of degree <span class="math">n</span>, therefore the matrix will be MDS as long as <span class="math">n\\geq 4</span>. In the AES, <span class="math">\\alpha</span> is not a primitive element, but its minimal polynomial is still irreducible and of degree 8.</p>
+
+    <p class="text-gray-300">We can now use even more efficient linear operations. For instance, the operation <span class="math">\\alpha:x\\mapsto(x\\lll 1)\\oplus((x\\gg 1)\\wedge 1)</span> can be implemented very efficiently in hardware, using just wires and a single bitwise xor. When used in <span class="math">M_{\\mathrm{AES}}</span>, it also generates an MDS matrix, because its minimum polynomial is <span class="math">(x^{4}\\oplus x\\oplus 1)^{2}</span>. This new MDS matrix can be implemented with just 100 bitwise xors using the previous trick.</p>
+
+    <p class="text-gray-300">Surprisingly, this simple construction based on <span class="math">M_{AES}</span> actually has a lower implementation cost than the best previously known lightweight MDS matrix in <span class="math">M_{4}\\big{(}M_{8}(\\mathbb{F}_{2})\\big{)}</span> (apart from ones obtained using global optimizations in <em>[x13]</em>), and the same ideas also lead to a matrix in <span class="math">M_{4}\\big{(}M_{4}(\\mathbb{F}_{2}^{4})\\big{)}</span> with a lower implementation cost than previously known constructions. This example motivates the approach taken in this paper. We will consider MDS matrices defined over a ring, and study a circuit implementing the matrix, instead</p>
+
+    <p class="text-gray-300">MDS Matrices with Lightweight Circuits</p>
+
+    <p class="text-gray-300">of just counting the 1’s in the binary matrix. We will search for new matrices with an efficient implementation, using a representation as a series of field (or ring) operations, and try to minimize the number of xors and linear operations <span class="math">\\alpha</span> required to reach an MDS matrix.</p>
+
+    <h2 id="sec-21" class="text-2xl font-bold">4 Graph-based Search for Efficient Implementations</h2>
+
+    <p class="text-gray-300">One possible approach to find efficient implementations is to run an exhaustive search over a class of implementations and to test whether each implementation corresponds to the target function. In particular, several previous works used a graph approach to perform this search <em>[UDI^{+}11, x18]</em>. An implementation is represented as a sequence of operations, and this implicitly defines a graph where the nodes are sequences of operations. More precisely, there is an edge <span class="math">L_{1}\\stackrel{{\\scriptstyle\\textsf{op}}}{{\\rightarrow}}L_{2}</span> between the sequences of operations <span class="math">L_{1}</span> and <span class="math">L_{2}</span> when <span class="math">L_{2}=L_{1},\\textsf{op}</span>. In addition, sequences of operations defining the same function up to reordering of the inputs and outputs are considered equivalent.</p>
+
+    <p class="text-gray-300">Finding the optimal implementation of a given function (in the class of implementations corresponding to the operations used) corresponds to finding the shortest path between the empty circuit (corresponding to the identity) and the objective. Alternatively, this approach can be used to find an optimal member of a class of functions with some predefined property.</p>
+
+    <h3 id="sec-22" class="text-xl font-semibold mt-8">4.1 Previous works</h3>
+
+    <p class="text-gray-300">This approach was first used to design cryptographic components by Ullrich et al. <em>[UDI^{+}11]</em>, in the context of 4-bit S-Boxes. They work on 5 bit registers, and spawn a tree of implementations in which a transition consists in adding an operation in the set of AND, OR, XOR, NOT and COPY. The NOT operation takes one parameter, and the other operations take two parameters (for instance, the AND operation implements <span class="math">x\\leftarrow x\\wedge y)</span>), so that there are 85 possible operations at each step. The extra register can store some intermediate values, so that the use of non-invertible operations does not necessarily lead to a non-invertible S-Box. Instead of looking for the implementation of the fixed S-Box, they look for the best implementation of any S-Box in a given equivalence class (up to affine equivalence).</p>
+
+    <p class="text-gray-300">They use several rules in order to reduce the branching factor; in particular, they verify that there is always a subset of the registers which encodes a permutation, and detect when two nodes are equivalent. Those rules strongly reduce the branching, and they manage to find a 9-instruction implementation of a 4-bit permutation with the best reachable differential and linear properties.</p>
+
+    <p class="text-gray-300">The metric they use to compare implementations is the number of operations, so that they can use a simple depth-first search to find the shortest path between the identity and a class of S-Boxes.</p>
+
+    <h5 id="sec-23" class="text-base font-semibold mt-4">Bidirectional search.</h5>
+
+    <p class="text-gray-300">Recently, Jean, Peyrin and Sim <em>[x18]</em> used a variant of this algorithm with a bidirectional search. They focus on optimizing the implementation of a given function, and they grow a tree in the forward direction starting from the identify, and in the backward direction starting from the target function. They also use different weights for the instructions, therefore their search algorithm is a bidirectional variant of Dijkstra’s algorithm, where they use a priority queue to grow each tree.</p>
+
+    <p class="text-gray-300">This allows a more efficient search than the depth-first search of Ullrich et al., but they have to use only invertible operations. In particular, they cannot use any extra register, and they have to combine elementary gates into invertible operations (such as</p>
+
+    <p class="text-gray-300"><span class="math">x\\leftarrow x\\oplus(y\\wedge z))</span>. Because of those restrictions, the class of implementations considered is smaller, and the implementations obtained can potentially be worse.</p>
+
+    <h3 id="sec-24" class="text-xl font-semibold mt-8">4.2 Application to MDS search</h3>
+
+    <p class="text-gray-300">In our work, since we look for MDS matrices, we use <span class="math">r</span> registers representing words in <span class="math">\\mathbb{F}_{2}^{n}</span> (rather than bits), and we consider only linear operations:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>XOR of two words (<span class="math">x\\leftarrow x\\oplus y</span>);</li>
+
+      <li>Copy of a register (<span class="math">x\\leftarrow y</span>);</li>
+
+      <li>Application of an abstract linear mapping <span class="math">\\alpha</span> to a register <span class="math">x\\leftarrow\\alpha(x)</span>.</li>
+
+    </ul>
+
+    <p class="text-gray-300">(This generalizes multiplication by a generator <span class="math">\\alpha</span> of a finite field)</p>
+
+    <p class="text-gray-300">We can represent the linear mapping corresponding to a sequence of instructions with a <span class="math">k\\times r</span> matrix with coefficients in <span class="math">M_{n}(\\mathbb{F}_{2})</span>. The empty implementation corresponds to the identity matrix with extra zero columns, and every operation of an implementation can be translated to the corresponding operation on the columns of the matrix.</p>
+
+    <p class="text-gray-300">Since <span class="math">\\mathbb{F}_{2}[\\alpha]</span> is a commutative ring, we can test whether the matrix is MDS by computing the minors and testing whether they are the zero polynomnial. If a minor equals zero, then any choice of <span class="math">\\alpha</span> will give a zero minor, therefore the corresponding linear mapping has a branch number smaller than <span class="math">k</span>. However, if all the minors are non-zero, then <em>some</em> choices of <span class="math">\\alpha</span> will give a linear mapping with maximum branch number, when <span class="math">n</span> is large enough (See Section 6 for more details).</p>
+
+    <h4 id="sec-25" class="text-lg font-semibold mt-6">Use of <span class="math">A^{*}</span> algorithm.</h4>
+
+    <p class="text-gray-300">We decided to use extra registers to enable better implementations. This prevents us from using a bidirectional search, but the strong properties of the set of MDS matrices allows us to use the <span class="math">A^{*}</span> algorithm to guide the search towards MDS matrices.</p>
+
+    <p class="text-gray-300">The <span class="math">A^{<em>}</span> algorithm </em>[x14]<em> is an extension of Dijkstra’s path finding algorithm </em>[x10]<em>. It is specialized in finding a path between a single source and destination, and uses a heuristic estimation <span class="math">h</span> of the remaining distance between a node and the destination. <span class="math">A^{</em>}</span> iteratively explores the node that minimizes <span class="math">g(x)+h(x)</span>, where <span class="math">g(x)</span> is the distance from the source to <span class="math">x</span>.</p>
+
+    <p class="text-gray-300">The heuristic <span class="math">h</span> must be admissible, <em>i.e.</em> it must never overestimate the remaining distance, otherwise the algorithm might find a sub-optimal path. In addition, the heuristic is called monotone if <span class="math">h(x)\\leq h(y)+d</span> for every pair of nodes <span class="math">x,y</span> with an edge of weight <span class="math">d</span>. When the heuristic is monotone, nodes only need to be explored once.</p>
+
+    <h4 id="sec-26" class="text-lg font-semibold mt-6">Heuristic.</h4>
+
+    <p class="text-gray-300">In our case, we need a heuristic to estimate the number of remaining operations before reaching an MDS matrix. Since the operations affect the columns of the matrix, we count how many columns of the current state matrix could be part of an MDS matrix. Clearly, every column that contains a zero coefficient can not be part of an MDS matrix. Moreover, columns that are linearly dependent can not be part of an MDS matrix together. Therefore we let <span class="math">m</span> be the rank of the submatrix composed of all the columns with no zero coefficients. Our heuristic considers that we need at least <span class="math">k-m</span> XOR operations to reach a <span class="math">k\\times k</span> MDS matrix.</p>
+
+    <p class="text-gray-300">It is easy to see that this heuristic never overestimates the number of remaining operations, but we couldn’t prove that it is monotone. However, our code tests the monotony condition every time it processes a node, and we never encountered a situation where it was violated.</p>
+
+    <p class="text-gray-300">The use of <span class="math">A^{*}</span> with this heuristic significantly improves the performance of our search, compared to the more simple algorithm of Dijkstra.</p>
+
+    <h3 id="sec-27" class="text-xl font-semibold mt-8">4.3 Search algorithm</h3>
+
+    <p class="text-gray-300">From a high level, our algorithm spans a massive tree of functions on which we test the MDS property. We start from the identity function, and every time we process a node, we test whether the corresponding matrix is MDS, and we spawn one child for each operation in our set.</p>
+
+    <p class="text-gray-300">We keep track of all the created nodes inside of two structures: the first structure (TestedStates) holds all nodes that have already been processed, while the second (UntestedStates) holds all the nodes that have been created but not yet processed. At each step of the algorithm, we select an element of minimum estimated weight in UntestedStates, and test whether it is already in TestedStates.</p>
+
+    <p class="text-gray-300">Following <span class="math">A^{*}</span>, the estimated weight of a node is defined as the sum of the weight of the operations already performed, plus an estimation of the remaining operations to reach an MDS matrix.</p>
+
+    <p class="text-gray-300">Note that several paths in the tree can lead to the same state. Therefore, when we pick a new node, we first test if it belongs to TestedStates. Since we open the nodes by order of estimated weight and the heuristic for the remaining weight (experimentally) satisfies the monotony condition, the first time we process a node corresponds to an optimal implementation.</p>
+
+    <h4 id="sec-28" class="text-lg font-semibold mt-6">4.3.1 Reducing the search space.</h4>
+
+    <p class="text-gray-300">In order to reduce the time and memory used by the search, we use some optimizations to reduce branching during the construction of the tree.</p>
+
+    <p class="text-gray-300">First, we notice that permuting the inputs or outputs of a circuit does not affect its cost, and preserves the MDS property. Therefore, we consider that matrices are equivalent up to reordering of the inputs and outputs. In practice, we associate to each matrix an identifier that is unique up to reordering of input/output words: we consider all permutations of the lines and columns, and use the largest matrix (for some ordering) as the identifier. In particular the TestedStates structure is replaced by a set of identifiers TestedIDs. Every time we select a node from UntestedStates, we compute its identifier, and test whether it is already in TestedIDs.</p>
+
+    <p class="text-gray-300">We also limit the use of copy operations, and consider only circuits where the next operation is a linear mapping or an XOR that overwrites the copied value. This does not limit the set of states that can be reached (circuits can be rewritten to obey this restriction), but it limits the branching at every step. In addition, after a copy operation, we test whether the circuit is still injective, and stop the exploration when it is not. Indeed, an MDS matrix is necessarily injective, and all the intermediate steps of the circuits must also be injective.</p>
+
+    <p class="text-gray-300">Finally we use a limit in the cost and depth of the circuits, so that we do not generate nodes that are too costly. When looking for minimal-cost MDS matrices, we repeatedly run the algorithm with increased limits, until the search succeeds with the minimal possible cost.</p>
+
+    <p class="text-gray-300">The resulting algorithm is given as Algorithm 1, in Appendix A.</p>
+
+    <p class="text-gray-300">An other important question is that of the cost of operations. We considered the cost of the copy to be 0, the cost of <span class="math">\\alpha</span> to be 1, and the cost of the word-wise XOR to be variable. We mostly considered an XOR of cost 8 (i.e. 8 times more costly than <span class="math">\\alpha</span>, which corresponds for instance to the case of <span class="math">\\mathbb{F}_{2}^{8}</span> with <span class="math">\\alpha</span> a multiplication by the primitive element) and an XOR of cost 2 (lowest possible but higher than the cost of <span class="math">\\alpha</span>, for performances reasons).</p>
+
+    <p class="text-gray-300">4.4 Extensions</p>
+
+    <p class="text-gray-300">On top of the main algorithm, we added some extensions. These consist in extensions of the set of operations, which broaden the class of matrices that we consider. Of course, a larger class means more matrices to test, thus we can find new (and sometimes better) matrices, but the algorithm also requires more resources. These extensions can be used separately but combinations of extensions are possible. The first extensions adds more registers, while the others include several linear mappings instead of a single one.</p>
+
+    <h4 id="sec-29" class="text-lg font-semibold mt-6">4.4.1 Additional read-only registers (RO_IN).</h4>
+
+    <p class="text-gray-300">The first extension adds extra input registers to store the <span class="math">k</span> input words (<span class="math">k</span> new registers for matrices of size <span class="math">k</span>). To limit the branching factor, these registers are used as input of an XOR or copy operation, but are never modified. In particular, with this extension, the full state is always injective.</p>
+
+    <h4 id="sec-30" class="text-lg font-semibold mt-6">4.4.2 Using <span class="math">\\alpha^{-1}</span> (INV).</h4>
+
+    <p class="text-gray-300">When we instantiate <span class="math">\\alpha</span> with a concrete linear mapping, we will usually choose the companion matrix of a sparse polynomial (or equivalently, an LFSR) because of its low xor count. This implies that <span class="math">\\alpha^{-1}</span> also has a low xor count <em>[x1]</em>, therefore it is interesting to add <span class="math">\\alpha^{-1}</span> to the set of operations. This restricts instantiation choices to invertible linear mappings, but we can still compute the minors as polynomials in <span class="math">\\alpha</span> and <span class="math">\\alpha^{-1}</span>, and there exist good instantiations if and only if all the minors are non-zero polynomials (See Section 6).</p>
+
+    <h4 id="sec-31" class="text-lg font-semibold mt-6">4.4.3 Using small powers of <span class="math">\\alpha</span> (MAX_POW).</h4>
+
+    <p class="text-gray-300">When <span class="math">\\alpha</span> is instantiated with the companion matrix of a sparse polynomial, <span class="math">\\alpha^{2}</span> also has a low xor count, therefore it is interesting to consider small powers of <span class="math">\\alpha</span> (in particular, <span class="math">\\alpha^{2}</span>) as extra operations.</p>
+
+    <p class="text-gray-300">When combined with the INV extension, small powers of <span class="math">\\alpha^{-1}</span> (e.g. <span class="math">\\alpha^{-2}</span>) will also be added.</p>
+
+    <h4 id="sec-32" class="text-lg font-semibold mt-6">4.4.4 Assuming independent linear operations (INDEP).</h4>
+
+    <p class="text-gray-300">More generally, we can assume that all the linear operations are independent, and write the coefficients of the matrix as multivariate polynomials in <span class="math">\\alpha</span>, <span class="math">\\beta</span>, <span class="math">\\gamma</span>, … Each linear operation is used only once, so that the polynomials are of degree at most one in each variable. Furthermore, we assume that all the mappings commute so that we can test efficiently the MDS property.</p>
+
+    <p class="text-gray-300">In practice, we instantiate <span class="math">\\alpha</span>, <span class="math">\\beta</span>, <span class="math">\\gamma</span>, … as powers of a single linear mapping, but the search space is smaller using the extension than using INV and MAX_POW because a single linear mapping is considered at every step of the algorithm.</p>
+
+    <p class="text-gray-300">For implementation reasons, our code is limited to three linear operations in this case (for more details, see Section 4.5).</p>
+
+    <h3 id="sec-33" class="text-xl font-semibold mt-8">4.5 Implementation choices</h3>
+
+    <h5 id="sec-34" class="text-base font-semibold mt-4">Memory.</h5>
+
+    <p class="text-gray-300">When it comes to the implementation of this algorithm, the main issue is memory. Indeed, the algorithm spawns a huge tree. Each node consumes little memory (about 768 bits), but the number of nodes grows exponentially in the size of the set of operations. As seen in Table 4, the program requires hundreds of gigabytes of memory to find <span class="math">4\\times 4</span> MDS matrices, and even more with some extensions.</p>
+
+    <p class="text-gray-300">To reduce the memory needed, we store only the minimal required information in a node (the father and the last operation), and recompute other properties (<em>e.g.</em> the matrix representation and the identifier) when needed. This allows to trade time for memory.</p>
+
+    <h4 id="sec-35" class="text-lg font-semibold mt-6">MDS test.</h4>
+
+    <p class="text-gray-300">In order to test whether a node corresponds to an MDS matrix, we have to build the matrix and compute its minors. As mentioned already, the elements of the matrix are polynomials in <span class="math">\\mathbb{F}_{2}[\\alpha]</span>. The empty implementation corresponds to the identity with extra zero columns, and we apply each operation to the columns of the matrix to build the matrix of a given implementation: copy and XOR operations correspond to the same operations, while the linear operation <span class="math">\\alpha</span> corresponds to multiplying the polynomials by <span class="math">\\alpha</span>.</p>
+
+    <p class="text-gray-300">In our implementation, we store a polynomial as a bitfield, with each bit corresponding to a coefficient. In particular, multiplication by <span class="math">\\alpha</span> corresponds to a bit shift, and the carry less multiplication instruction of recent x86 processors (pclmulqdq) corresponds to multiplication of two polynomial of degree 64 (with an output of degree 128).</p>
+
+    <p class="text-gray-300">In practice, we build the matrix using 32-bit words (<em>i.e.</em> polynomials of degree at most 32), and the determinant of the full matrix is considered as a polynomial of degree 128 (our code only supports matrices of size <span class="math">k\\leq 4</span>). We compute the minors with Laplace extension, because minors of smaller order have to be computed anyway.</p>
+
+    <h4 id="sec-36" class="text-lg font-semibold mt-6">INV extension.</h4>
+
+    <p class="text-gray-300">With the INV extension, we have to deal with <span class="math">\\alpha^{-1}</span> operations in the circuit. Therefore the coefficients of the matrix are polynomials with both positive and negative powers of <span class="math">\\alpha</span> (Laurent polynomials). For our implementation, we assume that the polynomials only contain terms between <span class="math">\\alpha^{-16}</span> and <span class="math">\\alpha^{15}</span>, and store them shifted by 16 bits, <em>i.e.</em> multiplied by <span class="math">\\alpha^{16}</span>. In particular, all the code testing the MDS property is still valid, working with those shifted polynomials.</p>
+
+    <h4 id="sec-37" class="text-lg font-semibold mt-6">INDEP extension.</h4>
+
+    <p class="text-gray-300">With the INDEP extension, we have to deal with three linear mappings <span class="math">\\alpha</span>, <span class="math">\\beta</span>, <span class="math">\\gamma</span>, and the coefficients of the matrix are multivariate polynomials in <span class="math">\\mathbb{F}_{2}[\\alpha,\\beta,\\gamma]</span>. As explained, we assume that each linear operation is only used once, so that the coefficients of the matrix have degree at most one in each variable. During the computation of the determinants, we have to multiply at most <span class="math">k</span> coefficients, so that all the terms have degree at most <span class="math">k</span> in each variable. Therefore we can use an encoding as univariate polynomials in <span class="math">X</span>, where <span class="math">\\alpha</span> is encoded as <span class="math">X</span>, <span class="math">\\beta</span> as <span class="math">X^{k+1}</span>, <span class="math">\\gamma</span> as <span class="math">X^{(k+1)}</span> and so forth. With this encoding, there is no ambiguity to represent terms of degree at most <span class="math">k</span> in each variable, and multiplying two univariate polynomials corresponds to multiplying the related multivariate polynomials</p>
+
+    <p class="text-gray-300">In terms of implementation, this means that <span class="math">\\alpha</span> corresponds to a shift by 1 bit, <span class="math">\\beta</span> by <span class="math">k+1</span> bits, <span class="math">\\gamma</span> by <span class="math">(k+1)^{2}</span> bits … The rest of the implementation stays the same, and the code testing the MDS property remains valid with this representation. With <span class="math">k=4</span>, the matrix contains terms up to <span class="math">\\alpha\\beta\\gamma</span>, encoded as <span class="math">X\\cdot X^{5}\\cdot X^{25}=X^{31}</span> and they all fit in a 32-bit word.</p>
+
+    <h2 id="sec-38" class="text-2xl font-bold">5 Results</h2>
+
+    <p class="text-gray-300">We ran the algorithm for <span class="math">k=3</span> and <span class="math">k=4</span>, using several sets of extensions.</p>
+
+    <p class="text-gray-300">The results for <span class="math">k=3</span> ran within microseconds on a common laptop. They are summed up in Table 3. The least costly matrix, <span class="math">M_{3,4}^{5,1}</span>, uses 5 XORs on <span class="math">\\mathbb{F}_{2}^{k}</span> plus 1 linear operation. Interestingly, this is cheaper than the minimum cost of 6 XORs for a naive implementation.</p>
+
+    <p class="text-gray-300">Sébastien Duval and Gaëtan Leurent</p>
+
+    <p class="text-gray-300">!<a href="img-0.jpeg">img-0.jpeg</a> Figure 1:  <span class="math">4 \\times 4</span>  MDS with depth 5:  <span class="math">M_{4,5}^{8,3}</span> .</p>
+
+    <p class="text-gray-300">!<a href="img-1.jpeg">img-1.jpeg</a> Figure 2:  <span class="math">4 \\times 4</span>  MDS with depth 5:  <span class="math">M_{4,5}^{8,3^{-1}}</span> .</p>
+
+    <p class="text-gray-300">With minimum depth (i.e. depth 2), our best result,  <span class="math">M_{4,2}^{6,3}</span> , takes 6 XORs on  <span class="math">\\mathbb{F}_2^k</span>  plus 3 linear operations, which does not improve over a naive implementation.</p>
+
+    <p class="text-gray-300">For  <span class="math">k = 4</span> , however, the memory requirements are huge: some tests could not be performed because they require more than 2.5TB of memory. We used a machine with 4 Intel Xeon E7-4860 v2 CPUs (48 cores in total) running at 2.60GHz, with a total of 2.5TB of RAM. We parallelized the code and none of the runs took more than 24h in real time (the ones that could take longer ran out of memory beforehand). We note that parallelizing the code is rather easy, since we only need to share the structures which store the tested and untested states. The most interesting results are summed up in Table 4. The least costly matrix,  <span class="math">M_{4,6}^{8,3}</span> , requires 8 XORs on  <span class="math">\\mathbb{F}_2^k</span>  and 3 linear operations. At depth 3, our best result,  <span class="math">M_{4,3}^{9,5}</span> , requires 9 XORs on  <span class="math">\\mathbb{F}_2^k</span>  and 5 linear operations. Both results are significantly cheaper than the minimum of 12 XORs required in a naive implementation.</p>
+
+    <p class="text-gray-300">We note that we somewhat reached the limits, since running the algorithm with  <span class="math">k = 4</span>  to find circuits of depth 6 with a lesser cost than the solution given in the table found no results and took 2.4TB of memory (using extensions RO_IN and INDEP). Similarly, we could not find any circuit of depth 3 less costly than the one given, despite running the algorithm with multiple extensions and limits.</p>
+
+    <p class="text-gray-300">These results are formal matrices: instantiations on  <span class="math">\\mathbb{F}_2^4</span>  and  <span class="math">\\mathbb{F}_2^8</span>  are discussed in Section 6. Figures of the circuits are given in Appendix D (some of the circuits have been reorganized to make them easier to understand).</p>
+
+    <p class="text-gray-300">Implementation of the inverse matrix. When implementing the inverse of an SPN cipher, the inverse of the MDS matrix will be needed, and matrices whose inverse can also be implemented efficiently are desirable. In particular, a number of lightweight ciphers use an involutory matrix, so that the same implementation can be used for encryption and decryption. Our search algorithm does not allow us to look specifically for involutions (or even for matrices that are easy to invert), but several of our results allow an efficient implementation of the inverse.</p>
+
+    <p class="text-gray-300">Actually, most of the matrices in the table are easy to invert because their additional register only serves to build Feistel-like operations (this is not the case in general). In terms of implementation cost, it holds that the inverse matrix has the same implementation cost as the direct matrix. In terms of depth, however, there is no conservation between a matrix and its inverse.</p>
+
+    <p class="text-gray-300">To illustrate this, let us consider the example of  <span class="math">M_{4,5}^{8,3}</span> , and  <span class="math">M_{4,5}^{8,3^{-1}}</span>  shown in Figures 1</p>
+
+    <p class="text-gray-300">MDS Matrices with Lightweight Circuits</p>
+
+    <p class="text-gray-300">Table 3: Optimal  <span class="math">3 \\times 3</span>  MDS matrices (all results are obtained in less than 1 second, memory is given in MB).</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Depth</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Cost</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Extensions</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Memory</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">M</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Fig.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">4</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">5 XOR, 1 LIN</td>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+            <td class="px-3 py-2 border-b border-gray-700">14</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">M5,13,4 = [3 2 22 3 22 2 3], M5,1'3,4 = [2 1 31 1 13 1 2]</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">3, 4</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">3</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">5 XOR, 2 LIN</td>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+            <td class="px-3 py-2 border-b border-gray-700">5</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">M5,23,3 = [3 1 31 1 22 1 1]</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">5</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">2</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">6 XOR, 3 LIN</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">RO_IN</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">4</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">M6,33,2 = [2 1 11 2 11 1 2]</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">6</td>
+
+          </tr>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">and  <span class="math">2.5</span> <span class="math">M_{4,5}^{8,3}</span>  has depth 5 and costs 9 XORs and 3 linear operations. Over  <span class="math">\\mathbb{F}_2^8</span> , the instantiation discussed in 6 gives that both  <span class="math">M_{4,5}^{8,3}</span>  over  <span class="math">\\mathbb{F}_2^8</span>  and its inverse have the same depth (as well as the same cost). On the other hand, over  <span class="math">\\mathbb{F}_2^4</span> , the instantiation of  <span class="math">M_{4,5}^{8,3}</span>  requires the use of  <span class="math">A_4</span> ,  <span class="math">A_4^{-1}</span>  and  <span class="math">A_4^2</span> , so that  <span class="math">M_{4,5}^{8,3^{-1}}</span>  uses  <span class="math">A_4</span> ,  <span class="math">A_4^{-1}</span>  and  <span class="math">A_4^{-2}</span> , given as:</p>
+
+    <div class="my-4 text-center"><span class="math-block">A _ {4} = \\left[ \\begin{array}{l l l l} 0 &amp;amp; 1 &amp;amp; 0 &amp;amp; 0 \\\\ 0 &amp;amp; 1 &amp;amp; 0 &amp;amp; 0 \\\\ 0 &amp;amp; 0 &amp;amp; 1 &amp;amp; 0 \\\\ 1 &amp;amp; 1 &amp;amp; 0 &amp;amp; 0 \\end{array} \\right] \\qquad A _ {4} ^ {- 1} = \\left[ \\begin{array}{l l l l} 1 &amp;amp; 0 &amp;amp; 0 &amp;amp; 1 \\\\ 1 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 \\\\ 0 &amp;amp; 1 &amp;amp; 0 &amp;amp; 0 \\\\ 0 &amp;amp; 0 &amp;amp; 1 &amp;amp; 0 \\end{array} \\right] \\qquad A _ {4} ^ {2} = \\left[ \\begin{array}{l l l l} 1 &amp;amp; 0 &amp;amp; 1 &amp;amp; 1 \\\\ 1 &amp;amp; 0 &amp;amp; 0 &amp;amp; 1 \\\\ 1 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 \\\\ 0 &amp;amp; 1 &amp;amp; 0 &amp;amp; 0 \\end{array} \\right] \\qquad A _ {4} ^ {- 2} = \\left[ \\begin{array}{l l l l} 0 &amp;amp; 0 &amp;amp; 1 &amp;amp; 0 \\\\ 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 1 \\\\ 1 &amp;amp; 1 &amp;amp; 0 &amp;amp; 0 \\\\ 0 &amp;amp; 1 &amp;amp; 1 &amp;amp; 0 \\end{array} \\right]</span></div>
+
+    <p class="text-gray-300"><span class="math">A_{4}</span>  and  <span class="math">A_{4}^{-1}</span>  have the same cost and depth, but  <span class="math">A_{4}^{2}</span>  can only be implemented by 2 iterations of  <span class="math">A_{4}</span> , thus a depth 2 implementation, while  <span class="math">A_{4}^{-2}</span>  has an implementation with depth 1. Summing up, over  <span class="math">\\mathbb{F}_2^4</span> , both  <span class="math">M_{4,5}^{8,3}</span>  and its inverse have the same cost, but  <span class="math">M_{4,5}^{8,3}</span>  has depth 6 while  <span class="math">M_{4,5}^{8,3^{-1}}</span>  has depth 5.</p>
+
+    <p class="text-gray-300">In addition some matrices are almost involutive. In particular one of the optimal matrices we have found in size 3 is  <span class="math">M_{3,4}^{5,1&#x27;} = \\begin{bmatrix} 2 &amp;amp; 1 &amp;amp; 3 \\\\ 1 &amp;amp; 1 &amp;amp; 1 \\\\ 3 &amp;amp; 1 &amp;amp; 2 \\end{bmatrix}</span> ; we note that its inverse is  <span class="math">M_{3,4}^{5,1&#x27; - 1} = \\begin{bmatrix} 3 &amp;amp; 1 &amp;amp; 2 \\\\ 1 &amp;amp; 1 &amp;amp; 1 \\\\ 2 &amp;amp; 1 &amp;amp; 3 \\end{bmatrix}</span> , it can obviously be computed with the same circuit and an extra wire crossing.</p>
+
+    <p class="text-gray-300">Details on the tables All results are given supposing that the depth of  <span class="math">\\alpha</span> ,  <span class="math">\\beta</span>  and  <span class="math">\\gamma</span>  is 1.</p>
+
+    <p class="text-gray-300">The matrices given in these tables are examples. Our intention was in no way to be exhaustive in this table, the algorithm outputs many more formal matrices.</p>
+
+    <p class="text-gray-300">On the structure of the resulting circuits Although we did not find much structure in the results, it may be of interest that several circuits take the shape of a generalized Feistel network (as originally defined in [Nyb96] based on the work by Feistel, and studied in many works since), namely Figures 7, 9, 12, 13 and 14.</p>
+
+    <p class="text-gray-300">We would like to underline that the figures given in Appendix D have been intensively modified from the original output of the algorithm. We have reordered the input and output variables as well as some operations which commute in order to render the figures more readable and to put forward the structure.</p>
+
+    <p class="text-gray-300">On top of this, when it was possible, we replaced the use of an additional register by Feistel-like operations to ease the reading.</p>
+
+    <p class="text-gray-300">These are of course only examples of the outputs of the algorithm.</p>
+
+    <p class="text-gray-300">Sébastien Duval and Gaëtan Leurent</p>
+
+    <p class="text-gray-300">Table 4: Optimal  <span class="math">4 \\times 4</span>  MDS matrices.</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Depth</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Cost</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Extensions</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Memory (GB)</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Time (h)</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">M</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Fig.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">6</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">8 XOR, 3 LIN</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">30.9</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">19.5</td>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+            <td class="px-3 py-2 border-b border-gray-700">M8,3= [2 2 3 1]</td>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+            <td class="px-3 py-2 border-b border-gray-700">7</td>
+
+          </tr>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">|   |   |   |   |   |  [1 3 6 4]  |   |   |   |   |   |</p>
+
+    <p class="text-gray-300">|   |   |   |   |   |  [3 1 4 4]  |   |   |   |   |   |</p>
+
+    <p class="text-gray-300">|   |   |   |   |   |  [3 2 1 3]  |   |   |   |   |   |</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">5</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">8 XOR, 3 LIN</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">INDEP</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">24.3</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">2.3</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">M8,3= [β 1 β+1 1]</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">9</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">|   |   |   |   |   |  [γ α+1 γ+1 α+γ+1]  |   |   |   |   |   |</p>
+
+    <p class="text-gray-300">|   |   |   |   |   |  [γ α+1 γ+1 α+γ+1]  |   |   |   |   |   |</p>
+
+    <p class="text-gray-300">|   |   |   |   |   |  [γ+1]  |   |   |   |   |   |</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">5</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">9 XOR, 3 LIN</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">154.5</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">25.6</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">M8,3= [2 2 3 1]</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">8</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">|   |   |   |   |   |  [1 3 6 4]  |   |   |   |   |   |</p>
+
+    <p class="text-gray-300">|   |   |   |   |   |  [3 1 4 4]  |   |   |   |   |   |</p>
+
+    <p class="text-gray-300">|   |   |   |   |   |  [3 2 1 3]  |   |   |   |   |   |</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">4</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">8 XOR, 4 LIN</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">MAX_PDW = 2</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">274</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">30.2</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">M8,4= [5 7 1 3]</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">12, 13, 14</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">|   |   |   |   |   |  [4 6 1 1]  |   |   |   |   |   |</p>
+
+    <p class="text-gray-300">|   |   |   |   |   |  [1 3 5 7]  |   |   |   |   |   |</p>
+
+    <p class="text-gray-300">|   |   |   |   |   |  [1 1 4 6]  |   |   |   |   |   |</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">4</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">9 XOR, 3 LIN</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">INDEP</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">46</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">4.5</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">M8,4= [α+1 α γ+1 γ+1]</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">11</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">|   |   |   |   |   |  [β β+1 1 β]  |   |   |   |   |   |</p>
+
+    <p class="text-gray-300">|   |   |   |   |   |  [1 1 γ γ+1]  |   |   |   |   |   |</p>
+
+    <p class="text-gray-300">|   |   |   |   |   |  [α α+1 γ+1 γ]  |   |   |   |   |   |</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">4</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">9 XOR, 4 LIN</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">77.7</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">12.8</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">M8,4= [1 2 4 3]</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">10</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">|   |   |   |   |   |  [2 3 2 3]  |   |   |   |   |   |</p>
+
+    <p class="text-gray-300">|   |   |   |   |   |  [3 3 5 1]  |   |   |   |   |   |</p>
+
+    <p class="text-gray-300">|   |   |   |   |   |  [3 1 1 3]  |   |   |   |   |   |</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">3</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">9 XOR, 5 LIN</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">INV</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">279.1</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">38.5</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">M8,5= [α+α-1 α 1 1]</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">15</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">|   |   |   |   |   |  [1 α+1 α α-1]  |   |   |   |   |   |</p>
+
+    <p class="text-gray-300">|   |   |   |   |   |  [1 +α-1 1 1 1 +α-1]  |   |   |   |   |   |</p>
+
+    <p class="text-gray-300">|   |   |   |   |   |  [α-1 α-1 1 +α-1 1]  |   |   |   |   |   |</p>
+
+    <p class="text-gray-300">6 Instantiation</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">When we have a formal matrix <span class="math">M</span> in <span class="math">\\alpha</span> with all the minors being non-zero polynomials, we can look for concrete choices of <span class="math">\\alpha</span> with a low implementation cost that give a linear mapping with maximum branch number. For a given matrix <span class="math">A\\in M_{n}(\\mathbb{F}_{2})</span>, we can build <span class="math">M(A)</span> by substituting <span class="math">\\alpha</span> by <span class="math">A</span>, and test whether the resulting linear mapping in <span class="math">M_{k}\\big{(}M_{n}(\\mathbb{F}_{2})\\big{)}</span> has maximum branch number. As seen in Section 2, the linear mapping has maximum branch number if and only if all square sub-matrices following the <span class="math">n\\times n</span> blocks are non-singular. Moreover, since all the blocks are polynomials in <span class="math">A</span>, they commute, and we can compute the determinants by blocks <em>[x20]</em>. Indeed, with <span class="math">I,J</span> subsets of the lines and columns, and $m_{I,J}=\\det_{\\mathbb{F}_{2}[\\alpha]}(M_{</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">I,J})<span class="math"> the corresponding minor in </span>\\mathbb{F}_{2}[\\alpha]$, we have:</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">$\\det_{\\mathbb{F}_{2}}(M(A)_{</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">I,J})=\\det_{\\mathbb{F}_{2}}(\\det_{M_{n}(\\mathbb{F}_{2})}(M(A)_{</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">I,J}))=\\det_{\\mathbb{F}_{2}}(m_{I,J}(A)).$</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">Therefore, <span class="math">M(A)</span> is MDS if and only if all the <span class="math">m_{I,J}(A)</span> (the formal minors evaluated on <span class="math">A</span>) are non-singular.</p>
+
+    <p class="text-gray-300">Finally, let <span class="math">\\mu_{A}</span> be the minimal polynomial of <span class="math">A</span> (a minimal degree polynomial such that <span class="math">\\mu_{A}(A)=0</span>). We have the following characterization of <span class="math">A</span></p>
+
+    <h6 id="sec-39" class="text-base font-medium mt-4">Proposition 1.</h6>
+
+    <p class="text-gray-300">Let <span class="math">M\\in M_{k}(\\mathbb{F}_{2}[\\alpha])</span> be a formal matrix, with formal minors <span class="math">m_{I,J}</span>, and <span class="math">A\\in M_{n}(\\mathbb{F}_{2})</span> a linear mapping.</p>
+
+    <p class="text-gray-300">Then <span class="math">M(A)</span> is MDS if and only if <span class="math">\\mu_{A}</span> is relatively prime with all the formal minors <span class="math">m_{I,J}</span>.</p>
+
+    <h6 id="sec-40" class="text-base font-medium mt-4">Proof.</h6>
+
+    <p class="text-gray-300">If <span class="math">\\gcd(\\mu_{A},m_{I,J})=1</span>, there exist polynomials <span class="math">u,v</span> such that <span class="math">u\\mu_{A}+vm_{I,J}=1</span> from Bezout identity. In particular</p>
+
+    <p class="text-gray-300"><span class="math">u(A)\\mu_{A}(A)+v(A)m_{I,J}(A)=v(A)m_{I,J}(A)=1,</span></p>
+
+    <p class="text-gray-300">therefore <span class="math">m_{I,J}(A)</span> is non-singular. If this holds for all <span class="math">m_{I,J}</span> then <span class="math">M(A)</span> is MDS.</p>
+
+    <p class="text-gray-300">Reciprocally, we assume that there exist <span class="math">I,J</span> such that <span class="math">p=\\gcd(\\mu_{A},m_{I,J})</span> is non-constant. Then <span class="math">p(A)</span> must be singular (otherwise, we have <span class="math">\\mu_{A}=pq</span> with <span class="math">q(A)=0</span> which contradicts the definition of the minimal polynomial <span class="math">\\mu_{A}</span>). Therefore, <span class="math">m_{I,J}(A)</span> is also singular and <span class="math">M(A)</span> is not MDS. ∎∎</p>
+
+    <p class="text-gray-300">In particular, if all the minors are of degree strictly lower than <span class="math">n</span>, and <span class="math">\\pi</span> is an irreducible polynomial of degree <span class="math">n</span>, then we can use the companion matrix of <span class="math">\\pi</span> as <span class="math">A</span>, and this yields an MDS matrix <span class="math">M(A)</span>. In this case, <span class="math">A</span> actually corresponds to multiplication in a finite field. More generally, we can use this construction even if <span class="math">\\pi</span> is not irreducible. As long as <span class="math">\\pi</span> is relatively prime with all the formal minors <span class="math">m_{I,J}</span>, the resulting matrix <span class="math">M(A)</span> will be MDS. In terms of implementation cost, choosing a trinomial for <span class="math">\\pi</span> will result in an optimal implementation for the evaluation of <span class="math">A</span>: a single xor gate and only wire crossings in hardware, or a shift and conditional xor in software.</p>
+
+    <h3 id="sec-41" class="text-xl font-semibold mt-8">6.1 With inverse</h3>
+
+    <p class="text-gray-300">When we also use the inverse of <span class="math">\\alpha</span> to construct the matrix <span class="math">M</span>, the coefficients of the matrix, and the formal minors <span class="math">m_{I,J}</span>, will be Laurent polynomials in <span class="math">\\mathbb{F}_{2}[\\alpha,\\alpha^{-1}]</span>, rather than plain polynomials. In order to instantiate such a matrix <span class="math">M</span>, we must use a non-singular matrix <span class="math">A</span>, and we still have the property that <span class="math">M(A)</span> is MDS if and only if all the <span class="math">m_{I,J}(A)</span> are non-singular. Moreover, we can write <span class="math">m_{I,J}=\\tilde{m}_{I,J}\\times\\alpha^{z_{I,J}}</span> with <span class="math">\\tilde{m}_{I,J}</span> a polynomial (<span class="math">z_{I,J}</span> is chosen to minimize the degree of <span class="math">\\tilde{m}_{I,J}</span>), and <span class="math">m_{I,J}(A)</span> is non-singular if and only if <span class="math">\\tilde{m}_{I,J}(A)</span> is non-singular, because <span class="math">A</span> is necessarily non-singular. Therefore, we can still use a characterization based on the minimal polynomial <span class="math">\\mu_{A}</span>: <span class="math">M(A)</span> is MDS if and only if <span class="math">\\mu_{A}</span> is relatively prime with all the <span class="math">\\tilde{m}_{I,J}</span>.</p>
+
+    <p class="text-gray-300">######</p>
+
+    <p class="text-gray-300">Sébastien Duval and Gaëtan Leurent</p>
+
+    <h2 id="sec-42" class="text-2xl font-bold">6.2 With independent multiplications</h2>
+
+    <p class="text-gray-300">When we use the independent multiplications extension of the algorithm, the result is a formal matrix with coefficients in <span class="math">\\mathbb{F}_2[\\alpha, \\beta, \\gamma]</span>, whose minors are non-zero polynomials in <span class="math">\\mathbb{F}_2[\\alpha, \\beta, \\gamma]</span>. Since the polynomial computations only make sense when <span class="math">\\alpha</span>, <span class="math">\\beta</span> and <span class="math">\\gamma</span> commute, we will instantiate it with linear mappings that commute. If we use mappings <span class="math">A</span>, <span class="math">B</span>, <span class="math">C</span> with <span class="math">AB = BA</span>, <span class="math">AC = CA</span>, <span class="math">BC = CB</span>, polynomials evaluated in <span class="math">A, B, C</span> commute, and <span class="math">M(A, B, C)</span> is MDS if and only if all the <span class="math">m_{I,J}(A, B, C)</span> (the formal minors evaluated in <span class="math">A, B, C</span>) are non-singular.</p>
+
+    <p class="text-gray-300">In particular, if we instantiate <span class="math">\\alpha</span>, <span class="math">\\beta</span> and <span class="math">\\gamma</span> as powers of a fixed linear mapping <span class="math">A</span>, we can use the previous results to characterize the mappings <span class="math">A</span> that yield an MDS matrix from their minimal polynomials.</p>
+
+    <h2 id="sec-43" class="text-2xl font-bold">6.3 Low xor count instantiations</h2>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">In practice, we want to choose <span class="math">A</span> so that <span class="math">M(A)</span> is MDS, and <span class="math">A</span> also has a low implementation cost. Following the results of Beierle, Kranz, and Leander [BKL16], we know that multiplication by an element <span class="math">\\alpha</span> in <span class="math">\\mathrm{GF}(2^n)</span> can be implemented with a single bitwise xor if and only if the minimal polynomial of <span class="math">\\alpha</span> is a trinomial of degree <span class="math">n</span>. Moreover, their proof can be generalized to arbitrary mappings <span class="math">A</span> in <span class="math">M_n(\\mathbb{F}_2)</span>, with the following result: if <span class="math">A</span> can be implemented with a single xor then either <span class="math">A</span> is singular (i.e. $\\alpha</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mu_A<span class="math">), </span>A + 1<span class="math"> is singular (i.e. </span>(\\alpha + 1)</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mu_A<span class="math">) or </span>\\mu_A<span class="math"> is a trinomial of degree </span>n$.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">Since all the matrices we list in Table 3 and Table 4 have <span class="math">\\alpha</span> and <span class="math">\\alpha + 1</span> as a minor, the only interesting candidates with an xor count of one are matrices with a minimal polynomial that is a trinomial of degree <span class="math">n</span>. Therefore we concentrate our search on companion matrices of trinomials. (For a given trinomial <span class="math">t</span>, there are many different matrices with an xor count of one and <span class="math">t</span> as minimal polynomial, but they are either all MDS or all non-MDS, because of Proposition 1.)</p>
+
+    <p class="text-gray-300">We now instantiate the matrices from Table 1. We define <span class="math">A_8</span> the companion matrix of <span class="math">X^8 + X^2 + 1</span> over <span class="math">\\mathbb{F}_2</span>; <span class="math">A_8^{-1}</span> has minimal polynomial <span class="math">X^8 + X^6 + 1</span>:</p>
+
+    <div class="my-4 text-center"><span class="math-block">A _ {8} = \\left[ \\begin{array}{c c c c c c c c} 0 &amp;amp; 1 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 \\\\ 0 &amp;amp; 0 &amp;amp; 1 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 \\\\ 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 1 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 \\\\ 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 1 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 \\\\ 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 1 &amp;amp; 0 &amp;amp; 0 \\\\ 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 1 &amp;amp; 0 \\\\ 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 1 &amp;amp; 0 \\end{array} \\right] \\qquad A _ {8} ^ {- 1} = \\left[ \\begin{array}{c c c c c c c c} 0 &amp;amp; 1 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 1 \\\\ 1 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 \\\\ 0 &amp;amp; 1 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 \\\\ 0 &amp;amp; 0 &amp;amp; 1 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 \\\\ 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 1 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 \\\\ 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 1 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 \\\\ 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 &amp;amp; 1 &amp;amp; 0 \\end{array} \\right]</span></div>
+
+    <p class="text-gray-300">Similarly, we define <span class="math">A_4</span> the companion matrix of <span class="math">X^4 + X + 1</span> over <span class="math">\\mathbb{F}_2</span>; <span class="math">A_4^{-1}</span> has minimal polynomial <span class="math">X^4 + X^3 + 1</span>:</p>
+
+    <div class="my-4 text-center"><span class="math-block">A _ {4} = \\left[ \\begin{array}{c c c c} 0 &amp;amp; 1 &amp;amp; 0 &amp;amp; 0 \\\\ 0 &amp;amp; 1 &amp;amp; 0 &amp;amp; 0 \\\\ 0 &amp;amp; 0 &amp;amp; 1 &amp;amp; 0 \\\\ 1 &amp;amp; 1 &amp;amp; 0 &amp;amp; 0 \\end{array} \\right] \\qquad A _ {4} ^ {- 1} = \\left[ \\begin{array}{c c c c} 1 &amp;amp; 0 &amp;amp; 0 &amp;amp; 1 \\\\ 1 &amp;amp; 0 &amp;amp; 0 &amp;amp; 0 \\\\ 0 &amp;amp; 1 &amp;amp; 0 &amp;amp; 0 \\\\ 0 &amp;amp; 0 &amp;amp; 1 &amp;amp; 0 \\end{array} \\right]</span></div>
+
+    <p class="text-gray-300">It is not generally the case, but for the matrices of Table 1, <span class="math">A_8</span>, <span class="math">A_4</span>, <span class="math">A_8^{-1}</span> and <span class="math">A_4^{-1}</span> are enough to instantiate the results of the algorithm over <span class="math">\\mathbb{F}_2^8</span>. For instance, over <span class="math">\\mathbb{F}_2[X]</span>:</p>
+
+    <p class="text-gray-300"><strong>The trinomials and their factorization are</strong></p>
+
+    <div class="my-4 text-center"><span class="math-block">X ^ {8} + X + 1 = \\left(X ^ {2} + X + 1\\right) \\left(X ^ {6} + X ^ {5} + X ^ {3} + X ^ {2} + 1\\right),</span></div>
+
+    <div class="my-4 text-center"><span class="math-block">X ^ {8} + X ^ {2} + 1 = \\left(X ^ {4} + X + 1\\right) ^ {2},</span></div>
+
+    <div class="my-4 text-center"><span class="math-block">X ^ {8} + X ^ {3} + 1 = \\left(X ^ {3} + X + 1\\right) \\left(X ^ {5} + X ^ {3} + X ^ {2} + X + 1\\right),</span></div>
+
+    <div class="my-4 text-center"><span class="math-block">X ^ {8} + X ^ {4} + 1 = \\left(X ^ {2} + X + 1\\right) ^ {4},</span></div>
+
+    <div class="my-4 text-center"><span class="math-block">X ^ {8} + X ^ {5} + 1 = \\left(X ^ {3} + X ^ {2} + 1\\right) \\left(X ^ {5} + X ^ {4} + X ^ {3} + X ^ {2} + 1\\right),</span></div>
+
+    <div class="my-4 text-center"><span class="math-block">X ^ {8} + X ^ {6} + 1 = \\left(X ^ {4} + X ^ {3} + 1\\right) ^ {2},</span></div>
+
+    <div class="my-4 text-center"><span class="math-block">X ^ {8} + X ^ {7} + 1 = \\left(X ^ {2} + X + 1\\right) \\left(X ^ {6} + X ^ {4} + X ^ {3} + X + 1\\right).</span></div>
+
+    <p class="text-gray-300">In particular, there are only 2 trinomials which factorize to degree 4 polynomials: <span class="math">X^{8}+X^{2}+1=(X^{4}+X+1)^{2}</span> and <span class="math">X^{8}+X^{6}+1=(X^{4}+X^{3}+1)^{2}</span>.</p>
+
+    <p class="text-gray-300"><span class="math">\\textbf{The minors of }M_{4,6}^{8,3}=\\begin{bmatrix}2&amp;2&amp;3&amp;1\\cr 1&amp;3&amp;6&amp;4\\cr 3&amp;1&amp;4&amp;4\\cr 3&amp;2&amp;1&amp;3\\end{bmatrix}\\textbf{are}</span> <span class="math">\\{1,X,X+1,X^{2},X^{2}+1,X^{2}+X,X^{2}+X+1,X^{3},X^{3}+1,X^{3}+X,X^{3}+X+1,X^{3}+X^{2}+1,X^{3}+X^{2}+X,X^{3}+X^{2}+X+1\\}</span> whose factors are</p>
+
+    <p class="text-gray-300"><span class="math">\\{X,X+1,X^{3}+X+1,X^{2}+X+1,X^{3}+X^{2}+1\\}</span></p>
+
+    <p class="text-gray-300">None is of degree greater than 3, therefore they are all relatively prime with both <span class="math">X^{8}+X^{2}+1</span> and <span class="math">X^{8}+X^{6}+1</span>. Picking either <span class="math">\\alpha=A_{8}</span> or <span class="math">\\alpha=A_{8}^{-1}</span> therefore yields an MDS matrix over <span class="math">\\mathbb{F}_{2}^{8}</span>. A full implementation is given in Appendix C.</p>
+
+    <p class="text-gray-300"><span class="math">\\textbf{The factors of the minors of }M_{4,4}^{8,4}=\\begin{bmatrix}5&amp;7&amp;1&amp;3\\cr 4&amp;6&amp;1&amp;1\\cr 1&amp;3&amp;5&amp;7\\cr 1&amp;1&amp;4&amp;6\\end{bmatrix}\\textbf{are}</span> <span class="math">\\{X,X+1,X^{3}+X+1,X^{2}+X+1,X^{3}+X^{2}+1,X^{4}+X^{3}+1\\}</span></p>
+
+    <p class="text-gray-300">The only factor of degree 4 is <span class="math">X^{4}+X^{3}+1</span>, so there is at least one minor which is not relatively prime with <span class="math">X^{8}+X^{6}+1</span>, but they are all relatively prime with <span class="math">X^{8}+X^{2}+1</span>. Picking <span class="math">\\alpha=A_{8}</span> therefore yields an MDS matrix over <span class="math">\\mathbb{F}_{2}^{8}</span>.</p>
+
+    <p class="text-gray-300">The other results are obtained in a similar fashion.</p>
+
+    <h4 id="sec-44" class="text-lg font-semibold mt-6">6.3.1 Instantiation of <span class="math">M_{4,5}^{8,3}=\\begin{bmatrix}\\beta&amp;1&amp;\\beta+1&amp;1\\cr\\gamma&amp;\\alpha&amp;\\gamma&amp;\\alpha+\\gamma\\cr\\gamma&amp;\\alpha+1&amp;\\gamma+1&amp;\\alpha+\\gamma+1\\cr\\beta+\\gamma&amp;1&amp;\\beta+\\gamma+1&amp;\\gamma+1\\end{bmatrix}</span></h4>
+
+    <p class="text-gray-300">Following Section 6.2, we first instantiate all the linear mappings as powers of single <span class="math">\\alpha</span>. Using the sage code given in Appendix B, we found that setting <span class="math">\\beta=\\alpha^{-1}</span> and <span class="math">\\gamma=\\alpha^{2}</span> still gives an MDS matrix. The factors of the minors of the resulting matrix are:</p>
+
+    <p class="text-gray-300"><span class="math">X,X+1,X^{2}+X+1,X^{3}+X+1,X^{3}+X^{2}+1,X^{4}+X+1</span></p>
+
+    <p class="text-gray-300">The only factor of degree 4 is <span class="math">X^{4}+X^{3}+1</span>, therefore <span class="math">\\alpha=A^{-1}</span> yields an MDS matrix over <span class="math">\\mathbb{F}_{2}^{8}</span>.</p>
+
+    <h2 id="sec-45" class="text-2xl font-bold">Conclusion</h2>
+
+    <p class="text-gray-300">Like the parallel work of <em>[x10]</em>, our results show that global optimization of an MDS matrix is much more powerful than local optimization of the coefficients. Moreover, our approach allows to find new MDS matrices optimized for a global lightweight implementation, while the straight line tools used in <em>[x10]</em> can only find a good implementation of a given matrix. As can be seen in Table 1, our approach leads to even better results. In particular, the best <span class="math">4\\times 4</span> MDS matrix with 8-bit words previously reported has an xor count of 72, while our best result has an xor count of only 67. Moreover, our approach can take into account the depth of the circuits. When considering results with a depth of 3 (the minimal depth possible), we still have an MDS matrix with xor count only 77 which would be challenging with straight line program optimizations. Finally, we tried to run the straight line program tools on the binary matrices found by our search, but the implementations found by the tools are not as good as ours.</p>
+
+    <p class="text-gray-300">References</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>[ADK^{+}14] Martin R. Albrecht, Benedikt Driessen, Elif Bilge Kavun, Gregor Leander, Christof Paar, and Tolga Yalçin. Block ciphers - focus on the linear layer (feat. PRIDE). In Juan A. Garay and Rosario Gennaro, editors, CRYPTO 2014, Part I, volume 8616 of LNCS, pages 57–76. Springer, Heidelberg, August 2014.</li>
+
+      <li>[AF13] Daniel Augot and Matthieu Finiasz. Exhaustive search for small dimension recursive MDS diffusion layers for block ciphers and hash functions. In ISIT, pages 1551–1555. IEEE, 2013.</li>
+
+      <li>[AIK^{+}01] Kazumaro Aoki, Tetsuya Ichikawa, Masayuki Kanda, Mitsuru Matsui, Shiho Moriai, Junko Nakajima, and Toshio Tokita. Camellia: A 128-bit block cipher suitable for multiple platforms - Design and analysis. In Douglas R. Stinson and Stafford E. Tavares, editors, SAC 2000, volume 2012 of LNCS, pages 39–56. Springer, Heidelberg, August 2001.</li>
+
+      <li>[BBG^{+}09] Ryad Benadjila, Olivier Billet, Henri Gilbert, Gilles Macario-Rat, Thomas Peyrin, Matt Robshaw, and Yannick Seurin. Sha-3 proposal: Echo. Submission to NIST (updated), page 113, 2009.</li>
+
+      <li>[BBR16] Subhadeep Banik, Andrey Bogdanov, and Francesco Regazzoni. Atomic-AES: A compact implementation of the AES encryption/decryption core. In Orr Dunkelman and Somitra Kumar Sanadhya, editors, INDOCRYPT 2016, volume 10095 of LNCS, pages 173–190. Springer, Heidelberg, December 2016.</li>
+
+      <li>[BCG^{+}12] Julia Borghoff, Anne Canteaut, Tim Güneysu, Elif Bilge Kavun, Miroslav Knežević, Lars R. Knudsen, Gregor Leander, Ventzislav Nikov, Christof Paar, Christian Rechberger, Peter Rombouts, Søren S. Thomsen, and Tolga Yalçin. PRINCE - A low-latency block cipher for pervasive computing applications - extended abstract. In Xiaoyun Wang and Kazue Sako, editors, ASIACRYPT 2012, volume 7658 of LNCS, pages 208–225. Springer, Heidelberg, December 2012.</li>
+
+      <li>[BJK^{+}16] Christof Beierle, Jérémy Jean, Stefan Kölbl, Gregor Leander, Amir Moradi, Thomas Peyrin, Yu Sasaki, Pascal Sasdrich, and Siang Meng Sim. The SKINNY family of block ciphers and its low-latency variant MANTIS. In Matthew Robshaw and Jonathan Katz, editors, CRYPTO 2016, Part II, volume 9815 of LNCS, pages 123–153. Springer, Heidelberg, August 2016.</li>
+
+      <li>[BKL^{+}07] Andrey Bogdanov, Lars R. Knudsen, Gregor Leander, Christof Paar, Axel Poschmann, Matthew J. B. Robshaw, Yannick Seurin, and C. Vikkelsoe. PRESENT: An ultra-lightweight block cipher. In Pascal Paillier and Ingrid Verbauwhede, editors, CHES 2007, volume 4727 of LNCS, pages 450–466. Springer, Heidelberg, September 2007.</li>
+
+      <li>[BKL16] Christof Beierle, Thorsten Kranz, and Gregor Leander. Lightweight multiplication in GF(<span class="math">2^{n}</span>) with applications to MDS matrices. In Matthew Robshaw and Jonathan Katz, editors, CRYPTO 2016, Part I, volume 9814 of LNCS, pages 625–653. Springer, Heidelberg, August 2016.</li>
+
+      <li>[BMP13] Joan Boyar, Philip Matthews, and René Peralta. Logic minimization techniques with applications to cryptology. Journal of Cryptology, 26(2):280–312, April 2013.</li>
+
+    </ul>
+
+    <p class="text-gray-300">-</p>
+
+    <p class="text-gray-300">MDS Matrices with Lightweight Circuits</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>[BNN^{+}10] Paulo Barreto, Ventzislav Nikov, Svetla Nikova, Vincent Rijmen, and Elmar Tischhauser. Whirlwind: a new cryptographic hash function. Designs, Codes and Cryptography, 56(2):141–162, Aug 2010.</li>
+
+      <li>[CDK09] Christophe De Cannière, Orr Dunkelman, and Miroslav Knežević. KATAN and KTANTAN - a family of small and efficient hardware-oriented block ciphers. In Christophe Clavier and Kris Gaj, editors, CHES 2009, volume 5747 of LNCS, pages 272–288. Springer, Heidelberg, September 2009.</li>
+
+      <li>[CDL16] Anne Canteaut, Sébastien Duval, and Gaëtan Leurent. Construction of lightweight S-boxes using Feistel and MISTY structures. In Orr Dunkelman and Liam Keliher, editors, SAC 2015, volume 9566 of LNCS, pages 373–393. Springer, Heidelberg, August 2016.</li>
+
+      <li>[Dij59] Edsger Wybe Dijkstra. A note on two problems in connexion with graphs. Numerische Mathematik, 1:269–271, 1959.</li>
+
+      <li>[DPVAR00] Joan Daemen, Michaël Peeters, Gilles Van Assche, and Vincent Rijmen. Nessie proposal: Noekeon, 2000.</li>
+
+      <li>[DR01] Joan Daemen and Vincent Rijmen. The wide trail design strategy. In Bahram Honary, editor, 8th IMA International Conference on Cryptography and Coding, volume 2260 of LNCS, pages 222–238. Springer, Heidelberg, December 2001.</li>
+
+      <li>[DR02] Joan Daemen and Vincent Rijmen. The Design of Rijndael: AES - The Advanced Encryption Standard. Information Security and Cryptography. Springer, 2002.</li>
+
+      <li>[GKM^{+}] P. Gauravaram, L.R. Knudsen, K. Matusiewicz, F. Mendel, C. Rechberger, M. Schläffer, and S.S. Thomsen. Grøstl — a SHA-3 candidate. Submission to NIST.</li>
+
+      <li>[GLSV15] Vincent Grosso, Gaëtan Leurent, François-Xavier Standaert, and Kerem Varici. LS-designs: Bitslice encryption for efficient masked software implementations. In Carlos Cid and Christian Rechberger, editors, FSE 2014, volume 8540 of LNCS, pages 18–37. Springer, Heidelberg, March 2015.</li>
+
+      <li>[GPP11] Jian Guo, Thomas Peyrin, and Axel Poschmann. The PHOTON family of lightweight hash functions. In Phillip Rogaway, editor, CRYPTO 2011, volume 6841 of LNCS, pages 222–239. Springer, Heidelberg, August 2011.</li>
+
+      <li>[GPPR11] Jian Guo, Thomas Peyrin, Axel Poschmann, and Matthew J. B. Robshaw. The LED block cipher. In Bart Preneel and Tsuyoshi Takagi, editors, CHES 2011, volume 6917 of LNCS, pages 326–341. Springer, Heidelberg, September / October 2011.</li>
+
+      <li>[HNR68] Peter E. Hart, Nils J. Nilsson, and Bertram Raphael. A formal basis for the heuristic determination of minimum cost paths. IEEE Trans. Systems Science and Cybernetics, 4(2):100–107, 1968.</li>
+
+      <li>[HSH^{+}06] Deukjo Hong, Jaechul Sung, Seokhie Hong, Jongin Lim, Sangjin Lee, Bon-Seok Koo, Changhoon Lee, Donghoon Chang, Jesang Lee, Kitae Jeong, Hyun Kim, Jongsung Kim, and Seongtaek Chee. HIGHT: A new block cipher suitable for low-resource device. In Louis Goubin and Mitsuru Matsui, editors, CHES 2006, volume 4249 of LNCS, pages 46–59. Springer, Heidelberg, October 2006.</li>
+
+    </ul>
+
+    <p class="text-gray-300">Sébastien Duval and Gaëtan Leurent</p>
+
+    <p class="text-gray-300">[JPST17] Jérémy Jean, Thomas Peyrin, Siang Meng Sim, and Jade Tourteaux. Optimizing implementations of lightweight building blocks. IACR Trans. Symm. Cryptol., 2017(4):130–168, 2017.</p>
+
+    <p class="text-gray-300">[KLSW17] Thorsten Kranz, Gregor Leander, Ko Stoffelen, and Friedrich Wiemer. Shorter linear straight-line programs for MDS matrices. IACR Trans. Symm. Cryptol., 2017(4):188–211, 2017.</p>
+
+    <p class="text-gray-300">[KPPY14] Khoongming Khoo, Thomas Peyrin, Axel York Poschmann, and Huihui Yap. FOAM: Searching for hardware-optimal SPN structures and components with a fair comparison. In Lejla Batina and Matthew Robshaw, editors, CHES 2014, volume 8731 of LNCS, pages 433–450. Springer, Heidelberg, September 2014.</p>
+
+    <p class="text-gray-300">[LS16] Meicheng Liu and Siang Meng Sim. Lightweight MDS generalized circulant matrices. In Thomas Peyrin, editor, FSE 2016, volume 9783 of LNCS, pages 101–120. Springer, Heidelberg, March 2016.</p>
+
+    <p class="text-gray-300">[LW14] Yongqiang Li and Mingsheng Wang. Constructing S-boxes for lightweight cryptography with Feistel structure. In Lejla Batina and Matthew Robshaw, editors, CHES 2014, volume 8731 of LNCS, pages 127–146. Springer, Heidelberg, September 2014.</p>
+
+    <p class="text-gray-300">[LW16] Yongqiang Li and Mingsheng Wang. On the construction of lightweight circulant involutory MDS matrices. In Thomas Peyrin, editor, FSE 2016, volume 9783 of LNCS, pages 121–139. Springer, Heidelberg, March 2016.</p>
+
+    <p class="text-gray-300">[Nyb96] Kaisa Nyberg. Generalized Feistel networks. In Kwangjo Kim and Tsutomu Matsumoto, editors, ASIACRYPT'96, volume 1163 of LNCS, pages 91–104. Springer, Heidelberg, November 1996.</p>
+
+    <p class="text-gray-300">[RB01] Vincent Rijmen and PSLM Barreto. The whirlpool hash function, 2001.</p>
+
+    <p class="text-gray-300">[SDMS12] Mahdi Sajadieh, Mohammad Dakhilalian, Hamid Mala, and Pouyan Sepehrdad. Recursive diffusion layers for block ciphers and hash functions. In Anne Canteaut, editor, FSE 2012, volume 7549 of LNCS, pages 385–401. Springer, Heidelberg, March 2012.</p>
+
+    <p class="text-gray-300">[Sil00] John R Silvester. Determinants of block matrices. The Mathematical Gazette, 84(501):460–467, 2000.</p>
+
+    <p class="text-gray-300">[SKOP15] Siang Meng Sim, Khoongming Khoo, Frédérique E. Oggier, and Thomas Peyrin. Lightweight MDS involution matrices. In Gregor Leander, editor, FSE 2015, volume 9054 of LNCS, pages 471–493. Springer, Heidelberg, March 2015.</p>
+
+    <p class="text-gray-300">[SKW⁺99] Bruce Schneier, John Kelsey, Doug Whiting, David Wagner, Chris Hall, and Niels Ferguson. The Twofish encryption algorithm: a 128-bit block cipher. John Wiley &amp; Sons, Inc., 1999.</p>
+
+    <p class="text-gray-300">[SMMK13] Tomoyasu Suzaki, Kazuhiko Minematsu, Sumio Morioka, and Eita Kobayashi. TWINE: A lightweight block cipher for multiple platforms. In Lars R. Knudsen and Huapeng Wu, editors, SAC 2012, volume 7707 of LNCS, pages 339–354. Springer, Heidelberg, August 2013.</p>
+
+    <p class="text-gray-300">MDS Matrices with Lightweight Circuits</p>
+
+    <p class="text-gray-300">[SMTM01] Akashi Satoh, Sumio Morioka, Kohji Takano, and Seiji Munetoh. A compact Rijndael hardware architecture with S-box optimization. In Colin Boyd, editor, ASIACRYPT 2001, volume 2248 of LNCS, pages 239–254. Springer, Heidelberg, December 2001.</p>
+
+    <p class="text-gray-300">[SS16] Sumanta Sarkar and Habeeb Syed. Lightweight diffusion layer: Importance of Toeplitz matrices. IACR Trans. Symm. Cryptol., 2016(1):95–113, 2016. http://tosc.iacr.org/index.php/ToSC/article/view/537.</p>
+
+    <p class="text-gray-300">[UDI⁺¹¹] Markus Ullrich, Christophe De Cannière, Sebastian Indesteege, Özgül Küçük, Nicky Mouha, and Bart Preneel. Finding Optimal Bitsliced Implementations of 4x4-bit S-Boxes. In SKEW 2011 Symmetric Key Encryption Workshop, Copenhagen, Denmark, pages 16–17, 2011.</p>
+
+    <p class="text-gray-300">[WFY⁺⁰²] Dai Watanabe, Soichi Furuya, Hirotaka Yoshida, Kazuo Takaragi, and Bart Preneel. A new keystream generator MUGI. In Joan Daemen and Vincent Rijmen, editors, FSE 2002, volume 2365 of LNCS, pages 179–194. Springer, Heidelberg, February 2002.</p>
+
+    <p class="text-gray-300">[WWW13] Shengbao Wu, Mingsheng Wang, and Wenling Wu. Recursive diffusion layers for (lightweight) block ciphers and hash functions. In Lars R. Knudsen and Huapeng Wu, editors, SAC 2012, volume 7707 of LNCS, pages 355–371. Springer, Heidelberg, August 2013.</p>
+
+    <p class="text-gray-300">[WZ11] Wenling Wu and Lei Zhang. LBlock: A lightweight block cipher. In Javier Lopez and Gene Tsudik, editors, ACNS 11, volume 6715 of LNCS, pages 327–344. Springer, Heidelberg, June 2011.</p>
+
+    <p class="text-gray-300">[ZWZZ16] Ruoxin Zhao, Baofeng Wu, Rui Zhang, and Qian Zhang. Designing optimal implementations of linear layers (full version). Cryptology ePrint Archive, Report 2016/1118, 2016. http://eprint.iacr.org/2016/1118.</p>
+
+    <p class="text-gray-300">Sébastien Duval and Gaëtan Leurent</p>
+
+    <p class="text-gray-300">Algorithm 1 Algorithm to search for MDS circuits. 1: function FIND MDS Input: MAX_WEIGHT, MAX_DEPTH, weights of operations. Output: All MDS matrices of weight lesser than MAX_WEIGHT. 2: TestedIDs  <span class="math">\\leftarrow</span>  NULL 3: UntestedStates  <span class="math">\\leftarrow</span>  Identity 4: CurrentWeight  <span class="math">\\leftarrow 0</span> 5: for state  <span class="math">\\in</span>  UntestedStates with state.weight  <span class="math">=</span>  CurrentWeight do 6: if TestedIDs.contains(state.ID) then 7: continue 8: if state.isMDS() then 9: state.print()) 10: continue ▷ Children are equivalent or of bigger weight. 11: state.spawnChildren(UntestedStates) 12: if {UntestedStates with CurrentWeight}  <span class="math">= \\emptyset</span>  then 13: CurrentWeight  <span class="math">\\leftarrow</span>  CurrentWeight + 1 return 14: function STATE.SPAWNCHILDREN(UntestedStates) 15: for op  <span class="math">\\in</span>  opSet do 16: childState  <span class="math">\\leftarrow</span>  state.addOp(op) 17: if childState.weight  <span class="math">&amp;gt;</span>  MAX_WEIGHT or childState.depth  <span class="math">&amp;gt;</span>  MAX_DEPTH then 18: continue 19: if op  <span class="math">= COPY</span>  and childState.notInjective() then 20: continue 21: UntestedStates.append(childState) return 22: function STATE.PRINT Prints the state as a matrix, gives its weight and operations. 23: function STATE.ISMDS Tests if the function is MDS by computing the determinant of all its square submatrices. 24: function STATE.NOTINJECTIVE Tests if the function is injective by computing its determinant (there are subtilities since some of the words are discarded in the end). 25: function STATE.ADDOP(op, from, to) Returns the child state from the father state and the new operation. Computes the child's weight.</p>
+
+    <p class="text-gray-300">B Instantiation</p>
+
+    <p class="text-gray-300">We can use the following sage program to instantiate the constructions of Section 6.</p>
+
+    <p class="text-gray-300">⬇ R.<a,b,c> = PolynomialRing(GF(2)) M = Matrix([[b,1,b+1,1], \\ [c,a,c,a+c], \\ [c,a+1,c+1,a+c+1], \\ [b+c,1,b+c+1,c+1]])</p>
+
+    <p class="text-gray-300">#M = Matrix([[a,a,a+1,1], \\</p>
+
+    <p class="text-gray-300">#M = Matrix([[a^2+1,a^2+a+1,1,a+1], \\</p>
+
+    <p class="text-gray-300">#M = Matrix([[a+1,a,1,a+1], \\</p>
+
+    <p class="text-gray-300">can_invert = lambda m: m.is_invertible() \\ if hasattr(m,"is_invertible") \\ else not m.is_zero() all_minors = lambda M : [ m for k in range (M.nrows()) \\ for m in M.minors(k+1) ] minors_factor = lambda M : { p for m in all_minors(M) \\ for p,_ in factor(m)} is_MDS = lambda M : all(can_invert(m) for m in all_minors(M)) print is_MDS(M)</p>
+
+    <p class="text-gray-300">MS = MatrixSpace(GF(2),8,8) MS.is_field = lambda proof=True: False A_8 = MS([[0,1,0,0,0,0,0,0],[0,0,1,0,0,0,0,0], \\ [0,0,0,1,0,0,0,0],[0,0,0,0,1,0,0,0], \\ [0,0,0,0,0,1,0,0],[0,0,0,0,0,0,1,0], \\ [0,0,0,0,0,0,0,1],[1,0,1,0,0,0,0,0]]) A_8 = A_8^-1 print is_MDS(M.substitute({a:A_8,b:A_8^-1,c:A_8^-2}))</p>
+
+    <p class="text-gray-300">Sébastien Duval and Gaëtan Leurent</p>
+
+    <p class="text-gray-300">The best MDS  <span class="math">4 \\times 4</span>  MDS matrix over 8-bit word that we found can be implemented with 67 bitwise xors. It is obtained from  <span class="math">M_{4,6}^{8,3}</span>  with  <span class="math">\\alpha = A_8</span> . This corresponds to the following binary matrix:</p>
+
+    <p class="text-gray-300">!<a href="img-2.jpeg">img-2.jpeg</a></p>
+
+    <p class="text-gray-300">It can also be implemented with the following C code. The shifts are implicit and the linear function LIN corresponds to  <span class="math">A_8</span> . Other matrices can be implemented in a similar way.</p>
+
+    <pre><code>#define ROT(x) (((x)&amp;lt;&amp;lt;1) | ((x)&amp;gt;&amp;gt;7))
+#define LIN(x) (ROT((x)) ~ (((x)&amp;gt;&amp;gt;1)&amp;amp;1))
+uint32_t MDS(uint32_t x) {
+uint8_t a = x, b = x&amp;gt;&amp;gt;8, c = x&amp;gt;&amp;gt;16, d = x&amp;gt;&amp;gt;24;
+a ^= b;
+c ^= d;
+d ^= LIN(a);
+b ^= c;
+b = LIN(b);
+a ^= b;
+c ^= LIN(d);
+d ^= a;
+b ^= c;
+return (((((uint32_t)c&amp;lt;&amp;lt;8) | b)&amp;lt;&amp;lt;8) | a)&amp;lt;&amp;lt;8) | d;
+}
+
+MDS Matrices with Lightweight Circuits
+
+# D Figures
+
+# D.1  $3 \\times 3$  matrices
+
+![img-3.jpeg](img-3.jpeg)
+Figure 3:  $3 \\times 3$  MDS matrix with depth 4:  $M_{3,4}^{5,1} = \\left[ \\begin{array}{lll}3 &amp;amp; 2 &amp;amp; 2\\\\ 2 &amp;amp; 3 &amp;amp; 2\\\\ 2 &amp;amp; 3 &amp;amp; 3 \\end{array} \\right]$
+
+![img-4.jpeg](img-4.jpeg)
+Figure 4:  $3 \\times 3$  MDS matrix with depth 4:  $M_{3,4}^{5,1^f} = \\left[ \\begin{array}{lll}2 &amp;amp; 1 &amp;amp; 3\\\\ 1 &amp;amp; 1 &amp;amp; 1\\\\ 3 &amp;amp; 1 &amp;amp; 2 \\end{array} \\right]$
+
+![img-5.jpeg](img-5.jpeg)
+Figure 5:  $3 \\times 3$  MDS matrix with depth 3:  $M_{3,3}^{5,2} = \\left[ \\begin{array}{lll}3 &amp;amp; 1 &amp;amp; 3\\\\ 1 &amp;amp; 1 &amp;amp; 2\\\\ 2 &amp;amp; 1 &amp;amp; 1 \\end{array} \\right]$
+
+![img-6.jpeg](img-6.jpeg)
+Figure 6:  $3 \\times 3$  MDS matrix with depth 2:  $M_{3,2}^{6,3} = \\left[ \\begin{array}{lll}2 &amp;amp; 1 &amp;amp; 1\\\\ 1 &amp;amp; 2 &amp;amp; 1\\\\ 1 &amp;amp; 1 &amp;amp; 2 \\end{array} \\right]$
+
+Sébastien Duval and Gaëtan Leurent
+
+# D.2  $4 \\times 4$  matrices
+
+![img-7.jpeg](img-7.jpeg)
+Figure 7:  $4 \\times 4$  MDS matrix with depth 6: Figure 8:  $4 \\times 4$  MDS matrix with depth 5:  $M_{4,6}^{8,3} = \\begin{bmatrix} 3 &amp;amp; 1 &amp;amp; 4 &amp;amp; 4 \\\\ 1 &amp;amp; 3 &amp;amp; 6 &amp;amp; 4 \\\\ 2 &amp;amp; 2 &amp;amp; 3 &amp;amp; 1 \\\\ 3 &amp;amp; 2 &amp;amp; 1 &amp;amp; 3 \\end{bmatrix}$
+
+![img-8.jpeg](img-8.jpeg)
+
+![img-9.jpeg](img-9.jpeg)
+Figure 9:  $4 \\times 4$  MDS matrix with depth 5:  $M_{4,5}^{8,3} = \\begin{bmatrix} \\alpha + \\gamma &amp;amp; \\alpha &amp;amp; \\gamma &amp;amp; \\gamma \\\\ \\alpha + \\gamma + 1 &amp;amp; \\alpha + 1 &amp;amp; \\gamma + 1 &amp;amp; \\gamma \\\\ 1 &amp;amp; 1 &amp;amp; \\beta + 1 &amp;amp; \\beta \\\\ \\gamma + 1 &amp;amp; 1 &amp;amp; \\beta + \\gamma + 1 &amp;amp; \\beta + \\gamma \\end{bmatrix}$
+
+![img-10.jpeg](img-10.jpeg)
+Figure 10:  $4 \\times 4$  MDS matrix with depth 4:  $M_{4,4}^{9,4} = \\begin{bmatrix} 1 &amp;amp; 2 &amp;amp; 4 &amp;amp; 3 \\\\ 2 &amp;amp; 3 &amp;amp; 2 &amp;amp; 3 \\\\ 3 &amp;amp; 3 &amp;amp; 5 &amp;amp; 1 \\\\ 3 &amp;amp; 1 &amp;amp; 1 &amp;amp; 3 \\end{bmatrix}$
+
+![img-11.jpeg](img-11.jpeg)
+Figure 11:  $4 \\times 4$  MDS matrix with depth 4:  $M_{4,4}^{9,3} = \\begin{bmatrix} \\alpha + 1 &amp;amp; \\alpha &amp;amp; \\gamma + 1 &amp;amp; \\gamma + 1 \\\\ \\beta &amp;amp; \\beta + 1 &amp;amp; 1 &amp;amp; \\beta \\\\ 1 &amp;amp; 1 &amp;amp; \\gamma &amp;amp; \\gamma + 1 \\\\ \\alpha &amp;amp; \\alpha + 1 &amp;amp; \\gamma + 1 &amp;amp; \\gamma \\end{bmatrix}$
+
+MDS Matrices with Lightweight Circuits
+
+![img-12.jpeg](img-12.jpeg)
+Figure 12:  $4 \\times 4$  MDS matrix with depth 4:  $M_{4,4}^{8,4} = \\begin{bmatrix} 5 &amp;amp; 7 &amp;amp; 1 &amp;amp; 3 \\\\ 4 &amp;amp; 6 &amp;amp; 1 &amp;amp; 1 \\\\ 1 &amp;amp; 3 &amp;amp; 5 &amp;amp; 7 \\\\ 1 &amp;amp; 1 &amp;amp; 4 &amp;amp; 6 \\end{bmatrix}$  with  $\\alpha = 2$ .
+
+![img-13.jpeg](img-13.jpeg)
+Figure 13:  $4 \\times 4$  MDS matrix with depth 4:  $M_{4,4}^{8,4&#x27;} = \\begin{bmatrix} 6 &amp;amp; 7 &amp;amp; 1 &amp;amp; 5 \\\\ 2 &amp;amp; 3 &amp;amp; 1 &amp;amp; 1 \\\\ 1 &amp;amp; 5 &amp;amp; 6 &amp;amp; 7 \\\\ 1 &amp;amp; 1 &amp;amp; 2 &amp;amp; 3 \\end{bmatrix}$  with  $\\alpha = 2$  ( $\\alpha \\leftrightarrow \\alpha^2$  is also MDS).
+
+![img-14.jpeg](img-14.jpeg)
+Figure 14:  $4 \\times 4$  MDS matrix with depth  $4M_{4,4}^{8,4^{\\prime \\prime}} = \\begin{bmatrix} 3 &amp;amp; 2 &amp;amp; 1 &amp;amp; 3 \\\\ 2 &amp;amp; 3 &amp;amp; 1 &amp;amp; 1 \\\\ 1 &amp;amp; 3 &amp;amp; 6 &amp;amp; 4 \\\\ 1 &amp;amp; 1 &amp;amp; 4 &amp;amp; 6 \\end{bmatrix}$  with  $\\alpha = 2$  ( $\\alpha \\leftrightarrow \\alpha^2$  is also MDS).
+
+![img-15.jpeg](img-15.jpeg)
+Figure 15:  $4 \\times 4$  MDS matrix with depth 3:  $M_{4,3}^{9,5} = \\begin{bmatrix} \\alpha + \\alpha^{-1} &amp;amp; \\alpha &amp;amp; 1 &amp;amp; 1 \\\\ 1 &amp;amp; \\alpha + 1 &amp;amp; \\alpha &amp;amp; \\alpha^{-1} \\\\ 1 + \\alpha^{-1} &amp;amp; 1 &amp;amp; 1 &amp;amp; 1 + \\alpha^{-1} \\\\ \\alpha^{-1} &amp;amp; \\alpha^{-1} &amp;amp; 1 + \\alpha^{-1} &amp;amp; 1 \\end{bmatrix}$</code></pre>`;
+---
+
+<BaseLayout title="MDS Matrices with Lightweight Circuits (2018/260)">
+  <article class="max-w-4xl mx-auto article-prose">
+    <nav class="mb-8">
+      <a href="/papers" class="text-blue-400 hover:text-blue-300">
+        &larr; Back to Papers
+      </a>
+    </nav>
+
+    <header class="mb-12">
+      <h1 class="text-3xl font-bold mb-4"
+        set:html={TITLE_HTML} />
+      <p class="text-gray-400 mb-2"
+        set:html={AUTHORS_HTML} />
+      <p class="text-gray-500 text-sm mb-4">
+        2018 &middot; eprint 2018/260
+      </p>
+      <div class="flex gap-4 text-sm">
+        <a
+          href={EPRINT_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          class="text-blue-400 hover:text-blue-300"
+        >
+          Paper (eprint) &rarr;
+        </a>
+      </div>
+      <p class="mt-4 text-xs text-gray-500">
+        All content below belongs to the original authors. This page
+        reproduces the paper for educational purposes. Always
+        <a
+          href={EPRINT_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          class="text-blue-400 hover:text-blue-300"
+        >cite the original</a>.
+      </p>
+      <p class="mt-1 text-xs text-gray-600">
+        Converted with: {CRAWLER} &middot; {CONVERTED_DATE}
+      </p>
+    </header>
+
+    <Fragment set:html={CONTENT} />
+
+  </article>
+</BaseLayout>

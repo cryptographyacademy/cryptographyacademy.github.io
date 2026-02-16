@@ -1,0 +1,443 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+
+const EPRINT_URL = 'https://eprint.iacr.org/2018/248';
+const CRAWLER = 'mistral';
+const CONVERTED_DATE = '2026-02-16';
+const TITLE_HTML = 'Stake-Bleeding Attacks on Proof-of-Stake Blockchains';
+const AUTHORS_HTML = 'Peter Gaži, Aggelos Kiayias, Alexander Russell';
+
+const CONTENT = `    <p class="text-gray-300">Peter Gaži [ IOHK Email: peter.gazi@iohk.io ] Aggelos Kiayias [ University of Edinburgh &amp; IOHK Email: aggelos.kiayias@ed.ac.uk ] Alexander Russell [ University of Connecticut Email: acr@cse.uconn.edu ]</p>
+
+    <h6 id="sec-2" class="text-base font-medium mt-4">Abstract</h6>
+
+    <p class="text-gray-300">We describe a general attack on proof-of-stake (PoS) blockchains without checkpointing. Our attack leverages transaction fees, the ability to treat transactions “out of context,” and the standard longest chain rule to completely dominate a blockchain. The attack grows in power with the number of honest transactions and the stake held by the adversary, and can be launched by an adversary controlling any constant fraction of the stake.</p>
+
+    <p class="text-gray-300">With the present statistical profile of blockchain protocols, the attack can be launched given a few years of prior blockchain operation; hence it is within the realm of feasibility for PoS protocols. Most importantly, it demonstrates how closely transaction fees and rewards are coupled with the security properties of PoS protocols. More broadly, our attack must be reflected and countered in any future PoS design that avoids checkpointing, as well as any effort to remove checkpointing from existing protocols. We describe several mechanisms for protecting against the attack that include context-sensitivity of transactions and chain density statistics.</p>
+
+    <h2 id="sec-3" class="text-2xl font-bold">I Introduction</h2>
+
+    <p class="text-gray-300">Proof-of-stake (PoS) blockchain protocols were envisioned as a solution to the immense energy demands of miner nodes in proof-of-work (PoW) based blockchain systems. PoS was proposed in discussions in the bitcoin forum and adopts the principle that the right to produce a new blockchain block should be awarded to a stakeholder with probability proportional to their current stake, as documented by the blockchain itself. Conceivably, such a blockchain discipline could yield desirable ledger properties without consuming significant real-world resources: no substantial energy expenditure would have to be invested to run the protocol. Such protocols would naturally replace the assumption of an honest majority of hashing power with the assumption of an honest majority of stake in the system. While the potential virtues of such PoS protocols are substantial, it was argued early on that the design of such schemes could be particularly challenging (see, e.g., <em>[x1]</em>) or perhaps even infeasible (see, e.g., <em>[x21]</em>).</p>
+
+    <p class="text-gray-300">One particularly critical threat in the PoS setting was documented by Buterin <em>[x5]</em> who referred to it as the problem of “long-range attacks” (also related to the concept of “costless-simulation” in, e.g., <em>[x21]</em>). This refers to the ability of a minority set of stakeholders to execute the blockchain protocol starting from the genesis block (or any sufficiently old state) and produce a valid alternative history of the system. Confronted with such alternative history and no other outside information beyond the genesis block, a freshly joining node would have no ability to reliably distinguish between this alternate history and the actual history. It follows that with such an attack a minority set of stakeholders could double-spend or erase past transactions, violating the fundamental persistence property of the resulting ledger. In the same blog post <em>[x5]</em>, however, a glimmer of hope was also provided: it was observed that the blockchains produced by such a minority set of stakeholders may have characteristics that could be used to distinguish them from the actual blockchain maintained by the honest majority. In particular, if timestamps are included in each block, it would be the case that a simple simulation of the protocol by a minority set of stakeholders would result in a blockchain that is more sparse in the time domain and, as a result, a longest chain rule at any particular moment would favor the blockchain produced by the honest parties.</p>
+
+    <p class="text-gray-300">A number of PoS protocols were proposed and implemented, e.g., the PPCoin <em>[x20]</em> and NXT cryptocurrencies <em>[x13]</em>. Recent efforts have additionally begun to rigorously analyze security in the PoS setting, leading to protocols with formal guarantees such as Algorand <em>[x23]</em>, Ouroboros <em>[x22]</em>, Snow White <em>[x6]</em>, and Ouroboros Praos <em>[x10]</em>. For the sake of the upcoming exposition, it will be useful to split these protocols into two classes:</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Eventual-consensus protocols that apply some form of a longest-chain rule to the blockchain. In this setting the immutability of a block increases gradually with the number of blocks created on top of it.</li>
+
+      <li>Blockwise-BA protocols that achieve the immutability of every single block via a full execution of a Byzantine Agreement (BA) protocol before moving on to production of any subsequent block.</li>
+
+    </ol>
+
+    <p class="text-gray-300">Of the above-listed PoS protocols, Algorand is a blockwise-BA protocol, while all the other protocols aim for eventual consensus. Looking ahead, our investigation proves relevant for the design of eventual-consensus PoS protocols; we mention Algorand here for the sake of comparison.</p>
+
+    <p class="text-gray-300">All of these protocols had to confront the problem of long-range attacks, which was eventually understood to be even more serious than originally thought. The additional complication—aptly named “posterior corruption” in <em>[x6]</em>—observes that simply examining time stamps will not be sufficient for dealing with long-range attacks. In fact, an attacker can attempt to</p>
+
+    <p class="text-gray-300">1See e.g., the post by user QuantumMechanic https://bitcointalk.org/index.php?topic=27787.0 and the ensuing discussion in 2011.</p>
+
+    <p class="text-gray-300">2Note that we include only PoS protocols for which a a sufficiently detailed whitepaper exists, cf. Fig. 2.</p>
+
+    <p class="text-gray-300">corrupt the secret keys corresponding to accounts that possessed substantial stake at some past moment in the history of the system. Assuming that such accounts have small (or even zero) stake at the present time, they are highly susceptible to bribery (or simple carelessness) which would expose their secret keys to an attacker. Armed with such a set of (currently low-stake) keys, the attacker can mount the long-range attack and in this case the density of the resulting blockchain in the time domain could be indistinguishable from the honestly generated public blockchain.</p>
+
+    <p class="text-gray-300">To address the posterior corruption and other long range attacks, a number of mitigating approaches have been employed (sometimes in conjunction) and can be organised into three types:</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Introduce some type of frequent <em>checkpointing mechanism</em>, that enables nodes to be introduced to the system by providing them a relatively recent block.</li>
+
+      <li>Employ <em>key-evolving cryptography</em> <em>[x10]</em> that calls for users to evolve their secret keys so that past signatures cannot be forged, even when a complete exposure of their current secret state takes place.</li>
+
+      <li>Enforce <em>strict chain density statistics</em>, where the expected number of participating players at any step of the protocol is known; thus alternative protocol execution histories that exhibit significantly smaller participation can be immediately dismissed as adversarial.</li>
+
+    </ol>
+
+    <p class="text-gray-300">Out of the above-mentioned PoS schemes, all eventual-consensus protocols (i.e., NXT, PPCoin, Ouroboros, Snow White, and Ouroboros Praos) employ the first mitigation strategy and assume some form of checkpointing. Ouroboros Praos employs the first and the second approach (key-evolving signatures) to additionally handle adaptive corruptions, while Algorand adopts the second and the third approach (strict chain density statistics) to the same end.</p>
+
+    <p class="text-gray-300">It is worth appreciating the distinction between these methods to address posterior corruption and long range attacks. Checkpointing neutralizes the problem entirely by enabling nodes to ignore alternative chains that are not consistent with the most recent checkpoint known to the node. However, this comes with a significant model restriction: for any type of checkpointing to work, nodes must either be frequently online (so they adopt a recent checkpoint block they have received from the network as active participants) or receive reliable (trusted) information when (re)introduced to the system after a long period of being offline (or when they first join). This amounts to an additional trust assumption necessary for secure operation of the system, and as such is clearly undesirable in a decentralized, permissionless setting. Similarly, enforcing strict chain density statistics requires reliably estimating the number of participants at any stage of the protocol and is also model-restricting: the protocol will not be able to operate in an environment permitting an arbitrary number of parties to be invoked for execution. On the other hand, key evolving cryptography is a more <em>algorithmic</em> mitigation that comes with a minimal requirement on the model: nodes should merely have the ability to erase private state. Algorithmic mitigations seem clearly preferable to model-restricting ones whenever available.</p>
+
+    <p class="text-gray-300">It is important to observe that key-evolving cryptography, the only algorithmic mitigation listed above, focuses specifically on the issue of posterior corruption; in particular, it is unclear if key evolution can thwart all possible long-range attacks. Thus, our work is motivated by the following question:</p>
+
+    <p class="text-gray-300">&gt; <em>Is key-evolving cryptography sufficient to prevent all possible long-range attacks, and in this way achieve PoS that does not need to rely on any model-restricting mitigations?</em></p>
+
+    <h3 id="sec-4" class="text-xl font-semibold mt-8">V-A Our Results</h3>
+
+    <p class="text-gray-300">We answer the above question in the negative by introducing a new class of long-range attacks against eventual-consensus PoS protocols, called <em>stake-bleeding</em> attacks. Stake-bleeding is an effective strategy for mounting a long-range attack that <em>does not rely on posterior corruption</em>; thus it cannot be prevented by key-evolving cryptographic techniques. The only requirement for the attack is that the underlying blockchain protocol allows transaction fees to be used as rewards for running the protocol, a standard feature in blockchain protocols to incentivize participation in ledger maintenance.</p>
+
+    <p class="text-gray-300">The idea of the attack is as follows: an attacking stakeholder minority coalition launches a long-range attack that at the same time includes all transactions that have been posted in the honestly maintained public blockchain. Given that the fees from the transactions will be used to reward the ones that produce the blocks in some way, a large number of the transaction fees in the private attacker blockchain will be collected by the malicious coalition (fees originating from accounts that do not exist in the private chain would have to be forfeited). Assuming the blockchain system has run for a substantial period of time, it is conceivable that the accrued transaction fees will turn the attacking minority coalition into a majority that will be able to advance the private blockchain at a speed faster than the honestly maintained public blockchain. Due to the costless simulation nature of the long-range attack it would be possible to mount a stake-bleeding attack from an arbitrary point in the past (assuming checkpointing is either not used or extends sufficiently back into the past) and thus the attacking coalition could rewrite the history of transactions.</p>
+
+    <p class="text-gray-300">We prove that the theoretical bound that the attacker would have to go back in the history of the PoS system to launch the attack is <span class="math">\\approx(2-4\\alpha_{A})/f</span> where <span class="math">\\alpha_{A}</span> denotes the relative stake of the minority coalition and <span class="math">f</span> is the relative fees that are made available per unit of time.</p>
+
+    <p class="text-gray-300">Using the Bitcoin blockchain as a basis for a feasibility evaluation, on November 3th, 2017 the 1-day average of transaction fees per block was 2.28BTC. The BTC in circulation on this same day are about 16.66 million, giving a relative fee rate of <span class="math">1.36\\cdot 10^{-7}</span>. It follows that, at the current rate, a hypothetical PoS blockchain with the same fee–currency profile as bitcoin would be of theoretical interest only. Nevertheless, with a <span class="math">20</span>-fold increase in total transaction fees per unit of</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Attacker Relative Stake</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Years of Operation</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">0.1</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">11.11</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">0.2</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">8.33</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">0.3</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">5.55</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">0.4</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">2.77</td>
+
+          </tr>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">Fig. 1: Years of blockchain history needed to launch a stake-bleeding attack assuming a minimum relative transaction fee volume of  <span class="math">2.73 \\cdot 10^{-7}</span>  per minute (a 20-fold increase based on recent (3rd of November 2017) values drawn from the Bitcoin blockchain) in a hypothetical PoS blockchain.</p>
+
+    <p class="text-gray-300">time <span class="math">^6</span>  a stake bleeding attack would be feasible, requiring less than 6 years worth of history for a  <span class="math">30\\%</span>  attacker, cf. Figure 1. In particular, this indicates that stake-bleeding attacks must be a design consideration in the general threat model for long-lived PoS blockchain systems.</p>
+
+    <p class="text-gray-300">We then consider possible mitigation strategies for stake bleeding attacks. First, one can observe that stake bleeding attacks would result in a private blockchain that initially exhibits a sparse block density in the time-domain that gradually increases. This may be atypical for honestly maintained blockchains and could be used as part of the chain selection rule. Nevertheless, a different mitigation that is much simpler to implement is to introduce context in each transaction: a context-sensitive transaction is a transaction that includes the hash of the blockchain at some recent prior point. It is easy to see that such transactions cannot be transferred to an alternative blockchain that is privately maintained by a malicious set of stakeholders. We note that this mitigation has been considered before for a different purpose; see [Lar13] where it was employed to prevent an attacker to transfer "coin-age-destroyed" to a secretly maintained blockchain.</p>
+
+    <p class="text-gray-300">To conclude we illustrate a systematized presentation of long-range attacks, their requirements and the way they can be mitigated in Figure 2. We observe that stake bleeding attacks would adversely affect all currently proposed eventual-consensus PoS protocols if the checkpointing mechanism was removed. Therefore, it has to be taken into account in any future effort to remove the undesirable checkpointing mechanism from these protocols, as well as when designing new eventual-consensus PoS protocols that do not rely on checkpointing. Introducing context-sensitivity in transactions is a simple "algorithmic" mitigation mechanism that can thus be added to the design arsenal of PoS blockchain protocols in order to relax model assumptions such as negligible transaction fees or frequent checkpointing.</p>
+
+    <p class="text-gray-300">The stake-bleeding attack can be launched even in a generous computational model that affords many advantages</p>
+
+    <p class="text-gray-300">to the blockchain protocol:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>The adversary requires no control over message delivery: the attack can be launched in a fully synchronous communication and computation environment, with all messages—including those generated by the adversary—delivered by reliable broadcast.</li>
+
+      <li>The adversary requires no dynamic corruptions: the attack can be launched by a fixed collection of adversarial parties determined at the beginning of the execution.</li>
+
+      <li>The adversary requires no introduction of new parties or deactivation of honest parties: the attack can be launched with a static population of fully participating parties.</li>
+
+    </ul>
+
+    <p class="text-gray-300">Below, we outline a simple, strong computational model reflecting the features mentioned above. The model is obtained by suitably strengthening the framework from [KRDO17], and is sufficient to support our attack. We emphasize that adopting such a strong model only broadens the applicability and strength of the attack, which can be launched in typical blockchain models that provide the adversary significantly more power [GKL15], [PSS17], [BPS16], [DGKR17].</p>
+
+    <p class="text-gray-300">a) Time, slots, and synchrony: We consider a setting where time is unambiguously divided into discrete units called slots; participating parties are equipped with synchronized clocks that indicate the current slot. The model additionally permits reliable, synchronous broadcast: each party may broadcast, at the beginning of each time slot, a message which is then reliably delivered to all other parties by the end of the slot. b) Adversarial corruption: The model involves a fixed collection of participating parties  <span class="math">\\mathcal{U}</span> . An adversary  <span class="math">\\mathcal{A}</span>  in our model is associated with a fixed subset of adversarial parties. We overload the symbol  <span class="math">\\mathcal{A}</span>  to denote the subset of adversarial parties; the set of honest parties is denoted  <span class="math">\\mathcal{H}</span> . Honest parties are active at all times, receiving all messages sent by the other parties, and follow the protocol under consideration. The adversary is activated in each slot, and may arbitrarily direct the behavior of adversarial parties. Note that messages sent by adversarial parties are subject to the broadcast constraint—they are synchronously delivered to all honest parties. c) The INIT functionality; initial stake and transactions; the environment: The model is associated with an (idealized) initialization functionality INIT. The INIT functionality is parameterized by an initial stake distribution. This is an assignment of nonnegative numbers to the players which we write as  <span class="math">\\mathbb{S}_0 = \\big((U_1,s_1),\\ldots ,(U_n,s_n)\\big)</span> . The functionality INIT <span class="math">^{\\mathbb{S}_0}</span>  operates as follows:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Prior to any computation of the parties, the functionality determines, for each party  <span class="math">U \\in \\mathcal{U}</span> , a pair of public and private keys  <span class="math">(\\mathsf{pk}_U, \\mathsf{sk}_U)</span> .</li>
+
+      <li>During the protocol, the functionality responds to a message from the user  <span class="math">U</span>  of the form key with  <span class="math">\\mathsf{sk}_U</span> , the secret key  <span class="math">\\mathsf{sk}_U</span>  of the user  <span class="math">U</span> .</li>
+
+      <li>During the protocol, the functionality responds to any message of the form genesis_block with the "genesis block"  <span class="math">B_{0}</span>  consisting of the initial stake distribution and the public keys associated with the users.</li>
+
+    </ul>
+
+    <p class="text-gray-300">The model introduces a further entity: the environment  <span class="math">\\mathcal{Z}</span> . In our setting, the environment is merely responsible for generating</p>
+
+    <p class="text-gray-300">Fig. 2: Overview of long-range attacks, the associated attack requirements, possible mitigations and our results. The term "pure longest chain rule" refers to a chain selection rule that considers the length of the blockchain as the sole criterion. A mitigation is classified as algorithmic if it prevents the attack by hardening the protocol without weakening the model; it is model-restricting if it strengthens the model assumptions so as to put the attack outside of the model or to otherwise restrict the execution environment in a significant way that is incongruent with the intended operational setting of decentralised blockchain protocols such as Bitcoin. Note that Algorand is a blockwise-BA protocol, the other depicted protocols are of the eventual-consensus type. We include all PoS protocols for which a sufficiently detailed whitepaper exists (specifically, PPCoin [KN12], NXT [Com14], Algorand [Mic16], Ouroboros [KRDO17], Snow White [BPS16], and Ouroboros Praos [DGKR17]). Others such as Casper and Bitshares are not sufficiently well documented to include in the comparison.* !<a href="img-0.jpeg">img-0.jpeg</a></p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Specifically, the description of Casper [BG17] merely provides a "finality" layer on top of a non-specified PoS system; regarding Bitshares [SL15], the whitepaper for distributed consensus to be found in http://docs.bitshares.org/bitshares/papers/index. is not available (Checked March 4th, 2018)</li>
+
+    </ul>
+
+    <p class="text-gray-300">transactions, which are provided as inputs to the parties. In particular, in each round of the protocol, the environment may provide each party with a collection of transactions; these have the form  <span class="math">(U, U&#x27;, s)</span>  which calls for the transfer of  <span class="math">s</span>  stake from party  <span class="math">U</span>  to party  <span class="math">U&#x27;</span> . (For our attack, it suffices to consider an environment as simply a fixed schedule of transactions delivered to the parties. Note that a typical blockchain security model would imbue the environment with significant further powers: an information channel to the adversary, adaptive choice of transactions, scheduling of message deliveries, etc.)</p>
+
+    <p class="text-gray-300">Finally, given an initialization functionality  <span class="math">\\mathsf{INIT}^{\\mathbb{S}_0}</span>  and an environment  <span class="math">\\mathcal{Z}</span> , an execution of a protocol consists of the genesis block  <span class="math">B_0</span> , the secret keys of the parties, the sequence of transactions delivered to the players by the environment, and the entire sequence of messages broadcast by the players.</p>
+
+    <p class="text-gray-300">a) Transaction ledger properties: A blockchain is a data structure which associates with each time slot (at most) one block. Individual blocks consist of a collection of transactions,</p>
+
+    <p class="text-gray-300">in addition to protocol-specific metadata. In the context of the model described above, we assume that the genesis block  <span class="math">B_{0}</span>  appears as a default initial block in any blockchain, associated with time 0. A chain also immediately induces a stake distribution,  <span class="math">\\mathbb{S}_{\\mathbf{C}}</span> , given by applying the transactions in the chain to the stake distribution of the genesis block. For a blockchain  <span class="math">\\mathbf{C}</span> , we let  <span class="math">\\mathbf{C}^{\\lfloor \\ell \\rfloor}</span>  denote the prefix of  <span class="math">\\mathbf{C}</span>  obtained by removing the last  <span class="math">\\ell</span>  blocks.</p>
+
+    <p class="text-gray-300">Intuitively, a blockchain protocol  <span class="math">\\Pi</span>  permits a collection of parties to collectively maintain a common ledger. We will focus on protocols that, in fact, maintain an individual ledger for each party (at each point of time); the notion of a common ledger is guaranteed by appropriate persistence and liveness properties of the protocol  <span class="math">\\Pi</span> :</p>
+
+    <p class="text-gray-300">Persistence. Once a node of the system proclaims a certain transaction  <span class="math">tx</span>  as stable, the remaining honest nodes, if queried, will either report  <span class="math">tx</span>  in the same position in the ledger or will not report as stable any transaction in conflict to  <span class="math">tx</span> . Here the notion of stability is a predicate that is parameterized by a security parameter  <span class="math">k</span> ; specifically, a</p>
+
+    <p class="text-gray-300">transaction is declared <em>stable</em> (by a party with chain <span class="math">\\mathbf{C}</span>) if and only if it appears in <span class="math">\\mathbf{C}^{\\lfloor k}</span>. If all honest nodes in the system attempt to include a certain transaction, then after the passing of time corresponding to <span class="math">u</span> slots (called the transaction confirmation time), all nodes, if queried and responding honestly, will report the transaction as stable.</p>
+
+    <p class="text-gray-300">Intuitively speaking, a <em>secure blockchain protocol</em> <span class="math">\\Pi</span> guarantees that these properties are possessed by the ledgers (recorded in the blockchains) held by the honest parties, under appropriate constraints on the adversary <span class="math">\\mathcal{A}</span>.</p>
+
+    <h5 id="sec-8" class="text-base font-semibold mt-4">Chain selection rules</h5>
+
+    <p class="text-gray-300"><em>the longest chain rule:</em> We focus our attention on protocols defined by a <em>chain selection rule</em>: Each step of the protocol calls for certain players to broadcast a blockchain; players then apply a <em>selection rule</em> which may result in replacing their local chain with one of the broadcast chains. We focus on the “longest chain rule”: broadcast blockchains are checked for <em>validity</em>—a protocol-dependent property—following which the longest valid chain, including the one held by the player, is adopted. (Length is simply the number of blocks; for concreteness, we assume ties are broken lexicographically.)</p>
+
+    <h5 id="sec-9" class="text-base font-semibold mt-4">Proof-of-stake protocols</h5>
+
+    <p class="text-gray-300">We focus on ledgers that are maintained via a <em>proof-of-stake</em> protocol <span class="math">\\Pi</span>, which confers the right to extend a chain to a party <span class="math">U</span> with probability proportional to the party’s stake in (a prefix of) the chain.</p>
+
+    <p class="text-gray-300">The probability of a party being allowed to extend a given chain <span class="math">\\mathbf{C}</span> (an event denoted as <span class="math">\\mathsf{ExtendOpportunity}_{\\Pi}</span>) is proportional to the stake under control of this party according to <span class="math">\\mathbb{S}_{\\mathbf{C}^{\\lfloor \\ell}}</span>, the stake distribution induced from <span class="math">\\mathbf{C}^{\\lfloor \\ell}</span>. Here <span class="math">\\ell</span> is a protocol-specific parameter typically related to the security parameter <span class="math">k</span> discussed above.</p>
+
+    <p class="text-gray-300">We are intentionally vague about the details of the probability space in the description above, as this depends on the details of the underlying proof-of-stake protocol. Additionally, we ignore the issue of “persistence depth” in Theorem 1 below, simply setting <span class="math">\\ell=0</span>. Accounting for this would change the conclusion by an additive <span class="math">\\ell</span> factor.</p>
+
+    <h5 id="sec-10" class="text-base font-semibold mt-4">Relative stake and honest majority</h5>
+
+    <p class="text-gray-300">As a matter of notation, for a set of parties <span class="math">\\mathcal{X}</span> and a stake distribution <span class="math">\\mathbb{S}</span>, we denote by <span class="math">\\mathbb{S}(\\mathcal{X})</span> the stake held by the parties in <span class="math">\\mathcal{X}</span>. At a particular moment in the execution of a blockchain protocol (often understood from the context), we let <span class="math">\\alpha_{\\mathcal{X}}\\in[0,1]</span> denote the <em>relative stake</em> of the parties in <span class="math">\\mathcal{X}</span>. Specifically, this is the quantity <span class="math">\\mathbb{S}_{\\mathbf{C}}(\\mathcal{X})/\\mathbb{S}_{\\mathbf{C}}(\\mathcal{U})</span> where <span class="math">\\mathbf{C}</span> is the chain held by the honest users. (Note that due to the broadcast assumption, all honest players hold the same longest valid chain in each slot.) We say that an execution of <span class="math">\\Pi</span> has an <em>honest majority</em> if <span class="math">\\alpha_{\\mathcal{A}}&lt;1/2</span> at every step of the protocol.</p>
+
+    <h5 id="sec-11" class="text-base font-semibold mt-4">Block rewards and transaction fees</h5>
+
+    <p class="text-gray-300">Most blockchain protocols involve some form of block rewards and transaction fees. To be able to make generic statements about all the considered protocols, let us introduce the following notation:</p>
+
+    <p class="text-gray-300">denotes the total fees (as a fraction of total stake) of all new transactions that were created by <span class="math">\\mathcal{Z}</span> in the slot <span class="math">i</span> of execution <span class="math">\\mathcal{E}</span>. denotes the total amount of coins that were <em>created by the protocol</em> <span class="math">\\Pi</span> and given to the party creating the block in the blockchain <span class="math">\\mathbf{C}</span> in slot <span class="math">i</span>. denotes the total amount transferred from parties in <span class="math">\\mathcal{X}</span> to parties in <span class="math">\\mathcal{Y}</span> on the blockchain <span class="math">\\mathbf{C}</span> in slot <span class="math">i</span>.</p>
+
+    <h2 id="sec-12" class="text-2xl font-bold">III The Stake-Bleeding Attack</h2>
+
+    <h3 id="sec-13" class="text-xl font-semibold mt-8">III-A Attack Description</h3>
+
+    <p class="text-gray-300">We first informally describe how our attack operates in the context of a generic proof-of-stake blockchain defined by a protocol <span class="math">\\Pi</span>. To simplify the presentation, we assume throughout that the attacker controls some moderate proportion of stake <span class="math">\\alpha_{\\mathcal{A}}&lt;1/2</span>.</p>
+
+    <p class="text-gray-300">The adversary <span class="math">\\mathcal{A}</span> simulates the honest protocol <span class="math">\\Pi</span> and maintains a local copy of the current blockchain (denoted <span class="math">\\mathbf{C}</span>) as prescribed by this protocol. Additionally, it also maintains an alternative blockchain <span class="math">\\mathbf{\\hat{C}}</span> that is initially empty and is kept hidden from honest parties.</p>
+
+    <p class="text-gray-300">The adversary checks in every time slot whether it is allowed to extend the chain <span class="math">\\mathbf{C}</span> or <span class="math">\\mathbf{\\hat{C}}</span> according to the rules of the protocol <span class="math">\\Pi</span>. It skips all opportunities to extend <span class="math">\\mathbf{C}</span>, hence not contributing to its growth at all. On the other hand, whenever an opportunity to extend <span class="math">\\mathbf{\\hat{C}}</span> arises, <span class="math">\\mathcal{A}</span> extends <span class="math">\\mathbf{\\hat{C}}</span> with a new block, and inserts into this new block all the transactions from the honest chain <span class="math">\\mathbf{\\hat{C}}</span> that are not yet included in <span class="math">\\mathbf{\\hat{C}}</span> and are valid in the context of <span class="math">\\mathbf{\\hat{C}}</span> (or as many of them as allowed by the rules of <span class="math">\\Pi</span>). This entitles <span class="math">\\mathcal{A}</span> to receive (on <span class="math">\\mathbf{\\hat{C}}</span>) any block-creation reward and any transaction fees coming from the included transactions.</p>
+
+    <p class="text-gray-300">As the protocol progresses, with overwhelming probability both <span class="math">\\mathbf{C}</span> and <span class="math">\\mathbf{\\hat{C}}</span> will be growing, with <span class="math">\\mathbf{C}</span> growing more quickly. While the relative stake of <span class="math">\\mathcal{A}</span> on <span class="math">\\mathbf{C}</span> will possibly be decreasing due to the block-creation rewards granted to block creators in <span class="math">\\mathbf{C}</span>, its relative stake on the chain <span class="math">\\mathbf{\\hat{C}}</span> will be growing both due to the block rewards and transaction fees. Under some realistic assumptions on the relative sizes of the transaction fees and block rewards (that are spelled out in Section III-B), the adversarial relative stake in <span class="math">\\mathbf{\\hat{C}}</span> will eventually exceed the honest relative stake in <span class="math">\\mathbf{C}</span>. From this point on, the chain <span class="math">\\mathbf{\\hat{C}}</span> grows faster (in expectation) than the chain <span class="math">\\mathbf{C}</span> and eventually becomes longer. If <span class="math">\\Pi</span> uses the plain longest-chain rule that rejects blocks in the future, <span class="math">\\mathcal{A}</span> can now easily violate the persistence of the ledger by publishing <span class="math">\\mathbf{\\hat{C}}</span>, which will be adopted by all honest parties following <span class="math">\\Pi</span>. Moreover, if <span class="math">\\mathcal{A}</span> adds a transaction to the end of <span class="math">\\mathbf{\\hat{C}}</span> just before publishing it in which it transfers enough stake to honest parties to no longer control the majority, it will not violate the “honest majority” assumption as described in Section II-B.</p>
+
+    <p class="text-gray-300">A more concise description of the adversary that executes our attack is given in Figure 3. The description uses a generic <span class="math">\\mathsf{ExtendOpportunity}_{\\Pi}(\\mathbf{C})</span> predicate that is true whenever <span class="math">\\mathcal{A}</span> is allowed to extend a given chain <span class="math">\\mathbf{C}</span> according to the rules of <span class="math">\\Pi</span>. Additionally, <span class="math">\\mathsf{length}(\\mathbf{C})</span> denotes the length of the chain <span class="math">\\mathbf{C}</span> from the perspective of the adversary.</p>
+
+    <h3 id="sec-14" class="text-xl font-semibold mt-8">III-B Attack Analysis</h3>
+
+    <p class="text-gray-300">The proof-of-stake protocol <span class="math">\\Pi</span> has to satisfy several properties in order to be susceptible to the attack described in</p>
+
+    <p class="text-gray-300">The adversary  <span class="math">\\mathcal{A}</span>  maintains its view of the public chain  <span class="math">\\mathbf{C}</span>  according to  <span class="math">\\Pi</span>  and its own, private chain  <span class="math">\\hat{\\mathbf{C}}</span> ; both initially empty.  <span class="math">\\mathcal{A}</span>  follows  <span class="math">\\Pi</span>  with the following exceptions:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Upon ExtendOpportunity <span class="math">_{\\Pi}(\\mathbf{C})</span> : Do nothing.</li>
+
+      <li>Upon ExtendOpportunity <span class="math">_{\\Pi}(\\hat{\\mathbf{C}})</span> : Extend  <span class="math">\\hat{\\mathbf{C}}</span>  with a new block containing all transactions from  <span class="math">\\mathbf{C}</span>  that are not yet in  <span class="math">\\hat{\\mathbf{C}}</span>  and do not compromise the validity of  <span class="math">\\hat{\\mathbf{C}}</span>  according to  <span class="math">\\Pi</span> . Keep  <span class="math">\\hat{\\mathbf{C}}</span>  private.</li>
+
+      <li>Upon length  <span class="math">(\\hat{\\mathbf{C}}) &amp;gt; \\text{length}(\\mathbf{C})</span> : Transfer stake majority in  <span class="math">\\hat{\\mathbf{C}}</span>  to  <span class="math">\\mathcal{H}</span> . Publish  <span class="math">\\hat{\\mathbf{C}}</span>  according to  <span class="math">\\Pi</span> .</li>
+
+    </ul>
+
+    <p class="text-gray-300">Section III-A. The main requirements are:</p>
+
+    <p class="text-gray-300">(i) No frequent checkpoints. The protocol  <span class="math">\\Pi</span>  must operate according to the longest-chain rule: out of all valid chains seen by the honest parties,  <span class="math">\\Pi</span>  prescribes them to adopt the longest one.</p>
+
+    <p class="text-gray-300">While some deviations from this requirement are possible,  <span class="math">\\Pi</span>  must necessarily allow reorganizations long into the past: if a maximum depth of a reorganization is specified and small (i.e., an honest party is not allowed by  <span class="math">\\Pi</span>  to change its view of the main chain more than several blocks (or slots) into the past even if there was an otherwise-preferable candidate chain), then the attack is not applicable.</p>
+
+    <p class="text-gray-300">(ii) Transaction fees. The protocol  <span class="math">\\Pi</span>  has to involve transaction fees, or more broadly, any transfers of coins from transacting parties to the parties maintaining the ledger. In greater detail, the attack only succeeds if  <span class="math">\\hat{\\mathbf{C}}</span>  eventually grows faster than  <span class="math">\\mathbf{C}</span> . Since the growth speed of  <span class="math">\\mathbf{C}</span>  (resp.  <span class="math">\\hat{\\mathbf{C}}</span> ) is proportional to the relative stake of honest parties in  <span class="math">\\mathbf{C}</span>  (resp. of the adversary in  <span class="math">\\hat{\\mathbf{C}}</span> ), we need that the latter eventually exceeds the former.</p>
+
+    <p class="text-gray-300">Observe that the relative stake of the adversary in  <span class="math">\\hat{\\mathbf{C}}</span>  is increased in every slot  <span class="math">i</span>  when it creates a block by:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>the reward for this block  <span class="math">\\text{rewards}_{\\Pi}(\\hat{\\mathbf{C}}, i)</span> ;</li>
+
+      <li>all transfers from honest to adversarial parties  <span class="math">\\text{transfers}_{\\mathcal{H} \\to \\mathcal{A}}(\\hat{\\mathbf{C}}, i)</span> ;</li>
+
+      <li>all the fees</li>
+
+    </ul>
+
+    <div class="my-4 text-center"><span class="math-block">\\sum_ {j = i ^ {\\prime} + 1} ^ {i} \\operatorname {f e e s} _ {\\Pi} (\\mathcal {E}, j)</span></div>
+
+    <p class="text-gray-300">for all slots  <span class="math">j \\leq i</span>  that followed after the slot  <span class="math">i&#x27;</span>  containing the previous block in  <span class="math">\\hat{\\mathbf{C}}</span> .</p>
+
+    <p class="text-gray-300">On the other hand, the relative stake of the honest parties in  <span class="math">\\mathbf{C}</span>  is increased in every slot when a block is created in  <span class="math">\\mathbf{C}</span>  by  <span class="math">\\text{rewards}_{\\Pi}(\\mathbf{C}, i)</span>  (not by any  <span class="math">\\text{fees}_{\\Pi}</span> , as all fees in  <span class="math">\\mathbf{C}</span>  are paid by honest parties); and decreased by  <span class="math">\\text{transfers}_{\\mathcal{H} \\to \\mathcal{A}}(\\mathbf{C}, i)</span> . We assume</p>
+
+    <div class="my-4 text-center"><span class="math-block">\\operatorname {t r a n s f e r s} _ {\\mathcal {A} \\rightarrow \\mathcal {H}} (\\mathbf {C}, i) = \\operatorname {t r a n s f e r s} _ {\\mathcal {A} \\rightarrow \\mathcal {H}} (\\hat {\\mathbf {C}}, i) = 0.</span></div>
+
+    <p class="text-gray-300">(iii) Context-oblivious transactions. The valid transactions produced according to  <span class="math">\\Pi</span>  need to be oblivious to the</p>
+
+    <p class="text-gray-300">context in which they are to be used within the blockchain:  <span class="math">\\Pi</span>  must allow  <span class="math">\\mathcal{A}</span>  to take transactions from  <span class="math">\\mathbf{C}</span>  and use them in the different context of  <span class="math">\\hat{\\mathbf{C}}</span> .</p>
+
+    <p class="text-gray-300">(iv) Validity of low-growth chains. The protocol  <span class="math">\\Pi</span>  has to support "sleepy majority" to make sure that the chain  <span class="math">\\hat{\\mathbf{C}}</span> , which is being extended only by a minority of stakeholders (and hence exhibits small chain growth at its beginning), is still considered valid according to the rules of  <span class="math">\\Pi</span> .</p>
+
+    <p class="text-gray-300">In the following theorem, we give an estimate of the number of slots that are needed to perform our attack, as a function of the initial adversarial stake  <span class="math">\\alpha_{\\mathcal{A}}</span>  and the amount of fees that are created in transactions in each slot. For the sake of simplicity, we analyze the case  <span class="math">1/3 &amp;lt; \\alpha_{\\mathcal{A}} &amp;lt; 1/2</span>  even though the attack works for any constant  <span class="math">\\alpha_{\\mathcal{A}} &amp;gt; 0</span>  (see the remarks at the end of the section for the explicit bound).</p>
+
+    <p class="text-gray-300">Theorem 1. Let  <span class="math">\\Pi</span>  be a proof-of-stake blockchain protocol with stake-proportional growth satisfying the conditions (i)-(iv) above. Consider an execution of the protocol  <span class="math">\\Pi</span>  with the adversary  <span class="math">\\mathcal{A}</span>  given in Figure 3. Assume that</p>
+
+    <p class="text-gray-300">transfers  <span class="math">\\mathcal{H}\\to \\mathcal{A}(\\mathbf{C},i) = 0</span></p>
+
+    <p class="text-gray-300">rewards  <span class="math">\\Pi (\\mathbf{C}^{\\prime},i) = 0</span>  ， and</p>
+
+    <p class="text-gray-300">fees  <span class="math">\\Pi (\\mathcal{E},i)\\geq f</span></p>
+
+    <p class="text-gray-300">are satisfied in execution  <span class="math">\\mathcal{E}</span>  for both  <span class="math">\\mathbf{C}&#x27; \\in \\{\\mathbf{C}, \\hat{\\mathbf{C}}\\}</span>  and all  <span class="math">i &amp;gt; 0</span> . Let  <span class="math">1/3 &amp;lt; \\alpha_{\\mathcal{A}} &amp;lt; 1/2</span>  denote the initial relative stake of the adversary  <span class="math">\\mathcal{A}</span> . Let  <span class="math">T</span>  denote the slot in which  <span class="math">\\text{length}(\\hat{\\mathbf{C}}) &amp;gt; \\text{length}(\\mathbf{C})</span>  occurs. Then we have</p>
+
+    <div class="my-4 text-center"><span class="math-block">\\mathbb {E} [ T ] \\leq \\frac {3 - 6 \\alpha_ {\\mathcal {A}}}{f}</span></div>
+
+    <p class="text-gray-300">and  <span class="math">T</span>  will be tightly concentrated around its expectation.</p>
+
+    <p class="text-gray-300">Proof: Let  <span class="math">\\alpha_{\\mathcal{P}}^{\\mathbf{C}&#x27;}[i]</span>  for  <span class="math">\\mathcal{P} \\in \\{\\mathcal{A}, \\mathcal{H}\\}</span> ,  <span class="math">\\mathbf{C}&#x27; \\in \\{\\mathbf{C}, \\hat{\\mathbf{C}}\\}</span>  and  <span class="math">i &amp;gt; 0</span>  denote the relative stake of the set of players  <span class="math">\\mathcal{P}</span>  in chain  <span class="math">\\mathbf{C}&#x27;</span>  in slot  <span class="math">i</span>  (recall that  <span class="math">\\mathcal{A}</span>  and  <span class="math">\\mathcal{H}</span>  denote the adversary and the honest parties, respectively). Additionally, let  <span class="math">\\mathrm{length}_i(\\mathbf{C}&#x27;)</span>  denote the length of the chain  <span class="math">\\mathbf{C}&#x27;</span>  in slot  <span class="math">i</span>  from the perspective of the adversary. Then the inequality  <span class="math">\\mathbb{E}[\\mathrm{length}_T(\\hat{\\mathbf{C}})] &amp;gt; \\mathbb{E}[\\mathrm{length}_T(\\mathbf{C})]</span>  translates (due to the stake-proportional growth assumption) to</p>
+
+    <div class="my-4 text-center"><span class="math-block">\\sum_ {i = 1} ^ {T} \\alpha_ {\\mathcal {A}} ^ {\\hat {\\mathbf {C}}} [ i ] &amp;gt; \\sum_ {i = 1} ^ {T} \\alpha_ {\\mathcal {H}} ^ {\\mathbf {C}} [ i ]. \\tag {1}</span></div>
+
+    <p class="text-gray-300">Since  <span class="math">\\text{rewards}_{\\Pi}(\\mathbf{C}&#x27;, i) = 0</span>  and the fees in  <span class="math">\\mathbf{C}</span>  are all paid (and received) by honest parties, we have  <span class="math">\\alpha_{\\mathcal{H}} := \\alpha_{\\mathcal{H}}^{\\mathbf{C}}[i] = 1 - \\alpha_{\\mathcal{A}}</span>  for all  <span class="math">i &amp;gt; 0</span>  and hence</p>
+
+    <div class="my-4 text-center"><span class="math-block">\\sum_ {i = 1} ^ {T} \\alpha_ {\\mathcal {H}} ^ {\\mathbf {C}} [ i ] = T (1 - \\alpha_ {\\mathcal {A}}).</span></div>
+
+    <p class="text-gray-300">To lower-bound the sum on the left-hand side of (1), define  <span class="math">T_{1}</span>  (respectively  <span class="math">T_{2}</span> ) to be the minimum slot that satisfies  <span class="math">\\alpha_{\\mathcal{A}}^{\\hat{\\mathbf{C}}}[T_1] \\geq \\alpha_{\\mathcal{H}}</span>  (respectively  <span class="math">\\alpha_{\\mathcal{A}}^{\\hat{\\mathbf{C}}}[T_2] \\geq 2\\alpha_{\\mathcal{H}} - \\alpha_{\\mathcal{A}}</span> ). Since the relative stake  <span class="math">\\alpha_{\\mathcal{A}}^{\\hat{\\mathbf{C}}}</span>  grows by at least  <span class="math">f</span>  per slot (as  <span class="math">\\mathcal{A}</span>  includes all</p>
+
+    <p class="text-gray-300">transactions from <span class="math">\\mathbf{C}</span> into <span class="math">\\mathbf{\\hat{C}}</span>), we get <span class="math">\\alpha_{\\mathcal{A}}+(T_{1}-1)f\\leq 1-\\alpha_{\\mathcal{A}}</span> (and similarly for <span class="math">T_{2}</span>), which gives us</p>
+
+    <p class="text-gray-300"><span class="math">T_{1}\\leq\\frac{1-2\\alpha_{\\mathcal{A}}}{f}+1\\quad\\text{and}\\quad T_{2}\\leq\\frac{2-4\\alpha_{\\mathcal{A}}}{f}+1\\;.</span> (2)</p>
+
+    <p class="text-gray-300">Note now that <span class="math">\\alpha_{\\mathcal{A}}^{\\mathbf{\\hat{C}}}[i]</span> can be lower-bounded by</p>
+
+    <p class="text-gray-300">\\[ \\alpha_{\\mathcal{A}}^{\\mathbf{\\hat{C}}}[i]\\leq\\begin{cases}\\alpha_{\\mathcal{A}}&\\text{for }i<T_{1}\\;,\\\\ 1-\\alpha_{\\mathcal{A}}&\\text{for }T_{1}\\leq i<T_{2}\\;,\\\\ 2-3\\alpha_{\\mathcal{A}}&\\text{for }i\\geq T_{2}\\;.\\end{cases} \\]</p>
+
+    <p class="text-gray-300">Therefore, (1) will be satisfied for any <span class="math">T</span> that satisfies</p>
+
+    <p class="text-gray-300"><span class="math">\\alpha_{\\mathcal{A}}(T_{1}-1)</span> <span class="math">+(1-\\alpha_{\\mathcal{A}})(T_{2}-T_{1})</span> <span class="math">+(2-3\\alpha_{\\mathcal{A}})(T-T_{2}+1)</span> <span class="math">&gt;(1-\\alpha_{\\mathcal{A}})T\\;.</span> (3)</p>
+
+    <p class="text-gray-300">Using (2) and solving for <span class="math">T</span> gives us the desired bound.</p>
+
+    <p class="text-gray-300">The concentration follows from the fact that the length of both <span class="math">\\mathbf{C}</span> and <span class="math">\\mathbf{\\hat{C}}</span> at some slot <span class="math">i</span> are determined by a sum of independent random variables for each slot <span class="math">1\\leq j\\leq i</span>. ∎</p>
+
+    <p class="text-gray-300">We note that we weakened the statement of Theorem 1 in several ways in order to simplify the presentation of its proof.</p>
+
+    <p class="text-gray-300">First, we focus on <span class="math">1/3&lt;\\alpha_{\\mathcal{A}}&lt;1/2</span> as otherwise the event defining <span class="math">T_{2}</span> would never occur. Nonetheless, it is easy to see that while our attack benefits from higher (sub-50%) initial adversarial stake, it can be performed also with <span class="math">\\alpha_{\\mathcal{A}}&lt;1/3</span> with a slightly modified analysis.</p>
+
+    <p class="text-gray-300">Second, Theorem 1 assumes zero block rewards and transfers from <span class="math">\\mathcal{H}</span> to <span class="math">\\mathcal{A}</span>. However, recall that <span class="math">\\mathsf{transfers}_{\\mathcal{H}\\to\\mathcal{A}}(\\mathbf{C},i)</span> are completely controlled by the environment, subject only to the restrictions described in Section II-A. (This is to capture that the security of the blockchain protocol does not rely on any particular assumption regarding the transactions that are to be stored in the ledger; rather it must operate securely for any such sequence of transactions.) Hence, for any <span class="math">\\mathsf{rewards}_{\\Pi}(\\mathbf{C},i)</span>, a situation where the same analysis applies can be simply achieved by setting <span class="math">\\mathsf{transfers}_{\\mathcal{H}\\to\\mathcal{A}}(\\mathbf{C},i)</span> so that the honest stake ratio in <span class="math">\\mathbf{C}</span> remains constant (as the adversarial stake ratio in <span class="math">\\mathbf{\\hat{C}}</span> will keep increasing). On the other hand, non-zero <span class="math">\\mathsf{rewards}_{\\Pi}(\\mathbf{\\hat{C}},i)</span> only make the attack succeed faster.</p>
+
+    <p class="text-gray-300">Finally, observe that we are quite pessimistic in the analysis, lower-bounding the values <span class="math">\\alpha_{\\mathcal{A}}^{\\mathbf{\\hat{C}}}[i]</span> as if they were not changing except in the slots <span class="math">T_{1}</span> and <span class="math">T_{2}</span>. By a more careful accounting one can obtain a better bound <span class="math">T\\approx(2-4\\alpha_{\\mathcal{A}})/f</span>.</p>
+
+    <h3 id="sec-16" class="text-xl font-semibold mt-8">III-C Implications for Existing PoS Protocols</h3>
+
+    <p class="text-gray-300">We now summarize to what extent are the preconditions described in Section III-B satisfied by various PoS protocols, both those coming from academic literature and real-world deployments, implying that stake-bleeding would be a consideration for them. We focus primarily on eventual consensus protocols, nevertheless we make a note on the applicability of our attack concept to the blockwise-BA setting. All of the eventual consensus protocols employ some form of checkpointing, presumably to prevent posterior corruption attacks; this general countermeasure prevents the stake bleeding attack (and any other long-range attack) as well in a trivial (and model-restricting) manner. Interestingly, if we remove checkpointing, all of the considered eventual consensus constructions would be susceptible to our attack, as they all satisfy the conditions (ii)-(iv) from Section III-B: they admit transaction fees, their transactions are context-oblivious, and low-growth chains are considered valid. In more detail we have the following.</p>
+
+    <p class="text-gray-300">The NXT protocol only allows to reorganize the last 720 blocks, hence forming a so-called moving checkpoint and violating condition (i) from Section III-B. A similar checkpointing mechanism is employed in PPCoin <em>[x11]</em>. The Snow White protocol <em>[x5]</em> also uses moving checkpoints to prevent the posterior corruption attack, and would also be susceptible to the stake bleeding attack without it. [KRD017] uses moving checkpoints as a part of its maxvalid chain-selection rule, neutralizing long-range attacks. Without checkpointing, Ouroboros would be susceptible to both posterior-corruption and stake-bleeding attacks, as it does not employ key-evolving cryptography. [DGKR17] uses the same maxvalid chain-selection rule as Ouroboros, imposing moving checkpoints. Without this countermeasure, Ouroboros Praos would still neutralize posterior corruption attacks thanks to its use of key-evolving signatures for signing blocks; however, it would be susceptible to our stake bleeding attack. [Mic16] as already discussed, is not an eventual-consensus protocol, but rather follows the blockwise-BA approach. Nonetheless, one can consider the applicability of the core idea of the stake bleeding attack to Algorand, aiming for creating an alternative sequence of blocks and exploiting stake bleeding to gain temporary majority of stake there. However, in the case of Algorand this attack is prevented by requiring a sufficient fraction of stakeholders to certify the outcome of each BA, which can be seen as violating the requirement (iv) in Section III-B. In fact, Algorand enforces a strict participation rule and hence it can always find the correct protocol execution, in a model-restricting fashion.</p>
+
+    <p class="text-gray-300">As already indicated, the above results imply that any attempt to remove model-restricting assumptions from these protocols needs to put into play, at minimum, some countermeasure against the stake bleeding attack. We discuss these in the final section.</p>
+
+    <h2 id="sec-17" class="text-2xl font-bold">IV Mitigations</h2>
+
+    <p class="text-gray-300">A natural way to remedy our attack is to modify the protocol <span class="math">\\Pi</span> to violate at least one of the requirements given in Section III-B. Doing this for requirements (i) or (ii) would lead to the trust assumption of a checkpointing service or to another model-restricting limitation bounding the transaction fees throughout the protocol execution to insignificant amounts. We hence rather focus on two alternative, algorithmic mitigations, aiming to violate the requirements (iii) and (iv).</p>
+
+    <h5 id="sec-18" class="text-base font-semibold mt-4">Minimum Chain Density in the Time-Domain</h5>
+
+    <p class="text-gray-300">A first observation that can be used to mitigate a stake bleeding attack is that a blockchain that is produced by the attack</p>
+
+    <p class="text-gray-300">of Section III-A has a period over which the density of the blockchain is rather sparse. We clarify the concept of density next: in all PoS protocols, it is allowed that some of the parties may not be online all the time (despite the fact that they are elected to participate in the protocol). The absence of their participation is something that can be detected by observing the blockchain. For instance, in the case of Ouroboros <em>[x11]</em>, there will be a number of “slots” that are left empty without a corresponding block; analogous observable quantities exist in the other protocols as well. This allows the protocol to detect and weed out blockchains with this deficiency that distinguishes them from the correct blockchain produced by honest parties. We do not pursue this direction further here.</p>
+
+    <h5 id="sec-19" class="text-base font-semibold mt-4">Context Sensitive Transactions</h5>
+
+    <p class="text-gray-300">A fundamental feature of a stake bleeding attack is taking a transaction “out of context” so to speak, i.e., copying it from the honestly maintained blockchain to the private blockchain maintained by the attacker. A very simple and effective way to prevent this from happening is to include “context”, i.e., the hash of a recent block, into each transaction. This idea has been discussed in the PoS setting at least as early as Larimer’s work in <em>[x10]</em> (see also <em>[x11]</em>) who introduced it to ensure that an attacker’s secret chain cannot take advantage of honest parties’ transactions to increase the total “coin-age“ value of the secret-chain they maintain (as “coin-age-destroyed” was a suggested mechanism for PoS that was proposed there). Here we use it for a different objective: to prevent transaction fees to “bleed” to the malicious parties over a period of time in a private chain. Using context sensitivity, the validity of a transaction would require the presence of that hash in the blockchain. This would only allow adversarially generated transactions to be transferable to the private blockchain, hence completely neutralizing the attack (as there would be no “bleeding” of honest stake anymore in the private blockchain). We remark that a seemingly similar mitigation has been proposed in <em>[x3]</em>, Section 2.2.2, to resolve a different issue where an attacker attempts to fork the blockchain in order to collect transaction fees that have been issued in the last few blocks produced by the honest participants. The mitigation suggested requires the transaction to include a recent block index and is insufficient to protect against stake-bleeding. In contrast, context-sensitivity as defined in this section requires the transaction to include the hash of a recent block.</p>
+
+    <h2 id="sec-20" class="text-2xl font-bold">V Conclusions</h2>
+
+    <p class="text-gray-300">We have presented a new class of long-range attacks, called stake-bleeding attacks, that are applicable to all investigated eventual-consensus PoS protocols when operated without any model-restricting assumptions. A stake-bleeding attack would require years of blockchain history to be successful given the current statistical profile of cryptocurrencies and hence they are not of immediate concern. Nevertheless, they point to an important design consideration from the cryptographic perspective. They show how it is possible to mount a long-range attack without relying on posterior corruptions, in fact without exploiting adaptivity of corruptions whatsoever. From this it is also easily inferred that key-evolving cryptography by itself is not a sufficient mitigation for long-range attacks and it is important to investigate additional algorithmic mitigations that thwart long rage attacks in trustless, permissionless environments without the resorting to checkpointing or other model-restricting assumptions.</p>
+
+    <h2 id="sec-21" class="text-2xl font-bold">Acknowledgment.</h2>
+
+    <p class="text-gray-300">Aggelos Kiayias was partly supported by Horizon 2020 research and innovation programme, project PRIVILEDGE, under grant agreement No 780477. Alexander Russell was partly supported by the National Science Foundation under Grant No. 1717432.</p>
+
+    <h2 id="sec-22" class="text-2xl font-bold">References</h2>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>[BG17] Vitalik Buterin and Virgil Griffith. Casper the friendly finality gadget. CoRR, abs/1710.09437, 2017.</li>
+
+      <li>[BGM14] Iddo Bentov, Ariel Gabizon, and Alex Mizrahi. Cryptocurrencies without proof of work. CoRR, abs/1406.5694, 2014.</li>
+
+      <li>[BPS16] Iddo Bentov, Rafael Pass, and Elaine Shi. Snow white: Provably secure proofs of stake. Cryptology ePrint Archive, Report 2016/919, 2016. http://eprint.iacr.org/2016/919.</li>
+
+      <li>[But14] Vitalik Buterin. Long-range attacks: The serious problem with adaptive proof of work. https://blog.ethereum.org/2014/05/15/long-range-attacks-the-serious-problem-with-adaptive-proof-of-work/, 2014.</li>
+
+      <li>[Com14] The NXT Community. NXT whitepaper. https://bravenewcoin.com/assets/Whitepapers/NxtWhitepaper-v122-rev4.pdf, July 2014.</li>
+
+      <li>[DGKR17] Bernardo David, Peter Gaži, Aggelos Kiayias, and Alexander Russell. Ouroboros praos: An adaptively-secure, semi-synchronous proof-of-stake protocol. Cryptology ePrint Archive, Report 2017/573, 2017. http://eprint.iacr.org/2017/573. To appear at EUROCRYPT 2018.</li>
+
+      <li>[Fra06] Matt Franklin. A survey of key evolving cryptosystems. Int. J. Security and Networks, 1(1/2), 2006.</li>
+
+      <li>[GKL15] Juan A. Garay, Aggelos Kiayias, and Nikos Leonardos. The bitcoin backbone protocol: Analysis and applications. In Elisabeth Oswald and Marc Fischlin, editors, EUROCRYPT 2015, Part II, volume 9057 of LNCS, pages 281–310. Springer, Heidelberg, April 2015. Updated version at http://eprint.iacr.org/2014/765.</li>
+
+      <li>[KN12] Sunny King and Scott Nadal. Ppcoin: Peer-to-peer crypto-currency with proof-of-stake. https://peercoin.net/assets/paper/peercoin-paper.pdf, August 2012.</li>
+
+      <li>[KRDO17] Aggelos Kiayias, Alexander Russell, Bernardo David, and Roman Oliynykov. Ouroboros: A provably secure proof-of-stake blockchain protocol. In Jonathan Katz and Hovav Shacham, editors, CRYPTO 2017, Part I, volume 10401 of LNCS, pages 357–388. Springer, Heidelberg, August 2017.</li>
+
+      <li>[Lar13] Dan Larimer. Transactions as proof-of-stake. https://bravenewcoin.com/assets/Uploads/TransactionsAsProofOfStake10.pdf, November 2013.</li>
+
+      <li>[Lar18] Dan Larimer. Delegated proof-of-stake consensus. https://bitshares.org/technology/delegated-proof-of-stake-consensus/, accessed 21.3.2018, 2018.</li>
+
+      <li>[Mic16] Silvio Micali. ALGORAND: The efficient and democratic ledger. CoRR, abs/1607.01341, 2016.</li>
+
+      <li>[Poe14] Andrew Poelstra. Distributed consensus from proof of stake is impossible. https://download.wpsoftware.net/bitcoin/old-pos.pdf, May 2014.</li>
+
+      <li>[Poe15] Andrew Poelstra. On stake and consensus. https://download.wpsoftware.net/bitcoin/pos.pdf, March 2015.</li>
+
+      <li>[PSS17] Rafael Pass, Lior Seeman, and Abhi Shelat. Analysis of the blockchain protocol in asynchronous networks. In Jean-Sébastien Coron and Jesper Buus Nielsen, editors, EUROCRYPT 2017, Part II, volume 10211 of LNCS, pages 643–673. Springer, Heidelberg, May 2017.</li>
+
+      <li>[SL15] Fabian Schuh and Daniel Larimer. Bitshares 2.0: General overview. https://bravenewcoin.com/assets/Whitepapers/bitshares-general.pdf, December 2015.</li>
+
+    </ul>`;
+---
+
+<BaseLayout title="Stake-Bleeding Attacks on Proof-of-Stake Blockchains (2018/248)">
+  <article class="max-w-4xl mx-auto article-prose">
+    <nav class="mb-8">
+      <a href="/papers" class="text-blue-400 hover:text-blue-300">
+        &larr; Back to Papers
+      </a>
+    </nav>
+
+    <header class="mb-12">
+      <h1 class="text-3xl font-bold mb-4"
+        set:html={TITLE_HTML} />
+      <p class="text-gray-400 mb-2"
+        set:html={AUTHORS_HTML} />
+      <p class="text-gray-500 text-sm mb-4">
+        2018 &middot; eprint 2018/248
+      </p>
+      <div class="flex gap-4 text-sm">
+        <a
+          href={EPRINT_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          class="text-blue-400 hover:text-blue-300"
+        >
+          Paper (eprint) &rarr;
+        </a>
+      </div>
+      <p class="mt-4 text-xs text-gray-500">
+        All content below belongs to the original authors. This page
+        reproduces the paper for educational purposes. Always
+        <a
+          href={EPRINT_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          class="text-blue-400 hover:text-blue-300"
+        >cite the original</a>.
+      </p>
+      <p class="mt-1 text-xs text-gray-600">
+        Converted with: {CRAWLER} &middot; {CONVERTED_DATE}
+      </p>
+    </header>
+
+    <Fragment set:html={CONTENT} />
+
+  </article>
+</BaseLayout>

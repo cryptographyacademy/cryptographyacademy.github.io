@@ -1,0 +1,1199 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+
+const EPRINT_URL = 'https://eprint.iacr.org/2023/824';
+const CRAWLER = 'mistral';
+const CONVERTED_DATE = '2026-02-16';
+const TITLE_HTML = 'Reed-Solomon Codes over the Circle Group';
+const AUTHORS_HTML = 'Ulrich Haböck, Daniel Lubarov, Jacqueline Nabaglo';
+
+const CONTENT = `    <p class="text-gray-300">Ulrich Haböck and Daniel Lubarov and Jacqueline Nabaglo</p>
+
+    <h6 id="sec-2" class="text-base font-medium mt-4">Abstract</h6>
+
+    <p class="text-gray-300">In this note we discuss Reed-Solomon codes with domain of definition within the unit circle of the complex extension <span class="math">\\mathbb{C}(F)</span> of a Mersenne prime field <span class="math">F</span>. Within this unit circle the interpolants of “real”, i.e. <span class="math">F</span>-valued, functions are again almost real, meaning that their values can be rectified to a real representation at almost no extra cost. Second, using standard techniques for the FFT of real-valued functions, encoding can be sped up significantly. Due to the particularly efficient arithmetic of Mersenne fields, we expect these “almost native” Reed-Solomon codes to perform as native ones based on prime fields with high two-adicity, but less processor-friendly arithmetic.</p>
+
+    <h6 id="sec-3" class="text-base font-medium mt-4">Contents</h6>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>1 Introduction</li>
+
+      <li>2 The complex extension and real FFTs</li>
+
+      <li>3 Interpolants over <span class="math">S_{1}</span></li>
+
+      <li>4 Almost native Reed-Solomon codes for Mersenne fields</li>
+
+    </ul>
+
+    <h2 id="sec-4" class="text-2xl font-bold">1 Introduction</h2>
+
+    <p class="text-gray-300">The performance of STARKs <em>[x1]</em>, i.e. scalable and transparent arguments of knowledge based on Reed-Solomon codes and the FRI <em>[x1, BSCI^{+}20]</em> proof of proximity, is largely determined by the finite field in which the witness trace is represented. While StarkWare’s implementation of their Cairo zero-knowledge virtual machine <em>[x11]</em> still uses cryptographically large prime fields, Plonky2 <em>[x34]</em> leverages the 64 bit small prime field with modulus</p>
+
+    <p class="text-gray-300"><span class="math">p=2^{64}-2^{32}+1,</span></p>
+
+    <p class="text-gray-300">commonly referred to as the <em>Goldilocks</em> field. While the size of the modulus enables efficient implementations for standard computer architectures, its multiplicative group is smooth enough to support efficient Fast Fourier transform (FFT) Reed-Solomon encoding, with two-adic subgroups up to size <span class="math">2^{32}</span>. The Goldilocks field has subsequently been adopted by many other projects, such as Polygon Hermez <em>[x10]</em> and Polygon Miden <em>[x29]</em>.</p>
+
+    <p class="text-gray-300">However, from the point of view of both efficient field implementation as well as arithmetic circuits, even smaller fields are desirable. At the time of writing, Risc Zero <em>[x1]</em> is the only project known to us which goes in this direction, using the 31 bit small Baby Bear prime</p>
+
+    <p class="text-gray-300"><span class="math">p=2^{31}-2^{27}+1</span></p>
+
+    <p class="text-gray-300">as the native modulus for the witnesses. As with Goldilocks, the multiplicative group of Baby Bear is sufficiently smooth for most practical applications, <span class="math">p-1=2^{27}\\cdot 3\\cdot 5.</span> There exist primes of similar form as Baby Bear, for example <span class="math">p=2^{31}+2^{30}+1</span>, which have comparable smooth multiplicative groups and efficient field arithmetic.</p>
+
+    <p class="text-gray-300">The most efficient fields for arithmetic seem to be Mersenne fields, defined by primes of the form <span class="math">p=2^{e}-1</span>. In particular, the prime</p>
+
+    <p class="text-gray-300"><span class="math">p=2^{31}-1</span></p>
+
+    <p class="text-gray-300">enables very efficient arithmetic on 32 bit architectures. Since <span class="math">2^{32}=2\\ (\\mathrm{mod}\\ p)</span>, a widened product encoded as <span class="math">2^{32}\\cdot x_{\\mathrm{hi}}+x_{\\mathrm{lo}}</span> is trivially reduced to a much smaller quantity, <span class="math">2\\cdot x_{\\mathrm{hi}}+x_{\\mathrm{lo}}</span>. However, as <span class="math">p-1=2\\cdot 3^{2}\\cdot 7\\cdot 11\\cdot 31\\cdot 151\\cdot 331</span>, the multiplicative group lacks two-adic subgroups, which are useful for efficient Cooley-Tukey Fast Fourier Transforms (FFTs).</p>
+
+    <p class="text-gray-300">In this write-up we describe almost native Reed-Solomon codes for Mersenne fields, which leverage FFT encoding over the circle group <span class="math">S_{1}</span> of the complex extension. Moving to the complex does not seem beneficial at first glance. First of all, extension field arithmetic is significantly more expensive than that of the base field, and secondly, code words become complex-valued, effectively halving the rate of our code. However, it turns out that for real, i.e. basefield-valued functions defined on a subgroup of <span class="math">S_{1}</span>, the interpolant over the rest of the circle group is again almost real, meaning that its values are within a real linear subspace which (essentially) depends only on the coset of the subgroup. Furthermore, using standard techniques for improving the FFT of real-valued functions, the cost of interpolation can be more than halved. Based on these facts we obtain Reed-Solomon codes which are “almost native” in the following sense:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>for real functions, the encoding costs are comparable to that of Cooley-Tukey-based encoding over an equally sized field with high two-adicty, and</li>
+
+      <li>the resulting codewords can be compressed to a wholly real-valued representation, causing essentially the same commitment costs as in the native case.</li>
+
+    </ul>
+
+    <p class="text-gray-300">Given the particularly efficient arithmetics of our target prime <span class="math">p=2^{31}-1</span> (see Table 1) we expect that almost native Reed-Solomon codes are equally performing as native solutions over fields like Baby Bear, while enjoying the benefits of faster field arithmetic at all other places, such as trace computation and arithmetic hashing.</p>
+
+    <p class="text-gray-300">The structure of the document is as follows. Section 2 is of preliminary character. It summarizes elementary properties on the complex extension and the unit circle group, and recaps facts on the FFT for real-valued functions. Section 3 is the core chapter and describes interpolants of real functions within the unit circle, yielding the aforementioned native representation of codewords. In Section 4, we apply our findings and introduce almost native Reed-Solomon codes. An implementation of our approach will be provided in a future version of the document.</p>
+
+    <h2 id="sec-5" class="text-2xl font-bold">2 The complex extension and real FFTs</h2>
+
+    <p class="text-gray-300">Although our main target are Mersenne fields, the results of this section hold for every prime field <span class="math">F=F_{p}</span> with modulus <span class="math">p=3\\ \\mathrm{mod}\\ 4</span>. That condition on <span class="math">p</span> is equivalent to demand that <span class="math">\\frac{p-1}{2}</span> is odd, or <span class="math">-1</span> is not a</p>
+
+    <p class="text-gray-300">quadratic residue. In this case the polynomial <span class="math">X^{2} + 1</span> is irreducible over <span class="math">F</span> and we can build the complex extension field <span class="math">\\mathbb{C}(F) = F[X] / (X^2 + 1)</span>. The extension is obtained by adjoining the formal root <span class="math">i := \\sqrt{-1}</span>,</p>
+
+    <div class="my-4 text-center"><span class="math-block">\\mathbb {C} (F) = \\{x + i \\cdot y: x, y \\in F \\},</span></div>
+
+    <p class="text-gray-300">and its field operations are imposed by the algebraic constraint <span class="math">i^2 = -1</span> on that root. The unit circle over <span class="math">F</span> is the algebraic set <span class="math">S_1 = \\{(x, y) \\in F^2 : x^2 + y^2 = 1\\}</span>, or in complex representation</p>
+
+    <div class="my-4 text-center"><span class="math-block">S _ {1} = \\{z \\in \\mathbb {C} (F) ^ {*}: z \\cdot \\bar {z} = 1 \\},</span></div>
+
+    <p class="text-gray-300">where <span class="math">\\bar{z}</span> denotes the conjugate <span class="math">\\bar{z} = x - i\\cdot y</span> of <span class="math">z = x + i\\cdot y</span>. Since conjugation is a field automorphism, <span class="math">S_{1}</span> is closed under complex multiplication, forming a subgroup of the complex multiplicative group <span class="math">\\mathbb{C}(F)^{*}</span>, the (unit) circle group.</p>
+
+    <p class="text-gray-300"><strong>Lemma 1 (Circle group).</strong> Let <span class="math">F = F_{p}</span> be a prime field with <span class="math">p = 3 \\mod 4</span>. Then the circle group <span class="math">S_{1}</span> over <span class="math">F</span> equals the group of <span class="math">(p + 1)</span>-th roots of unity in <span class="math">\\mathbb{C}(F)^{*}</span>, and has order <span class="math">p + 1</span>.</p>
+
+    <p class="text-gray-300"><strong>Proof.</strong> The Lemma is a simple consequence of the fact that conjugation equals the Frobenius isomorphism, <span class="math">\\overline{z} = z^p</span>. With this <span class="math">x^2 + y^2 = z \\cdot \\overline{z} = z^{p+1}</span>, and together with <span class="math">(p+1) \\mid (p^2 - 1)</span> we conclude that the circle group is equal to the order <span class="math">p+1</span> subgroup of the <span class="math">(p+1)</span>-th roots of unity.</p>
+
+    <p class="text-gray-300">The geometry of the complex plane over <span class="math">F</span> is similar to the classical case known from calculus. Although not needed in the sequel, we quickly cite the analogue of the polar form of complex numbers.</p>
+
+    <p class="text-gray-300"><strong>Proposition 1.</strong> Let <span class="math">F = F_{p}</span> be a prime field with <span class="math">p = 3 \\mod 4</span>. The multiplicative subgroup of all complex squares <span class="math">Q_{\\mathbb{C}} = \\{z^2 : z \\in \\mathbb{C}(F)^*\\}</span> decomposes into</p>
+
+    <div class="my-4 text-center"><span class="math-block">Q _ {\\mathbb {C}} = Q _ {F} \\otimes S _ {1},</span></div>
+
+    <p class="text-gray-300">where <span class="math">Q_{F}</span> are the <span class="math">\\frac{p - 1}{2}</span> many quadratic residues in the base field <span class="math">F</span>, and <span class="math">S_{1}</span> is the unit circle group over <span class="math">F</span> of order <span class="math">p + 1</span>.</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"><strong>Remark 1.</strong> In terms of group orders, we have $</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Q_{\\mathbb{C}(F)}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">= \\frac{p^2 - 1}{2} = \\frac{(p - 1)\\cdot(p + 1)}{2}<span class="math">. The real quadratic residues </span>Q_{F}<span class="math"> correspond to the odd </span>\\frac{p - 1}{2}<span class="math">-term, and the unit circle group </span>S_{1}<span class="math"> to the coprime factor </span>(p + 1)$.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300"><strong>Remark 2.</strong> The entire multiplicative group <span class="math">\\mathbb{C}(F)^*</span> decomposes into</p>
+
+    <div class="my-4 text-center"><span class="math-block">\\mathbb {C} (F) ^ {*} = Q _ {F} \\otimes S _ {\\pm 1},</span></div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">where <span class="math">S_{\\pm 1} = \\{z \\in \\mathbb{C}(F)^<em> : z \\cdot \\bar{z} \\in \\{\\pm 1\\}\\}</span> is the subgroup formed by the unit circle and the anti-unit circle <span class="math">S_{-1} = \\{z \\in \\mathbb{C}(F)^</em> : z \\cdot \\bar{z} = -1\\}</span>. In terms of group orders <span class="math">S_{\\pm 1}</span> corresponds to the <span class="math">2 \\cdot (p + 1)</span> term in $</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\mathbb{C}(F)^*</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">= 2 \\cdot (p + 1) \\cdot \\frac{p - 1}{2}$.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <h2 id="sec-6" class="text-2xl font-bold">Fourier transform and real FFTs</h2>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Suppose that <span class="math">H</span> is a multiplicative subgroup of an (arbitrary) finite field <span class="math">K</span> with order $</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">= N<span class="math">, and let </span>g<span class="math"> be a generator of </span>H<span class="math">. The (discrete) Fourier transform </span>\\hat{f}<span class="math"> of a function </span>f: H \\to K<span class="math"> is the function on </span>H$ defined by</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="my-4 text-center"><span class="math-block">\\hat {f} \\left(g ^ {k}\\right) := \\frac {1}{N} \\cdot \\sum_ {j = 0} ^ {N - 1} f \\left(g ^ {j}\\right) \\cdot g ^ {- k \\cdot j}, \\tag {1}</span></div>
+
+    <p class="text-gray-300">3</p>
+
+    <p class="text-gray-300"><span class="math">k=0,\\ldots,N-1</span>. Its values are the coefficients of the <em>interpolant</em> of <span class="math">f</span>, i.e. the unique polynomial <span class="math">p(X)</span> of degree less than <span class="math">N</span> which interpolates <span class="math">f</span> over <span class="math">H</span>,</p>
+
+    <p class="text-gray-300"><span class="math">f(g^{i})=\\sum_{k=0}^{N-1}\\hat{f}(g^{k})\\cdot g^{k\\cdot i},</span> (2)</p>
+
+    <p class="text-gray-300">for all <span class="math">i=0,\\ldots,N-1</span>. The right-hand side of (2) is the <em>inverse</em> Fourier transform of <span class="math">\\hat{f}:H\\to K</span>.</p>
+
+    <p class="text-gray-300">The standard algorithm for computing the Fourier transform is the Cooley-Tukey algorithm. The algorithm leverages the group structure of <span class="math">H</span> and computes (1) (and likewise the inverse (2)) using overall</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">$</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\cdot\\log</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\cdot\\left(\\frac{1}{2}\\cdot\\mathsf{M}+\\mathsf{A}\\right),$ (3)</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">where <span class="math">\\mathsf{M}</span> and <span class="math">\\mathsf{A}</span> denote multiplications and additions/substractions in <span class="math">K</span>. (For a detailed description see any standard textbook such as <em>[x13]</em> or <em>[x5]</em>.)</p>
+
+    <p class="text-gray-300">In the case of <span class="math">K=\\mathbb{C}(F)</span>, the complex extension of a finite field <span class="math">F</span> with prime modulus <span class="math">p=3\\bmod 4</span>, one may make use of the simple form of the roots of unity up to order 8, which are</p>
+
+    <p class="text-gray-300"><span class="math">c\\cdot(1+i),\\,i,\\,c\\cdot(-1+i),\\,-1,\\,c\\cdot(-1-i),\\,-i,\\,c\\cdot(1-i),</span></p>
+
+    <p class="text-gray-300">and 1, where <span class="math">c</span> is a real quadratic root of either <span class="math">+\\frac{1}{2}</span> or <span class="math">-\\frac{1}{2}</span>, depending on which of the two is a quadratic residue modulo <span class="math">p</span>. Multiplication with these roots involve fewer real multiplications, if any at all. This yields more efficient higher radix variants of the FFT such as radix-4 and radix-8 <em>[x1]</em>, or even better the <em>split-radix</em> variant <em>[x21, x10, x16]</em>, a mixture of radix 2 and radix 4. The split-radix algorithm costs slightly less than radix-8, consuming at most</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">$</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\cdot\\log</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\cdot(1\\cdot\\mathsf{M}_{F}+3\\cdot\\mathsf{A}_{F})\\,,$</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">in the 3/3-regime, where one complex multiplication counts 3 real multiplications <span class="math">\\mathsf{M}_{F}</span> and 3 real additions <span class="math">\\mathsf{A}_{F}</span> (c.f. <em>[x18]</em>). Compared to the Cooley-Tukey radix-2 FFT this is 33% less multiplications and 20% less additions. Furthermore, all these different radix FFTs can be sped up for <em>real-valued</em> functions <span class="math">f:H\\to F</span> by leveraging Hermitian symmetry of the Fourier transform, i.e.</p>
+
+    <p class="text-gray-300"><span class="math">\\hat{f}(\\bar{\\omega})=\\overline{\\hat{f}(\\omega)},</span></p>
+
+    <p class="text-gray-300">for every <span class="math">\\omega\\in H</span>. That symmetry may used to halve the number of computations in each step of the algorithms, and the same can be done for the inverse transforms of Hermitian symmetric functions. Although described for the classical case of the complex extension of the reals <span class="math">\\mathbb{R}</span>, the algorithms and their cost analysis carry over verbatim to finite fields. We summarize the discussion by the following Proposition.</p>
+
+    <h6 id="sec-7" class="text-base font-medium mt-4">Theorem 3 (<em>[x18]</em>).</h6>
+
+    <p class="text-gray-300">Let <span class="math">K=\\mathbb{C}(F)</span> be the complex extension of a finite field <span class="math">F</span> with prime modulus <span class="math">p=3\\bmod 4</span>, and <span class="math">H</span> be a two-adic multiplicative subgroup of <span class="math">K</span>. The Fourier transform of a real-valued function <span class="math">f:H\\to F</span>, as well as the inverse transform of a conjugate Hermitian function <span class="math">\\hat{f}:H\\to K</span> can be computed in less than</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">$</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\cdot\\log</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\cdot\\left(\\frac{1}{2}\\cdot\\mathsf{M}+\\frac{3}{2}\\cdot\\mathsf{A}\\right),$ (4)</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">where <span class="math">\\mathsf{M}</span> and <span class="math">\\mathsf{A}</span> denote field multiplications and additions over the base field <span class="math">F</span>.</p>
+
+    <h6 id="sec-8" class="text-base font-medium mt-4">Remark 4.</h6>
+
+    <p class="text-gray-300">In our target Mersenne field with modulus <span class="math">p=2^{31}-1</span>, the 8-th primitive root of unity is <span class="math">\\frac{1}{\\sqrt{2}}\\cdot(1+i)=2^{15}\\cdot(1+i)</span>. Thus multiplications by 8-th roots of unity involve merely shifts, additions and subtractions. For this reason one obtains similar operation counts by using the <em>packing</em> trick and a radix-8 transform: One splits the function into functions of half the size (corresponding to the values over the two cosets of an index 2 subgroup), packs them into a single complex one and applies a radix-8 algorithm. From the result one extracts the Fourier transforms of the two half-sized functions, which are then combined in the Cooley-Tukey sense to the requested one.</p>
+
+    <h2 id="sec-9" class="text-2xl font-bold">3 Interpolants over <span class="math">S_{1}</span></h2>
+
+    <p class="text-gray-300">The following proposition is the key for our real representation of Reed Solomon code words over the unit circle group. Although our main target are Mersenne prime fields, our observations solely assume that <span class="math">F=F_{p}</span> is a prime field with <span class="math">p=3\\bmod 4</span>.</p>
+
+    <h6 id="sec-10" class="text-base font-medium mt-4">Proposition 2.</h6>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Let <span class="math">F=F_{p}</span> be a prime field with <span class="math">p=3\\bmod 4</span>, and <span class="math">H</span> be a subgroup of <span class="math">S_{1}</span> the unit circle group in the complex extension <span class="math">\\mathbb{C}(F)</span>, having even order $</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\geq 2<span class="math">. Then for every </span>F<span class="math">-valued function </span>f<span class="math"> over </span>H<span class="math">, the values of its interpolant </span>p(X)=c_{0}+\\sum_{k=1}^{</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">-1}c_{k}\\cdot X^{k}<span class="math"> over a coset </span>\\tau\\cdot H<span class="math">, </span>\\tau\\in S_{1}<span class="math">, are in a real linear subspace of </span>\\mathbb{C}(F)<span class="math"> determined by </span>c_{0}<span class="math"> and </span>\\tau$, i.e.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300"><span class="math">p(x)-c_{0}\\in\\phi(\\tau)\\cdot F,</span> (5)</p>
+
+    <p class="text-gray-300">for all <span class="math">x\\in\\tau\\cdot H</span>, where</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">$\\phi(\\tau)=\\tau^{\\frac{</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">}{2}}.$ (6)</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Furthermore, the mapping <span class="math">\\phi</span> defines an injective homomorphism <span class="math">\\phi:S_{1}/H\\to S_{1}/\\{\\pm 1\\}</span>, the image of which is equal to the “projective” cyclic subgroup <span class="math">C_{2\\cdot\\beta}/\\{\\pm 1\\}</span>, with $\\beta=</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">S_{1}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">/</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">$.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <h6 id="sec-11" class="text-base font-medium mt-4">Remark 5.</h6>
+
+    <p class="text-gray-300">For subgroups <span class="math">H</span> of odd order a similar result holds, but one needs to do a more careful proof since <span class="math">\\sqrt{\\tau}</span> might be in the anti-unit circle <span class="math">S_{-1}</span>, and thus conjugate-equals-inverse relation breaks, <span class="math">\\sqrt{\\tau}\\cdot\\overline{\\sqrt{\\tau}}=-1</span>. As we will not make use of this special case, we omit the details.</p>
+
+    <h6 id="sec-12" class="text-base font-medium mt-4">Proof.</h6>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">As <span class="math">f</span> is real over <span class="math">H</span>, the coefficients of its interpolant $p(X)=\\sum_{k=0}^{</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">-1}c_{k}\\cdot X^{k}<span class="math"> are Hermitian symmetric with respect to conjugation, i.e. </span>c_{0}=\\bar{c}_{0}<span class="math">, and </span>c_{</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">-k}=\\bar{c}_{k}<span class="math"> for </span>k=1,\\ldots,</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">-1<span class="math">. Let us now consider the values of </span>p(X)-c_{0}<span class="math"> over </span>\\tau\\cdot H<span class="math">, where </span>\\tau\\in S_{1}$:</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">$p(\\tau\\cdot X)-c_{0}=\\sum_{k=1}^{</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">-1}c_{k}\\cdot\\tau^{k}\\cdot X^{k}=\\sum_{k}d_{k}\\cdot X^{k},$</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">with</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\[ d_{k}=\\begin{cases}c_{k}\\cdot\\tau^{k}&\\text{for }1\\leq k\\leq</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">-1,\\\\</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">0&\\text{otherwise}.\\end{cases} \\]</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Scaling the function by $\\tau^{-\\frac{</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">}{2}}<span class="math"> leads to coefficients </span>d_{k}^{\\prime}:=\\tau^{-\\frac{</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">}{2}}\\cdot d_{k}$ which satisfy the Hermitian symmetry</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">$d_{</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">-k}^{\\prime}=\\tau^{-\\frac{</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">}{2}}\\cdot\\tau^{</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">-k}\\cdot c_{</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">-k}=\\tau^{\\frac{</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">}{2}}\\cdot\\tau^{-k}\\cdot\\bar{c}_{k}=\\overline{\\tau^{-\\frac{</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">}{2}}\\cdot\\tau^{k}\\cdot c_{k}}=\\bar{d}_{k}^{\\prime},$</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">for $k=1,\\ldots,</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">-1<span class="math">. We therefore conclude that </span>\\tau^{-\\frac{</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">}{2}}\\cdot(p(\\tau\\cdot x)-c_{0})\\in F<span class="math">, for every </span>x\\in H$, which proves the first claim of the proposition.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">The second claim is seen easily from the fact that, for every <span class="math">x\\in H</span> we have $x^{\\frac{</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">}{2}}\\in\\{\\pm 1\\}<span class="math"> and thus </span>(\\tau\\cdot x)^{\\frac{</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">}{2}}\\in\\tau^{\\frac{</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">}{2}}\\cdot\\{\\pm 1\\}<span class="math">. Thus </span>\\phi<span class="math"> projects to an isomorphism from </span>S_{1}/H<span class="math"> into </span>S_{1}/\\{\\pm 1\\}<span class="math">, and the kernel of that isomorphism is trivial since </span>\\tau^{\\frac{</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">}{2}}\\in\\{\\pm 1\\}<span class="math"> is equivalent to </span>\\tau^{</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">}=1<span class="math">. As </span>S_{1}<span class="math"> is cyclic, so is the projective unit circle </span>S_{1}/\\{\\pm 1\\}<span class="math"> and the image of </span>\\phi<span class="math"> is the unique subgroup of order </span>\\beta=</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">S_{1}/H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"><span class="math">, which is equal to the subgroup </span>C_{2\\cdot\\beta}/\\{\\pm 1\\}$. ∎</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">##</p>
+
+    <p class="text-gray-300">Figure 1: Illustration of the coset correction factors and their linear subspaces for a subgroup <span class="math">H</span> of index <span class="math">\\beta</span>. Assuming that the powers of <span class="math">\\tau</span> enumerate the cosets of <span class="math">H</span>, i.e. <span class="math">S_{1}=H\\cup\\tau\\cdot H\\cup\\tau^{2}\\cdot H\\cup\\ldots\\cup\\tau^{\\beta-1}\\cdot H</span>, and for simplicity that <span class="math">c_{0}=0</span>, then the values over the first coset <span class="math">\\tau\\cdot H</span> are located on the line spanned by the <span class="math">\\phi(\\tau)</span> which is the <span class="math">(2\\cdot\\beta)</span>-th primitive root of unity <span class="math">g=1^{\\frac{1}{2\\beta}}</span>. The values over the second coset <span class="math">\\tau^{2}\\cdot H</span> are within the line spanned by its second power <span class="math">g^{2}</span>, the values over <span class="math">\\tau^{3}\\cdot H</span> within the subspace spanned by <span class="math">g^{3}</span>, and so on. In the general case <span class="math">c_{0}\\neq 0</span> the lines are shifted by the real value <span class="math">c_{0}</span>.</p>
+
+    <h2 id="sec-13" class="text-2xl font-bold">4 Almost native Reed-Solomon codes for Mersenne fields</h2>
+
+    <p class="text-gray-300">Let us now apply our findings to the case of Mersenne fields <span class="math">F=F_{p}</span>, with prime modulus <span class="math">p=2^{e}-1</span>. By Lemma 1 the unit circle group <span class="math">S_{1}</span> is a purely two-adic subgroup of <span class="math">\\mathbb{C}(F)^{*}</span>,</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">$</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">S_{1}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">=p+1=2^{e}.$</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">amenable for the FFT algorithms outlined in Section 2. In the context of STARKs which use Lagrange representations of witness polynomials, such as algebraic intermediate representations (AIR) <em>[x1, x2, x10]</em> or Plonkish arithmetization <em>[x12]</em>, one faces the following issue. Given the values of the witness polynomial over a witness domain <span class="math">H</span>, interpolate it to some larger sampling domain <span class="math">D</span>, of size $</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">D</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">=\\beta\\cdot</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"><span class="math">, with integer </span>\\beta<span class="math">, and commit the obtained values via a Merkle hash. If both </span>H<span class="math"> and </span>D<span class="math"> can be placed within the unit circle group </span>S_{1}$ we obtain what we like to call an almost native Reed-Solomon code:</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>By leveraging the mixed-radix FFT for real-valued functions (Proposition 3), computing the interpolant and its demanded coset values costs about the same as native over an equally sized field with high two-adicity.</li>
+
+    </ul>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">First, one computes the Fourier transform of the real witness function <span class="math">w:H\\rightarrow F</span>. Then, for each coset <span class="math">\\tau\\cdot H\\subseteq D</span>, one multiplies the Fourier transform of <span class="math">w</span> (minus its constant term) by the gauged shift factors $\\tau^{k-\\frac{</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">}{2}}<span class="math">, </span>k=1,\\ldots,</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">-1<span class="math">, and then uses the inverse FFT for Hermitian symmetric functions to obtain the real values of the rectified </span>\\tau^{-\\frac{</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">}{2}}\\cdot(w(X)-c_{0})<span class="math"> over </span>\\tau\\cdot H$.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>The native representation of the codeword consists of the real coset evaluations</li>
+
+    </ul>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">$\\tau^{-\\frac{</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">}{2}}\\cdot(w(x)-c_{0})\\Big{</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">}_{x\\in\\tau\\cdot H},$ (7)</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">where <span class="math">\\tau\\cdot H\\subseteq D</span>, together with the constant term <span class="math">c_{0}=\\sum_{x\\in H}w(x)</span>.</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Instead of committing $w(x)</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">_{x\\in D}<span class="math">, one may commit only to rectified values (7), and additionally announce (or, commit to) the scalar </span>c_{0}<span class="math">. We note that in many applications one can even assume that </span>c_{0}=0<span class="math">: Often, not all of the domain </span>H$ is consumed by witness data and one can use an unused value to adjust the domain sum to zero.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">Table 1: Benchmarks for field operations on an Apple M1 and an Intel Ice Lake, using NEON or AVX-512 vector instructions. On both architectures the M31 field with prime  <span class="math">p = 2^{31} - 1</span>  improves over the rather generically structured Baby bear prime (using Montogomery arithmetic for the latter).</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">ARM (NEON)</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">ops / cycle</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">cycles/op</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"></th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+            <td class="px-3 py-2 border-b border-gray-700">mul</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">add</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">mul</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">add</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">M31</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">3.2</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">5.33</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">0.31</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">0.19</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Baby bear</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">2</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">5.33</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">0.5</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">0.19</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">x86 (AVX-512)</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">ops / cycle</td>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+            <td class="px-3 py-2 border-b border-gray-700">cycles/op</td>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">---</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">---</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">---</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">---</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">---</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700"></td>
+
+            <td class="px-3 py-2 border-b border-gray-700">mul</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">add</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">mul</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">add</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">M31</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">2.91</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">10.67</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">0.34</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">0.09</td>
+
+          </tr>
+
+          <tr>
+
+            <td class="px-3 py-2 border-b border-gray-700">Baby bear</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">2.29</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">10.67</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">0.44</td>
+
+            <td class="px-3 py-2 border-b border-gray-700">0.09</td>
+
+          </tr>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">In the non-zero-knowledge setting, our target Mersenne prime  <span class="math">p = 2^{31} - 1</span>  enables almost native Reed-Solomon codes for witness domains  <span class="math">H</span>  up to size  <span class="math">2^{30}</span> , considering a sampling domain  <span class="math">D = S_{1}</span>  of size  <span class="math">2^{31}</span> , which corresponds to a blow-up factor  <span class="math">\\beta = 2</span> . When targeting zero-knowledge, the largest possible size for  <span class="math">H</span>  is  <span class="math">2^{29}</span> , using a disjoint sampling domain  <span class="math">D</span>  within  <span class="math">S_{1}</span>  of double the size of  <span class="math">H</span> .</p>
+
+    <p class="text-gray-300">On standard computer architectures we expect the benefit of Mersenne arithmetics balances out the overhead in the number of additions introduced by the mixed-radix FFT over the complex extension. This expectation is supported by our benchmarks in Table 1, together with the operation counts (3) and (4), according to which a mixed-radix real FFT over M31 would cost</p>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\cdot \\log</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\cdot \\left(\\frac {1}{2} \\cdot 0. 3 1 + \\frac {3}{2} \\cdot 0. 1 9\\right) \\approx 0. 4 4 \\cdot</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\cdot \\log</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">,</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\cdot \\log</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\cdot \\left(\\frac {1}{2} \\cdot 0. 3 4 + \\frac {3}{2} \\cdot 0. 0 9\\right) \\approx 0. 3 1 \\cdot</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\cdot \\log</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <p class="text-gray-300">clock cycles on an Apple M1 ARM processor and an Intel Ice Lake x86 processor, respectively, versus</p>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\cdot \\log</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\cdot \\left(\\frac {1}{2} \\cdot 0. 5 + 1 \\cdot 0. 1 9\\right) \\approx 0. 4 4 \\cdot</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\cdot \\log</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">,</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\cdot \\log</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\cdot \\left(\\frac {1}{2} \\cdot 0. 4 4 + 1 \\cdot 0. 0 9\\right) \\approx 0. 3 1 \\cdot</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\cdot \\log</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <p class="text-gray-300">clock cycles for the Cooley-Tukey algorithm over Baby Bear, again for Apple M1 and Intel Ice Lake. <span class="math">^3</span>  All in all, we believe that almost native Reed-Solomon codes over Mersenne fields are performing as native ones over highly two-adic fields of the same size, while providing the benefits of exceptionally fast field arithmetic. A proof of concept, including benchmarks, will be provided in a future update of this note.</p>
+
+    <p class="text-gray-300">[Ber68] Glenn David Bergland. A fast Fourier transform algorithm using base 8 iterations. In Mathematics of Computation, volume 22, 1968. [BG] Jeremy Bruestle and Paul Gafni. RISC Zero zkVM: scalable, transparent arguments of RISC-V integrity. https://www.risczero.com/proof-system-in-detail.pdf.</p>
+
+    <p class="text-gray-300">[BSBHR18a] Eli Ben-Sasson, Iddo Bentov, Yinon Horesh, and Michael Riabzev. Fast Reed-Solomon interactive oracle proofs of proximity. In ICALP 2018, 2018. Full paper: https://eccc.weizmann.ac.il/report/2017/134/.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>[BSBHR18b] Eli Ben-Sasson, Iddo Bentov, Yinon Horesh, and Michael Riabzev. Scalable, transparent, and post-quantum secure computational integrity. In IACR ePrint Archive 2018/046, 2018. https://eprint.iacr.org/2018/046.</li>
+
+      <li>[BSCI^{+}20] Eli Ben-Sasson, Dan Carmon, Yuval Ishai, Swastik Kopparty, and Shubhangi Saraf. Proximity gaps for Reed-Solomon codes. In FOCS 2020, 2020. Full paper: https://eprint.iacr.org/2020/654.</li>
+
+      <li>[BSGKS20] Eli Ben-Sasson, Lior Goldberg, Swastik Kopparty, and Shubhangi Saraf. DEEP-FRI: Sampling outside the box improves soundness. In ITCS 2020, 2020. Full paper: https://eprint.iacr.org/2019/336.</li>
+
+      <li>[CLRS09] Thomas H. Cormen, Charles E. Leiserson, Ronald L. Rivest, and Cifford Stein. Introduction to algorithms (3rd ed.). MIT Press, 2009.</li>
+
+      <li>[DH84] Pierre Duhamel and Henk D.L. Hollman. Split radix FFT algorithm. In Electorn. Lett., volume 20, 1984.</li>
+
+      <li>[GPR21] Lior Goldberg, Shahar Papini, and Michael Riabzev. Cairo – a Turing-complete STARK-friendly CPU architecture. In IACR ePrint Archive 2021/1063, 2021. https://eprint.iacr.org/2021/1063.</li>
+
+      <li>[GWC19] Ariel Gabizon, Zachary J. Williamson, and Oana Ciobotaru. PLONK: Permutations over Lagrange-bases for oecumenical non-interactive arguments of knowledge. In IACR ePrint Archive 2019/953, 2019. https://eprint.iacr.org/2019/953.</li>
+
+      <li>[Her] Polygon Hermez. https://github.com/orgs/0xPolygonHermez/repositories.</li>
+
+      <li>[Mid] Polygon Miden: A STARK-based virtual machine. https://github.com/maticnetwork/miden.</li>
+
+      <li>[SHB86] Henrik V. Sorensen, Michael T. Heideman, and C. Sidney Burrus. On computing the split-radix FFT. In IEEE Transactions on Acoustics, Speech and Signal Processing, volume 34(1), 1986.</li>
+
+      <li>[SJHB87] Henrik V. Sorensen, Douglas L. Jones, Michael T. Heideman, and C. Sidney Burrus. Real-valued fast Fourier transform algorithms. In IEEE Transactions on Acoustics, Speech and Signal Processing, volume 35(6), 1987.</li>
+
+      <li>[Sta21] StarkWare Team. ethSTARK documentation – version 1.1. In IACR preprint archive 2021/582, 2021. https://eprint.iacr.org/2021/582.</li>
+
+      <li>[Tea] Polygon Zero Team. Plonky2: Fast recursive arguments with PLONK and FRI. https://github.com/mir-protocol/plonky2/blob/main/plonky2/plonky2.pdf.</li>
+
+      <li>[vzGG13] Joachim von zur Gathen and Jürgen Gerhard. Modern computer algebra (3rd ed.). Cambridge Univ. Press, 2013.</li>
+
+      <li>[Yav68] R. Yavne. An economical method for calculating the discrete Fourier transform. In Proc. of AFIPS‘68 Fall Joint Computer Conference, volume 1, 1968.</li>
+
+    </ul>`;
+---
+
+<BaseLayout title="Reed-Solomon Codes over the Circle Group (2023/824)">
+  <article class="max-w-4xl mx-auto article-prose">
+    <nav class="mb-8">
+      <a href="/papers" class="text-blue-400 hover:text-blue-300">
+        &larr; Back to Papers
+      </a>
+    </nav>
+
+    <header class="mb-12">
+      <h1 class="text-3xl font-bold mb-4"
+        set:html={TITLE_HTML} />
+      <p class="text-gray-400 mb-2"
+        set:html={AUTHORS_HTML} />
+      <p class="text-gray-500 text-sm mb-4">
+        2023 &middot; eprint 2023/824
+      </p>
+      <div class="flex gap-4 text-sm">
+        <a
+          href={EPRINT_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          class="text-blue-400 hover:text-blue-300"
+        >
+          Paper (eprint) &rarr;
+        </a>
+      </div>
+      <p class="mt-4 text-xs text-gray-500">
+        All content below belongs to the original authors. This page
+        reproduces the paper for educational purposes. Always
+        <a
+          href={EPRINT_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          class="text-blue-400 hover:text-blue-300"
+        >cite the original</a>.
+      </p>
+      <p class="mt-1 text-xs text-gray-600">
+        Converted with: {CRAWLER} &middot; {CONVERTED_DATE}
+      </p>
+    </header>
+
+    <Fragment set:html={CONTENT} />
+
+  </article>
+</BaseLayout>

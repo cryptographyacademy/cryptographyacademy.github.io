@@ -1,0 +1,1027 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+
+const EPRINT_URL = 'https://eprint.iacr.org/2020/972';
+const CRAWLER = 'mistral';
+const CONVERTED_DATE = '2026-02-16';
+const TITLE_HTML = 'Optimized Binary GCD for Modular Inversion';
+const AUTHORS_HTML = 'Thomas Pornin';
+
+const CONTENT = `    <p class="text-gray-300">Thomas Pornin</p>
+
+    <p class="text-gray-300">NCC Group, thomas.pornin@nccgroup.com</p>
+
+    <p class="text-gray-300">23 August 2020</p>
+
+    <p class="text-gray-300">Abstract. In this short note, we describe a practical optimization of the well-known extended binary GCD algorithm, for the purpose of computing modular inverses. The method is conceptually simple and is applicable to all odd moduli (including nonprime moduli). When implemented for inversion in the field of integers modulo the prime <span class="math">2^{255} - 19</span>, on a recent x86 CPU (Coffee Lake core), we compute the inverse in 6253 cycles, with a fully constant-time implementation.</p>
+
+    <p class="text-gray-300">Note. An initial version of this note used a slightly more aggressive algorithm ( <span class="math">k</span>  iterations of the inner loop instead of  <span class="math">k - 1</span> ) which was wrong. The gap in the proof was discovered by Tim Taubert, and further discussions showed a counterexample for which the algorithm failed. The current version of the algorithm, and the revised proof, are believed correct. A side effect of the fix is to enable extra optimizations in the implementation of the inner loop, leading to substantially better performance, now at 6253 cycles (from an original 7490 cycles).</p>
+
+    <p class="text-gray-300">We study here the following problem: given an odd integer  <span class="math">m \\geq 3</span>  and a value  <span class="math">y \\in \\mathbb{Z}_m</span> , compute its modular inverse  <span class="math">x</span>  which is such that  <span class="math">xy = 1 \\mod m</span> . This is a notoriously expensive operation, compared with addition and multiplication in  <span class="math">\\mathbb{Z}_m</span> . Its cost is the main reason why, for instance, operations on elliptic curves are often done with projective coordinates or other similar systems where coordinates are handled as fractions, so that all costly inversions can be mutualized into a final inversion, once the whole computation is finished.</p>
+
+    <p class="text-gray-300">There are some applications of modular inversion where the value to invert and/or the modulus is secret. In elliptic curve cryptography, the modulus  <span class="math">m</span>  is normally prime and publicly known, but the value to invert is private. In RSA key pair generation, modular inversion is needed to compute the private exponent, and the CRT reconstruction factor; in these cases, the value to invert and the modulus are both secret, and when computing the private exponent from the public exponent, the modulus is not even prime. In all situations where secret values are handled, a constant-time implementation is needed (i.e. one with an execution time and a memory access pattern that do not vary depending on secret data).</p>
+
+    <p class="text-gray-300">When  <span class="math">m</span>  is prime, a simple method is to use Fermat's little theorem:</p>
+
+    <div class="my-4 text-center"><span class="math-block">1 / y = y ^ {m - 2} \\mod m</span></div>
+
+    <p class="text-gray-300">This method requires  <span class="math">O(\\log m)</span>  multiplications modulo  <span class="math">m</span> , hence it usually has a cost cubic in the size of  <span class="math">m</span>  (assuming a quadratic cost for multiplication, which is the usual case for moduli</p>
+
+    <p class="text-gray-300">used in cryptographic applications). When <span class="math">m = 2^{255} - 19</span>, and implementing on a recent 64-bit x86 CPU, modular multiplications are quite fast, and this is favourable to Fermat's little theorem; our implementation of this inversion method, on an Intel Core i5-8259U at 2.30 GHz (Coffee Lake core), can perform a constant-time inversion in 9175 cycles. The goal is to find something faster.</p>
+
+    <p class="text-gray-300">Apart from Fermat's little theorem, the main method to compute modular inverses is the Extended Euclidean Algorithm for GCD. While Euclid's algorithm was presented by Euclid himself[7], the extension to compute values <span class="math">u</span> and <span class="math">v</span> such that <span class="math">au + bv = \\mathrm{GCD}(a, b)</span> was first described by Aryabhata[1]. The binary GCD is a variant of Euclid's algorithm that performs only comparisons, subtractions and divisions by 2 (i.e. right shifts), and is therefore more amenable to fast and constant-time implementations than the general divisions in Euclid's algorithm; that algorithm was first presented, albeit a bit cryptically, in the Nine Chapters on the Mathematical Art[5]. A more accessible description was published by Stein in 1967[14]. A variant called the plus-minus algorithm was presented by Brent and Kung in 1983[4]. More recently, a new (and quite complex) algorithm was described by Bernstein and Yang[3]. See also [12] for extensive benchmarks for inversions modulo primes with the <span class="math">2^n - r</span> format (for a small <span class="math">r</span>). Asymptotically fast but not constant-time GCD algorithms are presented in [11].</p>
+
+    <p class="text-gray-300">Bernstein and Yang claim to hold the current speed record for computing inverses modulo <span class="math">2^{255} - 19</span> on recent 64-bit x86 CPUs (Skylake cores and similar variants). The field of integers modulo the prime <span class="math">p = 2^{255} - 19</span> is used by some well-known elliptic curves, Curve25519 and Edwards25519, thus highlighting the relevance of this particular modulus. Bernstein and Yang obtain a performance of 8520 cycles on a Coffee Lake core<span class="math">^{1}</span>. With the method presented here, we do better: 6253 cycles.</p>
+
+    <p class="text-gray-300">Our algorithm was added to the BearSSL library[2] in 2018; it was also deployed as part of the implementation of key pair generation in the reference code for the Falcon post-quantum signature scheme[8]. This note formally describes the algorithm and proves its correctness.</p>
+
+    <p class="text-gray-300">It shall be said that gaining even 2000 cycles on inversion modulo <span class="math">2^{255} - 19</span> on recent x86 CPUs will not yield substantial performance gains in elliptic curve implementations that use that field: a curve point multiplication will typically use close to 100000 cycles or more, and a 2000-cycle gain will be hardly noticeable, even in the improbable situation of a system where raw elliptic curve performance is the bottleneck. In practice, on large server and desktop systems, cryptographic operations, especially asymmetric cryptographic operations, use only a relatively small proportion of the available power, and a <span class="math">2\\%</span> gain on these operations will not really matter. However, on smaller architectures with less efficient multipliers, or when using larger moduli, the performance ratio with Fermat's little theorem is expected to increase, making the optimization worthwhile. In particular, on small microcontrollers (e.g. ARM Cortex M0+), the inversion algorithm presented in this note may be fast enough that a curve point multiplication routine using window optimizations would benefit from using it in order to normalize the window points to affine coordinates, for faster subsequent point additions.</p>
+
+    <p class="text-gray-300"><span class="math">^{1}</span>I am deeply grateful to Bo-Yin Yang, who sent me a copy of their code so that I may benchmark it on the same test system as the one used for the algorithm described in this note. This speed is almost identical to the 8543 cycles on a Kaby Lake core, as reported in the published article; this makes sense, since Coffee Lake and Kaby Lake use the same internal scheduler and execution units, and differ only in external pieces that should not matter much for a compact, L1-cache only computational piece of code.</p>
+
+    <p class="text-gray-300">3</p>
+
+    <p class="text-gray-300">Algorithm 1 describes the classic extended binary GCD.</p>
+
+    <p class="text-gray-300">Algorithm 1 Extended Binary GCD (classic algorithm) Require: Odd modulus <span class="math">m</span> (<span class="math">m \\geq 3</span>, <span class="math">m \\mod 2 = 1</span>) and value to invert <span class="math">y</span> (<span class="math">0 \\leq y &amp;lt; m</span>) Ensure: <span class="math">1/y \\mod m</span> (if <span class="math">\\mathrm{GCD}(y, m) = 1</span>), or zero 1: <span class="math">a \\gets y, u \\gets 1, b \\gets m, v \\gets 0</span> 2: while <span class="math">a \\neq 0</span> do 3: if <span class="math">a = 0 \\mod 2</span> then 4: <span class="math">a \\gets a/2</span> ▶ <span class="math">a</span> is even, so this division is exact. 5: <span class="math">u \\gets u/2 \\mod m</span> 6: else 7: if <span class="math">a &amp;lt; b</span> then 8: <span class="math">(a, u, b, v) \\gets (b, v, a, u)</span> ▶ Conditional swap to ensure <span class="math">a \\geq b</span>. 9: <span class="math">a \\gets (a - b)/2</span> ▶ <span class="math">a</span> and <span class="math">b</span> are odd, so this division is exact. 10: <span class="math">u \\gets (u - v)/2 \\mod m</span> 11: if <span class="math">b \\neq 1</span> then 12: return 0 (value <span class="math">y</span> is not invertible) ▶ <span class="math">b</span> contains <span class="math">\\mathrm{GCD}(y, m)</span> at this point. 13: return <span class="math">v</span></p>
+
+    <p class="text-gray-300">In this algorithm, values <span class="math">a</span> and <span class="math">b</span> are nonnegative integers, while <span class="math">u</span> and <span class="math">v</span> are integers modulo <span class="math">m</span>. It is not hard to see that:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li><span class="math">b</span> is always an odd integer;</li>
+
+      <li><span class="math">\\operatorname{GCD}(a, b)</span> is constant throughout the algorithm;</li>
+
+      <li>when <span class="math">a = 0</span> (exit condition), <span class="math">b</span> contains the GCD of <span class="math">y</span> and <span class="math">m</span>;</li>
+
+      <li>divisions by 2 to compute the new value of <span class="math">a</span> are exact;</li>
+
+      <li>each iteration maintains the invariants <span class="math">a = uy \\mod m</span> and <span class="math">b = vy \\mod m</span>;</li>
+
+      <li>the sum of the lengths, in bits, of <span class="math">a</span> and <span class="math">b</span> is decremented by at least one at each iteration.</li>
+
+    </ul>
+
+    <p class="text-gray-300">Therefore, if <span class="math">m</span> is a <span class="math">n</span>-bit integer, then at most <span class="math">2n - 1</span> iterations are needed to reach the exit condition. In order to have a constant-time implementation, we need to always perform <span class="math">2n - 1</span> iterations; if <span class="math">a = 0</span>, the extra iterations will not modify <span class="math">b</span> or <span class="math">v</span>, so they won't modify the result². A constant-time implementation will also need to perform each iteration in a constant-time way, replacing all conditions with bitwise combinations of values.</p>
+
+    <p class="text-gray-300">The extended binary GCD is quadratic in the length of the modulus: it has <span class="math">O(n)</span> iterations, and each iteration involves a fixed number of operations which can be computed in time <span class="math">O(n)</span> (comparisons, subtractions, halvings). If implemented as is, its performance is comparable to Fermat's little theorem for <span class="math">m = 2^{255} - 19</span>, but somewhat worse for platforms with fast large multiplications; for larger moduli, it becomes better. It also properly handles non-prime moduli.</p>
+
+    <p class="text-gray-300">²As will be explained later on, the last iteration needs not be done if the input <span class="math">y</span> is known to be invertible.</p>
+
+    <p class="text-gray-300">We will now present two complementary optimization methods that apply to this algorithm and substantially improve performance in practice.</p>
+
+    <h3 id="sec-4" class="text-xl font-semibold mt-8">Optimization 1: mutualize updates to <span class="math">u</span> and <span class="math">v</span>:</h3>
+
+    <p class="text-gray-300">In the description above, <span class="math">u</span> and <span class="math">v</span> record the modifications applied to <span class="math">a</span> and <span class="math">b</span>, but no decision is taken based on their values. We can thus delay and group the updates to <span class="math">u</span> and <span class="math">v</span>:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Initialize the <span class="math">update</span> <span class="math">factors</span>: <span class="math">f_{0}\\leftarrow 1,g_{0}\\leftarrow 0,f_{1}\\leftarrow 0,g_{1}\\leftarrow 1</span></li>
+
+    </ul>
+
+    <p class="text-gray-300">The update factors are such that the new value of <span class="math">(u,v)</span> should be:</p>
+
+    <p class="text-gray-300"><span class="math">(u,v)\\leftarrow(f_{0}u+g_{0}v,f_{1}u+g_{1}v)</span></p>
+
+    <p class="text-gray-300">We update <span class="math">f_{0},f_{1},g_{0}</span> and <span class="math">g_{1}</span> instead of <span class="math">u</span> and <span class="math">v</span> in the algorithm. Once every <span class="math">r</span> iterations, while the update factors are still small (e.g. they fit in a single register each), we apply them to <span class="math">u</span> and <span class="math">v</span> using multiplication opcodes, which is much faster than making <span class="math">r</span> linear updates. After each such update, the update factors are reinitialized.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>When swapping <span class="math">a</span> with <span class="math">b</span> (in case <span class="math">a</span> and <span class="math">b</span> are both odd, and <span class="math">a&lt;b</span>), exchange <span class="math">f_{0}</span> with <span class="math">f_{1}</span> and <span class="math">g_{0}</span> with <span class="math">g_{1}</span>.</li>
+
+      <li>When subtracting <span class="math">b</span> from <span class="math">a</span>, subtract <span class="math">f_{1}</span> from <span class="math">f_{0}</span> and <span class="math">g_{1}</span> from <span class="math">g_{0}</span>.</li>
+
+      <li>At each iteration, we should divide <span class="math">f_{0}</span> and <span class="math">g_{0}</span> by 2 (corresponding to the division of <span class="math">a</span> by 2), but this would entail making them non-integral. Instead, we multiply <span class="math">f_{1}</span> and <span class="math">g_{1}</span> by 2.</li>
+
+    </ul>
+
+    <p class="text-gray-300">The effect of the last item is that the update factors, after <span class="math">r</span> iterations, are in fact themselves wrong by a factor of exactly <span class="math">2^{r}</span>. This is not much of a problem; we can perform a division of the final result <span class="math">v</span> by <span class="math">2^{2n-1}</span>, after the <span class="math">2n-1</span> iterations (if <span class="math">m</span> is known in advance, this division is merely a multiplication by a precomputed constant; even in the general case, this division is the same thing as a pair of Montgomery reductions, and has a cost no higher than that of a couple of modular multiplications).</p>
+
+    <p class="text-gray-300">The update factors are signed integers, and we can bound them: after <span class="math">t\\geq 1</span> iterations, we have:</p>
+
+    <p class="text-gray-300"><span class="math">-2^{t}&lt;f_{0},g_{0}&lt;+2^{t}</span> <span class="math">-2^{t}&lt;f_{1},g_{1}\\leq+2^{t}</span></p>
+
+    <p class="text-gray-300">This is easily seen to be true after one iteration: the only possible values for <span class="math">(f_{0},g_{0})</span> are then <span class="math">(1,0)</span> (<span class="math">a</span> was even), <span class="math">(1,-1)</span> (<span class="math">a</span> was odd, and <span class="math">b</span> was lower than <span class="math">a</span>) or <span class="math">(-1,1)</span> (<span class="math">a</span> was odd and lower than <span class="math">b</span>, and a swap occurred before the subtraction); <span class="math">(f_{1},g_{1})</span> will be either <span class="math">(0,2)</span> or <span class="math">(2,0)</span>. Similarly, if the relations are verified after <span class="math">t</span> iterations, then it can be seen that all three possible outcomes of the next iteration will lead to the relations still being verified after <span class="math">t+1</span> iterations.</p>
+
+    <p class="text-gray-300">A consequence is that it is possible to encode update factors as <span class="math">unsigned</span> integers of <span class="math">r+1</span> bits, by storing <span class="math">f_{0}+2^{r}-1,f_{1}+2^{r}-1...</span> In particular, if the current architecture has registers of <span class="math">2r+2</span> bits, then two update factors may be stored in the same register. This will be used in our most optimized implementation.</p>
+
+    <h3 id="sec-5" class="text-xl font-semibold mt-8">Optimization 2: use approximations of <span class="math">a</span> and <span class="math">b</span>:</h3>
+
+    <p class="text-gray-300">While the update factors allow grouping the updates of <span class="math">u</span> and <span class="math">v</span>, and performing them efficiently with the help of integer multiplication opcodes, the values of <span class="math">a</span> and <span class="math">b</span> are still large. However, the update factors <span class="math">record</span></p>
+
+    <p class="text-gray-300">the operations which have been performed on <span class="math">a</span> and <span class="math">b</span>, to be mimicked by <span class="math">u</span> and <span class="math">v</span>; thus, if we could compute the update factors first, we may also apply them to <span class="math">a</span> and <span class="math">b</span>, thereby grouping and optimizing the updates to <span class="math">a</span> and <span class="math">b</span> too.</p>
+
+    <p class="text-gray-300">The issue here is that all update decisions depend on the values of <span class="math">a</span> and <span class="math">b</span>; specifically, whether <span class="math">a</span> is even or odd (thus using the low bit of <span class="math">a</span>), and whether <span class="math">a</span> is greater than <span class="math">b</span> (which requires mostly looking at the high bits of <span class="math">a</span> and <span class="math">b</span>). It can easily be seen that for <span class="math">k</span> iterations, the value of the low bit of <span class="math">a</span> will only depend on the initial <span class="math">k</span> low bits of <span class="math">a</span> and <span class="math">b</span>. The optimization idea is to make approximations of <span class="math">a</span> and <span class="math">b</span> that will fit in a single register each, and can tell us in a mostly correct way whether <span class="math">a</span> is greater than <span class="math">b</span> or not.</p>
+
+    <p class="text-gray-300">Suppose that the local architecture offers <span class="math">2k</span>-bit registers. Let <span class="math">n = \\max(\\mathrm{len}(a), \\mathrm{len}(b))</span>, where <span class="math">\\mathrm{len}(x)</span> is the length of <span class="math">x</span> in bits (the smallest integer <span class="math">i</span> such that <span class="math">x &amp;lt; 2^i</span>). Thus, <span class="math">n</span> is the current length of the largest of <span class="math">a</span> and <span class="math">b</span>. If <span class="math">n \\leq 2k</span>, then the values <span class="math">a</span> and <span class="math">b</span> already fit into a single register each, and we can use the classic extended GCD algorithm to compute the exact update factors. Otherwise, extract the <span class="math">k - 1</span> low bits and the <span class="math">k + 1</span> top bits of <span class="math">a</span> and <span class="math">b</span>, and assemble them into <span class="math">\\tilde{a}</span> and <span class="math">\\tilde{b}</span>:</p>
+
+    <div class="my-4 text-center"><span class="math-block">\\tilde{a} = (a \\bmod 2^{k-1}) + 2^{k-1} \\lfloor a / 2^{n-k-1} \\rfloor</span></div>
+
+    <div class="my-4 text-center"><span class="math-block">\\tilde{b} = (b \\bmod 2^{k-1}) + 2^{k-1} \\lfloor b / 2^{n-k-1} \\rfloor</span></div>
+
+    <p class="text-gray-300">Then, apply the extended binary GCD on <span class="math">\\tilde{a}</span> and <span class="math">\\tilde{b}</span> for <span class="math">k - 1</span> iterations, yielding update factors <span class="math">f_0, g_0, f_1</span> and <span class="math">g_1</span>. Finally, apply these factors to update <span class="math">a, b, u</span> and <span class="math">v</span>:</p>
+
+    <div class="my-4 text-center"><span class="math-block">(a, b) \\leftarrow \\left( \\left( f_0 a + g_0 b \\right) / 2^{k-1}, \\left( f_1 a + g_1 b \\right) / 2^{k-1} \\right)</span></div>
+
+    <div class="my-4 text-center"><span class="math-block">(u, v) \\leftarrow \\left( f_0 u + g_0 v, f_1 u + g_1 v \\right)</span></div>
+
+    <p class="text-gray-300">The divisions by <span class="math">2^{k-1}</span> are exact: while <span class="math">\\tilde{a}</span> and <span class="math">\\tilde{b}</span> are approximations of <span class="math">a</span> and <span class="math">b</span>, their low <span class="math">k-1</span> bits match exactly, and the application of the update factors clears the <span class="math">k-1</span> low bits of <span class="math">a</span> and <span class="math">b</span>.</p>
+
+    <p class="text-gray-300">The computed update factors are still approximations; they may be slightly wrong, i.e. fail to shrink <span class="math">a</span> and <span class="math">b</span> as much as expected. They may also lead to a negative value for <span class="math">a</span> or <span class="math">b</span>; in case a negative <span class="math">a</span> is obtained, it suffices to negate it, and also to negate <span class="math">u</span> (this time modulo <span class="math">m</span>), and similarly for <span class="math">b</span>. In practice, it is convenient to:</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>update <span class="math">a</span> with the update factors <span class="math">f_0</span> and <span class="math">g_0</span>;</li>
+
+      <li>if the new value is negative, negate it, and also negate <span class="math">f_0</span> and <span class="math">g_0</span>;</li>
+
+      <li>apply the (possibly negated) update factors <span class="math">f_0</span> and <span class="math">g_0</span> to compute the new value of <span class="math">u</span>.</li>
+
+    </ol>
+
+    <p class="text-gray-300">The tricky point is computing how many iterations are needed in the worst case; for a constant-time implementation, we need an absolute bound. Appendix A is dedicated to proving that each sequence of <span class="math">k - 1</span> iterations ensures that <span class="math">\\mathrm{len}(a) + \\mathrm{len}(b)</span> is reduced by at least <span class="math">k - 1</span>; therefore, <span class="math">2\\mathrm{len}(m) - 1</span> iterations are sufficient (just like the classic binary GCD algorithm). This bound is optimal: if <span class="math">y = 2^{\\mathrm{len}(m) - 1}</span>, then all <span class="math">2\\mathrm{len}(m) - 1</span> iterations are needed.</p>
+
+    <p class="text-gray-300">It may be convenient, for implementation purposes, to slightly raise the total number of iterations so that it is a multiple of <span class="math">k - 1</span>. Alternatively, the last iterations may be specialized away, which may allow for some extra optimizations, especially when the modulus <span class="math">m</span> is prime; this will be detailed later on.</p>
+
+    <p class="text-gray-300">5</p>
+
+    <p class="text-gray-300">The optimized algorithm is described below (algorithm 2).</p>
+
+    <p class="text-gray-300">Algorithm 2 Extended Binary GCD (optimized algorithm) Require: Odd modulus  <span class="math">m</span> <span class="math">(m\\geq 3,m\\bmod 2 = 1)</span>  , value  <span class="math">y(0\\leq y &amp;lt;   m)</span>  , and  <span class="math">k &amp;gt; 1</span> Ensure:  <span class="math">1 / y</span>  mod  <span class="math">m</span>  (if  <span class="math">\\mathrm{GCD}(y,m) = 1</span> 1:  <span class="math">a\\gets y,u\\gets 1,b\\gets m,v\\gets 0</span> 2: for  <span class="math">1\\leq i\\leq \\lceil (2\\mathrm{len}(m) - 1) / k\\rceil</span>  do 3:  <span class="math">n\\gets \\max (\\mathrm{len}(a),\\mathrm{len}(b),2k)</span> 4:  <span class="math">\\tilde{a}\\gets (a\\bmod 2^{k - 1}) + 2^{k - 1}\\lfloor a / 2^{n - k - 1}\\rfloor</span> <span class="math">\\triangleright \\tilde{a} &amp;lt; 2^{2k}</span> 5:  <span class="math">\\tilde{b}\\gets (b\\bmod 2^{k - 1}) + 2^{k - 1}\\lfloor b / 2^{n - k - 1}\\rfloor</span> <span class="math">\\triangleright \\tilde{b} &amp;lt; 2^{2k}</span> 6:  <span class="math">f_0\\gets 1,g_0\\gets 0,f_1\\gets 0,g_1\\gets 1</span> 7: for  <span class="math">1\\leq j\\leq k - 1</span>  do 8: if  <span class="math">\\tilde{a} = 0</span>  mod 2 then 9:  <span class="math">\\tilde{a}\\gets \\tilde{a} /2</span> 10: else 11: if  <span class="math">\\tilde{a} &amp;lt;  \\tilde{b}</span>  then 12:  <span class="math">(\\tilde{a},\\tilde{b})\\gets (\\tilde{b},\\tilde{a})</span> 13:  <span class="math">(f_0,g_0,f_1,g_1)\\gets (f_1,g_1,f_0,g_0)</span> 14:  <span class="math">\\tilde{a}\\gets (\\tilde{a} -\\tilde{b}) / 2</span> 15:  <span class="math">(f_0,g_0)\\gets (f_0 - f_1,g_0 - g_1)</span> 16:  <span class="math">(f_{1},g_{1})\\gets (2f_{1},2g_{1})</span> 17:  <span class="math">(a,b)\\gets ((af_0 + bg_0) / 2^{k - 1},(af_1 + bg_1) / 2^{k - 1})</span> 18: if  <span class="math">a &amp;lt;   0</span>  then 19:  <span class="math">(a,f_0,g_0)\\gets (-a, - f_0, - g_0)</span> 20: if  <span class="math">b &amp;lt;   0</span>  then 21:  <span class="math">(b,f_1,g_1)\\gets (-b, - f_1, - g_1)</span> 22:  <span class="math">(u,v)\\gets (uf_0 + vg_0\\bmod m,uf_1 + vg_1\\bmod m)</span> 23:  <span class="math">v\\gets v / 2^{(k - 1)\\lceil (2\\mathrm{len}(m) - 1) / (k - 1)\\rceil}</span>  mod  <span class="math">m</span> 24: if  <span class="math">b\\neq 1</span>  then 25: return 0 (value  <span class="math">y</span>  is not invertible) 26: return  <span class="math">v</span></p>
+
+    <p class="text-gray-300">When  <span class="math">y</span>  is known in advance to be either 0 or an invertible number modulo  <span class="math">m</span>  (this is always the case when  <span class="math">m</span>  is prime), then the last two outer iterations can be specialized and simplified, because, at that point:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>If  <span class="math">y = 0</span> , then the update factors after  <span class="math">k</span>  inner iterations will be  <span class="math">f_0 = 1, g_0 = 0, f_1 = 0</span>  and  <span class="math">g_1 = 2^{k - 1}</span> , regardless of the value of  <span class="math">\\tilde{b}</span> .</li>
+
+      <li>Otherwise, it is known that  <span class="math">\\operatorname{len}(a) + \\operatorname{len}(b) &amp;lt; 2k</span> , which means that  <span class="math">\\tilde{a} = a</span>  and  <span class="math">\\tilde{b} = b</span> ; the computed update factors will then be exact, and will remain exact even if more than  <span class="math">k - 1</span>  iterations are performed. Depending on the implementation of the routines that apply the update factors, it may be possible to merge the last two outer iterations.</li>
+
+      <li>At the end of the final iteration, it is not necessary to compute the new values of  <span class="math">a</span> ,  <span class="math">b</span>  and  <span class="math">u</span> , only  <span class="math">v</span>  (since the update factors are exact at that point, they cannot lead to a negative  <span class="math">b</span> ).</li>
+
+    </ul>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>The last inner loop iteration can be omitted because when the GCD is 1, the last iteration that starts with a non-zero  <span class="math">a</span>  must have  <span class="math">a = 1</span>  and  <span class="math">b = 1</span> , and  <span class="math">v</span>  already contains the correct result. This reduces the total number of required iterations to  <span class="math">2\\mathrm{len}(m) - 2</span> , i.e. 508 for a 255-bit modulus.</li>
+
+    </ul>
+
+    <p class="text-gray-300">In the general case, when the modulus  <span class="math">m</span>  is not necessarily prime, and a non-invertible but distinct from zero input  <span class="math">y</span>  is possible, these optimizations on the final steps can still be applied, but an extra verification step is required. It suffices to verify that the computed value, when multiplied with the original operand, yields the value 1. The cost of this extra check is small (typically less than  <span class="math">2\\%</span>  of the overall cost, for a modulus of about 256 bits).</p>
+
+    <p class="text-gray-300">We implemented our method in the case of the prime modulus  <span class="math">p = 2^{255} - 19</span> . Our code is available at:</p>
+
+    <p class="text-gray-300">https://github.com/pornin/bingcd</p>
+
+    <p class="text-gray-300">Implementation is in C, with some inline assembly, as well as calls to intrinsic functions. It should compile and run on any Linux or similar system, using GCC or Clang, and an x86 CPU with BMI2 and ADX extensions (in the Intel line, this means using a Haswell core or newer).</p>
+
+    <p class="text-gray-300">Extraction of the approximated words  <span class="math">\\tilde{a}</span>  and  <span class="math">\\tilde{b}</span>  is done with constant-time selection primitives to obtain the highest non-zero limbs in  <span class="math">a</span>  or  <span class="math">b</span>  (bitwise Boolean or), then the lzcnt opcode to count the number of leading zeros. This opcode is available on all x86 CPUs that also feature the BMI2 opcodes. This extraction is constant-time under the assumption that bitwise shifts execute in time independent of the shift count, an assumption that is valid on all relevant x86 CPUs to date <span class="math">^3</span> .</p>
+
+    <p class="text-gray-300">Updates to  <span class="math">a, b, u</span>  and  <span class="math">v</span>  use  <span class="math">64 \\times 64 \\rightarrow 128</span>  multiplication opcodes, accessed through the non-standard unsigned __int128 type. Large integers are represented over 256 bits as four 64-bit limbs; carry propagation uses the adc and sbb opcodes, accessed through the _addcarry_u64() and _subborrow_u64() intrinsic functions.</p>
+
+    <p class="text-gray-300">The whole point of the optimization described in this note is to make the core of the inner loop as simple and fast as possible. In our implementation, we use two versions of that core, implemented using inline assembly. The first version uses six 64-bit registers, to  <span class="math">\\tilde{a},\\tilde{b}</span> , and the four update factors:</p>
+
+    <pre><code class="language-txt"># Copy f0, g0, f1, g1, xa and xb into r10..r15
+movq %rax, %r10
+movq %rbx, %r11
+movq %rcx, %r12
+movq %rdx, %r13
+movq %rsi, %r14
+movq %rdi, %r15
+
+# Conditional swap if xa &lt; xb
+cmpq %rdi, %rsi
+cmovb %r15, %rsi
+cmovb %r14, %rdi
+cmovb %r12, %rax
+cmovb %r10, %rcx
+cmovb %r13, %rbx
+cmovb %r11, %rdx
+
+# Subtract xb from xa
+subq %rdi, %rsi
+subq %rcx, %rax
+subq %rdx, %rbx
+
+# If xa was even, override the operations above
+testl $1, %r14d
+cmovz %r10, %rax
+cmovz %r11, %rbx
+cmovz %r12, %rcx
+cmovz %r13, %rdx
+cmovz %r14, %rsi
+cmovz %r15, %rdi
+
+# Now xa is even; apply shift
+shrq $1, %rsi
+addq %rcx, %rcx
+addq %rdx, %rdx</code></pre>
+
+    <p class="text-gray-300">Only simple instructions that can be executed in several distinct CPU ports, thus amenable to parallelism, are used. Conditional swaps and selection are performed with cmov; this instruction is constant-time, has a 1-cycle latency, and two of them can be executed in a single cycle on a Coffee Lake core, thus each sequence of six cmov conceptually needs only 3 cycles to execute. The non-conditional mov are even more amenable to parallelism (four ports are eligible, leading to up to four mov executing in the same cycle) and some may be in fact eliminated by the register renaming unit. The sub and add opcodes can similarly execute on four ports. Note that multiplications by 2 of <span class="math">f_{1}</span> and <span class="math">g_{1}</span> (rcx and rdx in the code above) are performed with add instead of shl, because the latter may execute on only two ports and was measured to slightly decrease performance.</p>
+
+    <p class="text-gray-300">Counting each cmov at 0.5 cycle, sub, add, cmp and test at 0.25 cycle each, and shr at 0.5 cycle (using the reported reciprocal throughputs from Agner Fog’s comprehensive tables<em>[10]</em>), the sequence above requires a minimum of 8.25 cycles, not counting the mov opcodes. Simple measurements show that this sequence, when used in a loop, requires 9 cycles per iteration (on our test system), which means that some of the mov opcodes are eliminated and replaced with internal free data routing.</p>
+
+    <p class="text-gray-300">The second version of the core loop is even faster:</p>
+
+    <p class="text-gray-300">movq %rax, %r10 movq %rcx, %r12 movq %rsi, %r14 movq %rdi, %r15</p>
+
+    <p class="text-gray-300">cmpq %rdi, %rsi cmovb %r15, %rsi cmovb %r14, %rdi cmovb %r12, %rax cmovb %r10, %rcx</p>
+
+    <p class="text-gray-300">subq %rdi, %rsi subq %rcx, %rax addq %rdx, %rax</p>
+
+    <p class="text-gray-300">testl $1, %r14d cmovz %r10, %rax cmovz %r12, %rcx cmovz %r14, %rsi cmovz %r15, %rdi</p>
+
+    <p class="text-gray-300">shrq $1, %rsi addq %rcx, %rcx subq %rdx, %rcx</p>
+
+    <p class="text-gray-300">This alternate implementation keeps two update factors in the same register. Specifically, register rax contains <span class="math">f_0 + 2^{31} - 1 + 2^{32}(g_0 + 2^{31} - 1)</span>; rcx similarly contains <span class="math">f_1</span> and <span class="math">g_1</span>. The constant <span class="math">(2^{31} - 1)(2^{32} + 1)</span> is kept in rdx. Grouping values by pairs reduces the number of instructions, especially for conditional swaps and moves. The addition of the constant <span class="math">2^{31} - 1</span> to each update factor ensures that the stored values remain positive; thus, there will be no unwanted carry propagating from the low to high halves of the registers. The alternate loop appears to use, on average, about 6.17 cycles per iteration.</p>
+
+    <p class="text-gray-300">In total, the 508 iterations represent about 3260 cycles by themselves; all the other operations (extraction of the properly shifted words, updates to <span class="math">a</span>, <span class="math">b</span>, <span class="math">u</span> and <span class="math">v</span>, final multiplication by <span class="math">2^{-508}</span>) use slightly less than 3000 cycles. This highlights the importance of optimizing the inner loop as much as possible.</p>
+
+    <p class="text-gray-300">Measures are made on an Intel Core i5-8295U CPU, clocked at 2.3 GHz. Host system is Linux (Ubuntu 20.04, kernel 5.4.0-42). C compiler is Clang-10.0.0 and compilation uses optimization flags -O3 -march=native. TurboBoost is disabled (in the BIOS), so there is no frequency scaling above 2.3 GHz. SMT (HyperThreading) is disabled. Clock cycles are obtained with the rdtsc opcode before and after a sequence of 100 dependent inversions</p>
+
+    <p class="text-gray-300">9</p>
+
+    <p class="text-gray-300">(i.e. each inversion works over the output of the previous one); a serializing lfence opcode is also used to ensure that the CPU scheduler will run rdtsc at the right place in the sequence of instructions. The bench program first runs some extensive unit tests, to verify correction of the computations, and also act as a “warm-up” to make sure the CPU has gone out of energy-saving mode and has reached its nominal frequency. 2000 measures are then performed; the first 1000 are discarded (they are used to make sure caches are populated and branch prediction is properly trained), then the median of the remaining 1000 is reported⁴.</p>
+
+    <p class="text-gray-300">On this system, our inversion routine runs in 6253 cycles. This is better than the previously published record[3], which runs in 8520 cycles on the same system. For comparison purposes, we also implemented the usual inversion method with Fermat’s little theorem (FLT); for this, we use handwritten assembly routines for multiplications, squarings, and sequences of squarings modulo <span class="math">2^{255} - 19</span>. These routines are inspired from, and very similar to, the ones described in [13] and [12], though our FLT inversion routine ends up running in 9175 cycles, which is marginally faster than the previous record (9301 cycles, in [12]): apparently, our multiple squaring routine is faster by about half a cycle per iteration. We don’t really know why. In any case, the extended binary GCD is still faster.</p>
+
+    <p class="text-gray-300">A noteworthy feature of our code is that it can work with other moduli, with the same performance; supported moduli have the format <span class="math">2^{255} - r</span> for any odd <span class="math">r</span> between 1 and <span class="math">2^{31} - 1</span> (this limit is imposed by the way we perform modular reduction after a multiplication). If the modulus is not prime, the FLT inversion method no longer works, but the extended binary GCD still returns the correct result (in that case, our code includes the extra verification step, to also cover non-invertible inputs; that extra verification step costs about 100 cycles).</p>
+
+    <p class="text-gray-300">We described a simple and practical optimization to the classic extended binary GCD algorithm. In the specific case of inversion modulo <span class="math">2^{255} - r</span> (for a small <span class="math">r</span>), this optimization happens to lead to a routine which is faster than the usual method based on Fermat’s little theorem, and also slightly faster than the previously best reported inversion routine for that class of moduli, the recent (and more complicated) algorithm from Bernstein and Yang. This does not mean that our optimization makes binary GCD the best algorithm in all cases; it depends on many parameters, such as modulus size and format and target implementation architecture. We also did not try to apply it to polynomial GCDs, though a similar optimization might also provide practical benefits there. One can view our method as an improvement in data locality, thereby reducing data routing cost (in our primary example, by keeping values in single registers, thereby avoiding RAM traffic in the innermost loop).</p>
+
+    <p class="text-gray-300">⁴The deactivation of TurboBoost and the warm-up steps ensure that the CPU runs at exactly the frequency used by the TSC counter. We also tried using the performance counters, namely the CPU_CLK.UNHALTED counter which is supposed to count “true” cycles, and can be read with rdpmc at index 0x40000001; this does not yield different results. Our test program uses rdtsc because it is readable by non-root userland processes by default. Regardless, some measurement variance remains, of unclear provenance. It does not seem to be correlated with the value being inverted (since we observe that variance even when using the same values again and again), and thus should not contradict our claim of constant-time behaviour. It is known that modern complex CPUs are full of accumulated heuristics, many of them undocumented.</p>
+
+    <p class="text-gray-300">The same optimization technique should, conceptually, apply to the computation of the Jacobi symbol[6]. The Jacobi symbol is useful to test the quadratic residue status of a finite field element, which in turn is part of the operations used for constant-time hashing into elliptic curves[9].</p>
+
+    <p class="text-gray-300">Acknowledgements: We thank Eric Schorn and Paul Bottinelli, who reviewed this article, and Tim Taubert, who found the gap in the proof in a previous version.</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>1. 1.</li>
+
+      <li>BearSSL, a smaller SSL/TLS library, https://www.bearssl.org/</li>
+
+      <li>D. Bernstein and B.-Y. Yang, Fast constant-time gcd computation and modular inversion, https://gcd.cr.yp.to/papers.#safegcd</li>
+
+      <li>R. Brent and H. Kung, Systolic VLSI arrays for linear-time GCD computation, VLSI 1983, pp. 145-154, 1983.</li>
+
+      <li>1. 1.</li>
+
+      <li>H. Cohen, A Course in Computational Algebraic Number Theory, Springer, pp. 29-31, 1993.</li>
+
+      <li>Euclid, Elements, book 7, propositions 1 and 2, c. 300 BC.</li>
+
+      <li>Falcon: Fast-Fourier Lattice-based Compact Signatures over NTRU, https://falcon-sign.info/</li>
+
+      <li>A. Faz-Hernandez, S. Scott, N. Sullivan, R. Wahby and C. Wood, Hashing to Elliptic Curves, https://tools.ietf.org//draft-irtf-cfrg-hash-to-curve-09</li>
+
+      <li>A. Fog, Instruction tables: Lists of instruction latencies, throughputs and micro-operation breakdowns for Intel, AMD and VIA CPUs, https://www.agner.org/optimize/instruction_tables.pdf</li>
+
+      <li>N. Möller, On Schonhage's algorithm and subquadratic integer GCD computation, Mathematics of Computation, vol. 77, pp. 589-607, 2008.</li>
+
+      <li>K. Nath and P. Sarkar, Efficient Arithmetic In (Pseudo-)Mersenne Prime Order Fields, https://eprint.iacr.org/2018/985</li>
+
+      <li>T. Oliveira, J. López, H. Hisil, A. Faz-Hernández and F. Rodríguez-Henríquez, How to (pre-)compute a ladder - improving the performance of X25519 and X448, SAC 2017, Lecture Notes in Computer Science, vol. 10719, pp. 172-191.</li>
+
+      <li>J. Stein, Computational problems associated with Racab algebra, Journal of Computational Physics, vol. 1, issue 3, pp. 397-405, 1967.</li>
+
+    </ol>
+
+    <p class="text-gray-300">A Bounding the Number of Iterations</p>
+
+    <p class="text-gray-300">In this section, we prove that the inner loop of algorithm 2 ensures that the <span class="math">k-1</span> iterations always reduce <span class="math">\\mathrm{len}(a)+\\mathrm{len}(b)</span> by at least <span class="math">k-1</span> bits.</p>
+
+    <p class="text-gray-300">Each excution of the inner loop consists of <span class="math">k-1</span> iterations. We number iterations from <span class="math">0</span> to <span class="math">k-2</span>; this means that iteration <span class="math">t</span> happens just after <span class="math">t</span> iterations have completed. We will note <span class="math">x_{t}</span> the value of the quantity <span class="math">x</span> (for any of the quantities we manipulate, namely <span class="math">a</span>, <span class="math">b</span>, <span class="math">\\tilde{a}</span> and <span class="math">\\tilde{b}</span>) when <em>exiting</em> iteration <span class="math">t-1</span> and <em>entering</em> iteration <span class="math">t</span>.</p>
+
+    <h3 id="sec-14" class="text-xl font-semibold mt-8">A.1 Maximum Error Bound</h3>
+
+    <p class="text-gray-300">We first need to show that <span class="math">\\tilde{a}</span> and <span class="math">\\tilde{b}</span> remain “good approximations” of <span class="math">a</span> and <span class="math">b</span> over the <span class="math">k-1</span> iterations, i.e., that the upper bits of <span class="math">\\tilde{a}</span> and <span class="math">\\tilde{b}</span> still match or are close to the upper bits of <span class="math">a</span> and <span class="math">b</span>.</p>
+
+    <p class="text-gray-300">First, notice that after <span class="math">t</span> iterations of the inner loop (<span class="math">0\\leq t\\leq k-1</span>), the following inequalities hold:</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">$</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">f_{0}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">+</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">g_{0}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\leq 2^{t}$</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">They are obviously correct at the start (<span class="math">t=0</span>) since, at that point, <span class="math">f_{0}=g_{1}=1</span> and <span class="math">f_{1}=g_{0}=0</span>. Then, at each successive iteration:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>If <span class="math">\\tilde{a}</span> is even, then:</li>
+
+    </ul>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">$</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">f_{0}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">+</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">g_{0}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\leq 2^{t}<2^{t+1}$</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>If <span class="math">\\tilde{a}</span> is odd, then the conditional swap preserves the inequalities, and the subtraction implies that:</li>
+
+    </ul>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">$</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">f_{0}-f_{1}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">+</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">g_{0}-g_{1}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"><span class="math"> </span>\\leq</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">f_{0}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">+</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">f_{1}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">+</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">g_{0}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">+</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">g_{1}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">$</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300"><span class="math">\\leq 2^{t+1}</span></p>
+
+    <p class="text-gray-300">Suppose that the inner loop started with <span class="math">a</span> and <span class="math">b</span>, approximated into <span class="math">\\tilde{a}</span> and <span class="math">\\tilde{b}</span>. We have <span class="math">n=\\max(\\mathrm{len}(a),\\mathrm{len}(b))</span>. If <span class="math">n\\leq 2k</span>, then <span class="math">\\tilde{a}=a</span> and <span class="math">\\tilde{b}=b</span>, and there is no approximation; the algorithm then proceeds exactly as the classic algorithm (algorithm 1) and ensures a gain of at least <span class="math">1</span> bit per iteration. We thus consider thereafter that <span class="math">n&gt;2k</span>.</p>
+
+    <p class="text-gray-300">Considering the situation after <span class="math">t</span> iterations of the inner loop (<span class="math">0\\leq t\\leq k-1</span>), we define:</p>
+
+    <p class="text-gray-300"><span class="math">\\tilde{a}_{t}</span> <span class="math">=(\\tilde{a}f_{0}+\\tilde{b}g_{0})/2^{t}</span> <span class="math">\\tilde{b}_{t}</span> <span class="math">=(\\tilde{a}f_{1}+\\tilde{b}g_{1})/2^{t}</span> <span class="math">a_{t}</span> <span class="math">=(af_{0}+bg_{0})/2^{t}</span> <span class="math">b_{t}</span> <span class="math">=(af_{1}+bg_{1})/2^{t}</span></p>
+
+    <p class="text-gray-300">These are, respectively, the values of <span class="math">\\tilde{a}</span> and <span class="math">\\tilde{b}</span> after <span class="math">t</span> iterations, and the corresponding values of <span class="math">a</span> and <span class="math">b</span>, should the update factors be applied at that point. Note that, by construction, the divisions by <span class="math">2^{t}</span> are exact.</p>
+
+    <p class="text-gray-300">###</p>
+
+    <p class="text-gray-300">Note that <span class="math">\\tilde{a}</span> and <span class="math">\\tilde{b}</span> are approximations of <span class="math">a</span> and <span class="math">b</span> in the sense that bits <span class="math">k - 1</span> to <span class="math">2k - 1</span> of <span class="math">\\tilde{a}</span> (respectively <span class="math">\\tilde{b}</span>) are exactly the same as bits <span class="math">n - k - 1</span> to <span class="math">n - 1</span> of <span class="math">a</span> (respectively <span class="math">b</span>). This can be expressed with the following inequalities:</p>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">a - 2^{n - 2k} \\tilde{a}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">&lt; 2^{n - k - 1}</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">b - 2^{n - 2k} \\tilde{b}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">&lt; 2^{n - k - 1}</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <p class="text-gray-300">Consider now the following:</p>
+
+    <div class="my-4 text-center"><span class="math-block">\\begin{aligned} a_t - 2^{n - 2k} \\tilde{a}_t &amp;amp;= \\frac{(af_0 + bg_0) - 2^{n - 2k}(\\tilde{a}f_0 + \\tilde{b}g_0)}{2^t} \\\\ &amp;amp;= \\frac{(a - 2^{n - 2k} \\tilde{a})f_0 + (b - 2^{n - 2k} \\tilde{b})g_0}{2^t} \\end{aligned}</span></div>
+
+    <p class="text-gray-300">Therefore, applying the triangular inequality:</p>
+
+    <p class="text-gray-300">$$ \\begin{aligned}</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">a_t - 2^{n - 2k} \\tilde{a}_t</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">&amp;\\leq 2^{-t}(</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">2^{n - k - 1}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">f_0</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">+</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">2^{n - k - 1}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">g_0</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">) \\\\</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">\\end{aligned} $$</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Since $</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">f_0</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">+</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">g_0</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\leq 2^t$, we then get that:</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">a_t - 2^{n - 2k} \\tilde{a}_t</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\leq 2^{n - k - 1}</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <p class="text-gray-300">and similarly for <span class="math">b</span>:</p>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">b_t - 2^{n - 2k} \\tilde{b}_t</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\leq 2^{n - k - 1}</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <p class="text-gray-300">This means that, throughout the <span class="math">k</span> iterations, the upper bits (<span class="math">k - 1</span> to <span class="math">2k - 1</span>) of <span class="math">\\tilde{a}</span> and <span class="math">\\tilde{b}</span> remain a close approximation of the upper bits (<span class="math">n - k - 1</span> to <span class="math">n - 1</span>) of the values <span class="math">a</span> and <span class="math">b</span> that they represent, i.e. the values we would get by applying the update factors right away.</p>
+
+    <h2 id="sec-15" class="text-2xl font-bold">A.2 Length Reduction at Divergence Point</h2>
+
+    <p class="text-gray-300">As in the previous section, consider the values <span class="math">a</span> and <span class="math">b</span> at the start of an inner loop. The <span class="math">k - 1</span> iterations of the inner loop will perform halvings, swaps and subtractions based on the bits in <span class="math">\\tilde{a}</span> and <span class="math">\\tilde{b}</span>, used as representations of <span class="math">a</span> and <span class="math">b</span>. The halvings and subtractions rely on the <span class="math">k - 1</span> low bits of <span class="math">\\tilde{a}</span> and <span class="math">\\tilde{b}</span>, which are always exact; only the conditional swaps may differ between the classic and optimized algorithms, since, in the latter case, the relative ordering of <span class="math">\\tilde{a}</span> and <span class="math">\\tilde{b}</span> might not match that of <span class="math">a</span> and <span class="math">b</span>.</p>
+
+    <p class="text-gray-300">If, throughout the <span class="math">k - 1</span> iterations, the inner loop makes the exact same decisions that it would take with the actual updated values of <span class="math">a</span> and <span class="math">b</span>, then it follows the same steps as the classic algorithm (algorithm 1) on the same inputs, and thus obtains the same reduction in length of <span class="math">a</span> and <span class="math">b</span>, i.e. at least <span class="math">k - 1</span> bits in total. Otherwise, we call the divergence point the iteration <span class="math">d</span> (<span class="math">0 \\leq d &amp;lt; k - 1</span>) at which the inner loop of algorithm 2 takes a different decision from that would have been taken by the classic algorithm. Let us observe the situation at that point, using the notations from section A.1:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>The algorithm has <span class="math">\\tilde{a}_d</span> and <span class="math">\\tilde{b}_d</span>, which are both odd. Without loss of generality, we can assume that <span class="math">\\tilde{a}_d \\geq \\tilde{b}_d</span>. The inner loop of algorithm 2 decides to subtract <span class="math">\\tilde{b}_d</span> from <span class="math">\\tilde{a}_d</span>.</li>
+
+    </ul>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>However, the actual values <span class="math">a_d</span> and <span class="math">b_d</span> (updated values of <span class="math">a</span> and <span class="math">b</span>) would be such that <span class="math">a_d &amp;lt; b_d</span>. The subtraction will then yield a negative value.</li>
+
+    </ul>
+
+    <p class="text-gray-300">As we saw in section A.1, <span class="math">\\tilde{a}_d</span> and <span class="math">\\tilde{b}_d</span> are good approximations of <span class="math">a_d</span> and <span class="math">b_d</span>, respectively. Write that:</p>
+
+    <div class="my-4 text-center"><span class="math-block">2^{n-2k}(\\tilde{a}_d - \\tilde{b}_d) - (a_d - b_d) = (2^{n-2k}\\tilde{a}_d - a_d) + (b_d - 2^{n-2k}\\tilde{b}_d)</span></div>
+
+    <p class="text-gray-300">and thus:</p>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">2^{n-2k}(\\tilde{a}_d - \\tilde{b}_d) - (a_d - b_d)</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\leq</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">2^{n-2k}\\tilde{a}_d - a_d</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">+</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">b_d - 2^{n-2k}\\tilde{b}_d</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\leq 2^{n-k}</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <p class="text-gray-300">Since <span class="math">2^{n-2k}(\\tilde{a}_d - \\tilde{b}_d) \\geq 0</span> and <span class="math">a_d - b_d &amp;lt; 0</span>, and their difference is no greater in absolute value than <span class="math">2^{n-k}</span>, it follows that:</p>
+
+    <div class="my-4 text-center"><span class="math-block">0 \\leq \\tilde{a}_d - \\tilde{b}_d &amp;lt; 2^k</span></div>
+
+    <p class="text-gray-300">Therefore, at the divergence point <span class="math">d</span>, the inner loop will compute a new value <span class="math">\\tilde{a}_{d+1} = (\\tilde{a}_d - \\tilde{b}_d)/2</span> which will be strictly lower than <span class="math">2^{k-1}</span>, hence such that all its <span class="math">k+1</span> upper bits will be zero. Similarly:</p>
+
+    <div class="my-4 text-center"><span class="math-block">0 &amp;gt; a_d - b_d \\geq -2^{n-k}</span></div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">which implies that $</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">a_{d+1}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\leq 2^{n-k-1}<span class="math">. Note that </span></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">a_{d+1}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"><span class="math"> may be equal to </span>2^{n-k-1}<span class="math"> only if </span>\\tilde{a}_d = \\tilde{b}_d<span class="math">, in which case </span>\\tilde{a}_{d+1} = 0<span class="math"> and all subsequent iterations of the inner loop will decide to divide </span>\\tilde{a}_t<span class="math"> (and thus </span>a_t$) by 2, without any further subtraction.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <h2 id="sec-16" class="text-2xl font-bold">A.3 Minimal Length Reduction</h2>
+
+    <p class="text-gray-300">We again consider a situation at the start of an inner loop, such that:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>One of <span class="math">a</span> and <span class="math">b</span> (or both) has length at least <span class="math">2k + 1</span> bits.</li>
+
+      <li>The inner loop execution includes a divergence point at iteration <span class="math">d</span>.</li>
+
+    </ul>
+
+    <p class="text-gray-300">In all other inner loop cases, the execution follows the steps of the classic binary GCD algorithm, thereby ensuring a total length reduction of <span class="math">(a, b)</span> by at least <span class="math">k - 1</span> bits.</p>
+
+    <p class="text-gray-300">After the divergence point, the following properties apply:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Dividing <span class="math">a_t</span> by 2 does not change the sign of <span class="math">a_t</span>.</li>
+
+      <li>If <span class="math">a_t &amp;gt; 0</span> and <span class="math">b_t &amp;lt; 0</span>, then <span class="math">a_t - b_t &amp;gt; 0</span>.</li>
+
+      <li>If <span class="math">a_t &amp;lt; 0</span> and <span class="math">b_t &amp;gt; 0</span>, then <span class="math">a_t - b_t &amp;lt; 0</span>.</li>
+
+    </ul>
+
+    <p class="text-gray-300">Therefore, in all subsequent steps, one of the values will be negative, and the other one will be positive. It cannot happen that two strictly negative values, or two nonnegative values are obtained, unless <span class="math">a</span> reaches zero (in which case the algorithm has converged).</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Moreover, if $</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">a_t</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\geq 2^{n-k-1}<span class="math"> and </span></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">b_t</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">&lt; 2^{n-k-1}$, then:</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\left</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\frac{a_t - b_t}{2} \\right</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\leq \\frac{</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">a_t</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">+</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">b_t</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">}{2} &lt;</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">a_t</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">and if $</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">a_t</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">&lt; 2^{n-k-1}<span class="math"> and </span></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">b_t</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">&lt; 2^{n-k-1}$, then:</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\left</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\frac{a_t - b_t}{2} \\right</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\leq \\frac{</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">a_t</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">+</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">b_t</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">}{2} &lt; 2^{n-k-1}</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">As remarked in section A.1, if the divergence point yields <span class="math">a_{d+1} = -2^{n-k-1}</span>, then all subsequent iterations will use <span class="math">\\tilde{a}_t = 0</span> and none of them will try to perform a subtraction (or a swap); otherwise, $</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">a_{d+1}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">&lt; 2^{n-k-1}<span class="math">. It follows that, after the point of divergence, even if an iteration fails to reduce the sum of the lengths of </span>a_t<span class="math"> and </span>b_t<span class="math">, it will not allow any value </span>a<span class="math"> or </span>b<span class="math"> above </span>2^{n-k-1}<span class="math"> to grow, or any value below </span>2^{n-k-1}<span class="math"> to regrow beyond </span>n - k - 1$ bits.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">Using these properties, we analyze the possible cases, depending on the initial lengths of the values.</p>
+
+    <p class="text-gray-300"><strong>Case 1</strong>: <span class="math">\\mathrm{len}(a) = n</span> and <span class="math">\\mathrm{len}(b) \\leq n - k</span></p>
+
+    <p class="text-gray-300">This situation means that, when starting the inner loop, <span class="math">b</span> was shorter than <span class="math">a</span> by at least <span class="math">k</span> bits.</p>
+
+    <p class="text-gray-300">In that case, <span class="math">\\tilde{b} &amp;lt; 2^k</span> and <span class="math">\\tilde{a} \\geq 2^{2k-1}</span>. The first iteration will see that <span class="math">\\tilde{a} &amp;gt; \\tilde{b}</span> and there will be no swap. In fact, after <span class="math">t</span> iterations with no swap, the minimal value for <span class="math">\\tilde{a}_t</span> will be <span class="math">(\\tilde{a} - (2^t - 1)\\tilde{b}) / 2^t</span>. For <span class="math">t \\leq k-2</span>, we have:</p>
+
+    <div class="my-4 text-center"><span class="math-block">\\begin{array}{l} \\tilde{a} - (2^t - 1)\\tilde{b} \\geq 2^{2k-1} - (2^t - 1)(2^k - 1) \\\\ \\geq 2^{2k-1} - (2^{k-2} - 1)(2^k - 1) \\\\ &amp;gt; 2^{2k-1} - 2^{2k-2} \\\\ &amp;gt; 2^{2k-2} \\end{array}</span></div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">This implies that <span class="math">\\tilde{a}_t &amp;gt; 2^{2k-2-t} \\geq 2^k &amp;gt; \\tilde{b}_t</span>. Therefore, the next iteration will still perform no swap. In total, there will be no swap over the <span class="math">k-1</span> iterations. It follows that, after <span class="math">k-1</span> iterations, the reduction factors are such that <span class="math">f_0 = 1</span>, <span class="math">0 \\geq g_0 \\geq -(2^{k-1} - 1)</span>, <span class="math">f_1 = 0</span>, and <span class="math">g_1 = 2^{k-1}</span>. The update on <span class="math">a</span> will compute <span class="math">(af_0 + bg_0) / 2^{k-1}</span>; since <span class="math">a &amp;gt; 2^{k-1}b</span> and $</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">g_0</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">&lt; 2^{k-1}<span class="math">, the new value of </span>a<span class="math"> cannot be negative. Similarly, the new value of </span>b<span class="math"> cannot be negative since </span>f_1<span class="math"> and </span>g_1<span class="math"> are nonnegative. As was pointed out previously, after a divergence point, values </span>a_t<span class="math"> and </span>b_t<span class="math"> have opposite signs. We concluded that, in this case, there is no divergence point, and a reduction of at least </span>k-1$ bits is achieved, since the optimized algorithm follows the exact same steps as the classic algorithm.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300"><strong>Case 2</strong>: <span class="math">\\mathrm{len}(a) \\leq n - k</span> and <span class="math">\\mathrm{len}(b) = n</span></p>
+
+    <p class="text-gray-300">This case is similar to the previous case. It may start with some divisions of <span class="math">a</span> by 2; if <span class="math">s</span> such steps happen before reaching an odd <span class="math">\\tilde{a}</span>, then we can apply the analysis of the previous case, replacing <span class="math">k - 1</span> with <span class="math">k - 1 - s</span>: a swap occurs at iteration <span class="math">s</span>, and after the swap, the new <span class="math">a</span> (previously <span class="math">b</span>) has length <span class="math">n</span> bits while the new <span class="math">b</span> (previously <span class="math">a</span>) has length at most <span class="math">n - k - s</span> bits. The subsequent <span class="math">k - 1 - s</span> iterations will each reduce <span class="math">a</span> by at least one bit each, but there will be no further swap and no divergence point will be reached.</p>
+
+    <p class="text-gray-300"><strong>Case 3</strong>: <span class="math">\\mathrm{len}(a) = n</span> and <span class="math">\\mathrm{len}(b) \\geq n - k + 1</span>, or <span class="math">\\mathrm{len}(a) \\geq n - k + 1</span> and <span class="math">\\mathrm{len}(a) = n</span></p>
+
+    <p class="text-gray-300">Suppose that when the divergence point <span class="math">(d)</span> is reached, <span class="math">b_d &amp;lt; 2^{n-k-1}</span>. Since the divergence point is such that <span class="math">a_d &amp;lt; b_d</span>, this implies that <span class="math">a_d &amp;lt; 2^{n-k-1}</span> as well. Therefore, the two values have already been reduced by at least <span class="math">k + 3</span> bits in total at this point. Since operations beyond the divergence point won't allow values to regrow beyond <span class="math">2^{n-k-1}</span> in absolute value, it follows that the total reduction will be at least <span class="math">k + 3</span> bits.</p>
+
+    <p class="text-gray-300">We now assume that when the divergence point is reached, <span class="math">\\mathrm{len}(b_d) = n - k + j</span> for some <span class="math">j \\geq 0</span>. Since <span class="math">a_d &amp;lt; b_d</span> (this is a divergence point), it implies that <span class="math">\\mathrm{len}(a_d) \\leq n - k + j</span> as</p>
+
+    <p class="text-gray-300">15</p>
+
+    <p class="text-gray-300">well. Since one of the starting values had length <span class="math">n</span> bits, this means that at least <span class="math">k - j</span> bits of reduction have been achieved at that point. Then, the new value of <span class="math">a</span> is <span class="math">a_{d+1}</span> which is such that <span class="math">0 &amp;gt; a_{d+1} \\geq -2^{n-k-1}</span>. If <span class="math">a_{d+1} \\neq -2^{n-k-1}</span>, then this represents an extra reduction of at least <span class="math">j</span> bits in length, hence <span class="math">k - j + j = k</span> bits at least in total. As remarked above, subsequent steps won't allow any value of more than <span class="math">k - 1</span> bits to grow, so this reduction level cannot be compromised; after the <span class="math">k - 1</span> iterations, total reduction will still be at least <span class="math">k</span> bits.</p>
+
+    <p class="text-gray-300">The remaining case is when <span class="math">a_{d+1} = -2^{n-k-1}</span>, exactly. At that point, we have a reduction of at least <span class="math">k - 1</span> bits. Moreover, since <span class="math">\\tilde{a}_{d+1} = 0</span>, subsequent steps, if any, will divide <span class="math">a</span> by 2 but leave <span class="math">b</span> unchanged; there will be no loss on that reduction level. We thus obtain at least <span class="math">k - 1</span> bits of reduction.</p>
+
+    <p class="text-gray-300"><strong>Conclusion:</strong> In all cases, we saw that a reduction of at least <span class="math">k - 1</span> bits is achieved, which completes the proof.</p>
+
+    <p class="text-gray-300"><strong>Commentary:</strong> It may be surprising that even using approximations, we do not need more iterations than the classic binary GCD, for which the worst case bound <span class="math">2\\mathrm{len}(m) - 1</span> is already optimal. Intuitively, the reason is that we have some extra "hidden" iterations: the conditional negation of <span class="math">a</span> and <span class="math">b</span> (after their respective updates every <span class="math">k - 1</span> iterations) is the point where the approximation is resolved. In that sense, the optimized algorithm really needs <span class="math">k</span> iterations in the worst case to achieve a <span class="math">k - 1</span>-bit reduction; the last of these <span class="math">k</span> iterations masquerades as a pair of conditional subtractions.</p>
+
+    <p class="text-gray-300">16</p>`;
+---
+
+<BaseLayout title="Optimized Binary GCD for Modular Inversion (2020/972)">
+  <article class="max-w-4xl mx-auto article-prose">
+    <nav class="mb-8">
+      <a href="/papers" class="text-blue-400 hover:text-blue-300">
+        &larr; Back to Papers
+      </a>
+    </nav>
+
+    <header class="mb-12">
+      <h1 class="text-3xl font-bold mb-4"
+        set:html={TITLE_HTML} />
+      <p class="text-gray-400 mb-2"
+        set:html={AUTHORS_HTML} />
+      <p class="text-gray-500 text-sm mb-4">
+        2020 &middot; eprint 2020/972
+      </p>
+      <div class="flex gap-4 text-sm">
+        <a
+          href={EPRINT_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          class="text-blue-400 hover:text-blue-300"
+        >
+          Paper (eprint) &rarr;
+        </a>
+      </div>
+      <p class="mt-4 text-xs text-gray-500">
+        All content below belongs to the original authors. This page
+        reproduces the paper for educational purposes. Always
+        <a
+          href={EPRINT_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          class="text-blue-400 hover:text-blue-300"
+        >cite the original</a>.
+      </p>
+      <p class="mt-1 text-xs text-gray-600">
+        Converted with: {CRAWLER} &middot; {CONVERTED_DATE}
+      </p>
+    </header>
+
+    <Fragment set:html={CONTENT} />
+
+  </article>
+</BaseLayout>

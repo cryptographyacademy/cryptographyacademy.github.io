@@ -1,0 +1,875 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+
+const EPRINT_URL = 'https://eprint.iacr.org/2023/1284';
+const CRAWLER = 'mistral';
+const CONVERTED_DATE = '2026-02-16';
+const TITLE_HTML = 'Improving logarithmic derivative lookups using GKR';
+const AUTHORS_HTML = 'Shahar Papini, Ulrich Haböck';
+
+const CONTENT = `    <p class="text-gray-300">Improving logarithmic derivative lookups using GKR</p>
+
+    <p class="text-gray-300">Shahar Papini, Ulrich Haböck spapini@starkware.co, uhaboeck@polygon.technology</p>
+
+    <p class="text-gray-300">September 18*, 2023</p>
+
+    <p class="text-gray-300">Abstract</p>
+
+    <p class="text-gray-300">In this informal note, we instantiate the Goldwasser-Kalai-Rothblum (GKR) protocol to prove fractional sumchecks as present in lookup arguments based on logarithmic derivatives, with the following impact on the prover cost of [Hab22]: When looking up <span class="math">M \\geq 1</span> columns in a (for the sake of simplicity) single column table, the prover has to commit only to a single extra column, i.e. the multiplicities of the table entries. In order to carry over the GKR fractional sumcheck to the univariate setting, we furthermore introduce a simple, yet (as far as we know) novel transformation for turning a univariate polynomial commitment scheme into a multilinear one. The transformation complements existing approaches [ZXZS20, BCHO22, CBBZ22, Ham22, KT23] and might be of independent interest for its elegant way to prove arbitrary powers of the lexicographic shift over the Boolean hypercube.</p>
+
+    <p class="text-gray-300">Contents</p>
+
+    <p class="text-gray-300">1 Notation 1 2 logUp in a nutshell 1 3 GKR for fractional sumchecks 3 3.1 The circuit 3 3.2 The GKR protocol 4 3.3 Computational cost 5 4 Application to logUp 6 5 How to tackle the univariate case 8 5.1 A simple univariate IOP for multilinear evaluation 8 5.2 Univariate logUp with GKR 10</p>
+
+    <p class="text-gray-300">*This revision corrects several typos in the previous eprint.</p>
+
+    <p class="text-gray-300">A Appendix</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>A.1 The univariate constraints for the Lagrange</li>
+
+      <li>A.2 Proving the lexicographical shift on the hypercube</li>
+
+    </ul>
+
+    <h2 id="sec-1" class="text-2xl font-bold">1 Notation</h2>
+
+    <p class="text-gray-300">Throughout this note we assume that <span class="math">F</span> is a finite field of characteristic larger than <span class="math">2</span>, i.e. <span class="math">\\mathsf{char}(F)&gt;2</span>, <span class="math">F^{<em>}</span> its multiplicative group, and <span class="math">H_{n}</span> denotes the <span class="math">n</span>-dimensional Boolean hypercube <span class="math">\\{\\pm 1\\}^{n}</span> as a subgroup of <span class="math">(F^{</em>})^{n}</span>. A multilinear polynomial in <span class="math">n</span> variables is a polynomial <span class="math">p(X_{1},\\ldots,X_{n})</span> over <span class="math">F</span> with individual degrees at most <span class="math">1</span>, i.e. <span class="math">\\deg_{X_{i}}p(X_{1},\\ldots,X_{n})\\leq 1</span> for all <span class="math">i=1,\\ldots,n</span>. Whenever convenient we shall use vector notation for the variables, for example <span class="math">p((X_{1},\\ldots,X_{n}))</span> or <span class="math">p((X_{1},\\ldots,X_{k}),(X_{k+1},\\ldots,X_{n}))</span> for <span class="math">p(X_{1},\\ldots,X_{n})</span>. The Lagrange kernel for <span class="math">H_{n}</span> is the <span class="math">(2\\cdot n)</span>-variate multilinear polynomial</p>
+
+    <p class="text-gray-300"><span class="math">L_{n}(\\vec{X},\\vec{Y})=\\frac{1}{2^{n}}\\cdot\\prod_{i=1}^{n}(1+X_{i}\\cdot Y_{i}),</span></p>
+
+    <p class="text-gray-300">with <span class="math">\\vec{X}=(X_{1},\\ldots,X_{n})</span> and <span class="math">\\vec{Y}=(Y_{1},\\ldots,Y_{n})</span>. Taking <span class="math">\\vec{Y}=\\vec{y}</span> from the Boolean hypercube gives the Lagrange polynomial <span class="math">L_{n}(\\vec{X},\\vec{y})</span> which is the unique multilinear polynomial equal to <span class="math">1</span> if <span class="math">\\vec{X}=\\vec{y}</span>, and equal to zero elsewhere over <span class="math">H_{n}</span>.</p>
+
+    <p class="text-gray-300">For our purpose all multilinear polynomials <span class="math">p(\\vec{X})</span> in <span class="math">n</span> variables will be given in Lagrange representation, i.e. by their values over <span class="math">H_{n}</span>. To emphasize this fact, we describe our protocols as what is called a Lagrange interactive oracle proof in <em>[x10]</em>, in which the oracles are loaded with a set of values over <span class="math">H_{n}</span> (the Lagrange representations), and later accessed via tensor queries (in other words, evaluation queries for the Lagrange representation).</p>
+
+    <h2 id="sec-2" class="text-2xl font-bold">2 logUp in a nutshell</h2>
+
+    <p class="text-gray-300">In logUp, which is the current unofficial name for the lookup argument from <em>[x10]</em>, the prover is given the values over <span class="math">H_{n}</span> (the “witness columns”) of <span class="math">M\\geq 1</span> multilinear polynomials <span class="math">w_{1}(\\vec{X}),\\ldots,w_{M}(\\vec{X})</span>, and wishes to convince the verifier that these are all members of a predefined table given by the values of another multilinear polynomial <span class="math">t(\\vec{X})</span> over <span class="math">H_{n}</span>. (Without loss in generality, we assume that the values of <span class="math">t</span> over <span class="math">H_{n}</span> are all distinct.) For this, the prover provides the (Lagrange representation of the) multilinear polynomial <span class="math">m(\\vec{X})</span>, the values of which correspond to the overall multiplicities <span class="math">m(\\vec{x})</span> of the table values <span class="math">t(\\vec{x})</span> as they occur in the witness columns, i.e.</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">$m(\\vec{x})=\\sum_{i=1}^{M}\\left</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\{\\vec{y}\\in H_{n}:w_{i}(\\vec{y})=t(\\vec{x})\\}\\right</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">,$</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">w</p>
+
+    <p class="text-gray-300">for every <span class="math">\\vec{x}\\in H_{n}</span>. In order to convince verifier upon the virtual identity</p>
+
+    <p class="text-gray-300"><span class="math">\\prod_{i=1}^{M}\\prod_{\\vec{x}\\in H_{n}}(X-w_{i}(\\vec{x}))=\\prod_{\\vec{x}\\in H_{n}}(X-t(\\vec{x}))^{m(\\vec{x})},</span> (1)</p>
+
+    <p class="text-gray-300">the prover shows insteadthe equality of their (formal) logarithmic derivatives,</p>
+
+    <p class="text-gray-300"><span class="math">\\sum_{i=1}^{M}\\sum_{\\vec{x}\\in H_{n}}\\frac{1}{X-w_{i}(\\vec{x})}=\\sum_{\\vec{x}\\in H_{n}}\\frac{m(\\vec{x})}{X-t(\\vec{x})},</span> (2)</p>
+
+    <p class="text-gray-300">which is reduced to a sumcheck of rational terms by evaluating at a random <span class="math">\\alpha\\leftarrow\\!\\!\\text{\\rm s}~{}F</span> provided by the verifier,</p>
+
+    <p class="text-gray-300"><span class="math">\\sum_{\\vec{x}\\in H_{n}}\\left(\\frac{m(\\vec{x})}{\\alpha-t(\\vec{x})}-\\sum_{i=1}^{M}\\frac{1}{\\alpha-w_{i}(\\vec{x})}\\right)=0.</span> (3)</p>
+
+    <p class="text-gray-300">The way logUp handles the rational sumcheck is by the common approach, which transforms it into a polynomial one: In the most elementary variant of the protocol, the prover provides additional <em>helper columns</em> for each of the fractional terms, corresponding to multilinear polynomials</p>
+
+    <p class="text-gray-300"><span class="math">h(\\vec{X})\\text{ and }h_{1}(\\vec{X}),\\ldots,\\vec{h}_{M}(\\vec{X}),</span></p>
+
+    <p class="text-gray-300">which equal <span class="math">\\frac{1}{\\alpha-t(\\vec{x})}</span> and <span class="math">\\frac{1}{\\alpha-w_{1}(\\vec{X})},\\ldots,\\frac{1}{\\alpha-w_{M}(\\vec{X})}</span> over <span class="math">H_{n}</span>, respectively, and proves them correct using the corresponding domain identities. With these helper polynomials, the prover then shows that</p>
+
+    <p class="text-gray-300"><span class="math">\\sum_{\\vec{x}\\in H_{n}}\\left(m(\\vec{x})\\cdot h(\\vec{x})-\\sum_{i=1}^{M}h_{i}(\\vec{x})\\right)=0,</span></p>
+
+    <p class="text-gray-300">using the multivariate sumcheck protocol. For details, see <em>[x11]</em>.</p>
+
+    <p class="text-gray-300">The main advantage of logarithmic derivatives (or, fractional decompositions) are their amenability for sumchecks. Sumchecks are more efficiently proven than grand products, and sumchecks can be efficiently combined with further sumchecks in the context of larger protocols. Even the above described elementary variant of logUp already improves over the multivariate variant of plookup <em>[x10]</em> by essentially halving the number of additional columns the prover has to provide. Moreover, the performance can be optimized by a common trade-off between the number of helper functions and the algebraic degree of the sumcheck polynomial (c.f. <em>[x11]</em>). However, one can do significantly better: Inspired by Lasso <em>[x23]</em> we take the Goldwassser-Kalai-Rothblum (GKR) protocol for directly proving the rational sumcheck (3) <em>without providing multilinear variants of the fractional expressions</em> (the helper functions).</p>
+
+    <p class="text-gray-300">3 GKR for fractional sumchecks</p>
+
+    <p class="text-gray-300">Given multilinear polynomials <span class="math">p(\\vec{X})</span> and <span class="math">q(\\vec{X})</span> in <span class="math">n</span> variables over a finite field <span class="math">F</span>, we show in this section how to use the Goldwasser-Kalai-Rothblum protocol <em>[x14]</em> to prove</p>
+
+    <p class="text-gray-300"><span class="math">\\sum_{\\vec{x}\\in H_{n}}\\frac{p(\\vec{x})}{q(\\vec{x})}=0,</span> (4)</p>
+
+    <p class="text-gray-300">where <span class="math">H_{n}</span> is the <span class="math">n</span>-dimensional Boolean hypercube. We remark that everything in this section can be generalized in a straight-forward manner to higher-degree expressions of <span class="math">n</span>-variate multilinear polynomials <span class="math">w_{1}(\\vec{X}),\\ldots,w_{M}(\\vec{X})</span>,</p>
+
+    <p class="text-gray-300"><span class="math">\\sum_{\\vec{x}\\in H_{n}}\\frac{P(w_{1}(\\vec{x}),\\ldots,w_{M}(\\vec{x}))}{Q(w_{1}(\\vec{x}),\\ldots,w_{M}(\\vec{x}))}=0,</span></p>
+
+    <p class="text-gray-300">but for the sake of simplicity we keep with the more elementary variant given by Equation (4).</p>
+
+    <h3 id="sec-3" class="text-xl font-semibold mt-8">3.1 The circuit</h3>
+
+    <p class="text-gray-300">We define a layered circuit for computing the cumulative sums of the fractions using <em>projective coordinates</em> for the additive group of the finite field <span class="math">F</span>. The addition of two projective representations <span class="math">(a_{0},b_{0})</span> and <span class="math">(a_{1},b_{1})</span> from <span class="math">F^{2}</span> is</p>
+
+    <p class="text-gray-300"><span class="math">(a_{0},b_{0})+_{F}(a_{1},b_{1})=(a_{0}\\cdot b_{1}+a_{1}\\cdot b_{0},b_{0}\\cdot b_{1}),</span></p>
+
+    <p class="text-gray-300">where we write <span class="math">+_{F}</span> for not confusing it with an ordinary vector sum. In other words, we consider formal fractions over <span class="math">F</span>, which are pairs <span class="math">(a,b)\\in F^{2}</span> composed of a numerator <span class="math">a</span> and a denominator <span class="math">b</span>. For notational convenience, we consider our circuit built from gates with projective input and outputs, rather than a circuit with field-valued wire states. This leads to a somewhat non-standard presentation of the GKR protocol, but clarifies the recursively defined dependency between two adjacent layers of the circuit. The intermediate results of the circuit, which are throughout projective representations, are arranged along a binary tree of height <span class="math">n</span>, reflecting the topology given by the hypercube. That is, the nodes at layer <span class="math">k</span> of the tree, <span class="math">1\\leq k\\leq n</span>, correspond to the <span class="math">k</span>-dimensional hypercube <span class="math">H_{k}</span>, and the children of a <span class="math">\\vec{x}\\in H_{k}</span> correspond to <span class="math">(\\vec{x},+1)</span> and <span class="math">(\\vec{x},-1)</span> in <span class="math">H_{k+1}</span> (using the simplified notation for appending <span class="math">\\pm 1</span> to <span class="math">\\vec{x}</span>). Layer <span class="math">k=0</span> corresponds to the top node of the tree, having the children <span class="math">\\pm 1</span> from <span class="math">H_{1}</span>. We consider <span class="math">H_{0}</span> as that single node set, with <span class="math">\\vec{x}\\in H_{0}</span> being the empty coordinate-vector.</p>
+
+    <p class="text-gray-300">The circuit is as follows. The inputs are supplied to the bottom layer, i.e. layer <span class="math">n</span>, from which the values of the further layers, i.e. layer <span class="math">n-1</span>, <span class="math">n-2</span>, <span class="math">\\ldots</span>, are obtained step by step, until ending up with a projective representation of the overall sum (4) at layer <span class="math">0</span>.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>On layer <span class="math">n</span>, we start with the values of the fractions <span class="math">\\frac{p(\\vec{x})}{q(\\vec{x})}</span> in projective representation</li>
+
+    </ul>
+
+    <p class="text-gray-300"><span class="math">(p_{n}(x),q_{n}(x))=(p(\\vec{x}),q(\\vec{x})),\\quad\\vec{x}\\in H_{n}.</span></p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>On level <span class="math">k</span>, <span class="math">0 \\leq k &amp;lt; n</span>, for each node <span class="math">\\vec{x}</span> in <span class="math">H_{k}</span> the projective representation <span class="math">(p_{k}(\\vec{x}), q_{k}(\\vec{x}))</span> is the sum of the projective representations carried by its children nodes <span class="math">(\\vec{x}, +1)</span> and <span class="math">(\\vec{x}, -1)</span> from <span class="math">H_{k+1}</span>, i.e.</li>
+
+    </ul>
+
+    <div class="my-4 text-center"><span class="math-block">p _ {k} (\\vec {x}) = \\left(p _ {k + 1} (\\vec {x}, + 1) \\cdot q _ {k + 1} (\\vec {x}, - 1) + p _ {k + 1} (\\vec {x}, - 1) \\cdot q _ {k + 1} (\\vec {x}, + 1), \\right.</span></div>
+
+    <div class="my-4 text-center"><span class="math-block">q _ {k} (\\vec {x}) = q _ {k + 1} (\\vec {x}, + 1) \\cdot q _ {k + 1} (\\vec {x}, - 1).</span></div>
+
+    <p class="text-gray-300">In this manner, in each layer <span class="math">k</span> the nodes <span class="math">\\vec{x} \\in H_k</span> carry a projective representation <span class="math">(p_k(\\vec{x}), q_k(\\vec{x}))</span> for the cumulative sum of the fractions "below", i.e.</p>
+
+    <div class="my-4 text-center"><span class="math-block">\\frac {p _ {k} (\\vec {x})}{q _ {k} (\\vec {x})} = \\sum_ {\\vec {y} \\in H _ {n - k}} \\frac {p (\\vec {x} , \\vec {y})}{q (\\vec {x} , \\vec {y})}.</span></div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">(Using again the simplified notation <span class="math">(\\vec{x},\\vec{y})</span> for the appended vector $\\vec{x}\\</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\vec{y}<span class="math">.) In particular, at top layer 0 of the tree we obtain the projective representation </span>(p_0,q_0)$ of the overall sum</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="my-4 text-center"><span class="math-block">\\frac {p _ {0}}{q _ {0}} = \\sum_ {\\vec {y} \\in H _ {n}} \\frac {p (\\vec {y})}{q (\\vec {y})}.</span></div>
+
+    <h2 id="sec-4" class="text-2xl font-bold">3.2 The GKR protocol</h2>
+
+    <p class="text-gray-300">We do a minor variation of the GKR protocol to serve our design decision for the circuit, having gates with inputs and outputs being throughout projective representations.² In the first round <span class="math">k = 0</span>, the claims for</p>
+
+    <div class="my-4 text-center"><span class="math-block">p _ {1} (+ 1), q _ {1} (+ 1), p _ {1} (- 1), q _ {1} (- 1)</span></div>
+
+    <p class="text-gray-300">are reduced by a random <span class="math">\\mu_0\\gets *F</span> from the verifier to a "single-point" claim on</p>
+
+    <div class="my-4 text-center"><span class="math-block">p _ {1} (r _ {0}), q _ {1} (r _ {0}),</span></div>
+
+    <p class="text-gray-300">where <span class="math">r_0 = 1 - \\mu_0</span>, using linearity of <span class="math">p_1</span> and <span class="math">q_1</span>.</p>
+
+    <p class="text-gray-300">In each further layer <span class="math">k</span>, <span class="math">1 \\leq k \\leq n - 1</span>, the <span class="math">k</span>-variate multilinear polynomials <span class="math">p_k</span> and <span class="math">q_k</span> depend on <span class="math">p_{k + 1}</span> and <span class="math">q_{k + 1}</span> from the next layer by the two linear relations</p>
+
+    <div class="my-4 text-center"><span class="math-block">p _ {k} (\\vec {X}) = \\sum_ {\\vec {y} \\in H _ {k}} L _ {k} (\\vec {X}, \\vec {y}) \\cdot \\left(p _ {k + 1} (\\vec {y}, + 1) \\cdot q _ {k + 1} (\\vec {y}, - 1) + p _ {k + 1} (\\vec {y}, - 1) \\cdot q _ {k + 1} (\\vec {y}, + 1)\\right),</span></div>
+
+    <div class="my-4 text-center"><span class="math-block">q _ {k} (\\vec {X}) = \\sum_ {\\vec {y} \\in H _ {k}} L _ {k} (\\vec {X}, \\vec {y}) \\cdot q _ {k + 1} (\\vec {y}, + 1) \\cdot q _ {k + 1} (\\vec {y}, - 1).</span></div>
+
+    <p class="text-gray-300">Taking the claims on <span class="math">p_k</span> and <span class="math">q_k</span> at the random point <span class="math">\\vec{r}_k</span> from the previous layer, the two sumchecks for <span class="math">p_k(\\vec{r}_k)</span> and <span class="math">q_k(\\vec{r}_k)</span> are combined into a single sumcheck</p>
+
+    <p class="text-gray-300">² Again, we point out that this non-standard presentation of GKR, having two separate polynomials <span class="math">p_k</span> and <span class="math">q_k</span> at each layer, is for notational convenience only. The entire circuit can be written using a single multilinear polynomial <span class="math">v_k</span> per layer, which combines the two polynomials as <span class="math">v_k(\\vec{x}, 1) = \\frac{1 + y}{2} \\cdot p_k(\\vec{x}) + \\frac{1 - y}{2} \\cdot q_k(\\vec{x})</span>, e.g.</p>
+
+    <p class="text-gray-300">4</p>
+
+    <p class="text-gray-300">for <span class="math">p_k(\\vec{r}_k) + \\lambda_k \\cdot q_k(\\vec{r}_k)</span>, using a further randomness <span class="math">\\lambda_k \\leftarrow \\# F</span>, which is then reduced by the sumcheck protocol to evaluation claims for</p>
+
+    <div class="my-4 text-center"><span class="math-block">p_{k+1}(\\vec{\\rho}_k, +1), q_{k+1}(\\vec{\\rho}_k, +1), p_{k+1}(\\vec{\\rho}_k, -1), q_{k+1}(\\vec{\\rho}_k, -1),</span></div>
+
+    <p class="text-gray-300">with <span class="math">\\vec{\\rho}_k \\in F^k</span> being the randomnesses sampled in the course of the protocol. Like in the first round, these two-point claims are combined by means of a further random <span class="math">\\mu_k \\leftarrow \\# F</span> into the single-point claim for</p>
+
+    <div class="my-4 text-center"><span class="math-block">p_{k+1}(\\vec{r}_{k+1}), q_{k+1}(\\vec{r}_{k+1}),</span></div>
+
+    <p class="text-gray-300">with <span class="math">\\vec{r}_{k+1} = (\\vec{\\rho}_k, 1 - \\mu_k)</span>.</p>
+
+    <p class="text-gray-300">After the last round <span class="math">k = n - 1</span>, the initial evaluation claims for <span class="math">p_1</span> and <span class="math">q_1</span> at <span class="math">\\pm 1</span> are reduced to evaluation claims of <span class="math">p_n(\\vec{X}) = p(\\vec{X})</span> and <span class="math">q_n(\\vec{X}) = q(\\vec{X})</span> at the random point <span class="math">\\vec{r}_n</span> obtained in that round. If the latter claims are proven true, and if</p>
+
+    <div class="my-4 text-center"><span class="math-block">p_1(+1) \\cdot q_1(-1) + p_1(-1) \\cdot q_1(+1) = 0,</span></div>
+
+    <p class="text-gray-300">as well as</p>
+
+    <div class="my-4 text-center"><span class="math-block">q_1(+1) \\cdot q_1(-1) \\neq 0,</span></div>
+
+    <p class="text-gray-300">then the verifier accepts that <span class="math">\\sum_{\\vec{x} \\in H_n} \\frac{p(\\vec{x})}{q(\\vec{x})} = 0</span>.</p>
+
+    <p class="text-gray-300">Taking the soundness errors of the batching steps involving the <span class="math">\\mu_k</span>, <span class="math">k = 0, \\ldots, n - 1</span> and the <span class="math">\\lambda_k</span>, <span class="math">k = 1, \\ldots, n - 1</span>, into account, the overall soundness error is as follows.</p>
+
+    <p class="text-gray-300"><strong>Proposition 1.</strong> The soundness error <span class="math">\\varepsilon_{GKR}</span> of the above described GKR protocol for proving that <span class="math">\\sum_{\\vec{x} \\in H_n} \\frac{p(\\vec{x})}{q(\\vec{x})} = 0</span> is bounded by</p>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\varepsilon_{GKR} \\leq \\frac{2 \\cdot (n - 1) + 1}{</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">F</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">} + \\sum_{k=1}^{n-1} \\varepsilon_{Sumcheck}(</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H_k</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">) \\leq \\frac{1}{2} \\cdot \\frac{n \\cdot (3 \\cdot n + 1)}{</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">F</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">},</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">using $\\varepsilon_{Sumcheck}(</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H_k</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">) \\leq \\frac{3 \\cdot k}{</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">F</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">}<span class="math"> for the soundness error of the sumcheck protocol for a degree </span>d = 3<span class="math"> expression over the Boolean hypercube of size </span></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H_k</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">$.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">We will provide a formal security analysis of the protocol in another document.</p>
+
+    <h2 id="sec-5" class="text-2xl font-bold">3.3 Computational cost</h2>
+
+    <p class="text-gray-300">Let us count the number of field operations involved in the GKR fractional sumcheck. The sumcheck in round <span class="math">k</span>, <span class="math">1 \\leq k \\leq n - 1</span>, is subject to the degree <span class="math">d = 3</span> expression</p>
+
+    <div class="my-4 text-center"><span class="math-block">\\begin{aligned} p_k(\\vec{r}_k) + \\lambda_k \\cdot q_k(\\vec{r}_k) \\\\ = \\sum_{\\vec{y} \\in H_k} Q\\left(L_k(r_k, \\vec{y}), p_{k+1}(\\vec{y}, +1), p_{k+1}(\\vec{y}, -1) q_{k+1}(\\vec{y}, +1), q_{k+1}(\\vec{y}, -1)\\right), \\end{aligned}</span></div>
+
+    <p class="text-gray-300">with</p>
+
+    <p class="text-gray-300"><span class="math">Q(L,p_{+1},p_{-1},q_{+1},q_{-1})=L\\cdot\\Big{(}p_{+1}\\cdot q_{-1}+p_{-1}\\cdot q_{+1}+\\lambda_{k}\\cdot q_{+1}\\cdot q_{-1}\\Big{)}.</span></p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">The value of <span class="math">Q</span> as a polynomial in <span class="math">\\nu=5</span> variables, can be computed within $</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Q</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">_{\\mathsf{M}}=5<span class="math"> multiplications, and </span></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Q</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">_{\\mathsf{A}}=2$ additions. Using the approximate formula (12) from <em>[x10]</em>, the prover cost of the sumcheck is about</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">$</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H_{k}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\cdot(d+1)\\cdot\\big{(}(\\nu+</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Q</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">_{\\mathsf{M}})\\cdot\\mathsf{M}+(\\nu+</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">Q</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">_{\\mathsf{A}})\\cdot\\mathsf{A}\\big{)}=</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H_{k}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\cdot(40\\cdot\\mathsf{M}+28\\cdot\\mathsf{A})\\,,$</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">given the values of <span class="math">p_{k+1},q_{k+1}</span> over <span class="math">H_{k+1}</span>, and of <span class="math">L_{k}(\\,.\\,\\vec{r}_{k})</span> over <span class="math">H_{k}</span>. (Here, and in the sequel, <span class="math">\\mathsf{A}</span> and <span class="math">\\mathsf{M}</span> denote field additions and multiplications.) Summing over <span class="math">1\\leq k\\leq n-1</span> yields about</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">$</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H_{n}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\cdot(40\\cdot\\mathsf{M}+28\\cdot\\mathsf{A})\\,,$</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">and together with cost for computing the values of all intermediate values of the circuit, which is about</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">$</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H_{n}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\cdot(3\\cdot\\mathsf{M}+1\\cdot\\mathsf{A}),$</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">we end up with the total cost of</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">$</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H_{n}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\cdot(43\\cdot\\mathsf{M}+29\\cdot\\mathsf{A})$ (5)</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">for the entire GKR fractional sumcheck over <span class="math">H_{n}</span>.</p>
+
+    <h2 id="sec-6" class="text-2xl font-bold">4 Application to logUp</h2>
+
+    <p class="text-gray-300">For simplicity we assume that the number of columns subject to the lookup argument is equal to <span class="math">M=2^{k}-1</span>, so that we have in total <span class="math">2^{k}</span> columns of length <span class="math">2^{n}</span>, including the table column. To prove the fractional sumcheck Equation (3), one simply applies the GKR protocol as described in Section 3 to the combined multilinear polynomial in <span class="math">n+k</span> variables,</p>
+
+    <p class="text-gray-300"><span class="math">p(\\vec{X},\\vec{Y})</span> <span class="math">=L_{k}(\\vec{Y},\\vec{1})\\cdot m(\\vec{X})-\\sum_{\\vec{y}\\in H_{k}\\setminus\\{\\vec{1}\\}}L_{k}(\\vec{Y},\\vec{y})\\cdot 1,</span> <span class="math">q(\\vec{X},\\vec{Y})</span> <span class="math">=L_{k}(\\vec{Y},\\vec{1})\\cdot(\\alpha-t(\\vec{X}))+\\sum_{\\vec{y}\\in H_{k}\\setminus\\{\\vec{1}\\}}L_{k}(\\vec{Y},\\vec{y})\\cdot(\\alpha-w_{i(\\vec{y})}(\\vec{X})),</span></p>
+
+    <p class="text-gray-300">where <span class="math">\\vec{1}=(1,\\ldots,1)</span>, and <span class="math">i(\\vec{y})</span>, <span class="math">\\vec{y}\\in H_{k}\\setminus\\{\\vec{1}\\}</span>, is an enumeration of <span class="math">\\{1,\\ldots,M\\}</span>. This reduces the sumcheck claim to evaluation claims for <span class="math">t(\\vec{X})</span>, <span class="math">m(\\vec{X})</span> and <span class="math">w_{1}(\\vec{X}),\\ldots,w_{M}(\\vec{X})</span> at a random point <span class="math">\\vec{r}\\in F^{n}</span>. The verifier queries the oracles for their values at <span class="math">\\vec{r}</span>, and accepts if the answers are consistent with the claims.</p>
+
+    <p class="text-gray-300">In regards of the soundness error, there is as good as no change. The soundness error of reducing the “virtual” fractional identity (2) to the fractional sumcheck (3) still dominates.</p>
+
+    <h6 id="sec-7" class="text-base font-medium mt-4">Proposition 2 (logUp-GKR Soundness).</h6>
+
+    <p class="text-gray-300">Let <span class="math">M\\geq 1</span> be an integer, <span class="math">F</span> a finite field with characteristic <span class="math">\\mbox{\\sf char}(F)&gt;M\\cdot 2^{n}</span>. The soundness error <span class="math">\\varepsilon</span> for logUp on <span class="math">M</span> witness columns and a single table column over <span class="math">H_{n}</span>, using GKR for the fractional sumcheck, is bounded by</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">$\\varepsilon\\leq\\frac{(M+1)\\cdot 2^{n}-1}{</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">F</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">-</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">}+\\varepsilon_{GKR}(</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H_{n+m}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">),$</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">where $\\varepsilon_{GKR}(</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H_{n+m}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">)<span class="math"> is the soundness error of the GKR protocol over a domain of size </span></th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H_{n+m}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600"><span class="math">, and </span>m=\\lceil\\log_{2}(M+1)\\rceil$.</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">As pointed out in Section 2, the constraint on the number of elements to be looked up is essential for the uniqueness of fractional decompositions. The first term of the soundness error bound is due to the above mentioned reduction from fractional identity to sumcheck, whereas for completness of the protocol the random point needs to be taken from <span class="math">F\\backslash H</span>. We will give a formal description of the protocol, including its security analysis in another document.</p>
+
+    <p class="text-gray-300">Let us estimate the performance impact of using GKR for fractional sumchecks. In our proposed variant of logUp, the prover only needs to provide a single additional column, the one for the multiplicities as recorded by <span class="math">m(\\vec{X})</span>. According to Equation (5), the computational cost for the rational sumcheck is about</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">$</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H_{n+m}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\cdot(43\\cdot{\\sf M}+29\\cdot{\\sf A})\\,,$ (6)</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">which amounts to <span class="math">43\\cdot{\\sf M}+29\\cdot{\\sf A}</span> per element to be looked up (for large numbers of witness columns, so that we can neglect the table size). This is only about the double of the arithmetic costs for the elementary variant of logUp described in Section 2, which is about</p>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">$</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">H_{n+m}</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\cdot(19\\cdot{\\sf M}+16\\cdot{\\sf A})\\,,$ (7)</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <p class="text-gray-300">the commitment effort for the <span class="math">(M+1)</span> helper functions left aside. (The arithmetic costs are about the half of (7), when combining the sumcheck with others.) Depending on the used commitment scheme, we expect the following impact on the prover costs:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>Elliptic curve based schemes consume an equivalent of several hundreds multiplications and additions per committed field element (see Table 1 in <em>[x11]</em>), yielding an at least 10-fold advantage,</li>
+
+      <li>For Reed-Solomon code based schemes the difference from (7) (or the half of it) to (6) is already largely consumed by the encoding alone. Depending on the concrete hash function, we expect the advantage ranging from about 2-fold up to 10-fold.</li>
+
+    </ul>
+
+    <p class="text-gray-300">We are curious of how well this operation count based forecast will be met in practice.</p>
+
+    <p class="text-gray-300">In order to apply the fractional sumcheck GKR to univariate logUp, we introduce a simple univariate IOP for turning a univariate polynomial commitment scheme into a multilinear one. Contrary to the existing approaches [ZXZS20, BCHO22, CBBZ22, Ham22] and most recently [KT23], our transform works throughout with Lagrange representations (multilinear and univariate ones), i.e. we identify values on the hypercube with values over the univariate domain. This leads to a very elementary transformation which might be also of interest in other applications. (One application is complementary to [Ham22, KT23] and given in Appendix A.2.)</p>
+
+    <p class="text-gray-300">As in the above mentioned track of work, we identify the univariate cyclic domain  <span class="math">H = \\{x \\in F : x^{2^n} = 1\\}</span>  with the Boolean hypercube  <span class="math">H_n = \\{\\pm 1\\}^n</span> , using the bit decomposition of the indices</p>
+
+    <div class="my-4 text-center"><span class="math-block">i = i _ {0} + i _ {1} \\cdot 2 + \\ldots + i _ {n - 1} \\cdot 2 ^ {n - 1},</span></div>
+
+    <p class="text-gray-300">which yields the bijective map  <span class="math">\\iota : H \\to H_{n}</span>  according to the following commutative diagram. (Here, and in the sequel,  <span class="math">g</span>  is a generator of the cyclic domain.)</p>
+
+    <p class="text-gray-300">!<a href="img-0.jpeg">img-0.jpeg</a></p>
+
+    <p class="text-gray-300">We recall that the map  <span class="math">\\iota</span>  is not a homomorphism between the two groups.</p>
+
+    <p class="text-gray-300">By means of  <span class="math">\\iota</span>  we identify values over the Boolean hypercube as values over the univariate domain. In terms of Lagrange representations, given</p>
+
+    <div class="my-4 text-center"><span class="math-block">f (\\vec {X}) = \\sum_ {\\vec {x} \\in H _ {n}} v (\\vec {x}) \\cdot L _ {n} (\\vec {X}, \\vec {x}),</span></div>
+
+    <p class="text-gray-300">we commit to the univariate Lagrange representation over  <span class="math">H</span>  given by  <span class="math">v \\circ \\iota</span> , which corresponds to the unique polynomial</p>
+
+    <div class="my-4 text-center"><span class="math-block">u _ {f} (X)</span></div>
+
+    <p class="text-gray-300">of degree  <span class="math">\\deg u_f(X) \\leq 2^n - 1</span>  such that</p>
+
+    <div class="my-4 text-center"><span class="math-block">v _ {i} = u _ {f} (g ^ {i}) = v \\left((- 1) ^ {i _ {0}}, \\ldots , (- 1) ^ {i _ {n - 1}}\\right),</span></div>
+
+    <p class="text-gray-300">for every index  <span class="math">i\\in [0,2^n)</span> , where  <span class="math">(i_0,\\ldots ,i_{n - 1})</span>  are the binary digits of it.</p>
+
+    <p class="text-gray-300">The evaluation proof for <span class="math">f</span> at a multivariate query point <span class="math">\\vec{t} = (t_0, \\dots, t_{n-1})</span> from <span class="math">(F \\setminus \\{-1\\})^n</span> is as follows.<span class="math">^3</span> As [ZXZS20] we represent <span class="math">f</span> at <span class="math">\\vec{t}</span> as inner product, which in our case is between the values given by <span class="math">v</span> and the column <span class="math">c</span> for the values of the multivariate Lagrangians <span class="math">L_n(\\vec{t}, \\vec{x})</span> over <span class="math">H_n</span>, i.e.</p>
+
+    <div class="my-4 text-center"><span class="math-block">f(t_0, \\dots, t_{n-1}) = \\sum_{i=0}^{2^n - 1} v_i \\cdot c_i, \\tag{8}</span></div>
+
+    <p class="text-gray-300">where</p>
+
+    <div class="my-4 text-center"><span class="math-block">c_i = \\frac{1}{2^n} \\cdot \\prod_{k=0}^{n-1} (1 + (-1)^{i_k} \\cdot t_k). \\tag{9}</span></div>
+
+    <p class="text-gray-300">In the first round the prover provides a Lagrange oracle for the unique univariate polynomial</p>
+
+    <div class="my-4 text-center"><span class="math-block">c(X)</span></div>
+
+    <p class="text-gray-300">of degree <span class="math">\\deg c(X) \\leq 2^n - 1</span>, which extends the values of the column <span class="math">c = (c_i)</span> (i.e. <span class="math">c(g^i) = c_i</span>). Correctness of the additional oracle <span class="math">c(X)</span> is directly enforced by the following periodic constraints over <span class="math">H</span>,</p>
+
+    <div class="my-4 text-center"><span class="math-block">c_0 = \\frac{1}{2^n} \\cdot (1 + t_0) \\cdot \\dots \\cdot (1 + t_{n-1}), \\tag{10}</span></div>
+
+    <p class="text-gray-300">and</p>
+
+    <div class="my-4 text-center"><span class="math-block">c_{i+2^{k-1}} = c_i \\cdot \\frac{1 - t_{k-1}}{1 + t_{k-1}}, \\quad i \\in 2^k \\cdot \\mathbb{Z} \\cap [0, 2^n), \\tag{11}</span></div>
+
+    <p class="text-gray-300">for <span class="math">k = 1, \\dots, n</span>. (These constraints yield quadratic identities over <span class="math">H</span>, and their selector polynomials have a succinct rational representation. See Section A.1.) It then runs the univariate sumcheck protocol for</p>
+
+    <div class="my-4 text-center"><span class="math-block">f(t_0, \\dots, t_{n-1}) = \\sum_{x \\in H} u_f(x) \\cdot c(x), \\tag{12}</span></div>
+
+    <p class="text-gray-300">leading to another quadratic identity over <span class="math">H</span>. We assume that the reader is familiar with univariate sumcheck techniques (see [BSCR<span class="math">^{+}</span>19, CHM<span class="math">^{+}</span>20] or [HGdB21]), and skip an explicit description of the complete IOP.</p>
+
+    <p class="text-gray-300"><strong>Proposition 3.</strong> Assume that <span class="math">F</span> is a finite field with a two-adic multiplicative subgroup <span class="math">H</span> of order <span class="math">2^n</span>. The above sketched protocol defines a univariate polynomial IOP for proving the value <span class="math">f(\\vec{t}_0, \\dots, \\vec{t}_{n-1})</span> of the unique multilinear polynomial <span class="math">f(\\vec{X})</span>, which extends the set of values over <span class="math">H_n</span> given by <span class="math">u_f(X)</span> over <span class="math">H</span> via <span class="math">u_f \\circ \\iota^{-1}</span>. Its soundness error <span class="math">\\varepsilon</span> is bounded by</p>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <div class="overflow-x-auto my-4">
+
+      <table class="min-w-full text-sm text-gray-300">
+
+        <thead>
+
+          <tr>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">\\varepsilon \\leq \\frac{2 \\cdot d_{max}}{</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">F</th>
+
+            <th class="px-3 py-2 text-left font-semibold border-b border-gray-600">} + \\varepsilon_{sumcheck},</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+    <div class="my-4 text-center"><span class="math-block"></span></div>
+
+    <p class="text-gray-300">where <span class="math">d_{max}</span> is the maximum degree of oracle polynomials, and <span class="math">\\varepsilon_{sumcheck}</span> is the soundness error of the univariate sumcheck argument.</p>
+
+    <p class="text-gray-300"><span class="math">^3</span>We remark that the assumption on the coordinates can be dropped by a more careful setup of the constraints. However, in most applications (as ours) the query point is, or can be made random, with a sampling set that avoids the case <span class="math">-1</span>.</p>
+
+    <p class="text-gray-300">9</p>
+
+    <p class="text-gray-300">The protocol is zero-knowledge if the used sumcheck argument is, and is easily extended to a batch evaluation proof, proving the values of several multilinear polynomials <span class="math">f_{1}(\\vec{X}),\\ldots,f_{M}(\\vec{X})</span> at given points <span class="math">\\vec{t}_{1},\\ldots,\\vec{t}_{M}</span>, respectively. We will provide a formal security analysis in another document.</p>
+
+    <h6 id="sec-10" class="text-base font-medium mt-4">Remark 1.</h6>
+
+    <p class="text-gray-300">In a similar manner one can modify the transformation from <em>[x20]</em> into one with a succinct verifier. Given a multilinear polynomial with respect to the monomial basis, <span class="math">f(\\vec{X})=\\sum c_{i_{0},\\ldots,i_{n-1}}\\cdot X_{0}^{i_{0}}\\cdot\\ldots\\cdot X_{i_{n-1}}^{i_{n-1}}</span>, the prover simply provides the univariate oracle <span class="math">w(X)</span> for the column <span class="math">w</span> of the monomial values at <span class="math">\\vec{t}</span>,</p>
+
+    <p class="text-gray-300"><span class="math">w_{i}=t_{1}^{i_{0}}\\cdot\\ldots\\cdot t_{n-1}^{i_{n-1}},</span></p>
+
+    <p class="text-gray-300">for <span class="math">i=0,\\ldots,2^{n}-1</span>, again with <span class="math">(i_{0},\\ldots,i_{n-1})</span> being the bit representation of the index <span class="math">i</span>. Correctness of <span class="math">w(X)</span> is enforced by the periodic constraints <span class="math">w_{0}=1</span>, and</p>
+
+    <p class="text-gray-300"><span class="math">w_{i+2^{k-1}}=w_{i}\\cdot t_{k},\\quad i\\in 2^{k}\\cdot\\mathbb{Z}\\cap[0,2^{n}),</span></p>
+
+    <p class="text-gray-300">for <span class="math">k=1,\\ldots,n</span>. The approach can be generalized to multivariate polynomial of larger individual degree, but at the cost of having non-periodic constraints instead (unless the field has multiplicative subgroup of suitable order). These non-periodic constraints can be handled in the style of Plonk <em>[x11]</em> via pre-computed selector polynomials.</p>
+
+    <h3 id="sec-11" class="text-xl font-semibold mt-8">5.2 Univariate logUp with GKR</h3>
+
+    <p class="text-gray-300">For simplicity we again assume a single-column table <span class="math">t</span>, and that we have <span class="math">M=2^{k}-1</span>, <span class="math">k\\geq 1</span>, witness columns <span class="math">w_{1},\\ldots,w_{M}(X)</span> subject to the lookup.</p>
+
+    <p class="text-gray-300">Regarding values over the univariate domain <span class="math">H</span> as values over the Boolean hypercube <span class="math">\\{\\pm 1\\}^{n}</span>, as in Section 5.1, we run the GKR protocol for the fractional sumcheck as described in Section 4. The GKR protocol eventually ends up with evaluation claims for the multilinear extensions <span class="math">t(\\vec{X})</span> and <span class="math">w_{1}(\\vec{X}),\\ldots,w_{M}(\\vec{X})</span>, and <span class="math">m(\\vec{X})</span> at a random point <span class="math">\\vec{r}=(r_{0},\\ldots,r_{n-1})</span>,</p>
+
+    <p class="text-gray-300"><span class="math">t(\\vec{r})</span> <span class="math">=v_{t},\\quad m(\\vec{r})=v_{m},</span> <span class="math">w_{i}(\\vec{r})</span> <span class="math">=v_{i},\\quad i=1,\\ldots,M,</span></p>
+
+    <p class="text-gray-300">which are then reduced to a single evaluation claim on a random linear combination,</p>
+
+    <p class="text-gray-300"><span class="math">t(\\vec{X})+\\lambda\\cdot m(\\vec{X})+\\sum_{i=1}^{M}\\lambda^{i+1}\\cdot w_{i}(\\vec{X}),</span></p>
+
+    <p class="text-gray-300">at <span class="math">\\vec{X}=\\vec{r}</span>, using <span class="math">\\lambda\\leftarrow\\</span> <span class="math">F</span>. This claim is proven by the univariate IOP from Section 5.1.</p>
+
+    <p class="text-gray-300">The soundness error <span class="math">\\varepsilon</span> for this protocol variant, which we call univariate logUp/GKR, increases at most by the soundness error of the PCS transformation,</p>
+
+    <p class="text-gray-300"><span class="math">\\varepsilon\\leq\\varepsilon_{MVlogUp}+\\varepsilon_{trafo},</span></p>
+
+    <p class="text-gray-300"><span class="math">\\varepsilon_{MVlogUp}</span> is the soundness error of the multivariate logUp/GKR protocol (Proposition 1), and <span class="math">\\varepsilon_{trafo}</span> is the soundness error of our univariate IOP for multilinear evaluation (Proposition 3). Again, we postpone a formal security analysis to another document.</p>
+
+    <h2 id="sec-12" class="text-2xl font-bold">Acknowledgements</h2>
+
+    <p class="text-gray-300">We would like to thank Ariel Gabizon, Adrian Hamelink, Justin Thaler, and Jeroen Zuiddam for their feedback. In addition to that, thanks to Sai Deng for pointing out several typos.</p>
+
+    <h2 id="sec-13" class="text-2xl font-bold">References</h2>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>[BCHO22] Jonathan Bootle, Alessandro Chiesa, Yuncong Hu, and Michele Orr‘u. Gemini: Elastic SNARKs for diverse environments. In EUROCRYPT 2022, 2022. Full paper: https://eprint.iacr.org/2022/420.</li>
+
+      <li>[BSBHR18] Eli Ben-Sasson, Iddo Bentov, Yinon Horesh, and Michael Riabzev. Scalable, transparent, and post-quantum secure computational integrity. In IACR ePrint Archive 2018/046, 2018. https://eprint.iacr.org/2018/046.</li>
+
+      <li>[BSCR^{+}19] Eli Ben-Sasson, Alessandro Chiesa, Michael Riabzev, Nicholas Spooner, Madars Virza, and Nicholas P. Ward. Aurora: Transparent succinct arguments for R1CS. In Y. Ishai and Vincent Rijmen, editors, EUROCRYPT 2019, volume 11476 of LNCS. Springer, 2019.</li>
+
+      <li>[BSGKS20] Eli Ben-Sasson, Lior Goldberg, Swastik Kopparty, and Shubhangi Saraf. DEEP-FRI: Sampling outside the box improves soundness. In ITCS 2020, 2020. Full paper: https://eprint.iacr.org/2019/336.</li>
+
+      <li>[CBBZ22] Binyi Chen, Benedikt Bünz, Dan Boneh, and Zhenfei Zhang. Hyperplonk: PLONK with a linear-time prover and high-degree costum gates. In IACR ePrint Archive 2020/1355, 2022. https://eprint.iacr.org/2022/1355.</li>
+
+      <li>[CHM^{+}20] Alessandro Chiesa, Yuncong Hu, Mary Maller, Pratyush Mishra, Noah Vesely, and Nicholas Ward. Marlin: Preprocessing zk-SNARKs with universal and updatable SRS. In EUROCRYPT 2020, volume 12105 of LNCS, 2020. Full paper: https://eprint.iacr.org/2019/1047.pdf.</li>
+
+    </ul>
+
+    <p class="text-gray-300">-</p>
+
+    <p class="text-gray-300">[GKR08] Shafi Goldwasser, Yael Tauman Kalai, and Guy N. Rothblum. Delegating computation: Interactive proofs for muggles. In STOC‘08, 2008. https://eprint.iacr.org/2022/1056.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+
+      <li>[GW20] Ariel Gabizon and Zachary J. Williamson. Plookup: A simplified polynomial protocol for lookup tables. In IACR ePrint Archive 2020/315, 2020. https://eprint.iacr.org/2020/315.</li>
+
+      <li>[GWC19] Ariel Gabizon, Zachary J. Williamson, and Oana Ciobotaru. PLONK: Permutations over Lagrange-bases for oecumenical non-interactive arguments of knowledge. In IACR ePrint Archive 2019/953, 2019. https://eprint.iacr.org/2019/953.</li>
+
+      <li>[Hab22] Ulrich Haböck. Multivariate lookups based on logarithmic derivatives. In IACR ePrint Archive 2022/1530, 2022. https://eprint.iacr.org/2022/1530.</li>
+
+      <li>[Ham22] Adrian Hamelink. Gemini. hackmd.io, 2022. https://hackmd.io/@adrian-aztec/BJxoyeCqj.</li>
+
+      <li>[HGdB21] Ulrich Haböck, Alberto Garoffolo, and Daniele di Benedetto. Darlin: Recursive proofs based on Marlin. In IACR preprint archive 2021/930, 2021. https://eprint.iacr.org/2021/930.</li>
+
+      <li>[KT23] Tohru Kohrita and Patrick Towa. Zeromorph: Zero-knowledge multilinear-evaluation proofs from homomorphic univariate commitments. In IACR preprint archive 2023/917, 2023. https://eprint.iacr.org/2023/917.</li>
+
+      <li>[Sta21] StarkWare Team. ethSTARK documentation – version 1.1. In IACR preprint archive 2021/582, 2021. https://eprint.iacr.org/2021/582.</li>
+
+      <li>[STW23] Srinath Setty, Justin Thaler, and Riad Wahby. Unlocking the lookup singularity with Lasso. In IACR ePrint Archive 2023/1216, 2023. https://eprint.iacr.org/2023/1216.</li>
+
+      <li>[ZXZS20] Jiaheng Zhang, Tianchen Xie, Yupeng Zhang, and Dawn Song. Transparent polynomial delegation and its applications to zero knowledge proof. In IEEE S&P 2020, 2020. Full paper: https://eprint.iacr.org/2019/1482.</li>
+
+    </ul>
+
+    <h2 id="sec-14" class="text-2xl font-bold">Appendix A Appendix</h2>
+
+    <h3 id="sec-15" class="text-xl font-semibold mt-8">A.1 The univariate constraints for the Lagrange</h3>
+
+    <p class="text-gray-300">Let <span class="math">c(X)</span> be the univariate oracle for the Lagrange column <span class="math">c_{i}=L_{n}(\\vec{t},\\iota(g^{i}))</span>, <span class="math">i=0,\\ldots,2^{n}-1</span>, as provided by the prover in Section 5.1. The complete set of</p>
+
+    <p class="text-gray-300">constraints are as follows. We take the non-normalized quotients</p>
+
+    <p class="text-gray-300"><span class="math">s_{k}(X)=\\frac{v_{H_{n}}(X)}{v_{H_{k}}(X)}=\\frac{X^{2^{n}}-1}{X^{2^{k}}-1},</span></p>
+
+    <p class="text-gray-300">as selector polynomials for the periodic constraints (10) and (11). The selector <span class="math">s_{k}(X)</span> is zero over <span class="math">H</span>, except for points in the subgroup <span class="math">H_{k}</span> of the <span class="math">(2^{k})</span>-th roots of unity, generated by <span class="math">g^{2^{n-k}}</span>. The polynomial form of (10) is</p>
+
+    <p class="text-gray-300"><span class="math">s_{0}(X)\\cdot\\left(c(X)-\\frac{1}{2^{n}}\\cdot(1+t_{0})\\cdot\\ldots\\cdot(1+t_{n-1})\\right)=0,</span> (13)</p>
+
+    <p class="text-gray-300">and for (11), <span class="math">k=1,\\ldots,n</span>, we have</p>
+
+    <p class="text-gray-300"><span class="math">s_{k-1}(X)\\cdot\\left((1-t_{n-k})\\cdot c(X)+(1+t_{n-k})\\cdot c(g^{2^{n-k}}\\cdot X)\\right)=0,</span> (14)</p>
+
+    <p class="text-gray-300">all identities over <span class="math">H</span>, i.e. modulo <span class="math">v_{H}(X)</span>. Recall that <span class="math">\\vec{t}\\in(F\\setminus\\{-1\\})^{n}</span>, so all coordinates of <span class="math">\\vec{t}</span> are different from <span class="math">-1</span>, so that the coefficient <span class="math">(1+t_{n-k})</span> in (14) is non-zero for every <span class="math">k</span>.</p>
+
+    <p class="text-gray-300">Let us dwell on the necessity and sufficiency of the constraints. First of all, notice that the domain points are subject to a varying number of transitional constraints, depending in which of the subgroups <span class="math">H_{k}</span>, <span class="math">k=0,\\ldots n-1</span>, they are contained. Since these form an increasing chain</p>
+
+    <p class="text-gray-300"><span class="math">\\{1\\}=H_{0}\\subset H_{1}\\subset\\ldots\\subset H_{n-1}\\subset H_{n},</span></p>
+
+    <p class="text-gray-300">a point <span class="math">x=g^{i}</span> that is in <span class="math">H_{k^{\\prime}}</span> but not in <span class="math">H_{k^{\\prime}-1}</span>, corresponding to an index <span class="math">i</span> which is an odd multiple of <span class="math">2^{n-k^{\\prime}}</span>, has the constraints (14) active only for <span class="math">k&gt;k^{\\prime}</span>. This means that <span class="math">x</span> is constrained to index transitions of smaller step size only, i.e. those with offset <span class="math">2^{n-k}</span>, <span class="math">k&gt;k^{\\prime}</span>, each of which leads into a larger (or “finer”) subgroup (for offset <span class="math">2^{n-k}</span> we end up in <span class="math">H_{k}</span>). The constraint (13) enforces the correct Lagrange value at index <span class="math">i=0</span>. Since <span class="math">\\vec{t}\\in(F\\setminus\\{-1\\})^{n}</span>, each of the active constraints from (14) enforces the proper replacement quotient in the Lagrange product, when flipping the corresponding bit from zero to one. This shows that the constraints are necessary. To see that this they are sufficient, consider the following path of subsequent transitions: We start at the trivial index with bit representation <span class="math">(0,\\ldots,0)</span>, and successively add to the index the non-zero bits of our target index <span class="math">i</span>, starting with the most significant one, and going down to the least significant. The value at <span class="math">(0,\\ldots,0)</span> is enforced correct by the constraint (10). In each transition step, corresponding to a non-zero bit <span class="math">i_{n-k}\\neq 0</span>, we leave the subgroup from the last step, corresponding to some <span class="math">H_{k^{\\prime}}</span> with <span class="math">k^{\\prime}&lt;k</span>, and enter the subgroup <span class="math">H_{k}</span>. By the preceeding discussion, the constraint (11) is active and enforces the proper quotient for the transition triggered by <span class="math">i_{n-k}</span>. Since the target index <span class="math">i</span> was arbitrary, the proof is complete.</p>
+
+    <p class="text-gray-300">A.2 Proving the lexicographical shift on the hypercube</p>
+
+    <p class="text-gray-300">The univariate IOP for multilinear evaluation from Section 5.1 can be easily extended to prove openings of functions under the lexicographical shift on the Boolean hypercube more elegantly as in <em>[x10]</em> and <em>[x13]</em>.</p>
+
+    <p class="text-gray-300">The lexicographical shift <span class="math">T</span> on the Boolean hypercube <span class="math">H_{n}=\\{\\pm 1\\}^{n}</span> is the circular rotation induced by the lexicographical order on <span class="math">H_{n}</span>. It sends each element <span class="math">\\vec{x}</span> to its upper neighbor with respect to the lexicographical order, except the largest element <span class="math">-\\vec{1}=(-1,\\ldots,-1)</span>, which is mapped to the smallest element <span class="math">\\vec{1}=(+1,\\ldots,+1)</span>. Assuming that <span class="math">F</span> admits a multiplicative subgroup <span class="math">H</span> of order <span class="math">2^{n}</span>, and using the identification <span class="math">\\iota:H\\mapsto H_{n}</span> from Section 5.1, where <span class="math">g</span> is a generator of <span class="math">H</span>, the lexicographical shift translates to the multiplication by <span class="math">g</span> over the univariate domain <span class="math">H</span>,</p>
+
+    <p class="text-gray-300"><span class="math">T=\\iota\\circ T_{g}\\circ\\iota^{-1},</span></p>
+
+    <p class="text-gray-300">where <span class="math">T_{g}:x\\mapsto g\\cdot x</span>. More generally the <span class="math">k</span>-th power <span class="math">T^{k}</span> translates to <span class="math">T_{g}^{k}</span>, which corresponds to the multiplication by <span class="math">g^{k}</span>. Thus, for proving the multilinear opening of the shift of a function <span class="math">f</span> over <span class="math">H_{n}</span> at a point <span class="math">\\vec{t}\\in F^{n}</span>,</p>
+
+    <p class="text-gray-300"><span class="math">\\langle f\\circ T,L_{n}(\\&gt;.\\&gt;,\\&gt;.\\vec{t})\\rangle=v,</span></p>
+
+    <p class="text-gray-300">the protocol simply uses <span class="math">u_{f}(g\\cdot X)</span> in the univarate sumcheck for the inner product with the Lagrange column <span class="math">c</span> for <span class="math">\\vec{t}</span>, i.e.</p>
+
+    <p class="text-gray-300"><span class="math">(f\\circ T)(t_{0},\\ldots,t_{n-1})=\\sum_{x\\in H}u_{f}(g\\cdot x)\\cdot c(x).</span></p>
+
+    <p class="text-gray-300">This protocol is easily extended to opening higher order shifts at the same point,</p>
+
+    <p class="text-gray-300"><span class="math">(f\\circ T^{k})(t_{0},\\ldots,t_{n-1})=\\sum_{x\\in H}u_{f}(g^{k}\\cdot x)\\cdot c(x),</span></p>
+
+    <p class="text-gray-300">and across multiple polynomials, which is the typical situation that arises in multivariate variants of AIR <em>[x5, x4, x11]</em>, and Plonk <em>[x12]</em>.</p>
+
+    <p class="text-gray-300">We note that unlike <em>[x10]</em> and <em>[x13]</em>, in which values over the hypercube are identified as coefficients of the univariate polynomial, no degree proofs are needed, and no elements over the trace domain need to be kept free. To the best of our knowledge the above described evaluation proof is the first solution that does not have any restriction on the power of the shift. We will provide a multivariate protocol for efficiently proving arbitrary powers of the lexicographical shift in another document.</p>
+
+    <p class="text-gray-300">###</p>`;
+---
+
+<BaseLayout title="Improving logarithmic derivative lookups using GKR (2023/1284)">
+  <article class="max-w-4xl mx-auto article-prose">
+    <nav class="mb-8">
+      <a href="/papers" class="text-blue-400 hover:text-blue-300">
+        &larr; Back to Papers
+      </a>
+    </nav>
+
+    <header class="mb-12">
+      <h1 class="text-3xl font-bold mb-4"
+        set:html={TITLE_HTML} />
+      <p class="text-gray-400 mb-2"
+        set:html={AUTHORS_HTML} />
+      <p class="text-gray-500 text-sm mb-4">
+        2023 &middot; eprint 2023/1284
+      </p>
+      <div class="flex gap-4 text-sm">
+        <a
+          href={EPRINT_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          class="text-blue-400 hover:text-blue-300"
+        >
+          Paper (eprint) &rarr;
+        </a>
+      </div>
+      <p class="mt-4 text-xs text-gray-500">
+        All content below belongs to the original authors. This page
+        reproduces the paper for educational purposes. Always
+        <a
+          href={EPRINT_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          class="text-blue-400 hover:text-blue-300"
+        >cite the original</a>.
+      </p>
+      <p class="mt-1 text-xs text-gray-600">
+        Converted with: {CRAWLER} &middot; {CONVERTED_DATE}
+      </p>
+    </header>
+
+    <Fragment set:html={CONTENT} />
+
+  </article>
+</BaseLayout>
