@@ -197,6 +197,17 @@ check-trailing-whitespace: ## Check for trailing whitespaces
 	fi
 
 # =============================================================================
+# Data generation
+# =============================================================================
+
+METADATA_DIR ?= \
+	$(HOME)/codes/dannywillems/poseidon-formalization/data/metadata
+
+.PHONY: generate-papers-data
+generate-papers-data: ## Generate papers.json from .astro files + metadata
+	METADATA_DIR=$(METADATA_DIR) python3 scripts/generate_papers_data.py
+
+# =============================================================================
 # Deploy
 # =============================================================================
 
