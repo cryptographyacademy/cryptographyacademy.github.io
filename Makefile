@@ -60,6 +60,11 @@ build-web: ## Build website
 	@echo "Building website..."
 	@cd web && npm run build
 
+.PHONY: build-web-verbose
+build-web-verbose: ## Build website
+	@echo "Building website..."
+	@cd web && npm run build-verbose
+
 # =============================================================================
 # Development
 # =============================================================================
