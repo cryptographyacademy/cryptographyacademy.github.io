@@ -1,0 +1,2464 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import PaperDisclaimer from '../../components/PaperDisclaimer.astro';
+import PaperHistory from '../../components/PaperHistory.astro';
+
+const EPRINT_URL = 'https://eprint.iacr.org/2005/174';
+const CRAWLER = 'modal-marker';
+const CONVERTED_DATE = '2026-02-17';
+const TITLE_HTML = 'On the Automatic Construction of Indistinguishable Operations';
+const AUTHORS_HTML = 'M. Barbosa1? and D. Page&lt;sup&gt;2&lt;/sup&gt;';
+
+const CONTENT = `    <p class="text-gray-300">M. Barbosa1? and D. Page&lt;sup&gt;2&lt;/sup&gt;</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>&lt;sup&gt;1&lt;/sup&gt; Departamento de Inform´atica, Universidade do Minho, Campus de Gualtar, 4710-057 Braga, Portugal. mbb@di.uminho.pt</li>
+      <li>&lt;sup&gt;2&lt;/sup&gt; Department of Computer Science, University of Bristol, Merchant Venturers Building, Woodland Road, Bristol, BS8 1UB, United Kingdom. page@cs.bris.ac.uk</li>
+    </ul>
+
+    <p class="text-gray-300">Abstract. An increasingly important design constraint for software running on ubiquitous computing devices is security, particularly against physical methods such as side-channel attack. One well studied methodology for defending against such attacks is the concept of indistinguishable functions which leak no information about program control flow since all execution paths are computationally identical. However, the constructing such functions by hand is laborious and error prone as their complexity increases. We investigate techniques for automating this process and find that effective solutions can be constructed with only minor amounts of computational effort.</p>
+
+    <p class="text-gray-300">Keywords. Side-channel Cryptanalysis, Simple Power Analysis, Countermeasures, Indistinguishable Operations.</p>
+
+    <h2 id="sec-1" class="text-2xl font-bold">1 Introduction</h2>
+
+    <p class="text-gray-300">As computing devices become increasingly ubiquitous, the task of writing software for them has presented programmers with a number of problems. Firstly, devices like smart-cards are highly constrained in both their computational and storage capacity; due to their low unit cost and small size, such devices are significantly less powerful than PDA or desktop class computers. This demands selection and implementation of algorithms which are sensitive to the demands of the platform. Coupled with these issues of efficiency, which are also prevalent in normal software development, constrained devices present new problems for the programmer. For example, one typically needs to consider the power characteristics and communication frequency of any operation since both eat into the valuable battery life of the device.</p>
+
+    <p class="text-gray-300">Perhaps the most challenging aspect of writing software for ubiquitous computers is the issue of security. Performing computation in a hostile, adversarial</p>
+
+    <p class="text-gray-300">&lt;sup&gt;?&lt;/sup&gt; Funded by scholarship SFRH/BPD/20528/2004, awarded by the Funda¸c˜ao para a Ciˆencia e Tecnologia, Minist´erio da Ciˆencia e do Ensino Superior, Portugal.</p>
+
+    <p class="text-gray-300">environment demands that software is robust enough to repel attackers who hope to retrieve data stored on the device. Although cryptography provides a number of tools to aid in protecting the data, the advent of physical attacks such as side-channel analysis and fault injection mean one needs to consider security of the software implementation as well as the mathematics it implements. By passive monitoring of execution features such as timing variations [14], power consumption [15] or electromagnetic emission [1, 2] attackers can remotely recover secret information from a device with little fear of detection. Typically attacks consist of a collection phase which provides the attacker with profiles of execution, and an analysis phase which recovers the secret information from the profiles. Considering power consumption as the collection medium from here on, attack methods can be split into two main classes. Simple power analysis (SPA) is where the attacker is given only one profile and is required to recover the secret information by focusing mainly on the operation being executed. In contrast, differential power analysis (DPA) uses statistical methods to form a corelation between a number of profiles and the secret information by focusing mainly on the data items being processed.</p>
+
+    <p class="text-gray-300">As attack methods have become better understood, so have the related defense methods. Although new vulnerabilities are regularly uncovered, one can now deploy techniques in hardware and software which will vastly reduce the effectiveness of most side-channel attacks and do so with fairly minor overhead. Very roughly, defense methods fall into one of two main categories:</p>
+
+    <p class="text-gray-300">Randomisation One method of reducing the chance of leaking secret information is to introduce a confusion or randomisation element into the algorithm being executed. This is particularly effective in defending against DPA-style attacks but may also be useful in the SPA-style case. Essentially, randomisation ensures the execution sequence and intermediate results are different for every invocation and hence reduces the correlation of a given profile with the secret information. This method exists in many different forms, for example the addition of blinding factors to exponents; dynamically randomising the parameters or control flow in exponentiation algorithms; and using redundant representations.</p>
+
+    <p class="text-gray-300">Indistinguishability To prevent leakage of secret information to an SPA-style attack by revealing the algorithm control flow, this approach aims to modify operations sequences so that every execution path is uniform. Again, there are several ways in which this can be achieved. One way is to work directly on the mathematical formulae that define the operations and modify them so that the resulting implementations have identical structure. Another method is to work directly on the code, rearranging it and inserting dummy operations, to obtain the same effect.</p>
+
+    <p class="text-gray-300">A key difference between issues of efficiency and security is that the programmer is assisted by a compiler in the former case but not in the later. That is, the programmer is entirely responsible for constructing defense methods against sidechannel analysis. Although the general technique of creating indistinguishable</p>
+
+    <h4 id="sec-2" class="text-lg font-semibold mt-6">Algorithm 1 The double-and-add method for ECC point multiplication.</h4>
+
+    <pre><code class="language-text">Input: point P, integer d
+Output: point Q = d · P
+1: Q ← O
+2: for i = |d| − 1 downto 0 do
+3: Q ← 2 · Q
+4: if di = 1 then
+5: Q ← Q + P
+6: end if
+7: end for
+8: return Q
+</code></pre>
+
+    <p class="text-gray-300">functions to foil SPA style attack is well understood; the general barrier to implementation is how labour intensive and error prone the process is. This is especially true when operation sequences in the functions are more complex than in the stock example of elliptic curve cryptography (ECC), for example systems like XTR or hyperelliptic curve cryptography (HECC). However, the task is ideally suited to automation; to this end our focus in this paper is the realisation of such automation to assist the development of secure software. In the rest of this Section we introduce the concept and use of indistinguishable functions in more detail and present an overview of related work. Then, in Section 2 we describe the construction of such functions as an optimisation problem and offer an algorithm to produce solutions in Section 3. Finally, we present some example results in Section 4 and concluding remarks in Section 5.</p>
+
+    <h4 id="sec-3" class="text-lg font-semibold mt-6">1.1 Using Indistinguishable Functions</h4>
+
+    <p class="text-gray-300">One of the most basic forms of side-channel attack is that of simple power analysis (SPA): the attacker is presented with a single profile from the collection phase and tasked with recovering the secret information. Such an attack can succeed if one can reconstruct the program control flow by observing the operations performed in an algorithm. If decisions in the control flow are based on secret information, it is leaked to the attacker. Because it represents an ideal partner for constrained devices, we focus here on point multiplication as used in ECC [3] and described by Algorithm 1.</p>
+
+    <p class="text-gray-300">Restricting ourselves to working over the field K = Fp, where p is a large prime, our elliptic curve is defined by:</p>
+
+    <p class="text-gray-300"><span class="math">$E(K): y^2 = x^3 + Ax + B</span>$</p>
+
+    <p class="text-gray-300">for some parameters A and B. The set of rational points P = (x, y) on this curve, together with the identity element O, form an additive group. ECC based public key cryptography typically derives security by presenting an intractable discrete logarithm problem over this curve group. That is, one constructs a secret integer d and performs the operation Q = d ·P for some public point P. Since reversing this operation is hard, one can then transmit Q without revealing the value of d.</p>
+
+    <p class="text-gray-300">Since one is composed from a different sequence of field operations than the other, point addition and doubling operations will be distinguishable from each other in a profile of power consumption. Denoting addition by A and doubling by D, the collection phase presents the attacker with a profile detailing the operations performed during execution of the algorithm. For example, by monitoring execution of using the multiplier d = 10012 = 910, one obtains the profile:</p>
+
+    <h4 id="sec-4" class="text-lg font-semibold mt-6">DADDDA</h4>
+
+    <p class="text-gray-300">Given this single profile, the analysis phase can recover the secret value of d simply by spotting where the point additions occur: if an addition occurs then d&lt;sup&gt;i&lt;/sup&gt; = 1, otherwise d&lt;sup&gt;i&lt;/sup&gt; = 0.</p>
+
+    <p class="text-gray-300">One way to avoid this problem is to employ a double-and-add-always method, due to Coron [7], whereby a dummy addition is executed if the real one is not. Although the cases where d&lt;sup&gt;i&lt;/sup&gt; = 0 and d&lt;sup&gt;i&lt;/sup&gt; = 1 are now indistinguishable, this method significantly reduces the performance of the algorithm since many more additions are performed.</p>
+
+    <p class="text-gray-300">However, the ECC group law is very flexible in terms of how the point addition and doubling operations can be implemented through different curve parameterisations, point representations and so on. We can utilise this flexibility to consider forcing indistinguishability by manipulating the functions for point addition and doubling so that they are no longer different. This is generally achieved by splitting the more expensive point addition into two parts, each of which is identical in terms of the operations it performs to a point doubling. Put more simply, instead of recovering the profile above from the SPA collection phase, an attacker gets:</p>
+
+    <h4 id="sec-5" class="text-lg font-semibold mt-6">DDDDDDDD</h4>
+
+    <p class="text-gray-300">from which they can get no useful information. Note that although we present the use of indistinguishable functions solely for point multiplication or exponentiation, the technique is more generally useful and can be applied in many other contexts.</p>
+
+    <h2 id="sec-6" class="text-2xl font-bold">1.2 Related Work</h2>
+
+    <p class="text-gray-300">Gebotys and Gebotys [11] analyse the SPA resistance of a DSP-based implementation of ECC point multiplication using projective coordinates on curves over Fp. They show that by hand-modifying the doubling and adding implementation code, simply by inserting dummy operations, it is possible to obtain significant improvements. Likewise, Trichina and Bellezza [20] analyse the overhead associated with the same approach using mixed coordinates on curves over F2&lt;sup&gt;n&lt;/sup&gt; , and again find an efficient hand-constructed solution. Brier and Joye [5] present unified addition and doubling functions by observing that operations for calculating slope can be shared between the two cases. Joye and Quisquater [13] and Liardet and Smart [17] take a different approach by finding different curve parameterisations that offer naturally indistinguishable formula; they utilise Hessian and Jacobi form elliptic curves respectively.</p>
+
+    <p class="text-gray-300">In other contexts than ECC, Page and Stam [19] present hand-constructed indistinguishable operations for XTR.</p>
+
+    <p class="text-gray-300">Chevallier-Mames et al. [6] propose a generalised formulation for constructing indistinguishable functions and apply it to processor-level sequences of instructions. SPA attacks typically exploit conditional instructions that depend on secret information: the solution is to make the sequences of instructions (processes) associated with both branches indistinguishable. The authors introduce the concept of side channel atomicity: all processes are transformed, simply by padding them with dummy operations, so that they execute as a repetition of a small instruction sequence (a pattern) called a side-channel atomic block.</p>
+
+    <h2 id="sec-7" class="text-2xl font-bold">2 Indistinguishable Functions</h2>
+
+    <p class="text-gray-300">In this section we enunciate the problem of building indistinguishable functions as an optimisation problem. We begin by defining a problem instance.</p>
+
+    <p class="text-gray-300"><strong>Definition 1.</strong> Let F be a list of N functions  <span class="math">F = F_1, F_2, ..., F_N</span>  where each function  <span class="math">F_i</span>  is itself a list of instructions from a finite basic instruction set L:</p>
+
+    <p class="text-gray-300"><span class="math">$F_i = F_i[1], F_i[2], ..., F_i[|F_i|]</span>$</p>
+
+    <p class="text-gray-300">where  <span class="math">|F_i|</span>  denotes the length of function  <span class="math">F_i</span> , and  <span class="math">F_i[j] \\in L</span>  denotes instruction j of function  <span class="math">F_i</span> , with  <span class="math">1 \\le j \\le |F_i|</span> . Also, let  <span class="math">F_i[k...j]</span>  denote instructions k to j in function  <span class="math">F_i</span> , with  <span class="math">1 \\le k \\le j \\le |F_i|</span> .</p>
+
+    <p class="text-gray-300">For concreteness one should think of the simple case of two functions  <span class="math">F_1</span>  and  <span class="math">F_2</span>  as performing ECC point addition and doubling. Further, the instruction set L is formed from three-address style operations [18] on elements in the base field, for example addition and multiplication, and the functions are straight-line in that they contain no internal control flow structure.</p>
+
+    <p class="text-gray-300">We aim to manipulate the original functions into new versions  <span class="math">F&#x27;_i</span>  such that the execution trace of all of them is some multiple of the execution trace of some pattern  <span class="math">\\Pi</span> . Clearly we might need to add some dummy instructions to the original functions as well as reordering their instructions so that the pattern is followed. To allow for instruction reordering, we extend our problem definition to include information about the data dependencies between instructions within each function. We represent these dependencies as directed graphs.</p>
+
+    <p class="text-gray-300"><strong>Definition 2.</strong> Given a set F as in Definition 1, let P be the list of pairs</p>
+
+    <p class="text-gray-300"><span class="math">$P = (F_1, G_1), (F_2, G_2), ..., (F_N, G_N)</span>$</p>
+
+    <p class="text-gray-300">where  <span class="math">G_i = (V_i, E_i)</span>  is a directed graph in which  <span class="math">V_i</span>  and  <span class="math">E_i</span>  are the associated sets of nodes and edges, respectively. Let  <span class="math">|V_i| = |F_i|</span>  and, to each instruction</p>
+
+    <p class="text-gray-300"><span class="math">F_i[j]</span> , associate node  <span class="math">v_j \\in V_i</span> . Let  <span class="math">E_i</span>  contain an edge between nodes  <span class="math">v_j</span>  and  <span class="math">v_k</span>  if and only if executing instruction  <span class="math">F_i[j]</span>  before instruction  <span class="math">F_i[k]</span>  disrupts the normal data flow inside the function. We say that instruction  <span class="math">F_i[j]</span>  depends on instruction  <span class="math">F_i[k]</span> .</p>
+
+    <p class="text-gray-300">In general terms, given a straight-line function  <span class="math">F_i</span>  described using three-address operations from our instruction set L, the pair of function and graph  <span class="math">(F_i,G_i)</span>  can be constructed as follows:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Add  <span class="math">|F_i|</span>  nodes to  <span class="math">V_i</span>  so that each instruction in the function is represented by a node in the graph.</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>For every instruction  <span class="math">F_i[j]</span>  add an edge  <span class="math">(v_j, v_k)</span>  to  <span class="math">E_i</span>  if and only if  <span class="math">F_i[j]</span>  uses a result directly modified by some instruction  <span class="math">F_i[k]</span> . Note that we assume that symbols for intermediate results are not reused; that is the function is in single-static-assignment (SSA) form [18]. If reuse is permitted, additional edges must be inserted in the dependency graph to prevent overwriting intermediate results.</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Calculate  <span class="math">(V_i, E&#x27;_i)</span> , the transitive closure of the graph  <span class="math">(V_i, E_i)</span> , and take  <span class="math">G_i = (V_i, E&#x27;_i)</span> .</li>
+    </ol></li>
+    </ul>
+
+    <p class="text-gray-300">We use the dependency graphs in Definition 2 to guarantee that the transformations we perform on the functions  <span class="math">F_i</span>  are sound. That is, as long as we respect the dependencies, the program is functionally correct even though the instructions are reordered. Definition 3 captures this notion.</p>
+
+    <p class="text-gray-300"><strong>Definition 3.</strong> A function  <span class="math">F&#x27;_i</span>  is a valid transformation of a function  <span class="math">F_i</span>  (written  <span class="math">F&#x27;_i \\Leftarrow F_i</span> ) if given the dependency graph  <span class="math">G_i</span> ,  <span class="math">F&#x27;_i</span>  can be generated by modifying  <span class="math">F_i</span>  as follows:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Reorder the instructions in  <span class="math">F_i</span> , respecting the dependency graph  <span class="math">G_i</span>  i.e. if there is an edge  <span class="math">(v_j, v_k) \\in E_i</span>  then instruction  <span class="math">F_i[j]</span>  must occur after instruction  <span class="math">F_i[k]</span>  in  <span class="math">F&#x27;_i</span> .</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Insert a finite number of dummy instructions.</li>
+    </ol></li>
+    </ul>
+
+    <p class="text-gray-300">The goal is to find  <span class="math">\\Pi</span>  and matching  <span class="math">F&#x27;_i</span>  whose processing overhead compared to the original programs is minimised. Hence, our problem definition must also include the concept of computational cost. For the sake of generality, we assign to each basic instruction in set L an integer weight value that provides a relative measure of it's computational weight.</p>
+
+    <p class="text-gray-300"><strong>Definition 4.</strong> Let  <span class="math">\\omega: L \\to \\mathbb{N}</span>  be a weight function that, for each basic instruction  <span class="math">l \\in L</span> , provides a relative value  <span class="math">\\omega(l)</span>  for the computational load associated with instruction l.</p>
+
+    <p class="text-gray-300">For example, taking w(x + y) = 1 we could set  <span class="math">w(x^2) = 10</span>  and  <span class="math">w(x \\times y) = 20</span> . Given this cost function, we are now in a position to provide a formulation of the problem of building indistinguishable functions as an optimisation problem.</p>
+
+    <p class="text-gray-300"><strong>Algorithm 2</strong> Methods for ECC affine point addition (left) and doubling (right).</p>
+
+    <pre><code class="language-text">Input: P = (x_1, y_1), Q = (x_2, y_2)
+                                                                                       Input: P = (x_1, y_1)
+Output: R = (x_3, y_3) = P + Q
+                                                                                        Output: R = (x_3, y_3) = 2 \\cdot P
+  1: \\lambda_1 \\leftarrow y_2 - y_1
+                                                                                         1: \\lambda_1 \\leftarrow x_1^2
+  2: \\lambda_2 \\leftarrow x_2 - x_1
+                                                                                         2: \\lambda_2 \\leftarrow \\lambda_1 + \\lambda_1
+  3: \\lambda_3 \\leftarrow \\lambda_2^{-1}
+                                                                                         3: \\lambda_3 \\leftarrow \\lambda_2 + \\lambda_1
+  4: \\lambda_4 \\leftarrow \\lambda_1 \\cdot \\lambda_3
+                                                                                         4: \\lambda_4 \\leftarrow \\lambda_3 + A
+  5: \\lambda_5 \\leftarrow \\lambda_4^2
+                                                                                         5: \\lambda_5 \\leftarrow y_1 + y_1
+  6: \\lambda_6 \\leftarrow \\lambda_5 - x_1
+                                                                                         6: \\lambda_6 \\leftarrow \\lambda_5^{-1}
+  7: x_3 \\leftarrow \\lambda_6 - x_2
+                                                                                         7: \\lambda_7 \\leftarrow \\lambda_4 \\cdot \\lambda_6
+  8: \\lambda_7 \\leftarrow x_1 - x_3
+                                                                                         8: \\lambda_8 \\leftarrow \\lambda_7^2
+  9: \\lambda_8 \\leftarrow \\lambda_4 \\cdot \\lambda_7
+                                                                                         9: \\lambda_9 \\leftarrow x_1 + x_1
+10: y_3 \\leftarrow \\lambda_8 - y_1
+                                                                                        10: x_3 \\leftarrow \\lambda_8 - \\lambda_9
+                                                                                        11: \\lambda_{10} \\leftarrow x_1 - x_3
+                                                                                       12: \\lambda_{11} \\leftarrow \\lambda_{10} \\cdot \\lambda_7
+13: y_3 \\leftarrow \\lambda_{11} - y_1
+</code></pre>
+
+    <p class="text-gray-300"><strong>Definition 5.</strong> Given a pair  <span class="math">(P, \\omega)</span>  as in Definitions 1, 2 and 4, find a pattern  <span class="math">\\Pi</span>  and a list of functions  <span class="math">F&#x27; = F&#x27;_1, F&#x27;_2, ..., F&#x27;_N</span>  such that</p>
+
+    <p class="text-gray-300"><span class="math">$\\begin{cases} \\Pi = \\Pi[1], \\Pi[2], ..., \\Pi[|\\Pi|] &amp; \\Pi[k] \\in L, 1 \\le k \\le |\\Pi| \\\\ F&#x27;_i \\Leftarrow F_i &amp; 1 \\le i \\le N \\\\ |F&#x27;_i| = 0 \\pmod{|\\Pi|} &amp; 1 \\le i \\le N \\\\ F&#x27;_i[j] = \\Pi[mod(j, |\\Pi|) + 1] &amp; 1 \\le i \\le N, 1 \\le j \\le |F&#x27;_i| \\end{cases}</span>$</p>
+
+    <p class="text-gray-300">and that</p>
+
+    <p class="text-gray-300"><span class="math">$\\sum_{i=1}^{N} \\sum_{j=1}^{|F_i&#x27;|} \\omega(F_i&#x27;[j])</span>$</p>
+
+    <p class="text-gray-300">is minimal.</p>
+
+    <p class="text-gray-300">Intuition on the hardness of satisfying these constraints comes from noticing similarities with well-known NP-complete optimisation problems such as the Minimum Bin Packing, Longest Common Subsequence and Nearest Codeword problems [8].</p>
+
+    <h4 id="sec-8" class="text-lg font-semibold mt-6">2.1 A Small Example</h4>
+
+    <p class="text-gray-300">Recalling our definition of the elliptic curve E(K) in Section 1.1, Algorithm 2 details two functions for affine point addition and doubling on such a curve. Denoting the addition and doubling as functions  <span class="math">F_1</span>  and  <span class="math">F_2</span>  respectively, we find  <span class="math">|F_1| = 10</span>  while  <span class="math">|F_2| = 13</span> . From these functions, we also find our instruction set is  <span class="math">L = \\{x + y, x - y, x^2, x \\times y, 1/x\\}</span>  with all operations over the base field  <span class="math">K = \\mathbb{F}_p</span> . Thus, we setup our costs as  <span class="math">\\omega(x + y) = 1</span> ,  <span class="math">\\omega(x - y) = 1</span> ,  <span class="math">\\omega(x^2) = 10</span> ,  <span class="math">\\omega(x \\times y) = 20</span>  and  <span class="math">\\omega(1/x) = 100</span> .</p>
+
+    <p class="text-gray-300">Notice the role of dependencies in the functions: operation three in  <span class="math">F_1</span>  depends on operation two but not on operation one. In fact, we can relocate operation one after operation three to form a valid function  <span class="math">F&#x27;_1</span>  since it respects the data dependencies that exist.</p>
+
+    <p class="text-gray-300">The graphs in Figure 1 represent the direct dependencies between the instructions in the addition method (top) and the doubling method (bottom). Complete dependency graphs as specified in Definition 2 can be obtained by calculating the transitive closure over the graphs in Figure 1.</p>
+
+    <p class="text-gray-300">Algorithm3 shows a solution for this instance of the optimization problem. The cost of the solution is 12 since we add an extra square and two extra additions both denoted by the use of  <span class="math">\\lambda_d</span>  as their arguments. It is easy to see that it is actually an absolute minimal value. To clarify the criteria specified in Definition 5, let us see how they apply to this case.</p>
+
+    <p class="text-gray-300">The pattern  <span class="math">\\Pi</span>  is given by the operation sequence of the doubling method, and we have  <span class="math">|\\Pi|=13</span> . To ensure both  <span class="math">|F_1&#x27;|=0 \\pmod{|\\Pi|}</span>  and  <span class="math">|F_2&#x27;|=0 \\pmod{|\\Pi|}</span>  we need to add three dummy instructions to  <span class="math">F_1</span> . The solution presents no mismatches between the instruction sequences of either function and the pattern  <span class="math">\\Pi</span> , so the restriction  <span class="math">F_i&#x27;[j]=\\Pi[\\operatorname{mod}(j,|\\Pi|)+1]</span>  holds for all valid i and j values. Finally, it is easy to see that both  <span class="math">F_i&#x27;</span>  are valid transformations of the original  <span class="math">F_i</span> . Instruction reordering occurs only once in  <span class="math">F_1&#x27;</span>  (instructions 3 and 5), and these are independent in  <span class="math">F_1</span> .  <span class="math">F_2&#x27;</span>  is identical to  <span class="math">F_2</span> .</p>
+
+    <p class="text-gray-300">    <img src="_page_7_Figure_4.jpeg" alt="" class="my-4 max-w-full" />
+</p>
+
+    <p class="text-gray-300">Fig. 1. Dependency graphs for the methods in Algorithm 2.</p>
+
+    <h4 id="sec-9" class="text-lg font-semibold mt-6">3 An Optimisation Algorithm</h4>
+
+    <p class="text-gray-300">Our approach to solving the problem as described above is detailed in Algorithm 4. The algorithm represents an adaptation of Threshold Accepting [9], a generic optimisation algorithm. Threshold Accepting is a close relative of simulated annealing, where candidate solutions are deterministically accepted or rejected according to a predefined threshold schedule: a proposed solution is accepted as long as it does not increase the current cost by more than the current threshold value. Note that we are not aiming to find the optimal solution,</p>
+
+    <h4 id="sec-10" class="text-lg font-semibold mt-6"><strong>Algorithm 3</strong> Indistinguishable versions of the methods in Algorithm 2.</h4>
+
+    <pre><code class="language-text">Input: P = (x_1, y_1), Q = (x_2, y_2)
+                                                                                          Input: P = (x_1, y_1)
+Output: R = (x_3, y_3) = P + Q
+                                                                                           Output: R = (x_3, y_3) = 2 \\cdot P
+                                                                                           1: \\lambda_1 \\leftarrow x_1^2
+  1: \\lambda_d \\leftarrow \\lambda_d^2
+  2: \\lambda_d \\leftarrow \\lambda_d + \\lambda_d
+                                                                                           2: \\lambda_2 \\leftarrow \\lambda_1 + \\lambda_1
+  3: \\lambda_2 \\leftarrow x_2 - x_1
+                                                                                            3: \\lambda_3 \\leftarrow \\lambda_2 + \\lambda_1
+  4: \\lambda_d \\leftarrow \\lambda_d + \\lambda_d
+                                                                                            4: \\lambda_4 \\leftarrow \\lambda_3 + A
+ 5: \\lambda_1 \\leftarrow y_2 - y_1
+6: \\lambda_3 \\leftarrow \\lambda_2^{-1}
+                                                                                           5: \\lambda_5 \\leftarrow y_1 + y_1
+6: \\lambda_6 \\leftarrow \\lambda_5^{-1}
+  7: \\lambda_4 \\leftarrow \\lambda_1 \\cdot \\lambda_3
+                                                                                            7: \\lambda_7 \\leftarrow \\lambda_4 \\cdot \\lambda_6
+  8: \\lambda_5 \\leftarrow \\lambda_4^2
+                                                                                            8: \\lambda_8 \\leftarrow \\lambda_7^2
+  9: \\lambda_6 \\leftarrow \\lambda_5 - x_1
+                                                                                           9: \\lambda_9 \\leftarrow x_1 + x_1
+10: x_3 \\leftarrow \\lambda_6 - x_2
+                                                                                          10: x_3 \\leftarrow \\lambda_8 - \\lambda_9
+11: \\lambda_7 \\leftarrow x_1 - x_3
+                                                                                          11: \\lambda_{10} \\leftarrow x_1 - x_3
+12: \\lambda_8 \\leftarrow \\lambda_4 \\cdot \\lambda_7
+                                                                                          12: \\lambda_{11} \\leftarrow \\lambda_{10} \\cdot \\lambda_7
+13: y_3 \\leftarrow \\lambda_8 - y_1
+                                                                                          13: y_3 \\leftarrow \\lambda_{11} - y_1
+</code></pre>
+
+    <p class="text-gray-300">but to find a good enough approximation of it that can be used in practical applications.</p>
+
+    <p class="text-gray-300">Algorithm 4 makes S attempts to find an optimal pattern size, which is selected randomly in each s-iteration (line 2). In each of these attempts, the original functions are taken as the starting solution, with the minor change that they are padded with dummy instructions, so as to make their size multiple of the pattern size (lines 3 to 6).</p>
+
+    <p class="text-gray-300">The inner loop (lines 10 to 18), which runs T times, uses a set of randomised heuristics to obtain a neighbour solution. This solution is accepted if it does not represent a relative cost increase greater than the current threshold value. The threshold varies with t, starting at a larger value for low values of t and gradually decreasing. The number of iterations S and T must be adjusted according to the size of the problem.</p>
+
+    <p class="text-gray-300"><span class="math">$\\begin{split} H[1] &amp; H[2] &amp; \\dots &amp; H[|H|-1] &amp; H[|H|] \\\\ F_1&#x27;[1] &amp; F_1&#x27;[2] &amp; \\dots &amp; F_1&#x27;[|H|-1] &amp; F_1&#x27;[|H|] \\\\ F_1&#x27;[|H|+1] &amp; F_1&#x27;[2] &amp; \\dots &amp; F_1&#x27;[2|H|-1] &amp; F_1&#x27;[2|H|] \\\\ &amp; \\vdots &amp; \\vdots &amp; \\vdots &amp; \\vdots &amp; \\vdots \\\\ F_1&#x27;[|F_1&#x27;|-|H|+1] &amp; F_1&#x27;[|F_1&#x27;|-|H|+2] &amp; \\dots &amp; F_1&#x27;[|F_1&#x27;|-1] &amp; F_1&#x27;[|F_1&#x27;|] \\\\ F_2&#x27;[1] &amp; F_2&#x27;[2] &amp; \\dots &amp; F_2&#x27;[|H|-1] &amp; F_2&#x27;[|H|] \\\\ &amp; \\vdots &amp; \\vdots &amp; \\vdots &amp; \\vdots \\\\ F_N&#x27;[|F_N&#x27;|-|H|+1] &amp; F_N&#x27;[|F_N&#x27;|-|H|+2] &amp; \\dots &amp; F_N&#x27;[|F_N&#x27;|-1] &amp; F_N&#x27;[|F_N&#x27;|] \\\\ \\end{split}</span>$</p>
+
+    <p class="text-gray-300">Fig. 2. A solution as a matrix of instructions.</p>
+
+    <h4 id="sec-11" class="text-lg font-semibold mt-6"><strong>Algorithm 4</strong> An optimisation algorithm for indistinguishable operations.</h4>
+
+    <pre><code class="language-text">Input: (P, \\omega)
+Output: (\\Pi, F&#x27;), a quasi-optimal solution to the problem in Definition 5
+ 1: for s = 1 to S do
+ 2:
+        |\\Pi| \\leftarrow \\text{random pattern size}
+ 3:
+        \\mathbf{x} \\leftarrow \\{F_i, 1 &lt; i &lt; N\\}
+ 4:
+        for all F_i&#x27; \\in \\mathbf{x} do
+ 5:
+           Append |\\Pi| - (|F_i| \\pmod{|\\Pi|}) dummy instructions to F_i
+ 6:
+        end for
+ 7:
+        cost \\leftarrow cost(\\mathbf{x})
+        result \\leftarrow \\mathbf{x}
+ 8:
+ 9:
+        best \\leftarrow cost
+        for t = 1 to T do
+10:
+           \\mathbf{x}&#x27; \\leftarrow neighbour(\\mathbf{x})
+11:
+12:
+           thresh \\leftarrow threshold(t, T)
+13:
+           cost&#x27; \\leftarrow cost(\\mathbf{x}&#x27;)
+           if (cost&#x27; - cost)/cost - 1 &lt; thresh then
+14:
+15:
+               \\mathbf{x} \\leftarrow \\mathbf{x}&#x27;
+16:
+               cost \\leftarrow cost&#x27;
+17:
+           end if
+18:
+         end for
+19:
+        if cost &lt; best then
+20.
+           result \\leftarrow \\mathbf{x}
+21:
+           best \\leftarrow cost
+22:
+        end if
+23: end for
+24: return result
+</code></pre>
+
+    <p class="text-gray-300">The quality of a solution is measured using a cost function that operates as follows:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><p class="text-gray-300">The complete set of instructions in a solution  <span class="math">\\mathbf{x}</span>  is seen as a matrix with  <span class="math">|\\Pi|</span>  columns and  <span class="math">(\\sum_{i=1}^{N} |F_i&#x27;|)/|\\Pi|</span>  lines (see Figure 2), in which each function occupies  <span class="math">|F_i&#x27;|/|\\Pi|</span>  consecutive lines.</p></li>
+      <li><p class="text-gray-300">Throughout the algorithm, the pattern  <span class="math">\\Pi</span>  is adjusted to each solution by taking  <span class="math">\\Pi[k]</span>  as the most common basic instruction in column k of the matrix.</p></li>
+      <li><p class="text-gray-300">A dummy instruction is always taken to be of the same type as the pattern instruction for its particular column, so dummy instructions are ignored when adjusting  <span class="math">\\Pi</span>  to a particular solution.</p></li>
+      <li><p class="text-gray-300">The overall cost of a solution has two components: c and d. The former is the cost associated with deviations from the pattern and it is evaluated as the sum, taken over all non-matching instructions in the matrix, of the weight difference relative to the corresponding pattern instruction. The latter is the cost associated with dummy operations and it is evaluated as the accumulated weight of all the dummy instructions in the matrix.</p></li>
+      <li><p class="text-gray-300">The relative importance of these components can be tuned to put more or less emphasis on indistinguishability. This affects the trade-off between indistinguishability and processing overhead.</p></li>
+    </ul>
+
+    <p class="text-gray-300">Throughout its execution, the algorithm keeps track of the best solution it has been able to reach (lines 19 to 22); this is returned when the algorithm terminates (line 24).</p>
+
+    <p class="text-gray-300">A neighbour solution is derived from the current solution by randomly selecting one of the following heuristics:</p>
+
+    <p class="text-gray-300">Tilt function left A function  <span class="math">F&#x27;_i</span>  is selected randomly, and its instructions are all moved as far to the left as possible, filling spaces previously occupied by dummy instructions or just freed by moving other instructions. The order of the instructions is preserved, and an instruction is only moved if it matches the pattern instruction for the target column.</p>
+
+    <p class="text-gray-300"><strong>Tilt function right</strong> Same as previous, only that instructions are shifted to the right.</p>
+
+    <p class="text-gray-300">Move instruction left A function  <span class="math">F&#x27;_i</span>  is selected randomly, and an instruction  <span class="math">F&#x27;_i[j]</span>  is randomly picked within it. This instruction is then moved as far to the left as possible. An instruction is only moved if this does not violate inter-instruction dependencies, and it matches the pattern instruction for the target column.</p>
+
+    <p class="text-gray-300">Move instruction right Same as previous, only that the instruction is shifted to the right.</p>
+
+    <p class="text-gray-300">After application of the selection heuristic, the neighbour solution is optimised by removing rows or columns containing only dummy instructions. If the final solution produced by Algorithm 4 includes deviations from the chosen pattern, these can be eliminated by extending the pattern to get a totally indistinguishable result. If the number of mismatches is large, this produces a degenerate solution. We have implemented this as an optional post-processing functionality.</p>
+
+    <p class="text-gray-300">Our experimental results indicate the following rules of thumb that should be considered when parameterising Algorithm 4:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>S should be at least half of the length of the longest function.</li>
+      <li>T should be a small multiple of the total number of instructions.</li>
+      <li>An overall cost function calculated as  <span class="math">c^2 + d</span>  leads to a good compromise between indistinguishability and processing overhead.</li>
+      <li>The threshold should decrease quadratically, starting at 70% for t=0 and reaching 10% when t=T-1.</li>
+      <li>The neighbour generation heuristics should be selected with equal probability, or with a small bias favoring moving over tilting mutations.</li>
+    </ul>
+
+    <h4 id="sec-12" class="text-lg font-semibold mt-6">4 Results</h4>
+
+    <p class="text-gray-300">Using Algorithm 4 we have been able to produce results equivalent to various hand-made solutions published in the literature for small sized problems, and</p>
+
+    <p class="text-gray-300">to construct indistinguishable versions of the much larger functions for point addition and doubling in genus 2 hyper-elliptic curves over finite fields.</p>
+
+    <p class="text-gray-300">Appendix 1 contains the results produced by Algorithm 4 when fed with the instruction sequences for vanilla EC affine point addition over F&lt;sup&gt;p&lt;/sup&gt; using projective coordinates, as presented by Gebotys and Gebotys in (Figure 1,[11]). This result has exactly the same overhead as the version presented in the same reference.</p>
+
+    <p class="text-gray-300">Appendix 2 contains the instruction sequences corresponding to formulae for finite field arithmetic in a specific degree six extension as used in a number of torus based constructions [12, 10], together with the results obtained using Algorithm 4 for this problem instance.</p>
+
+    <p class="text-gray-300">Table 1 (left) shows the number of dummy field operations added to each of the functions in Appendix 2. Also shown in Table 1 (right) is the estimated overhead for an exponentiation. We assume the average case in which the number of squarings is twice the number of multiplications. This is roughly equivalent to the best hand-made solution that we were able to produce in reasonable time, even if the number of dummy multiplications is slightly larger in the automated version.</p>
+
+    <p class="text-gray-300">Table 1. Overheads for the indistinguishable functions in Appendix 2.</p>
+
+    <p class="text-gray-300">Overhead 24% 19% 400%</p>
+
+    <div class="overflow-x-auto my-4">
+      <table class="min-w-full text-sm text-gray-300">
+        <thead>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">Operations Square Multiply</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left"></th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left"></th>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Add</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">9</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">11</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Multiply</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">4</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">2</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Shift</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">12</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p class="text-gray-300">Appendix 3 includes indistinguishable versions of hyper-elliptic curve point adding and doubling functions. These implementations correspond to the general case of the explicit formulae for genus 2 hyperelliptic curves over finite fields using affine coordinates. provided by Lange in [16]. A pseudo-code implementation of these formulae is also included in Appendix 3. In our analysis, we made no assumptions as to the values of curve parameters because our objective was to work over a relatively large problem instance. Operations involving curve parameters were treated as generic operations.</p>
+
+    <p class="text-gray-300">In this example, the group operations themselves contain branching instructions. To accommodate this, we had to first create indistinguishable versions of the smaller branches inside the addition and doubling functions, separately. The process was then applied globally to the two main branches of the addition function and to the doubling function as a whole, which meant processing three functions of considerable size, simultaneously.</p>
+
+    <p class="text-gray-300">Table 2 (left) shows the number of dummy field operations added to each of the functions in Appendix 3. Note that functions Add2 &lt;sup&gt;0&lt;/sup&gt; and Double&lt;sup&gt;0&lt;/sup&gt; correspond to cases that are overwhelmingly more likely to occur. The overhead, in these cases, is within reasonable limits. Also shown in Table 2 (right) is the estimated overhead for a point multiplication. We assume the average case in which the number of doublings is twice the number of additions, and consider only the most likely execution sequences for these operations (Add2') and Double'.</p>
+
+    <p class="text-gray-300"><strong>Table 2.</strong> Overheads for the indistinguishable functions in Appendix 3.</p>
+
+    <div class="overflow-x-auto my-4">
+      <table class="min-w-full text-sm text-gray-300">
+        <thead>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">Operations</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">Add1</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">Add2'</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">Add2''</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">Double'</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">Double''</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">Overhead</th>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Add</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">35</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">20</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">37</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">4</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">16</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">19%</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Multiply</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">28</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">14</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">27</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">5</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">16</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">25%</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Square</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">7</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">5</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">6</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">2</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">4</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">60%</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Invert</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">1</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">1</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">1</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">1</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">1</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">100%</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2 id="sec-13" class="text-2xl font-bold">5 Conclusion</h2>
+
+    <p class="text-gray-300">Defense against side-channel attacks is a vital part of engineering software that is to be executed on constrained devices. Since such devices are used within an adversarial environment, sound and efficient techniques are of value even if they are hard to implement. To this end we have investigated an automated approach to constructing indistinguishable functions, a general method of defense against certain classes of side-channel attack which are notoriously difficult to implement as the functions grow more complex. Our results show that efficient versions of such functions, which are competitive with hand-constructed versions, can be generated with only minor computational effort.</p>
+
+    <p class="text-gray-300">This work is pitched in the context of cryptography-aware compilation: the idea that programmers should be assisted in describing secure software just like they are offered support to optimise software. We have embedded our algorithm in such a compiler which can now automatically manipulate a source program so the result is more secure.</p>
+
+    <h4 id="sec-14" class="text-lg font-semibold mt-6">References</h4>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><p class="text-gray-300">D. Agrawal, B. Archambeault, J.R. Rao and P. Rohatgi. The EM Side-Channel(s). In Cryptographic Hardware and Embedded Systems (CHES), Springer-Verlag LNCS 2523, 29–45, 2002.</p></li>
+      <li><p class="text-gray-300">D. Agrawal, J.R. Rao and P. Rohatgi. Multi-channel Attacks. In Cryptographic Hardware and Embedded Systems (CHES), Springer-Verlag LNCS 2779, 2–16, 2003.</p></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>I.F. Blake, G. Seroussi and N.P. Smart. <em>Elliptic Curves in Cryptography</em>. Cambridge University Press, 1999.</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>I.F. Blake, G. Seroussi and N.P. Smart. Advances in Elliptic Curve Cryptography. Cambridge University Press, 2004.</li>
+    </ol></li>
+      <li><p class="text-gray-300">É. Brier and M. Joye. Weierstraß Elliptic Curves and Side-channel Attacks. In Public Key Cryptography (PKC), Springer-Verlag LNCS 2274, 335–345, 2002.</p></li>
+      <li><p class="text-gray-300">B. Chevallier-Mames, M. Ciet and M. Joye. Low-Cost Solutions for Preventing Simple Side-Channel Analysis: Side-Channel Atomicity. In <em>IEEE Transactions on Computers</em>, 53(6), 760–768, 2004.</p></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>J-S. Coron. Resistance against Differential Power Analysis for Elliptic Curve Cryptosystems. In Cryptographic Hardware and Embedded Systems (CHES), Springer-Verlag LNCS 1717, 292–302, 1999.</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>P. Crescenzi and V. Kann. A Compendium of NP Optimization Problems. Available at: http://www.nada.kth.se/∼viggo/problemlist/.</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>G. Dueck and T. Scheuer. Threshold Accepting: A General Purpose Optimization Algorithm Appearing Superior to Simulated Annealing. In Journal of Computational Physics, 90(1), 161–175, 1990.</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>M. van Dijk, R. Granger, D. Page, K. Rubin, A. Silverberg, M. Stam and D. Woodruff. Practical Cryptography in High Dimensional Tori To appear in Advances in Cryptology (EUROCRYPT), 2005.</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>C.H. Gebotys and R.J. Gebotys. Secure Elliptic Curve Implementations: An Analysis of Resistance to Power-Attacks in a DSP Processor. In Cryptographic Hardware and Embedded Systems (CHES), Springer-Verlag LNCS 2523, 114–128, 2002.</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>R. Granger, D. Page and M. Stam. A Comparison of CEILIDH and XTR. In Algorithmic Number Theory Symposium (ANTS), Springer-Verlag LNCS 3076, 235–249, 2004.</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>M. Joye and J-J. Quisquater. Hessian Elliptic Curves and Side-Channel Attacks. In Cryptographic Hardware and Embedded Systems (CHES), Springer-Verlag LNCS 2162, 402–410, 2001.</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>P.C. Kocher. Timing Attacks on Implementations of Diffie-Hellman, RSA, DSS, and Other Systems. In Advances in Cryptology (CRYPTO), Springer-Verlag LNCS 1109, 104–113, 1996.</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>P.C. Kocher, J. Jaffe and B. Jun. Differential Power Analysis. In Advances in Cryptology (CRYPTO), Springer-Verlag LNCS 1666, 388–397, 1999.</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>T. Lange. Efficient Arithmetic on Genus 2 Hyperelliptic Curves over Finite Fields via Explicit Formulae. In Cryptology ePrint Archive, Report 2002/121, 2002.</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>P-Y. Liardet and N.P. Smart. Preventing SPA/DPA in ECC Systems Using the Jacobi Form. In Cryptographic Hardware and Embedded Systems (CHES), Springer-Verlag LNCS 2162, 391–401, 2001.</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>S.S. Muchnick. Advanced Compiler Design and Implementation, Morgan Kaufmann, 1997.</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>D. Page and M. Stam. On XTR and Side-Channel Analysis. In Selected Areas in Cryptography (SAC), Springer-Verlag LNCS 3357, 54–68, 2004.</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>E. Trichina and A. Bellezza. Implementation of Elliptic Curve Cryptography with Built-In Counter Measures against Side Channel Attacks. In Cryptographic Hardware and Embedded Systems (CHES), Springer-Verlag LNCS 2523, 98–113, 2002.</li>
+    </ol></li>
+    </ul>
+
+    <h2 id="sec-15" class="text-2xl font-bold">Appendix 1: Arithmetic Over Elliptic Curves Over F&lt;sup&gt;p&lt;/sup&gt; Using Projective Coordinates</h2>
+
+    <p class="text-gray-300">Figure 3 shows the results produced by Algorithm 4 when fed with the instruction sequences for vanilla EC affine point addition over F&lt;sup&gt;p&lt;/sup&gt; using projective coordinates, as presented by Gebotys and Gebotys in (Figure 1,[11]).</p>
+
+    <div class="overflow-x-auto my-4">
+      <table class="min-w-full text-sm text-gray-300">
+        <thead>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">Double</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">Add</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left"></th>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">1</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">1</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">21</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">b1 = y ^ 2</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">z2s = z2 ^ 2</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">hs = h ^ 2</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">2</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">2</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">22</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">e1 = z ^ 2</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">z1s = z1 ^ 2</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">om = j ^ 2</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">3</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">3</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">23</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">b2 = b1 * b1</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">f = z1s * x2</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">ga = z1 * z2</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">4</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">4</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">24</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">b = b2 &lt;&lt; 3</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy shift)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy shift)</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">5</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">5</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">25</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">z31 = y * z</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">g = g2s * x1</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">al = th * hs</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">6</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">6</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">26</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">e2 = x - e1</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">7</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">7</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">27</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">e3 = x + e1</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">8</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">8</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">28</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">e = e2 * e3</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">z1c = z1s * z1</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">la = h * hs</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">9</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">9</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">29</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">z12 = z31 &lt;&lt; 1</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy shift)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy shift)</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">10</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">10</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">30</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">c1 = e &lt;&lt; 1</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy shift)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy shift)</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">11</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">11</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">31</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">c = c1 + e</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">12</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">12</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">32</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">f1 = b1 &lt;&lt; 2</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy shift)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy shift)</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">13</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">13</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">33</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">a = f1 * x</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">z2c = z2s * z2</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">th = la * i</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">14</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">14</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">34</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">f3 = a &lt;&lt; 1</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy shift)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy shift)</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">15</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">15</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">35</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy mul)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy mul)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">z3 = ga * h</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">16</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">16</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">36</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">d1 = c * c</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">i = y1 * z2c</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">la = hs * g</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">17</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">17</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">37</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">x12 = d1 - f3</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">th = f + g</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">om = la - x3</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">18</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">18</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">38</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">y31 = a - x3</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">h = f - g</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">x3 = om - al</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">19</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">19</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">39</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">y32 = y31 * c</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">om = y2 * z1c</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">al = om * j</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">20</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">20</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">40</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">y12 = y32 - b</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">j = om -i</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">y3 = al - th</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p class="text-gray-300">Fig. 3. Indistinguishable EC affine point addition over F&lt;sup&gt;p&lt;/sup&gt; using projective coordinates</p>
+
+    <h2 id="sec-16" class="text-2xl font-bold">Appendix 2: Arithmetic Over a Specific a Degree Six Extension of a Finite Field</h2>
+
+    <p class="text-gray-300">Figure 4 shows the instruction sequences corresponding to formulae for finite field arithmetic in a specific degree six extension, as used in a number of torus based constructions [12, 10]. Figure 5 shows the results obtained using Algorithm 4 for the functions in Figure 4.</p>
+
+    <div class="overflow-x-auto my-4">
+      <table class="min-w-full text-sm text-gray-300">
+        <thead>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">Square</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">Multiply</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left"></th>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">1</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">1</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">37</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">a0 = x0 - x3</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">a0 = x0 - x3</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">c16 = a * b</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">2</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">2</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">38</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">a1 = a0 + x0</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">b0 = y0 - y3</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">t0 = t0 - c16</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">3</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">3</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">39</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">c = x3 * a1</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">c12 = a0 * b0</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">t3 = t0 - t3</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">4</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">4</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">40</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">c0 = c + a0</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">a1 = x1 - x4</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">c2 = x2 * y2</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">5</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">5</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">41</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">c0 = c0 &lt;&lt; 1</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">b1 = y1 - y4</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">c = c + c2</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">6</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">6</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">42</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">X4 = c0 + c</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">c13 = a1 * b1</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">t2 = t2 - c</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">7</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">7</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">43</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">a1 = x0 + x3</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">a2 = x2 - x5</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">c = c2 + c1</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">8</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">8</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">44</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">c = a0 * a1</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">b2 = y2 - y5</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">t1 = t1 - c</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">9</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">9</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">45</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">c0 = c + x0</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">c14 = a2 * b2</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">t1 = t1 - c6</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">10</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">10</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">46</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">c0 = c0 &lt;&lt; 1</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">c0 = x0 * y0</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">c = c + c0</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">11</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">11</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">47</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">X1 = c0 + c</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">c = c13 + c14</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">t0 = t0 - c</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">12</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">12</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">48</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">a0 = x1 - x4</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">t0 = c + c12</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">a = x0 - x2</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">13</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">13</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">49</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">a1 = x0 - x4</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">t1 = c + c0</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">b = y0 - y2</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">14</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">14</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">50</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">c = x1 * a1</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">t2 = c0 + c14</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">c4 = a * b</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">15</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">15</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">51</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">c0 = c + a0</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">c8 = x5 * y5</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">X0 = t0 + c4</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">16</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">16</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">52</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">c0 = c0 &lt;&lt; 1</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">c = c8 + c12</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">a = x1 - x2</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">17</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">17</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">53</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">X3 = c0 + c</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">t5 = c + c13</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">b = y1 - y2</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">18</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">18</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">54</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">a1 = x1 + a0</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">c7 = x4 * y4</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">c5 = a * b</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">19</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">19</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">55</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">a1 = - a1</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">c6 = x3 * y3</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">X1 = t1 + c5</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">20</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">20</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">56</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">c = x4 * a1</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">t4 = c + c7</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">a = x3 - x4</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">21</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">21</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">57</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">c0 = c + x1</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">c = c6 + c7</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">b = y3 - y4</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">22</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">22</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">58</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">c0 = c0 &lt;&lt; 1</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">t3 = c + c14</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">c9 = a * b</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">23</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">23</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">59</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">X0 = c0 + c</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">c1 = x1 * y1</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">X2 = t2 + c9</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">24</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">24</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">60</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">a0 = x2 - x5</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">t2 = t2 + c1</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">a = x3 - x5</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">25</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">25</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">61</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">a1 = a0 - x5</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">a = x0 - x1</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">b = y3 - y5</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">26</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">26</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">62</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">c = x2 * a1</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">b = y0 - y1</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">c10 = a * b</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">27</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">27</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">63</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">c0 = c - x2</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">c3 = a * b</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">X3 = t3 + c10</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">28</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">28</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">64</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">c0 = c0 &lt;&lt; 1</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">t2 = t2 - c3</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">a = x4 - x5</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">29</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">29</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">65</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">X5 = c0 + c</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">t5 = t2 - t5</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">b = x4 - x5</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">30</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">30</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">76</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">a1 = a0 + x2</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">a = a1 - a2</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">c11 = a * b</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">31</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">31</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">77</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">a1 = - a1</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">b = b1 - b2</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">X4 = t4 + c11</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">32</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">32</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">78</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">c = x5 * a1</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">c17 = a * b</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">a = a0 - a1</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">33</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">33</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">79</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">c0 = c - x5</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">t1 = t1 - c17</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">b = b0 - b1</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">34</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">34</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">70</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">c0 = c0 &lt;&lt; 1</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">t4 = t1 - t4</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">c15 = a * b</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">35</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">35</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">71</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">X2 = c0 + c</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">a = a0 - a2</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">X5 = t5 + c15</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">36&lt;br&gt;b = b0 - b2</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p class="text-gray-300">Fig. 4. Squaring and multiplication in a specific degree six extension of a prime field</p>
+
+    <pre><code class="language-text">Square Multiply
+ 1
+ 2
+ 3
+ 4
+ 5
+ 6
+ 7
+ 8
+ 9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+20
+21
+22
+23
+24
+25
+26
+27
+28
+29
+30
+31
+32
+33
+34
+35
+36
+37
+38
+39
+40
+41
+42
+43
+44
+45
+46
+47
+48
+     a0 = x0 - x3
+     a1 = a0 + x0
+     c = x3 * a1
+     c0 = c + a0
+     c0 = c0 &lt;&lt; 1
+     X4 = c0 + c
+     a1 = x0 + x3
+     c = a0 * a1
+     c0 = c + x0
+     c0 = c0 &lt;&lt; 1
+     X1 = c0 + c
+     a0 = x1 - x4
+     a1 = x0 - x4
+     c = x1 * a1
+     c0 = c + a0
+     c0 = c0 &lt;&lt; 1
+     X3 = c0 + c
+     a1 = x1 + a0
+     a1 = - a1
+     c = x4 * a1
+     c0 = c + x1
+     c0 = c0 &lt;&lt; 1
+     X0 = c0 + c
+     a0 = x2 - x5
+     a1 = a0 - x5
+     c = x2 * a1
+     c0 = c - x2
+     c0 = c0 &lt;&lt; 1
+     X5 = c0 + c
+     a1 = a0 + x2
+     a1 = - a1
+     c = x5 * a1
+     c0 = c - x5
+     c0 = c0 &lt;&lt; 1
+     (dummy mul)
+     X2 = c0 + c
+     (dummy add)
+     (dummy mul)
+     (dummy add)
+     (dummy add)
+     (dummy add)
+     (dummy mul)
+     (dummy add)
+     (dummy add)
+     (dummy add)
+     (dummy add)
+     (dummy mul)
+     (dummy add)
+                                 1
+                                 2
+                                 3
+                                 4
+                                 5
+                                 6
+                                 7
+                                 8
+                                 9
+                                10
+                                11
+                                12
+                                13
+                                14
+                                15
+                                16
+                                17
+                                18
+                                19
+                                20
+                                21
+                                22
+                                23
+                                24
+                                25
+                                26
+                                27
+                                28
+                                29
+                                30
+                                31
+                                32
+                                33
+                                34
+                                35
+                                36
+                                37
+                                38
+                                39
+                                40
+                                41
+                                42
+                                43
+                                44
+                                45
+                                46
+                                47
+                                48
+                                     a0 = x0 - x3
+                                     b0 = y0 - y3
+                                     c12 = a0 * b0
+                                     a1 = x1 - x4
+                                     (dummy shift)
+                                     b1 = y1 - y4
+                                     b2 = y2 - y5
+                                     c13 = a1 * b1
+                                     a2 = x2 - x5
+                                     (dummy shift)
+                                     (dummy add)
+                                     (dummy add)
+                                     (dummy add)
+                                     c14 = a2 * b2
+                                     (dummy add)
+                                     (dummy shift)
+                                     (dummy add)
+                                     (dummy add)
+                                     (dummy add)
+                                     c0 = x0 * y0
+                                     c = c13 + c14
+                                     (dummy shift)
+                                     t2 = c0 + c14
+                                     t1 = c + c0
+                                     (dummy add)
+                                     c8 = x5 * y5
+                                     a = x0 - x1
+                                     (dummy shift)
+                                     c = c8 + c12
+                                     b = y0 - y1
+                                     (dummy add)
+                                     c7 = x4 * y4
+                                     t4 = c + c7
+                                     (dummy shift)
+                                     c6 = x3 * y3
+                                     c = c6 + c7
+                                     t3 = c + c14
+                                     c1 = x1 * y1
+                                     t2 = t2 + c1
+                                     t0 = c + c12
+                                     (dummy add)
+                                     c3 = a * b
+                                     a = a1 - a2
+                                     t2 = t2 - c3
+                                     t5 = c + c13
+                                     b = b1 - b2
+                                     c17 = a * b
+                                     a = a0 - a2
+                                                                 49
+                                                                 50
+                                                                 51
+                                                                 52
+                                                                 53
+                                                                 54
+                                                                 55
+                                                                 56
+                                                                 57
+                                                                 58
+                                                                 59
+                                                                 60
+                                                                 61
+                                                                 62
+                                                                 63
+                                                                 64
+                                                                 65
+                                                                 66
+                                                                 67
+                                                                 68
+                                                                 69
+                                                                 70
+                                                                 71
+                                                                 72
+                                                                 73
+                                                                 74
+                                                                 75
+                                                                 76
+                                                                 77
+                                                                 78
+                                                                 79
+                                                                 80
+                                                                 81
+                                                                 82
+                                                                 83
+                                                                 84
+                                                                 85
+                                                                 86
+                                                                 87
+                                                                 88
+                                                                 89
+                                                                 90
+                                                                 91
+                                                                 92
+                                                                 93
+                                                                 94
+                                                                 95
+                                                                 96
+                                                                      b = b0 - b2
+                                                                      t1 = t1 - c17
+                                                                      c16 = a * b
+                                                                      t5 = t2 - t5
+                                                                      (dummy shift)
+                                                                      a = x0 - x2
+                                                                      b = y0 - y2
+                                                                      c2 = x2 * y2
+                                                                      t4 = t1 - t4
+                                                                      (dummy shift)
+                                                                      t0 = t0 - c16
+                                                                      c = c + c2
+                                                                      t2 = t2 - c
+                                                                      (dummy mul)
+                                                                      c = c2 + c1
+                                                                      (dummy shift)
+                                                                      t1 = t1 - c
+                                                                      t1 = t1 - c6
+                                                                      c = c + c0
+                                                                      c4 = a * b
+                                                                      t0 = t0 - c
+                                                                      (dummy shift)
+                                                                      b = y1 - y2
+                                                                      a = x1 - x2
+                                                                      t3 = t0 - t3
+                                                                      c5 = a * b
+                                                                      X0 = t0 + c4
+                                                                      (dummy shift)
+                                                                      a = x3 - x4
+                                                                      b = y3 - y4
+                                                                      X1 = t1 + c5
+                                                                      c9 = a * b
+                                                                      a = x3 - x5
+                                                                      (dummy shift)
+                                                                      (dummy mul)
+                                                                      b = y3 - y5
+                                                                      (dummy add)
+                                                                      c10 = a * b
+                                                                      X3 = t3 + c10
+                                                                      a = x4 - x5
+                                                                      b = x4 - x5
+                                                                      c11 = a * b
+                                                                      X2 = t2 + c9
+                                                                      X4 = t4 + c11
+                                                                      a = a0 - a1
+                                                                      b = b0 - b1
+                                                                      c15 = a * b
+                                                                      X5 = t5 + c15
+</code></pre>
+
+    <p class="text-gray-300">Fig. 5. Indistinguishable squaring and multiplication in a degree six extension of a prime field</p>
+
+    <h2 id="sec-17" class="text-2xl font-bold">Appendix 3: Arithmetic over Genus 2 Hyperelliptic Curves Over Finite Fields Over Finite Fields</h2>
+
+    <p class="text-gray-300">Figures 8 and 9 show indistinguishable versions of hyper-elliptic curve point adding and doubling functions. These implementations correspond to the explicit formulae for genus 2 hyperelliptic curves over finite fields provided by Lange in [16]. Figure 7 contains a pseudo-code implementation of these formulae.</p>
+
+    <p class="text-gray-300">Figure 6 clarifies the relationship between Figures 7, 8 and 9. Note that variable sl1 in the pseudo-code implementation becomes variable sl16 in Figures 8 and 9. Note also that, whatever the execution path that occurs, indistinguishability is maintained accross all possible variants.</p>
+
+    <p class="text-gray-300">    <img src="_page_17_Figure_3.jpeg" alt="" class="my-4 max-w-full" />
+</p>
+
+    <p class="text-gray-300">Fig. 6. Structure of the instruction sequences depicted in Figures 8 and 9.</p>
+
+    <p class="text-gray-300">Fig. 7. Arithmetic on genus 2 hyperelliptic curves over finite fields</p>
+
+    <pre><code class="language-text">Function Add
+Parameters: h2, h1, h0
+            f4, f3, f2, f1, f0,
+            u10, u11, v10, v11,
+            u20, u21, v20, v21
+Returns: U0, U1, V0, V1
+  If (u11 = 0)
+    r=u20-(u21-u10)*u10
+    inv=inverse(r)
+    s0=inv*(v10-v20-v21*u10)
+    l1=s0*u21
+    l0=s0*u20
+    k2=f4-u21
+    k1=f3-(f4-u21)*u21-v21*h2-u20
+    U1=k2-square(s0)-s0*h2-u10
+    U0=k1-s0*(l1+h1+2*v21)-u10*U1
+    V1=(h2+s0)*U1-(h1+l1+v21)
+    V0=(h2-s0)*U0-(h0-l0+v20)
+  Else
+    z1 = u11-u21
+    z2 = u20 - u10
+    z3 = u11*z1+z2
+    r = z2*z3 + square(z1)*u10
+    inv1 = z1
+    inv0 = z3
+    w0= v10-v20
+    w1 = v11-v21
+    w2 = inv0*w0
+    w3 = inv1*w1
+    sl1=(inv0+inv1)*(w0+w1)-w2-w3*(1+u11)
+    sl0=w2-u10*w3
+    If (sl1&lt;&gt;0)
+      w1=inverse(r*sl1)
+      w2= r*w1
+      w3=square(sl1)*w1
+      w4 = r *w2
+      w5 = square(w4)
+      sll0=sl0*w2
+      ll2=u21+sll0
+      ll1=u21*sll0+u20
+      ll0=u20*sll0
+      U0=(sll0-u11)*(sll0-z1+h2*w4)-u10+ll1 \\
+              +(h1+2*v21)*w4+(2*u21+z1-f4)*w5
+      U1=2*sll0-z1+h2*w4-w5
+      w1=ll2-U1
+      w2=U1*w1+U0-ll1
+      V1=w2*w3-v21-h1+h2*U1
+      w2=U0*w1-ll0
+      V0=w2*w3-v20-h0+h2*U0
+    Else
+      inv=inverse(r)
+      s0=sl0*w1
+      *ru0=f4-u21-u11-square(s0)-s0*h2
+      *ru1=0
+      w1=s0*(u21+U0)+h1+v21+h2*U0
+      w2=s0+v20+h0
+      V0=U1*w1-w2
+      V1=0
+    End If
+                                                    Function Double
+                                                    Parameters: h2, h1, h0
+                                                                 f4, f3, f2, f1, f0,
+                                                                 u0, u1, v0, v1
+                                                    Returns: U0, U1, V0, V1
+                                                      vt1=h1+2*v1-h2*u1
+                                                      vt0=h0+2*v0-h2*u0
+                                                      w0=square(v1)
+                                                      w1=square(u1)
+                                                      w2=square(vt1)
+                                                      w3=u1*vt1
+                                                      r=u0*w2+vt0*(vt0-w3)
+                                                      invl1=-vt1
+                                                      invl0=vt0-w3
+                                                      w3=f3+w1
+                                                      w4=2*u0
+                                                      kl1=2*(w1-f4*u1)+w3-w4-v1*h2
+                                                      kl0=u1*(2*w4-w3+f4*u1+v1*h2) \\
+                                                              +f2-w0-2*f4*u0-v1*h1-v0*h2
+                                                      w0 = kl0*invl0
+                                                      w1 = kl1*invl1
+                                                      sl1=(invl0+invl1) \\
+                                                              *(kl0+kl1)-w0-w1*(1+u1)
+                                                      sl0=w0-u0*w1
+                                                      If (sl1&lt;&gt;0)
+                                                        w1=inverse(r*sl1)
+                                                        w2=r*w1
+                                                        w3=square(sl1)*w1
+                                                        w4=r*w2
+                                                        w5=square(w4)
+                                                        sll0=sl0*w2
+                                                        ll2=u1+sll0
+                                                        ll1=u1*sll0+u0
+                                                        ll0=u0*sll0
+                                                        U0=square(sll0)+w4*(h2*(sll0-u1) \\
+                                                                 +2*v1+h1)+w5*(2*u1-f4)
+                                                        U1=2*sll0+w4*h2-w5
+                                                        w1=ll2-U1
+                                                        w2=U1*w1+U0-ll1
+                                                        V1=w2*w3-v1-h1+U1*h2
+                                                        w2=U0*w1-ll0
+                                                        V0=w2*w3-v0-h0+h2*U0
+                                                      Else
+                                                        w1=inverse(r)
+                                                        s0=sl0*w1
+                                                        w1=u1*s0+v1+h1
+                                                        w2=u0*s0+v0+h0
+                                                        U0=f4-square(s0)-s0*h2-2*u1
+                                                        w1=w1-U0*(s0+h2)
+                                                        V0=U0*w1-w2
+                                                      End If
+</code></pre>
+
+    <p class="text-gray-300">End If</p>
+
+    <div class="overflow-x-auto my-4">
+      <table class="min-w-full text-sm text-gray-300">
+        <thead>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left"></th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">Add1</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">Add2'</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">Add2''</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">Double'</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">Double''</th>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">1</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">z10 = u11 - u21</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">z10 = u11 - u21</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">vt10 = v1 + v1</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">vt10 = v1 + v1</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">2</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">z20 = u20 - u10</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">z20 = u20 - u10</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">vt11 = h1 + vt10</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">vt11 = h1 + vt10</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">3</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy mul)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">z30 = u11 * z10</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">z30 = u11 * z10</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">vt12 = h2 * u1</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">vt12 = h2 * u1</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">4</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">z31 = z30 + z20</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">z31 = z30 + z20</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">vt13 = vt11 - vt12</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">vt13 = vt11 - vt12</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">5</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">vt00 = v0 + v0</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">vt00 = v0 + v0</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">6</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy mul)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">r0 = z20 * z31</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">r0 = z20 * z31</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy mul)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy mul)</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">7</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">vt01 = h0 + vt00</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">vt01 = h0 + vt00</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">8</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy squ)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">r1 = squ(z10)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">r1 = squ(z10)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy squ)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy squ)</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">9</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy mul)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">r2 = r1 * u10</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">r2 = r1 * u10</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">vt02 = h2 * u0</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">vt02 = h2 * u0</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">10</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">r3 = r2 + r0</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">r3 = r2 + r0</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">vt03 = vt01 - vt02</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">vt03 = vt01 - vt02</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">11</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">w00 = v10 - v20</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">w00 = v10 - v20</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">12</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">w10 = v11 - v21</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">w10 = v11 - v21</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">13</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy squ)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy squ)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy squ)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">w00 = squ(v1)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">w00 = squ(v1)</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">14</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy squ)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy squ)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy squ)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">w10 = squ(u1)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">w10 = squ(u1)</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">15</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy squ)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy squ)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy squ)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">w20 = squ(vt13)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">w20 = squ(vt13)</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">16</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy mul)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">w20 = z31 * w00</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">w20 = z31 * w00</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy mul)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy mul)</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">17</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy mul)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">w30 = z10 * w10</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">w30 = z10 * w10</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">w30 = u1 * vt13</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">w30 = u1 * vt13</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">18</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">s110 = z31 + z10</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">s110 = z31 + z10</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">19</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy mul)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy mul)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy mul)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">r0 = u0 * w20</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">r0 = u0 * w20</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">20</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">sl11 = w00 + w10</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">sl11 = w00 + w10</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">r1 = vt03 - w30</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">r1 = vt03 - w30</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">21</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy mul)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">sl12 = sl10 * sl11</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">sl12 = sl10 * sl11</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">r2 = vt03 * r1</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">r2 = vt03 * r1</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">22</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">sl13 = sl12 - w20</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">sl13 = sl12 - w20</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">r3 = r0 + r2</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">r3 = r0 + r2</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">23</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">sl14 = 1 + u11</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">sl14 = 1 + u11</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">invl10 = - vt13</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">invl10 = - vt13</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">24</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">invl00 = vt03 - w30</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">inv100 = vt03 - w30</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">25&lt;br&gt;26</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy mul)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">sl15 = w30 * sl14</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">sl15 = w30 * sl14</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy mul)&lt;br&gt;w31 = f3 + w10</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy mul)&lt;br&gt;w31 = f3 + w10</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">26</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)&lt;br&gt;(dummy add)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">sl16 = sl13 - sl15&lt;br&gt;(dummy add)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">sl16 = sl13 - sl15&lt;br&gt;(dummy add)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">w31 = 13 + w10&lt;br&gt;w40 = u0 + u0</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">w31 = 13 + w10&lt;br&gt;w40 = u0 + u0</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">28</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy mul)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">sl00 = u10 * w30</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">sl00 = u10 * w30</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">kl10 = f4 * u1</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">kl10 = f4 * u1</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">29</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy md1)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">s100 = u10 + w30&lt;br&gt;s101 = w20 - s100</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">s100 = u10 + w30&lt;br&gt;s101 = w20 - s100</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">30</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">kl11 = w10 - kl10</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">kl11 = w10 - kl10</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">31</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy mul)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">w11 = r3 * s116</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy mul)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy mul)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy mul)</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">32</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">kl12 = kl11 + kl11</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">kl12 = kl11 + kl11</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">33</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy inv)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">w12 = inv(w11)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">inv0 = inv(r3)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy inv)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy inv)</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">34</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">kl13 = kl12 + w31</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">kl13 = kl12 + w31</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">35</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy mul)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">w21 = r3 * w12</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">s00 = s101 * inv0</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy mul)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy mul)</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">36</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">kl14 = kl13 - w40</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">kl14 = kl13 - w40</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">37</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy squ)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">w31 = squ(s116)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">u102 = squ(s00)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy squ)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy squ)</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">38</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy mul)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">sl100 = sl01 * w21</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy mul)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">kl15 = v1 * h2</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">kl15 = v1 * h2</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">39</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">kl16 = kl14 - kl15</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">kl16 = kl14 - kl15</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">40</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">1120 = u21 + s1100</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">ul00 = f4 - u21</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">k100 = w40 + w40</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">k100 = w40 + w40</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">41</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">ul10 = sl100 + sl100</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">ul01 = ul00 - ul1</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">k101 = k100 - w31</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">k101 = k100 - w31</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">42</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy mul)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">1110 = u21 * s1100</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">ul04 = s00 * h2</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">k102 = f4 * u1</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">k102 = f4 * u1</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">43</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">ul0b = u21 + u21</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">ul03 = ul01 - ul02</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">k103 = k101 + k102</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">k103 = k101 + k102</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">44</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy mul)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy mul)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy mul)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">k104 = v1 * h2</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">k104 = v1 * h2</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">45&lt;br&gt;46</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">1111 = 1110 + u20</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">U0 = u103 - u104</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">k105 = k103 + k104&lt;br&gt;k106 = u1 * k105</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">kl05 = kl03 + kl04&lt;br&gt;kl06 = u1 * kl05</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">46&lt;br&gt;47</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy mul)&lt;br&gt;(dummy add)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy mul)&lt;br&gt;ul01 = sll00 - z10</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy mul)&lt;br&gt;(dummy add)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">k106 = u1 * k105&lt;br&gt;k107 = k106 + f2</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">k106 = u1 * k105&lt;br&gt;k107 = k106 + f2</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">48</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">ul01 = S1100 - 210&lt;br&gt;ul00 = S1100 - u11</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)&lt;br&gt;w11 = u21 + U0</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">k107 = k106 + 12&lt;br&gt;k108 = k107 - w00</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">k107 = k106 + 12&lt;br&gt;k108 = k107 - w00</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">49</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy mul)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy mul)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy mul)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">k100 = k107 - w00&lt;br&gt;k109 = f4 * u0</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">k100 = k107 - w00&lt;br&gt;k109 = f4 * u0</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">50</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy md1)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">ul11 = ul10 - z10</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">w21 = s00 + v20</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">kl0a = kl09 + kl09</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">k10a = k109 + k109</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">51</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">ul07 = v21 + v21</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">k10b = k108 - k10a</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">kl0b = kl08 - kl0a</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">52</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy mul)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">w40 = r3 * w21</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy mul)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">kl0c = v1 * h1</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">kl0c = v1 * h1</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">53</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">k10d = k10b - k10c</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">kl0d = kl0b - kl0c</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">54</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy mul)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">ul02 = h2 * w40</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">w12 = s00 * w11</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">kl0e = v0 * h2</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">kl0e = v0 * h2</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">55</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">r0 = u21 - u10</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">ul03 = ul01 + ul02</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">w13 = w12 + h1</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">k10f = k10d - k10e</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">kl0f = kl0d - kl0e</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">1</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p class="text-gray-300">Fig. 8. Indistinguishable arithmetic operations for genus 2 hyperelliptic curves over finite fields: instructions 1 to 55. The first three columns correspond to point adding. Add1 is the complete instruction sequence if the (u11=0) branch is chosen, Add2' represents the case when the  <span class="math">(u11 &lt;&gt; 0 \\land sl16 &lt;&gt; 0)</span>  branches occur, and Add2'' corresponds to the  <span class="math">(u11 &lt;&gt; 0 \\land sl16=0)</span>  branches. The last two columns correspond point doubling. Double' is the complete instruction sequence if the (sl16 &lt;&gt; 0) branch is chosen, and Double'' represents the case when the (sl16=0) branch occurs.</p>
+
+    <div class="overflow-x-auto my-4">
+      <table class="min-w-full text-sm text-gray-300">
+        <thead>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left"></th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">Add1</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">Add2'</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">Add2''</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">Double'</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">Double''</th>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">56</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy mul)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">w32 = w31 * w12</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy mul)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">w01 = kl0f * invl00</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">w01 = kl0f * invl00</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">57</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">r1 = u10 * r0</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">u104 = u100 * u103</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy mul)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">w11 = kl16 * invl10</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">w11 = kl16 * invl10</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">58</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">r2 = u20 - r1</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">sl10 = invl00+invl10</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">sl10 = invl00+invl10</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">59</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">s00 = v10 - v20</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">ul05 = ul04 - ul0</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">w14 = w13 + v21</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">sl11 = kl0f + kl16</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">sl11 = kl0f + kl16</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">60</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy mul)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">1100 = u20 * s1100</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">w15 = h2 * U0</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">sl12 = sl11 * sl10</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">sl12 = sl11 * sl10</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">61</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">k10 = f4 - u21</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">sl13 = sl12 - w01</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">sl13 = sl12 - w01</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">62</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">ul08 = h1 + ul07</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">w16 = w14 + w15</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">sl14 = 1 + u1</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">sl14 = 1 + u1</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">63</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">s01 = v21 * u10</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy mul)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy mul)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">sl15 = sl14 * w11</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">sl15 = sl14 * w11</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">64</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">s02 = s00 - s01</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">ul0c = ul0b + z10</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">sl16 = sl13 - sl15</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">sl16 = sl13 - sl15</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">65</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">k11 = k10 * u21</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">ul09 = ul08 * w40</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">v100 = U0 * w16</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">sl00 = u0 * w11</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">s100 = u0 * w11</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">66</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">k12 = f3 - k11</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">ul0d = ul0c - f4</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">sl01 = w01 - sl00</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">sl01 = w01 - sl00</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">67</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy mul)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy mul)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy mul)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">w12 = r3 * s116</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy mul)</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">68</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">inv0 = inv(r2)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy inv)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy inv)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">w13 = inv(w12)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">w12 = inv(r3)</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">69</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy mul)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy mul)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy mul)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">w21 = r3 * w13</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy mul)</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">70</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy squ)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy squ)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy squ)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">w32 = squ(s116)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy squ)</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">71</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy mul)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy mul)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy mul)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">w33 = w32 * w13</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy mul)</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">72</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy mul)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy mul)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy mul)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">w41 = r3 * w21</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy mul)</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">73</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy squ)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy squ)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy squ)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">w50 = squ(w41)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy squ)</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">74</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">k13 = v21 * h2</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy mul)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy mul)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">sl100 = sl01 * w21</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">s00 = s101 * w12</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">75</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">k20 = f4 - u21</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">1120 = u1 + s1100</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">76</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">s03 = s02 * inv0</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy mul)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy mul)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">1110 = u1 * s1100</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">w13 = u1 * s00</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">77</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">k14 = k12 - k13</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">ul06 = ul05 + ll11</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">w22 = w21 + h0</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">1111 = 1110 + u0</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">w14 = w13 + v1</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">78</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">ul12 = s03 * h2</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">ul12 = h2 * w40</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy mul)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">1100 = u0 * s1100</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy mul)</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">79</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">ul10 = squ(s03)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">w50 = squ(w40)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy squ)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">ul00 = squ(sl100)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">ul00 = squ(s00)</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">80</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">ul11 = k20 - ul10</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">ul0a = ul06 + ul09</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">V0 = v100 - w22</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">ul01 = sll00 - u1</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">81</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">110 = s03 * u21</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy mul)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy mul)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">ul02 = h2 * ul01</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy mul)</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">82</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">ul13 = ul11 + ul12</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">ul03 = v1 + v1</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">83</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">v112 = h1 + 110</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">U1 = u113 - w50</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">u104 = u102 + u103</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">84</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">v100 = h2 - s03</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">w13 = 1120 - U1</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">u105 = u104 + h1</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">85</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy mul)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">ul0e = ul0d * w50</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy mul)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">ul06 = w41 * ul05</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy mul)</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">86</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">v110 = h2 + s03</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">u107 = u100 + u106</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">87&lt;br&gt;88</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">ul13 = ul11 - ul12</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">ul08 = u1 + u1</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">89</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">U1 = u113 - u10&lt;br&gt;u105 = u10 * U1</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">U0 = u10e + u10a&lt;br&gt;w22 = U1 * w13</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)&lt;br&gt;(dummy mul)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">ul09 = ul08 - f4&lt;br&gt;ul0a = ul09 * w50</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)&lt;br&gt;(dummy mul)</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">90</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">w23 = w22 + U0</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">91</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">ul00 = 110 + h1&lt;br&gt;vl13 = vl12 + v21</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">w24 = w23 - 1111</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)&lt;br&gt;(dummy add)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">U0 = u107 + u10a&lt;br&gt;u110 = s1100 + s1100</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)&lt;br&gt;(dummy add)</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">92</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">101 = s03 * u20</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">v110 = w24 * w32</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">ul10 = s1100 + s1100&lt;br&gt;ul11 = w41 * h2</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">w21 = u0 * s00</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">93</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">ul12 = ul10 + ul11</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">w21 = u0 + s00&lt;br&gt;w22 = w21 + v0</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">94</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">U1 = u112 - w50</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">ul01 = f4 - ul00</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">95</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">k15 = k14 - u20</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">vl11 = vl10 - v21</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">w14 = 1120 - U1</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">96</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy mul)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">w25 = U0 * w13</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy mul)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">w22 = U1 * w14</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy mul)</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">97</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">ul01 = v21 + v21</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">vl12 = vl11 - h1</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">w23 = w22 + U0</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">w23 = w22 + h0</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">98</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">ul02 = ul00 + ul01</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">w26 = w25 - 1100</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">w24 = w23 - 1111</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">ul04 = u1 + u1</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">99</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">ul03 = s03 * ul02</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">v100 = w26 * w32</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy mul)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">v110 = w24 * w33</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">ul02 = s00 * h2</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">100</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">v102 = h0 - 101</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">vl11 = vl10 - v1</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">101</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">u104 = k15 - u103</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">v101 = v100 - v20</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">vl12 = vl11 - h1</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">ul03 = ul01 - ul02</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">102</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">vl11 = vl10 * U1</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy mul)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy mul)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">v113 = U1 * h2</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy mul)</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">103</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">v103 = v102 + v20</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">v102 = v101 - h0</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">V1 = v112 + v113</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">UO = ul03 - ul04</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">104</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy mul)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">v113 = h2 * U1</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy mul)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">w25 = U0 * w14</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy mul)</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">105</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">UO = ulO4 - ulO5</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">V1 = v112 + v113</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">w26 = w25 - 1100</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">w16 = s00 + h2</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">106</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">v101 = U0 * v100</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">v103 = h2 * U0</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy mul)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">v100 = w26 * w33</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">w17 = U0 * w16</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">107</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">v101 = v100 - v0</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">w15 = w14 + h1</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">108</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">VO = v101 - v103</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">v102 = v101 - h0</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">w18 = w15 - w17</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">109</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy mul)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy mul)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy mul)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">v103 = h2 * U0</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">v100 = U0 * w18</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">110</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">V1 = v111 - v113</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">V0 = v103 + v102</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(dummy add)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">V0 = v102 + v103</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">V0 = v100 - w23</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">l</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">1</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">l</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">l</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p class="text-gray-300"><strong>Fig. 9.</strong> Indistinguishable arithmetic operations for genus 2 hyperelliptic curves over finite fields: instructions 56 to 110. The first three columns correspond to point adding. Add1 is the complete instruction sequence if the (u11=0) branch is chosen, Add2' represents the case when the  <span class="math">(u11 &lt;&gt; 0 \\land sl16 &lt;&gt; 0)</span>  branches occur, and Add2'' corresponds to the  <span class="math">(u11 &lt;&gt; 0 \\land sl16 = 0)</span>  branches. The last two columns correspond point doubling. Double' is the complete instruction sequence if the (sl16 &lt;&gt; 0) branch is chosen, and Double'' represents the case when the (sl16 = 0) branch occurs.</p>
+
+`;
+---
+
+<BaseLayout title="On the Automatic Construction of Indistinguishable Operation... (2005/174)">
+  <article class="max-w-4xl mx-auto article-prose">
+    <nav class="mb-8">
+      <a href="/papers" class="text-blue-400 hover:text-blue-300">
+        &larr; Back to Papers
+      </a>
+    </nav>
+
+    <header class="mb-12">
+      <h1 class="text-3xl font-bold mb-4"
+        set:html={TITLE_HTML} />
+      <p class="text-gray-400 mb-2"
+        set:html={AUTHORS_HTML} />
+      <p class="text-gray-500 text-sm mb-4">
+        2005 &middot; eprint 2005/174
+      </p>
+      <div class="flex gap-4 text-sm">
+        <a
+          href={EPRINT_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          class="text-blue-400 hover:text-blue-300"
+        >
+          Paper (eprint) &rarr;
+        </a>
+      </div>
+      <PaperDisclaimer eprintUrl={EPRINT_URL} />
+      <p class="mt-1 text-xs text-gray-600">
+        Converted with: {CRAWLER} &middot; {CONVERTED_DATE}
+      </p>
+    </header>
+
+    <Fragment set:html={CONTENT} />
+
+    <PaperHistory slug="on-the-automatic-construction-of-indistinguishable-2005" />
+  </article>
+</BaseLayout>

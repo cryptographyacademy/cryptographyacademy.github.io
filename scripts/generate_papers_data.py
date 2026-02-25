@@ -1,13 +1,11 @@
 #!/usr/bin/env python3
-"""Generate papers.json and papers-meta.json from .astro files
-and external metadata JSONs.
+"""Generate papers.json and papers-meta.json from .astro files.
 
 Usage:
     python3 scripts/generate_papers_data.py
 
 Reads:
-    - web/src/pages/papers/*.astro (first ~15 lines for constants)
-    - $METADATA_DIR/*.json (category, keywords from eprint metadata)
+    - web/src/pages/papers/*.astro (first ~20 lines for constants)
 
 Writes:
     - web/src/data/papers.json
@@ -15,7 +13,6 @@ Writes:
 """
 
 import json
-import os
 import re
 import sys
 from pathlib import Path
@@ -23,25 +20,14 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 PAPERS_DIR = ROOT / "web" / "src" / "pages" / "papers"
 OUTPUT_DIR = ROOT / "web" / "src" / "data"
-METADATA_DIR = Path(
-    os.environ.get(
-        "METADATA_DIR",
-        str(
-            Path.home()
-            / "codes"
-            / "dannywillems"
-            / "poseidon-formalization"
-            / "data"
-            / "metadata"
-        ),
-    )
-)
 
 # Regex patterns for extracting constants from .astro frontmatter
 RE_EPRINT = re.compile(r"eprint\.iacr\.org/(\d{4})/(\d+)")
 RE_CRAWLER = re.compile(r"const CRAWLER\s*=\s*'([^']+)'")
 RE_TITLE = re.compile(r"const TITLE_HTML\s*=\s*'(.+?)';")
 RE_AUTHORS = re.compile(r"const AUTHORS_HTML\s*=\s*'(.+?)';")
+# Fallback: extract title from <BaseLayout title="...">
+RE_LAYOUT_TITLE = re.compile(r'<BaseLayout\s+title="(.+?)"')
 
 
 def unescape_html(s: str) -> str:
@@ -60,19 +46,20 @@ def strip_html(s: str) -> str:
 
 
 def parse_astro_file(path: Path) -> dict | None:
-    """Extract metadata from the first lines of an .astro file."""
+    """Extract metadata from an .astro file.
+
+    Tries frontmatter constants first (TITLE_HTML, AUTHORS_HTML),
+    then falls back to BaseLayout title attribute for hand-curated
+    files that embed title/authors directly in HTML.
+    """
     slug = path.stem
     if slug == "index":
         return None
 
-    # Read just the frontmatter (first 20 lines is enough)
-    lines = []
-    with open(path, encoding="utf-8") as f:
-        for i, line in enumerate(f):
-            if i >= 20:
-                break
-            lines.append(line)
-    header = "".join(lines)
+    text = path.read_text(encoding="utf-8")
+    # Use first ~40 lines for frontmatter + template header
+    header_lines = text.split("\n")[:40]
+    header = "\n".join(header_lines)
 
     # Extract eprint year/number
     m = RE_EPRINT.search(header)
@@ -86,11 +73,22 @@ def parse_astro_file(path: Path) -> dict | None:
     m = RE_CRAWLER.search(header)
     crawler = m.group(1) if m else ""
 
-    # Extract title
+    # Extract title: try TITLE_HTML constant first
     m = RE_TITLE.search(header)
-    title = unescape_html(m.group(1)) if m else slug
+    if m:
+        title = unescape_html(m.group(1))
+    else:
+        # Fallback: extract from <BaseLayout title="...">
+        m = RE_LAYOUT_TITLE.search(text)
+        if m:
+            raw = m.group(1)
+            # Remove the eprint suffix like " (2025/2040)"
+            raw = re.sub(r"\s*\(\d{4}/\d+\)\s*$", "", raw)
+            title = unescape_html(raw) if raw else slug
+        else:
+            title = slug
 
-    # Extract authors
+    # Extract authors: try AUTHORS_HTML constant first
     m = RE_AUTHORS.search(header)
     authors = unescape_html(m.group(1)) if m else ""
 
@@ -102,31 +100,6 @@ def parse_astro_file(path: Path) -> dict | None:
         "number": number,
         "crawler": crawler,
     }
-
-
-def load_metadata(year: int, number: int) -> dict:
-    """Load title, authors, category, keywords from metadata JSON."""
-    fname = f"{year}_{number}.json"
-    meta_path = METADATA_DIR / fname
-    if not meta_path.exists():
-        return {}
-    try:
-        with open(meta_path, encoding="utf-8") as f:
-            data = json.load(f)
-        result = {}
-        if data.get("title"):
-            result["title"] = data["title"]
-        if data.get("authors"):
-            names = [a["name"] for a in data["authors"] if a.get("name")]
-            if names:
-                result["authors"] = ", ".join(names)
-        if data.get("category"):
-            result["category"] = data["category"]
-        if data.get("keywords"):
-            result["keywords"] = data["keywords"]
-        return result
-    except (json.JSONDecodeError, KeyError):
-        return {}
 
 
 def main() -> None:
@@ -141,17 +114,8 @@ def main() -> None:
         if entry is None:
             continue
 
-        # Merge external metadata
-        meta = load_metadata(entry["year"], entry["number"])
-
-        # Use metadata title/authors as fallback when .astro lacks them
-        if entry["title"] == entry["slug"] and meta.get("title"):
-            entry["title"] = meta["title"]
-        if not entry["authors"] and meta.get("authors"):
-            entry["authors"] = meta["authors"]
-
-        entry["category"] = meta.get("category", "")
-        entry["keywords"] = meta.get("keywords", [])
+        entry["category"] = ""
+        entry["keywords"] = []
 
         papers.append(entry)
 

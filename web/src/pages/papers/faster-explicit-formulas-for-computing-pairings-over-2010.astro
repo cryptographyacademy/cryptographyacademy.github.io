@@ -1,0 +1,1213 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import PaperDisclaimer from '../../components/PaperDisclaimer.astro';
+import PaperHistory from '../../components/PaperHistory.astro';
+
+const EPRINT_URL = 'https://eprint.iacr.org/2010/526';
+const CRAWLER = 'marker';
+const CONVERTED_DATE = '2026-02-18';
+const TITLE_HTML = 'Faster Explicit Formulas for Computing Pairings over Ordinary Curves';
+const AUTHORS_HTML = 'Diego F. Aranha1? , Koray Karabina2? , Patrick Longa&lt;sup&gt;3&lt;/sup&gt; , Catherine H. Gebotys&lt;sup&gt;3&lt;/sup&gt; , Julio López&lt;sup&gt;1&lt;/sup&gt;';
+
+const CONTENT = `    <p class="text-gray-300">Diego F. Aranha1? , Koray Karabina2? , Patrick Longa&lt;sup&gt;3&lt;/sup&gt; , Catherine H. Gebotys&lt;sup&gt;3&lt;/sup&gt; , Julio López&lt;sup&gt;1&lt;/sup&gt;</p>
+
+    <blockquote class="border-l-4 border-gray-600 pl-4 my-4 text-gray-400 italic">
+    <p class="text-gray-300">&lt;sup&gt;1&lt;/sup&gt; University of Campinas, {dfaranha,jlopez}@ic.unicamp.br &lt;sup&gt;2&lt;/sup&gt; Certicom Research, kkarabina@rim.com &lt;sup&gt;3&lt;/sup&gt; University of Waterloo, {plonga,cgebotys}@uwaterloo.ca</p>
+
+    </blockquote>
+
+    <p class="text-gray-300">Abstract. We describe efficient formulas for computing pairings on ordinary elliptic curves over prime fields. First, we generalize lazy reduction techniques, previously considered only for arithmetic in quadratic extensions, to the whole pairing computation, including towering and curve arithmetic. Second, we introduce a new compressed squaring formula for cyclotomic subgroups and a new technique to avoid performing an inversion in the final exponentiation when the curve is parameterized by a negative integer. The techniques are illustrated in the context of pairing computation over Barreto-Naehrig curves, where they have a particularly efficient realization, and are also combined with other important developments in the recent literature. The resulting formulas reduce the number of required operations and, consequently, execution time, improving on the state-of-the-art performance of cryptographic pairings by 28%-34% on several popular 64-bit computing platforms. In particular, our techniques allow to compute a pairing under 2 million cycles for the first time on such architectures.</p>
+
+    <p class="text-gray-300">Key words: Efficient software implementation, explicit formulas, bilinear pairings.</p>
+
+    <h2 id="sec-1" class="text-2xl font-bold">1 Introduction</h2>
+
+    <p class="text-gray-300">The performance of pairing computation has received increasing interest in the research community, mainly because Pairing-Based Cryptography enables efficient and elegant solutions to several longstanding problems in cryptography such as Identity-Based Encryption [1,2], powerful non-interactive zero-knowledge proof systems [3] and communication-efficient multi-party key agreements [4]. Recently, dramatic improvements over the figure of 10 million cycles presented in [5] made possible to compute a pairing at the 128-bit security level in 4.38 million cycles [6] when using high-speed vector floating-point operations, and</p>
+
+    <p class="text-gray-300">&lt;sup&gt;?&lt;/sup&gt; This work was completed while these authors were at the University of Waterloo.</p>
+
+    <p class="text-gray-300">2.33 million cycles [7] when the fastest integer multiplier available in Intel 64-bit architectures is employed.</p>
+
+    <p class="text-gray-300">This work revisits the problem of efficiently computing pairings over largecharacteristic fields and improves the state-of-the-art performance of cryptographic pairings by a significant margin. First of all, it builds on the latest advancements proposed by several authors:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>The Optimal Ate pairing [8] computed entirely on twists [9] with simplified final line evaluations [6] over a recently-introduced subclass [10] of the Barreto-Naehrig (BN) family of pairing-friendly elliptic curves [11].</li>
+      <li>The implementation techniques described by [7] for accelerating quadratic extension field arithmetic, showing how to reduce expensive carry handling and function call overheads.</li>
+    </ul>
+
+    <p class="text-gray-300">On the other hand, the following new techniques are introduced:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>The notion of lazy reduction, usually applied for arithmetic in quadratic extensions in the context of pairings, as discussed in [12], is generalized to the towering and curve arithmetic performed in the pairing computation. In a sense, this follows a direction opposite to the one taken by other authors. Instead of trying to encode arithmetic so that modular reductions are faster [13,6], we insist on Montgomery reduction and focus our efforts on reducing the need of computing reductions. Moreover, for dealing with costly higher-precision additions inserted by lazy reduction, we develop a flexible methodology that keeps intermediate values under Montgomery reduction boundaries and maximizes the use of operations without carry checks. The traditional operation count model is also augmented to take into account modular reductions individually.</li>
+      <li>Formulas for point doubling and point addition in Jacobian and homogeneous coordinates are carefully optimized by eliminating several commonly neglected operations that are not inexpensive on modern 64-bit platforms.</li>
+      <li>The computation of the final exponentiation is improved with a new set of formulas for compressed squaring and efficient decompression in cyclotomic subgroups, and an arithmetic trick to remove a significant penalty incurred when computing pairings over curves parameterized by negative integers.</li>
+    </ul>
+
+    <p class="text-gray-300">The described techniques produce significant savings, allowing our illustrative software implementation to compute a pairing under 2 million cycles and improve the state-of-the-art timings by 28%-34% on several different 64-bit computing platforms. Even though the techniques are applied on pairings over BN curves at the 128-bit security level, they can be easily extended to other settings using different curves and higher security levels [14].</p>
+
+    <p class="text-gray-300">This paper is organized as follows. Section 2 gives an overview of Miller's Algorithm when employed for computing the Optimal Ate pairing over Barreto-Naehrig curves. Section 3 presents the generalized lazy reduction technique and its application to the improvement of towering arithmetic performance. Different optimizations to curve arithmetic, including the application of lazy reduction, are discussed in Section 4. Section 5 describes our improvements on the final exponentiation. Section 6 summarizes operation counts and Section 7 describes our high-speed software implementation and comparison of results with the previously fastest implementation in the literature. Section 8 concludes the paper.</p>
+
+    <h3 id="sec-2" class="text-xl font-semibold mt-8">2 Preliminaries</h3>
+
+    <p class="text-gray-300">An admissible bilinear pairing is a non-degenerate efficiently-computable map  <span class="math">e: \\mathbb{G}_1 \\times \\mathbb{G}_2 \\to \\mathbb{G}_T</span> , where  <span class="math">\\mathbb{G}_1</span>  and  <span class="math">\\mathbb{G}_2</span>  are additive groups of points in an elliptic curve E and  <span class="math">\\mathbb{G}_T</span>  is a subgroup of the multiplicative group of a finite field. The core property of map e is linearity in both arguments, allowing the construction of novel cryptographic schemes with security relying on the hardness of the Discrete Logarithm Problem in  <span class="math">\\mathbb{G}_1, \\mathbb{G}_2</span>  and  <span class="math">\\mathbb{G}_T</span> .</p>
+
+    <p class="text-gray-300">Barreto and Naehrig [11] described a parameterized family of elliptic curves  <span class="math">E_b: y^2 = x^3 + b, b \\neq 0</span>  over a prime field  <span class="math">\\mathbb{F}_p, p = 36u^4 + 36u^3 + 24u^2 + 6u + 1</span> , with prime order  <span class="math">n = 36u^4 + 36u^3 + 18u^2 + 6u + 1</span> , where  <span class="math">u \\in \\mathbb{Z}</span>  is an arbitrary integer. This family is rather large and easy to generate [10], providing a multitude of parameter choices; and, having embedding degree k = 12, is well-suited for computing asymmetric pairings at the 128-bit security level [12]. It admits several optimal derivations [8] of different variants of the Ate pairing [15] such as Rate [16], Optimal Ate [8] and  <span class="math">\\chi</span> -ate [17].</p>
+
+    <p class="text-gray-300">Let E[n] be the subgroup of n-torsion points of E and  <span class="math">E&#x27;: y^2 = x^3 + b/\\xi</span>  be a sextic twist of E with  <span class="math">\\xi</span>  not a cube nor a square in  <span class="math">\\mathbb{F}_{p^2}</span> . For the clear benefit of direct benchmarking, but also pointing that performance among variants is roughly the same, we restrict the discussion to computing the Optimal Ate pairing defined as in [6]:</p>
+
+    <p class="text-gray-300"><span class="math">$a_{opt}: \\mathbb{G}_2 \\times \\mathbb{G}_1 \\to \\mathbb{G}_T</span>$</p>
+
+    <p class="text-gray-300"><span class="math">(Q, P) \\to (f_{r,Q}(P) \\cdot l_{[r]Q, \\pi_p(Q)}(P) \\cdot l_{[r]Q + \\pi_p(Q), -\\pi_p^2(Q)}(P))^{\\frac{p^{12}-1}{n}},</span></p>
+
+    <p class="text-gray-300">where  <span class="math">r = 6u + 2 \\in \\mathbb{Z}</span> ; the map  <span class="math">\\pi_p : E \\to E</span>  is the Frobenius endomorphism  <span class="math">\\pi_p(x,y) = (x^p,y^p)</span> ; groups  <span class="math">\\mathbb{G}_1,\\mathbb{G}_2</span>  are determined by the eigenspaces of  <span class="math">\\pi_p</span>  as  <span class="math">\\mathbb{G}_1 = E[n] \\cap \\operatorname{Ker}(\\pi_p - [1]) = E(\\mathbb{F}_p)[n]</span>  and  <span class="math">\\mathbb{G}_2</span>  as the preimage  <span class="math">E&#x27;(\\mathbb{F}_{p^2})[n]</span>  of  <span class="math">E[n] \\cap \\operatorname{Ker}(\\pi_p - [p]) \\subseteq E(\\mathbb{F}_{p^{12}})[n]</span>  under the twisting isomorphism  <span class="math">\\psi : E&#x27; \\to E</span> ; the group  <span class="math">\\mathbb{G}_T</span>  is the subgroup of n-th roots of unity  <span class="math">\\mu_n \\subset \\mathbb{F}_{p^{12}}^*</span> ;  <span class="math">f_{r,Q}(P)</span>  is a normalized function with divisor  <span class="math">(f_{r,Q}) = r(Q) - ([r]Q) - (r-1)(\\mathcal{O})</span>  and  <span class="math">l_{Q_1,Q_2}(P)</span>  is the line arising in the addition of  <span class="math">Q_1</span>  and  <span class="math">Q_2</span>  evaluated at point P.</p>
+
+    <p class="text-gray-300">Miller [18,19] proposed an algorithm that constructs  <span class="math">f_{r,P}</span>  in stages by using a double-and-add method. When generalizing the denominator-free version [20] of Miller's Algorithm for computing the pairing  <span class="math">a_{opt}</span>  with the set of implementation-friendly parameters suggested by [10] at the 128-bit security level, we obtain Algorithm 1. For the BN curve we have  <span class="math">E: y^2 = x^3 + 2, u = -(2^{62} + 2^{55} + 1) &lt; 0</span> . In order to accommodate the negative r (line 9 in Algorithm 1), it is required to compute a cheap negation in  <span class="math">\\mathbb{G}_2</span>  to make the final accumulator T the result of [-|r|]Q, and an expensive inversion in the big field  <span class="math">\\mathbb{G}_T</span>  to obtain the correct</p>
+
+    <p class="text-gray-300">pairing value  <span class="math">f_{-|r|,Q}(P) = (f_{|r|,Q}(P))^{-1}</span> , instead of the value  <span class="math">f_{|r|,Q}(P)</span>  produced at the end of the algorithm. The expensive inversion will be handled later at Section 5 with the help of the final exponentiation.</p>
+
+    <p class="text-gray-300"><strong>Algorithm 1</strong> Optimal Ate pairing on BN curves (generalized for u &lt; 0).</p>
+
+    <pre><code class="language-text">Input: P \\in \\mathbb{G}_1, Q \\in \\mathbb{G}_2, r = |6u + 2| = \\sum_{i=0}^{\\log_2(r)} r_i 2^i
+
+Output: a_{opt}(Q, P)
+
+1: T \\leftarrow Q, f \\leftarrow 1
+
+2: for i = \\lfloor \\log_2(r) \\rfloor - 1 downto 0 do
+
+3: f \\leftarrow f^2 \\cdot l_{T,T}(P), T \\leftarrow 2T
+
+4: if r_i = 1 then
+
+5: f \\leftarrow f \\cdot l_{T,Q}(P), T \\leftarrow T + Q
+
+6: end for
+
+7: Q_1 \\leftarrow \\pi_p(Q), Q_2 \\leftarrow \\pi_p^2(Q)
+
+8: if u &lt; 0 then
+
+9: T \\leftarrow -T, f \\leftarrow f^{-1}
+
+10: end if
+
+11: f \\leftarrow f \\cdot l_{T,Q_1}(P), T \\leftarrow T + Q_1
+
+12: f \\leftarrow f \\cdot l_{T,Q_2}(P), T \\leftarrow T - Q_2
+
+13: f \\leftarrow f^{(p^{12}-1)/n}
+
+14: return f
+</code></pre>
+
+    <h3 id="sec-3" class="text-xl font-semibold mt-8">3 Tower Extension Field Arithmetic</h3>
+
+    <p class="text-gray-300">Miller's Algorithm [18,19] employs arithmetic in  <span class="math">\\mathbb{F}_{p^{12}}</span>  during the accumulation steps (lines 3,5,11-12 in Algorithm 1) and at the final exponentiation (line 13 in the same algorithm). Hence, to achieve a high-performance implementation of pairings it is crucial to perform arithmetic over extension fields efficiently. In particular, it has been recommended in [21] to represent  <span class="math">\\mathbb{F}_{p^k}</span>  with a tower of extensions using irreducible binomials. Accordingly, in our targeted setting we represent  <span class="math">\\mathbb{F}_{p^{12}}</span>  using the flexible towering scheme used in [22,5,7,10] combined with the parameters suggested by [10]:</p>
+
+    <pre><code class="language-text">\\begin{split} &amp;- \\ \\mathbb{F}_{p^2} = \\mathbb{F}_p[i]/(i^2 - \\beta), \\text{ where } \\beta = -1. \\\\ &amp;- \\ \\mathbb{F}_{p^4} = \\mathbb{F}_{p^2}[s]/(s^2 - \\xi), \\text{ where } \\xi = 1 + i. \\\\ &amp;- \\ \\mathbb{F}_{p^6} = \\mathbb{F}_{p^2}[v]/(v^3 - \\xi), \\text{ where } \\xi = 1 + i. \\\\ &amp;- \\ \\mathbb{F}_{p^{12}} = \\mathbb{F}_{p^4}[t]/(t^3 - s) \\text{ or } \\mathbb{F}_{p^6}[w]/(w^2 - v). \\end{split}
+</code></pre>
+
+    <p class="text-gray-300">It is possible to convert from one towering  <span class="math">\\mathbb{F}_{p^2} \\to \\mathbb{F}_{p^6} \\to \\mathbb{F}_{p^{12}}</span>  to the other  <span class="math">\\mathbb{F}_{p^2} \\to \\mathbb{F}_{p^4} \\to \\mathbb{F}_{p^{12}}</span>  by simply permuting the order of coefficients. The choice  <span class="math">p \\equiv 3 \\pmod{4}</span>  accelerates arithmetic in  <span class="math">\\mathbb{F}_{p^2}</span> , since multiplications by  <span class="math">\\beta = -1</span>  can be computed as simple subtractions [10].</p>
+
+    <h3 id="sec-4" class="text-xl font-semibold mt-8">3.1 Lazy Reduction for Tower Fields</h3>
+
+    <p class="text-gray-300">The concept of lazy reduction goes back to at least [23] and has been advantageously exploited by many works in different scenarios [24,25,12]. Lim and</p>
+
+    <p class="text-gray-300">Hwang [24] showed that multiplication in  <span class="math">\\mathbb{F}_{p^k}</span> , when  <span class="math">\\mathbb{F}_{p^k} = \\mathbb{F}_p[x]/(x^k - w)</span>  is seen as a direct extension over  <span class="math">\\mathbb{F}_p</span>  via the irreducible binomial  <span class="math">(x^k - w)</span>  with  <span class="math">w \\in \\mathbb{F}_p</span> , can be performed with k reductions modulo p. In contrast, it would normally require either  <span class="math">k^2</span>  reductions using conventional multiplication, or k(k+1)/2 reductions using Karatsuba multiplication. Lazy reduction was first employed in the context of pairing computation by [12] to eliminate reductions in  <span class="math">\\mathbb{F}_{p^2}</span>  multiplication. If one considers the tower  <span class="math">\\mathbb{F}_p \\to \\mathbb{F}_{p^2} \\to \\mathbb{F}_{p^6} \\to \\mathbb{F}_{p^{12}}</span> , then this approach requires  <span class="math">2 \\cdot 6 \\cdot 3 = 36</span>  reductions modulo p, and  <span class="math">3 \\cdot 6 \\cdot 3 = 54</span>  integer multiplications for performing one multiplication in  <span class="math">\\mathbb{F}_{p^{12}}</span> ; see [12,5,7].</p>
+
+    <p class="text-gray-300">In this section, we generalize the lazy reduction technique to towering-friendly fields  <span class="math">\\mathbb{F}_{p^k}</span> ,  <span class="math">k=2^i 3^j</span> ,  <span class="math">i\\geq 1, j\\geq 0</span> , conveniently built with irreducible binomials [26]. We show that multiplication (and squaring) in a tower extension  <span class="math">\\mathbb{F}_{p^k}</span>  only requires k reductions and still benefits from different arithmetic optimizations available in the literature to reduce the number of subfield multiplications or squarings. For instance, with our approach one now requires  <span class="math">2\\cdot 3\\cdot 2=12</span>  reductions modulo p and 54 integer multiplications using the tower  <span class="math">\\mathbb{F}_p\\to\\mathbb{F}_{p^2}\\to\\mathbb{F}_{p^6}\\to\\mathbb{F}_{p^{12}}</span>  to compute one multiplication in  <span class="math">\\mathbb{F}_{p^{12}}</span> ; or 12 reductions modulo p and 36 integer multiplications to compute one squaring in  <span class="math">\\mathbb{F}_{p^{12}}</span> . Although wider in generality, these techniques are analyzed in detail in the context of Montgomery multiplication and Montgomery reduction [27], which are commonly used in the context of pairings over ordinary curves. We explicitly state our formulas for the towering construction  <span class="math">\\mathbb{F}_p\\to\\mathbb{F}_{p^2}\\to\\mathbb{F}_{p^6}\\to\\mathbb{F}_{p^{12}}</span>  in Section 3.3. To remove ambiguity, the term reduction modulo p always refers to modular reduction of double-precision integers.</p>
+
+    <p class="text-gray-300"><strong>Theorem 1.</strong> Let  <span class="math">k = 2^i 3^j</span> ,  <span class="math">i, j \\in \\mathbb{Z}</span>  and  <span class="math">i \\geq 1, j \\geq 0</span> . Let</p>
+
+    <p class="text-gray-300"><span class="math">$\\mathbb{F}_p = \\mathbb{F}_{p^{k_0}} \\to \\mathbb{F}_{p^{k_1}} = \\mathbb{F}_{p^2} \\to \\cdots \\to \\mathbb{F}_{p^{k_{i+j-2}}} \\to \\mathbb{F}_{p^{k_{i+j-1}}} \\to \\mathbb{F}_{p^{k_{i+j}}} = \\mathbb{F}_{p^k}</span>$</p>
+
+    <p class="text-gray-300">be a tower extension, where each extension  <span class="math">\\mathbb{F}_{p^{k_{\\ell+1}}}/\\mathbb{F}_{p^{k_{\\ell}}}</span>  is of degree either 2 or 3, which can be constructed using a second degree irreducible binomial  <span class="math">x^2 - \\beta_{\\ell}</span> ,  <span class="math">\\beta_{\\ell} \\in \\mathbb{F}_{p^{k_{\\ell}}}</span> , or a third degree irreducible binomial  <span class="math">x^3 - \\beta_{\\ell}</span> ,  <span class="math">\\beta_{\\ell} \\in \\mathbb{F}_{p^{k_{\\ell}}}</span> , respectively. Suppose that  <span class="math">\\beta_{\\ell}</span>  can be chosen such that, for all  <span class="math">a \\in \\mathbb{F}_{p^{k_{\\ell}}}</span> ,  <span class="math">a \\cdot \\beta_{\\ell}</span>  can be computed without any reduction modulo p. Then multiplication in  <span class="math">\\mathbb{F}_{p^k}</span>  can be computed with  <span class="math">3^i 6^j</span>  integer multiplications and  <span class="math">k = 2^i 3^j</span>  reductions modulo p for any k.</p>
+
+    <p class="text-gray-300"><em>Proof.</em> We prove this by induction on i+j. The base case is i+j=1 (i=1 and j=0). That is, k=2, and we have a tower  <span class="math">\\mathbb{F}_p \\to \\mathbb{F}_{p^2}</span>  with  <span class="math">\\mathbb{F}_{p^2} = \\mathbb{F}_p[x]/(x^2-\\beta)</span> . For any  <span class="math">a=a_0+a_1x</span> ,  <span class="math">b=b_0+b_1x\\in \\mathbb{F}_{p^2}</span> ,  <span class="math">a_i,b_i\\in \\mathbb{F}_p</span> , we can write</p>
+
+    <p class="text-gray-300"><span class="math">$a \\cdot b = (a_0b_0 + a_1b_1\\beta) + ((a_0 + a_1)(b_0 + b_1) - a_0b_0 - a_1b_1)x</span>$</p>
+
+    <p class="text-gray-300">which can be computed with 3 integer multiplications and 2 reductions modulo p (note that we ignore multiplication by  <span class="math">\\beta</span> , by our assumption).</p>
+
+    <p class="text-gray-300">Next, consider</p>
+
+    <p class="text-gray-300"><span class="math">$\\mathbb{F}_p \\to \\mathbb{F}_{p^2} \\to \\cdots \\to \\mathbb{F}_{p^{k_{i+j}}} \\to \\mathbb{F}_{p^{k_{i+j+1}}},</span>$</p>
+
+    <p class="text-gray-300">where  <span class="math">k_{i+j+1}=2^{i+1}3^j</span> , or  <span class="math">k_{i+j+1}=2^i3^{j+1}</span> . In the former case, let  <span class="math">\\mathbb{F}_{p^{k_{i+j}+1}}=\\mathbb{F}_{p^{k_{i+j}}}[x]/(x^2-\\beta)</span>  and  <span class="math">a=a_0+a_1x</span> ,  <span class="math">b=b_0+b_1x\\in\\mathbb{F}_{p^{k_{i+j}+1}}</span> ,  <span class="math">a_i,b_i\\in\\mathbb{F}_{p^{k_{i+j}}}</span> . Then</p>
+
+    <p class="text-gray-300"><span class="math">$a \\cdot b = (a_0b_0 + a_1b_1\\beta) + [(a_0 + a_1)(b_0 + b_1) - a_0b_0 - a_1b_1]x, \\tag{1}</span>$</p>
+
+    <p class="text-gray-300">which can be computed with 3 multiplications in  <span class="math">\\mathbb{F}_{p^{k_{i+j}}}</span> , namely  <span class="math">a_0b_0</span> ,  <span class="math">a_1b_1\\beta</span>  and  <span class="math">(a_0+a_1)(b_0+b_1)</span>  (again, we ignore multiplication by  <span class="math">\\beta</span> ). By the induction hypothesis, each multiplication in  <span class="math">\\mathbb{F}_{p^{k_{i+j}}}</span>  requires  <span class="math">3^i6^j</span>  integer multiplications, and  <span class="math">2^i3^j</span>  reductions modulo p. Also, three reductions modulo p, when computing  <span class="math">a_0b_0</span> ,  <span class="math">a_1b_1\\beta</span>  and  <span class="math">(a_0+a_1)(b_0+b_1)</span> , can be minimized to two reductions modulo p (see (1)). Hence, multiplication in  <span class="math">\\mathbb{F}_{p^{k_{i+j+1}}}</span>  can be computed with  <span class="math">3 \\cdot 3^i6^j = 3^{i+1}6^j</span>  integer multiplications and  <span class="math">2 \\cdot 2^i3^j = 2^{i+1}3^j</span>  reductions modulo p.</p>
+
+    <p class="text-gray-300">The latter case,  <span class="math">k_{i+j+1} = 2^i 3^{j+1}</span> , can be proved similarly, by considering  <span class="math">\\mathbb{F}_{p^{k_{i+j+1}}} = \\mathbb{F}_{p^{k_{i+j}}}[x]/(x^3 - \\beta)</span> , and the Karatsuba multiplication formula for degree 3 extensions instead of (1).</p>
+
+    <p class="text-gray-300">It is also straightforward to generalize the procedure above to any formula other than Karatsuba which also involves only sums (or subtractions) of products of the form  <span class="math">\\sum \\pm a_i b_j</span> , with  <span class="math">a_i, b_j \\in \\mathbb{F}_{p^{k_l}}</span> , such as complex squaring or the Chung-Hasan asymmetric squaring formulas [28].</p>
+
+    <p class="text-gray-300">For efficiency purposes, we suggest a different treatment for the highest layer in the tower arithmetic. Theorem 1 implies that reductions can be completely delayed to the end of the last layer by applying lazy reduction, but in some cases (when the optimal k is already reached and no reductions can be saved) it will be more efficient to perform reductions immediately after multiplications or squarings. This will be illustrated with the computation of squaring in  <span class="math">\\mathbb{F}_{p^{12}}</span>  in Section 3.3.</p>
+
+    <p class="text-gray-300">In the Miller Loop, reductions can also be delayed from the underlying  <span class="math">\\mathbb{F}_{p^2}</span>  field during multiplication and squaring to the arithmetic layer immediately above (i.e., the point arithmetic and line evaluation). Similarly to the tower extension, on this upper layer reductions should only be delayed in the cases where this technique leads to fewer reductions. For details, see Section 4.</p>
+
+    <p class="text-gray-300">There are some penalties when delaying reductions. In particular, single-precision operations (with operands occupying  <span class="math">n = \\lceil \\lceil \\log_2 p \\rceil / w \\rceil</span>  words, where w is the computer word-size) are replaced by double-precision operations (with operands occupying 2n words). However, this disadvantage can be minimized in terms of speed by selecting a field size smaller than the word-size boundary because this technique can be exploited more extensively for optimizing double-precision arithmetic.</p>
+
+    <h3 id="sec-5" class="text-xl font-semibold mt-8">3.2 Selecting a Field Size Smaller than the Word-Size Boundary</h3>
+
+    <p class="text-gray-300">If the modulus p is selected so that  <span class="math">l = \\lceil \\log_2 p \\rceil &lt; N</span> , where  <span class="math">N = n \\cdot w</span> , n is the exact number of words required to represent p, i.e.,  <span class="math">n = \\lceil l/w \\rceil</span> , and w is the computer word-size, then several consecutive additions without carry-out in the most significant word (MSW) can be performed before a multiplication of</p>
+
+    <p class="text-gray-300">the form  <span class="math">c=a\\cdot b</span> , where  <span class="math">a,b\\in[0,2^N-1]</span>  such that  <span class="math">c&lt;2^{2N}</span> . In the case of Montgomery reduction, the restriction is given by the upper bound  <span class="math">c&lt;2^N\\cdot p</span> . Similarly, when delaying reductions the result of a multiplication without reduction has maximum value  <span class="math">(p-1)^2&lt;2^{2N}</span>  (assuming that  <span class="math">a,b\\in[0,p]</span> ) and several consecutive double-precision additions without carry-outs in the MSW (and, in some cases, subtractions without borrow-outs in the MSW) can be performed before reduction. When using Montgomery reduction up to  <span class="math">\\sim \\lfloor 2^N/p \\rfloor</span>  additions can be performed without carry checks.</p>
+
+    <p class="text-gray-300">Furthermore, cheaper single- and double-precision operations exploiting this &quot;extra room&quot; can be combined for maximal performance. The challenge is to optimally balance their use in the tower arithmetic since both may interfere with each other. For instance, if intermediate values are allowed to grow up to 2p before multiplication (instead of p) then the maximum result would be  <span class="math">4p^2</span> . This strategy makes use of cheaper single-precision additions without carry checks but limits the number of double-precision additions that can be executed without carry checks after multiplication with delayed reduction. As it will be evident later, to maximize the gain obtained with the proposed methodology one should take into account relative costs of operations and maximum bounds.</p>
+
+    <p class="text-gray-300">In the case of double-precision arithmetic, different optimizing alternatives are available. Let us analyze them in the context of Montgomery arithmetic. First, as pointed out by [7], if  <span class="math">c &gt; 2^N \\cdot p</span> , where c is the result of a double-precision addition, then c can be restored with a cheaper single-precision subtraction by  <span class="math">2^N \\cdot p</span>  (note that the first half of this value consists of zeroes only). Second, different options are available to convert negative numbers to positive after double-precision subtraction. In particular, let us consider the computation  <span class="math">c = a + l \\cdot b</span> , where  <span class="math">a, b \\in [0, mp^2]</span> ,  <span class="math">m \\in \\mathbb{Z}^+</span>  and  <span class="math">l &lt; 0 \\in \\mathbb{Z}</span>  s.t.  <span class="math">|lmp| &lt; 2^N</span> , which is a recurrent operation (for instance, when  <span class="math">l = \\beta</span> ). For this operation, we have explored the following alternatives, which can be integrated in the tower arithmetic with different advantages:</p>
+
+    <pre><code class="language-text">Option 1: r = c + (2^N \\cdot p/2^h), r \\in [0, mp^2 + 2^N \\cdot p/2^h], h is a small integer s.t. \\left|lmp^2\\right| &lt; 2^N \\cdot p/2^h &lt; 2^N \\cdot p - mp^2. Option 2: if c &lt; 0 then r = c + 2^N \\cdot p, r \\in [0, 2^N \\cdot p]. Option 3: r = c - lmp^2, r \\in [0, (|l| + 1)mp^2], s.t. (|l| + 1)mp &lt; 2^N. Option 4: if c &lt; 0 then r = c - lmp^2, r \\in [0, |lmp^2|].
+</code></pre>
+
+    <p class="text-gray-300">In particular, Options 2 and 4 require conditional checks that make the corresponding operations more expensive. Nevertheless, these options may be valuable when negative values cannot be corrected with other options without violating the upper bound. Also note that Option 2 can make use of a cheaper single-precision subtraction for converting negative results to positive. Options 1 and 3 are particularly efficient because no conditional checks are required. Moreover, if l is small enough (and h maximized for Option 1) several following operations can avoid carry checks. Between both, Option 1 is generally more efficient because adding  <span class="math">2^N \\cdot p/2^h</span>  requires less than double-precision if  <span class="math">h \\leq w</span> , where w is the computer word-size.</p>
+
+    <p class="text-gray-300">Next, we demonstrate how the different design options discussed in this section can be exploited with a clever selection of parameters and applied to different operations combining single- and double-precision arithmetic to speed up the extension field arithmetic.</p>
+
+    <h3 id="sec-6" class="text-xl font-semibold mt-8">3.3 Analysis for Selected Parameters</h3>
+
+    <p class="text-gray-300">For our illustrative analysis, we use the tower  <span class="math">\\mathbb{F}_{p^2} \\to \\mathbb{F}_{p^6} \\to \\mathbb{F}_{p^{12}}</span>  constructed with the irreducible binomials described at the beginning of this section. When targeting the 128-bit security level, single- and double-precision operations are defined by operands with sizes N=256 and 2N=512, respectively. For our selected prime,  <span class="math">\\lceil \\log_2 p \\rceil = 254</span>  and  <span class="math">2^N \\cdot p \\approx 6.8p^2</span> . Notation is fixed as following: (i)  <span class="math">+, -, \\times</span>  are operators not involving carry handling or modular reduction for boundary keeping; (ii)  <span class="math">\\oplus</span> ,  <span class="math">\\ominus</span> ,  <span class="math">\\otimes</span>  are operators producing reduced results through carry handling or modular reduction; (iii) a superscript in an operator is used to denote the extension degree involved in the operation; (iv) notation  <span class="math">a_{i,j}</span>  is used to address j-th subfield element in extension field element  <span class="math">a_i</span> ; (v) lower case t and upper case T variables represent single- and double-precision integers or extension field elements composed of single and double-precision integers, respectively. The precision of the operators is determined by the precision of the operands and result. Note that, as stated before, if  <span class="math">c &gt; 2^N \\cdot p</span>  after adding c = a + b in double-precision, we correct the result by computing  <span class="math">c - 2^N \\cdot p</span> . Similar to subtraction, we refer to the latter as &quot;Option 2&quot;.</p>
+
+    <p class="text-gray-300">The following notation is used for the cost of operations: (i) m, s, a denote the cost of multiplication, squaring and addition in  <span class="math">\\mathbb{F}_p</span> , respectively; (ii)  <span class="math">\\tilde{m}, \\tilde{s}, \\tilde{a}, \\tilde{i}</span>  denote the cost of multiplication, squaring, addition and inversion in  <span class="math">\\mathbb{F}_{p^2}</span> , respectively; (iii)  <span class="math">m_u, s_u, r</span>  denote the cost of unreduced multiplication and squaring producing double-precision results, and modular reduction of double-precision integers, respectively; (iv)  <span class="math">\\tilde{m}_u, \\tilde{s}_u, \\tilde{r}</span>  denote the cost of unreduced multiplication and squaring, and modular reduction of double-precision elements in  <span class="math">\\mathbb{F}_{p^2}</span> , respectively. For the remainder of the paper, and unless explicitly stated otherwise, we assume that double-precision addition has the cost of 2a and  <span class="math">2\\tilde{a}</span>  in  <span class="math">\\mathbb{F}_p</span>  and  <span class="math">\\mathbb{F}_{p^2}</span> , respectively, which approximately follows what we observe in practice.</p>
+
+    <p class="text-gray-300">We will now illustrate a selection of operations for efficient multiplication in  <span class="math">\\mathbb{F}_{p^{12}}</span> , beginning with multiplication in  <span class="math">\\mathbb{F}_{p^2}</span> . Let  <span class="math">a,b,c\\in\\mathbb{F}_{p^2}</span>  such that  <span class="math">a=a_0+a_1i,b=b_0+b_1i,c=a\\cdot b=c_0+c_1i</span> . The required operations for computing  <span class="math">\\mathbb{F}_{p^2}</span>  multiplication are detailed in Algorithm 2. As explained in Beuchat et al. [7, Section 5.2], when using the Karatsuba method and  <span class="math">a_i,b_i\\in\\mathbb{F}_p</span> ,  <span class="math">c_1=(a_0+a_1)(b_0+b_1)-a_0b_0-a_1b_1=a_0b_1+a_1b_0&lt;2p^2&lt;2^{N}\\cdot p</span> , additions are single-precision, reduction after multiplication can be delayed and hence subtractions are double-precision (steps 1-3 in Algorithm 2). Obviously, these operations do not require carry checks. For  <span class="math">c_0=a_0b_0-a_1b_1</span> ,  <span class="math">c_0</span>  is in interval  <span class="math">[-p^2,p^2]</span>  and a negative result can be converted to positive using <strong>Option 1</strong> with h=2 or <strong>Option 2</strong>, for which the final  <span class="math">c_0</span>  is in the range  <span class="math">[0,(2^N\\cdot p/4)+p^2]\\subset [0,2^N\\cdot p]</span>  or  <span class="math">[0,2^N\\cdot p]</span> , respectively (step 4 in Algorithm 2). Following Theorem 1, all reductions can be completely delayed to the next arithmetic layer (higher extension or curve arithmetic).</p>
+
+    <p class="text-gray-300"><strong>Algorithm 2</strong> Multiplication in  <span class="math">\\mathbb{F}_{p^2}</span>  without reduction ( <span class="math">\\times^2</span> , cost  <span class="math">\\tilde{m}_u = 3m_u + 8a</span> )</p>
+
+    <pre><code class="language-text">Input: a = (a_0 + a_1 i) and b = (b_0 + b_1 i) \\in \\mathbb{F}_{p^2}
+
+Output: c = a \\cdot b = (c_0 + c_1 i) \\in \\mathbb{F}_{p^2}
+
+1: T_0 \\leftarrow a_0 \\times b_0, T_1 \\leftarrow a_1 \\times b_1, t_0 \\leftarrow a_0 + a_1, t_1 \\leftarrow b_0 + b_1
+
+2: T_2 \\leftarrow t_0 \\times t_1, T_3 \\leftarrow T_0 + T_1
+
+3: T_3 \\leftarrow T_2 - T_3
+
+4: T_4 \\leftarrow T_0 \\ominus T_1 (Option 1 or 2)
+
+5: return c = (T_4 + T_3 i)
+</code></pre>
+
+    <p class="text-gray-300">Let us now define multiplication in  <span class="math">\\mathbb{F}_{p^6}</span> . Let  <span class="math">a,b,c\\in\\mathbb{F}_{p^6}</span>  such that a= <span class="math">(a_0 + a_1v + a_2v^2), b = (b_0 + b_1v + b_2v^2), c = a \\cdot b = (c_0 + c_1v + c_2v^2).</span>  The required operations for computing  <span class="math">\\mathbb{F}_{p^6}</span>  multiplication are detailed in Algorithm 3. In this case,  <span class="math">c_0 = v_0 + \\xi[(a_1 + a_2)(b_1 + b_2) - v_1 - v_2], c_1 = (a_0 + a_1)(b_0 + b_1) - v_0 - v_1 + \\xi v_2</span> and  <span class="math">c_2 = (a_0 + a_2)(b_0 + b_2) - v_0 - v_2 + v_1</span> , where  <span class="math">v_0 = a_0 b_0</span> ,  <span class="math">v_1 = a_1 b_1</span>  and  <span class="math">v_2 = a_2 b_2</span> . First, note that the pattern  <span class="math">s_x = (a_i + a_j)(b_i + b_j) - v_i - v_j</span>  repeats for each  <span class="math">c_x, 0 \\le x \\le 2</span> . After multiplications using Alg. 2 with <strong>Option 1</strong> (h = 2), we have  <span class="math">v_{i,0}, v_{i,0} \\in [0, (2^N \\cdot p/4) + p^2]</span>  and  <span class="math">v_{i,1}, v_{i,1} \\in [0, 2p^2]</span>  (step 1 of Alg. 3). Outputs of single-precision additions of the forms  <span class="math">(a_i + a_i)</span>  and  <span class="math">(b_i + b_i)</span>  are in the range [0, 2p] and hence do not produce carries (steps 2, 9 and 17 of Alg. 3). Corresponding  <span class="math">\\mathbb{F}_{p^2}</span>  multiplications  <span class="math">r_x = (a_i + a_j)(b_i + b_j)</span>  using Alg. 2 with <strong>Option 2</strong> give results in the ranges  <span class="math">r_{x,0} \\in [0,2^N \\cdot p]</span>  and  <span class="math">r_{x,1} \\in [0,8p^2]</span>  (steps 3, 10 and 18). Although  <span class="math">max(r_{x,1}) = 8p^2 &gt; 2^N \\cdot p</span> , note that  <span class="math">8p^2 &lt; 2^{2N}</span>  and  <span class="math">s_{x,1} = a_{i,0}b_{j,1} + a_{i,1}b_{j,0} + a_{j,0}b_{i,1} + a_{j,1}b_{i,0} \\in [0,4p^2] \\text{ since } s_x = a_ib_j + a_jb_i.</span> Hence, for  <span class="math">0 \\le x \\le 2</span> , double-precision subtractions for computing  <span class="math">s_{x,1}</span>  using Karatsuba do not require carry checks (steps 4 and 6, 11 and 13, 19 and 21). For computing  <span class="math">s_{x,0} = r_{x,0} - (v_{i,0} + v_{j,0})</span> , addition does not require carry check (output range  <span class="math">[0, 2(2^N \\cdot p/4 + p^2)] \\subset [0, 2^N \\cdot p]</span> ) and subtraction gives result in the range  <span class="math">[0, 2^N \\cdot p]</span>  when using <strong>Option 2</strong> (steps 5, 12 and 20). For computing  <span class="math">c_0</span> , multiplication by  <span class="math">\\xi</span> , i.e.,  <span class="math">S_0 = \\xi s_0</span>  involves the operations  <span class="math">S_{0,0} = s_{0,0} - s_{0,1}</span>  and  <span class="math">S_{0,1} = s_{0,0} + s_{0,1}</span> , which are computed in double-precision using <strong>Option 2</strong> to get the output range  <span class="math">[0, 2^N \\cdot p]</span>  (step 7). Similarly, final additions with  <span class="math">v_0</span>  require <strong>Option 2</strong> to get again the output range  <span class="math">[0, 2^N \\cdot p]</span>  (step 8). For computing  <span class="math">c_1</span> ,  <span class="math">S_1 = \\xi v_2</span>  is computed as  <span class="math">S_{1,0} = v_{2,0} - v_{2,1}</span>  and  <span class="math">S_{1,1} = v_{2,0} + v_{2,1}</span> , where the former requires a double-precision subtraction using <strong>Option 1</strong> (h = 1) to get a result in the range  <span class="math">[0, 2^N \\cdot p/2 + 2^N \\cdot p/4 + p^2] \\subset [0, 2^N \\cdot p]</span>  (step 14) and the latter requires a double-precision addition with no carry check to get a result in the range  <span class="math">[0,(2^N \\cdot p/4) + 3p^2] \\subset [0,2^N \\cdot p]</span>  (step 15). Then,  <span class="math">c_{1,0} = s_{1,0} + S_{1,0}</span> and  <span class="math">c_{1,1} = s_{1,1} + S_{1,1}</span>  involve double-precision additions using <strong>Option 2</strong> to obtain results in the range  <span class="math">[0, 2^N \\cdot p]</span>  (step 16). Results  <span class="math">c_{2,0} = s_{2,0} + v_{1,0}</span>  and  <span class="math">c_{2,1} = s_{2,1} + v_{1,1}</span>  require a double-precision addition using <strong>Option 2</strong> (final output range  <span class="math">[0, 2^N \\cdot p]</span> , step 22) and a double-precision addition without carry check (final output range  <span class="math">[0,6p^2] \\subset [0,2^N \\cdot p]</span> , step 23), respectively. Modular reductions have been delayed again to the last layer  <span class="math">\\mathbb{F}_{n^{12}}</span> .</p>
+
+    <pre><code class="language-text">Algorithm 3 Multiplication in \\mathbb{F}_{p^6} without reduction (\\times^6, \\cos 6\\tilde{m}_u + 28\\tilde{a})
+</code></pre>
+
+    <pre><code class="language-text">Input: a = (a_0 + a_1v + a_2v^2) and b = (b_0 + b_1v + b_2v^2) \\in \\mathbb{F}_{p^6}
+Output: c = a \\cdot b = (c_0 + c_1 v + c_2 v^2) \\in \\mathbb{F}_{p^6}
+ 1: T_0 \\leftarrow a_0 \\times^2 b_0, T_1 \\leftarrow a_1 \\times^2 b_1, T_2 \\leftarrow a_2 \\times^2 b_2
+                                                                                                                     (Option 1, h=2)
+ 2: t_0 \\leftarrow a_1 +^2 a_2, t_1 \\leftarrow b_1 +^2 b_2
+ 3: T_3 \\leftarrow t_0 \\times^2 t_1
+                                                                                                                                (Option 2)
+ 4: T_4 \\leftarrow T_1 +^2 T_2
+ 5: T_{3,0} \\leftarrow T_{3,0} \\ominus T_{4,0}
+                                                                                                                                (Option 2)
+ 6: T_{3,1} \\leftarrow T_{3,1} - T_{4,1}
+ 7: T_{4,0} \\leftarrow T_{3,0} \\ominus T_{3,1}, T_{4,1} \\leftarrow T_{3,0} \\oplus T_{3,1} \\ (\\equiv T_4 \\leftarrow \\xi \\cdot T_3)
+                                                                                                                                (Option 2)
+ 8: T_5 \\leftarrow T_4 \\oplus^2 T_0
+                                                                                                                                (Option 2)
+ 9: t_0 \\leftarrow a_0 +^2 a_1, t_1 \\leftarrow b_0 +^2 b_1
+10: T_3 \\leftarrow t_0 \\times^2 t_1
+                                                                                                                                (Option 2)
+11: T_4 \\leftarrow T_0 +^2 T_1
+12: T_{3,0} \\leftarrow T_{3,0} \\ominus T_{4,0}
+                                                                                                                                (Option 2)
+13: T_{3,1} \\leftarrow T_{3,1} - T_{4,1}
+14: T_{4,0} \\leftarrow T_{2,0} \\ominus T_{2,1}
+                                                                                                                     (Option 1, h = 1)
+15: T_{4,1} \\leftarrow T_{2,0} + T_{2,1} \\text{ (steps 14-15} \\equiv T_4 \\leftarrow \\xi \\cdot T_2)
+16: T_6 \\leftarrow T_3 \\oplus^2 T_4
+                                                                                                                                (Option 2)
+17: t_0 \\leftarrow a_0 +^2 a_2, t_1 \\leftarrow b_0 +^2 b_2
+18: T_3 \\leftarrow t_0 \\times^2 t_1
+                                                                                                                                (Option 2)
+19: T_4 \\leftarrow T_0 +^2 T_2
+20: T_{3,0} \\leftarrow T_{3,0} \\ominus T_{4,0}
+                                                                                                                                (Option 2)
+21: T_{3,1} \\leftarrow T_{3,1} - T_{4,1}
+22: T_{7,0} \\leftarrow T_{3,0} \\oplus T_{1,0}
+                                                                                                                                (Option 2)
+23: T_{7,1} \\leftarrow T_{3,1} + T_{1,1}
+24: return c = (T_5 + T_6v + T_7v^2)
+</code></pre>
+
+    <p class="text-gray-300">Finally, let  <span class="math">a, b, c \\in \\mathbb{F}_{p^{12}}</span>  such that  <span class="math">a = a_0 + a_1 w, b = b_0 + b_1 w, c = a \\cdot b = a_1 \\cdot b_2</span>  <span class="math">c_0 + c_1 w</span> . Algorithm 4 details the required operations for computing multiplication. In this case,  <span class="math">c_1 = (a_0 + a_1)(b_0 + b_1) - a_1b_1 - a_0b_0</span> . At step 1,  <span class="math">\\mathbb{F}_{p^6}</span>  multiplications  <span class="math">a_0b_0</span>  and  <span class="math">a_1b_1</span>  give outputs in range  <span class="math">\\subset [0, 2^N \\cdot p]</span>  using Algorithm 3. Additions  <span class="math">a_0 + a_1</span>  and  <span class="math">b_0 + b_1</span>  are single-precision reduced modulo p so that multiplication  <span class="math">(a_0 + a_1)(b_0 + b_1)</span>  in step 2 gives output in range  <span class="math">\\subset [0, 2^N \\cdot p]</span>  using Algorithm 3. Then, subtractions by  <span class="math">a_1b_1</span>  and  <span class="math">a_0b_0</span>  use double-precision operations with <strong>Option 2</strong> to have an output range  <span class="math">[0, 2^N \\cdot p]</span>  so that we can apply Montgomery reduction at step 5 to obtain the result modulo p. For  <span class="math">c_0 = a_0 b_0 + v a_1 b_1</span> , multiplication by v, i.e.,  <span class="math">T = v \\cdot v_1</span> , where  <span class="math">v_i = a_i b_i</span> , involves the double-precision operations  <span class="math">T_{0,0} = v_{2,0} - v_{2,1}</span> ,  <span class="math">T_{0,1} = v_{2,0} + v_{2,1}</span> ,  <span class="math">T_1 = v_0</span>  and  <span class="math">T_2 = v_1</span> , all performed with <strong>Option 2</strong> to obtain the output range  <span class="math">[0, 2^N \\cdot p]</span>  (steps 6-7). Final addition with  <span class="math">a_0b_0</span>  uses double-precision with <strong>Option 2</strong> again so that we can apply Montgomery reduction at step 9 to obtain the result modulo p. We remark that, by applying the lazy reduction technique using the operation sequence above, we have reduced the number of reductions in  <span class="math">\\mathbb{F}_{p^6}</span>  from 3 to only 2, or the number of total modular reductions in  <span class="math">\\mathbb{F}_p</span>  from 54 (or 36 if lazy reduction is employed in  <span class="math">\\mathbb{F}_{p^2}</span> ) to only k=12.</p>
+
+    <pre><code class="language-text">Algorithm 4 Multiplication in \\mathbb{F}_{p^{12}} (\\times^{12}, cost of 18\\tilde{m}_u + 6\\tilde{r} + 110\\tilde{a})
+Input: a = (a_0 + a_1 w) and b = (b_0 + b_1 w) \\in \\mathbb{F}_{p^{12}}
+Output: c = a \\cdot b = (c_0 + c_1 w) \\in \\mathbb{F}_{p^{12}}
+ 1: T_0 \\leftarrow a_0 \\times^6 b_0, T_1 \\leftarrow a_1 \\times^6 b_1, t_0 \\leftarrow a_0 \\oplus^6 a_1, t_1 \\leftarrow b_0 \\oplus^6 b_1
+ 2: T_2 \\leftarrow t_0 \\times^6 t_1
+ 3: T_3 \\leftarrow T_0 \\oplus^6 T_1
+                                                                                                                                 (Option 2)
+ 4: T_2 \\leftarrow T_2 \\ominus^6 T_3
+                                                                                                                                 (Option 2)
+ 5: c_1 \\leftarrow T_2 \\mod^6 p
+ 6: T_{2,0,0} \\leftarrow T_{1,2,0} \\ominus T_{1,2,1}, T_{2,0,1} \\leftarrow T_{1,2,0} \\oplus T_{1,2,1}
+                                                                                                                                 (Option 2)
+ 7: T_{2,1} \\leftarrow T_{1,0}, T_{2,2} \\leftarrow T_{1,1} \\text{ (steps 6-7} \\equiv T_2 \\leftarrow v \\cdot T_1)
+ 8: T_2 \\leftarrow T_0 \\oplus^6 T_2
+                                                                                                                                 (Option 2)
+ 9: c_0 \\leftarrow T_2 \\bmod^6 p
+10: return c = (c_0 + c_1 w)
+</code></pre>
+
+    <p class="text-gray-300">As previously stated, there are situations when it is more efficient to perform reductions right after multiplications and squarings in the last arithmetic layer of the tower construction. We illustrate the latter with squaring in  <span class="math">\\mathbb{F}_{p^1}</span> . As shown in Algorithm 5, a total of 2 reductions in  <span class="math">\\mathbb{F}_{p^6}</span>  are required when performing  <span class="math">\\mathbb{F}_{p^6}</span>  multiplications in step 4. If lazy reduction was applied, the number of reductions would stay at 2, and worse, the total cost would be increased because some operations would require double-precision. The reader should note that the approach suggested by [10], where the formulas in [28] are employed for computing squarings in internal cubic extensions of  <span class="math">\\mathbb{F}_{p^{12}}</span> , saves  <span class="math">1\\tilde{m}</span>  in comparison with Algorithm 5. However, we experimented such approach with several combinations of formulas and towering, and it remained consistently slower than Algorithm 5 due to an increase in the number of additions.</p>
+
+    <pre><code class="language-text">Input: a = (a_0 + a_1 w) \\in \\mathbb{F}_{p^{12}}
+
+Output: c = a^2 = (c_0 + c_1 w) \\in \\mathbb{F}_{p^{12}}
+
+1: t_0 \\leftarrow a_0 \\oplus^6 a_1, t_{1,0,0} \\leftarrow a_{1,2,0} \\oplus a_{1,2,1}, t_{1,0,1} \\leftarrow a_{1,2,0} \\oplus a_{1,2,1}
+
+2: t_{1,1} \\leftarrow a_{1,0}, t_{1,2} \\leftarrow a_{1,1} (steps 2-3 \\equiv t_1 \\leftarrow v \\cdot a_1)
+
+3: t_1 \\leftarrow a_0 \\oplus^6 t_1
+
+4: c_1 \\leftarrow (a_0 \\times^6 a_1) \\mod^6 p, t_0 \\leftarrow (t_0 \\times^6 t_1) \\mod^6 p
+
+5: t_{1,0,0} \\leftarrow c_{1,2,0} \\oplus c_{1,2,1}, t_{1,0,1} \\leftarrow c_{1,2,0} \\oplus c_{1,2,1}
+
+6: t_{1,1} \\leftarrow c_{1,0}, t_{1,2} \\leftarrow c_{1,1} (steps 6-7 \\equiv t_1 \\leftarrow v \\cdot c_1)
+
+7: t_1 \\leftarrow t_1 \\oplus^6 c_1
+
+8: c_0 \\leftarrow t_0 \\oplus^6 t_1, c_1 \\leftarrow c_1 \\oplus^6 c_1
+</code></pre>
+
+    <p class="text-gray-300"><strong>Algorithm 5</strong> Squaring in  <span class="math">\\mathbb{F}_{p^{12}}</span>  (cost of  <span class="math">12\\tilde{m}_u + 6\\tilde{r} + 73\\tilde{a}</span> )</p>
+
+    <p class="text-gray-300">9: <strong>return</strong>  <span class="math">c = (c_0 + c_1 w)</span></p>
+
+    <h2 id="sec-7" class="text-2xl font-bold">4 Miller Loop</h2>
+
+    <p class="text-gray-300">In this section, we present our optimizations to the curve arithmetic. To be consistent with other results in the literature, we do not distinguish between simple- and double-precision additions in the formulas below.</p>
+
+    <p class="text-gray-300">Recently, Costello et al. [9, Section 5] proposed the use of homogeneous coordinates to perform the curve arithmetic entirely on the twist. Their formula for computing a point doubling and line evaluation costs  <span class="math">2\\tilde{m} + 7\\tilde{s} + 23\\tilde{a} + 4m + 1m_{b&#x27;}</span> . The twisting of point P, given in our case by  <span class="math">(x_P/w^2, y_P/w^3) = (\\frac{x_P}{\\xi}v^2, \\frac{y_P}{\\xi}vw)</span> , is eliminated by multiplying the whole line evaluation by  <span class="math">\\xi</span>  and relying on the final exponentiation to eliminate this extra factor [9]. Clearly, the main drawback of this formula is the high number of additions. We present the following revised formula:</p>
+
+    <p class="text-gray-300"><span class="math">$X_{3} = \\frac{X_{1}Y_{1}}{2} \\left( Y_{1}^{2} - 9b&#x27;Z_{1}^{2} \\right), \\quad Y_{3} = \\left[ \\frac{1}{2} \\left( Y_{1}^{2} + 9b&#x27;Z_{1}^{2} \\right) \\right]^{2} - 27b&#x27;^{2}Z_{1}^{4}, \\quad Z_{3} = 2Y_{1}^{3}Z_{1},</span>$</p>
+
+    <p class="text-gray-300"><span class="math">$l = (-2Y_{1}Z_{1}y_{P})vw + \\left( 3X_{1}^{2}x_{P} \\right)v^{2} + \\xi \\left( 3b&#x27;Z_{1}^{2} - Y_{1}^{2} \\right). \\tag{2}</span>$</p>
+
+    <p class="text-gray-300">This doubling formula gives the cost of  <span class="math">3\\tilde{m}+6\\tilde{s}+17\\tilde{a}+4m+m_{b&#x27;}+m_{\\xi}</span> . Moreover, if the parameter b' is cleverly selected as in [10], multiplication by b' can be performed with minimal number of additions and subtractions. For instance, if one fixes b=2 then b'=2/(1+i)=1-i. Accordingly, the following execution has a cost of  <span class="math">3\\tilde{m}+6\\tilde{s}+19\\tilde{a}+4m</span>  (note that computations for E and  <span class="math">l_{0,0}</span>  are over  <span class="math">\\mathbb{F}_p</span>  and  <span class="math">\\overline{y_P}=-y_P</span>  is precomputed):</p>
+
+    <p class="text-gray-300"><span class="math">$A = X_1 \\cdot Y_1/2, \\quad B = Y_1^2, \\quad C = Z_1^2, \\quad D = 3C, \\quad E_0 = D_0 + D_1,</span>$</p>
+
+    <p class="text-gray-300"><span class="math">$E_1 = D_1 - D_0, \\quad F = 3E, \\quad X_3 = A \\cdot (B - F), \\quad G = (B + F)/2,</span>$</p>
+
+    <p class="text-gray-300"><span class="math">$Y_3 = G^2 - 3E^2, \\quad H = (Y_1 + Z_1)^2 - (B + C),</span>$</p>
+
+    <p class="text-gray-300"><span class="math">$Z_3 = B \\cdot H, \\quad I = E - B, \\quad J = X_1^2</span>$</p>
+
+    <p class="text-gray-300"><span class="math">$l_{0.0,0} = I_0 - I_1, \\quad l_{0.0,1} = I_0 + I_1, \\quad l_{1,1} = H \\cdot \\overline{y_P}, \\quad l_{0,2} = 3J \\cdot x_P.</span>$</p>
+
+    <p class="text-gray-300"><span class="math">$(3)</span>$</p>
+
+    <p class="text-gray-300">We point out that in practice we have observed that  <span class="math">\\tilde{m} - \\tilde{s} \\approx 3\\tilde{a}</span> . Hence, it is more efficient to compute  <span class="math">X_1Y_1</span>  directly than using  <span class="math">(X_1 + Y_1)^2</span> , B and J. If this was not the case, the formula could be computed with cost  <span class="math">2\\tilde{m} + 7\\tilde{s} + 23\\tilde{a} + 4m</span> .</p>
+
+    <p class="text-gray-300">Remarkably, the technique proposed in Section 3 for delaying reductions can also be applied to the point arithmetic over a quadratic extension field. Reductions can be delayed to the end of each  <span class="math">\\mathbb{F}_{p^2}</span>  multiplication/squaring and then delayed further for those sums of products that allow reducing the number of reductions. Although not plentiful (given the nature of most curve arithmetic formulas which have consecutive and redundant multiplications/squarings), there are a few places where this technique can be applied. For instance, doubling formula (2) requires 25  <span class="math">\\mathbb{F}_p</span>  reductions (3 per  <span class="math">\\mathbb{F}_{p^2}</span>  multiplication using Karatsuba, 2 per  <span class="math">\\mathbb{F}_{p^2}</span>  squaring and 1 per  <span class="math">\\mathbb{F}_p</span>  multiplication). First, by delaying reductions inside  <span class="math">\\mathbb{F}_{p^2}</span>  arithmetic the number of reductions per multiplication goes down to only 2, with 22 reductions in total. Moreover, reductions corresponding to  <span class="math">G^2</span></p>
+
+    <p class="text-gray-300">and  <span class="math">3E^2</span>  in  <span class="math">Y_3</span>  (see execution (3)) can be further delayed and merged, eliminating the need of two reductions. In total, the number of reductions is now 20. Similar optimizations can be applied to other point/line evaluation formulas (see Appendix B for optimizations to formulas using Jacobian and homogeneous coordinates).</p>
+
+    <p class="text-gray-300">For accumulating line evaluations into the Miller variable,  <span class="math">\\mathbb{F}_{p^{12}}</span>  is represented using the towering  <span class="math">\\mathbb{F}_{p^2} \\to \\mathbb{F}_{p^4} \\to \\mathbb{F}_{p^{12}}</span>  and a special (dense×sparse)-multiplication costing  <span class="math">13\\tilde{m}_u + 6\\tilde{r} + 61\\tilde{a}</span>  is used. During the first iteration of the loop, a squaring in  <span class="math">\\mathbb{F}_{p^{12}}</span>  can be eliminated since the Miller variable is initialized as 1 (line 1 in Algorithm 1) and a special (sparse×sparse) multiplication costing  <span class="math">7\\tilde{m}_u + 5\\tilde{r} + 30\\tilde{a}</span>  is used to multiply the first two line evaluations, resulting in the revised Algorithm 6. This sparser multiplication is also used for multiplying the two final line evaluations in step 10 of the algorithm.</p>
+
+    <h2 id="sec-8" class="text-2xl font-bold">5 Final Exponentiation</h2>
+
+    <p class="text-gray-300">The fastest way known for computing the final exponentiation is described in [29]. The power  <span class="math">\\frac{p^{12}-1}{n}</span>  is factored into an easy exponent  <span class="math">(p^6-1)</span>  which requires a conjugation and an inversion; another easy exponent  <span class="math">(p^2+1)</span>  which requires a  <span class="math">p^2</span> -power Frobenius and a multiplication; and a hard exponent  <span class="math">(p^4-p^2+1)/n</span>  which can be performed in the cyclotomic subgroup  <span class="math">\\mathbb{G}_{\\phi_6}(\\mathbb{F}_{p^2})</span> . For computing this last power, one can write the hard exponent as follows [12]:</p>
+
+    <p class="text-gray-300"><span class="math">$(p^4 - p^2 + 1)/n = \\lambda_3 p^3 + \\lambda_2 p^2 + \\lambda_1 p + \\lambda_0,</span>$</p>
+
+    <p class="text-gray-300">where</p>
+
+    <p class="text-gray-300"><span class="math">$\\lambda_3(u)=1\\;,\\;\\lambda_2(u)=6u^2+1,</span>$</p>
+
+    <p class="text-gray-300"><span class="math">$\\lambda_1(u)=-36u^3-18u^2-12u+1\\;,\\;\\lambda_0(u)=-36u^3-30u^2-18u-2,</span>$</p>
+
+    <p class="text-gray-300">and compute the individual powers by a multi-addition chain, requiring three consecutive exponentiations by the absolute value of the curve parameter |u|, 13 multiplications, 4 squarings, 4 p-power Frobenius, 2  <span class="math">p^2</span> -power Frobenius and a single  <span class="math">p^3</span> -power Frobenius in  <span class="math">\\mathbb{F}_{p^{12}}</span> . These powers of Frobenius can be efficiently computed with the formulas in [7]. In the following subsections, we explain how to remove the expensive inversion in  <span class="math">\\mathbb{F}_{p^{12}}</span>  mentioned at the end of Section 2; and how the cyclotomic subgroup structure allows faster compressed squarings and consequently faster exponentiation by |u|.</p>
+
+    <h3 id="sec-9" class="text-xl font-semibold mt-8">5.1 Removing the Inversion Penalty</h3>
+
+    <p class="text-gray-300">From Algorithm 1, the Optimal Ate pairing when u &lt; 0 can be computed as</p>
+
+    <p class="text-gray-300"><span class="math">$a_{opt}(Q, P) = \\left[g^{-1} \\cdot h\\right]^{\\frac{p^{12} - 1}{n}},</span>$
+(4)</p>
+
+    <p class="text-gray-300">with r = 6u + 2,  <span class="math">g = f_{|r|,Q}(P)</span>  and  <span class="math">h = l_{[-|r|]Q,\\pi_p(Q)}(P) \\cdot l_{[-|r|Q]+\\pi_p(Q),-\\pi_p^2(Q)}(P)</span> . Lemma 1 below allows one to replace the expensive inversion  <span class="math">g^{-1}</span>  with a simple conjugation with no change in the result. This is depicted in line 9 of Algorithm 6. <strong>Lemma 1.</strong> The pairing  <span class="math">a_{opt}(Q, P)</span>  can be computed as  <span class="math">\\left[g^{p^6} \\cdot h\\right]^{\\frac{p^{12}-1}{n}}</span> , with g, h defined as above.</p>
+
+    <p class="text-gray-300"><em>Proof.</em> By distributing the power  <span class="math">(p^{12}-1)/n</span>  in terms g,h in Equation (4):</p>
+
+    <p class="text-gray-300"><span class="math">$\\begin{split} a_{opt}(Q,P) &amp;= g^{\\frac{1-p^{12}}{n}} \\cdot h^{\\frac{p^{12}-1}{n}} = g^{\\frac{(1-p^6)(1+p^6)}{n}} \\cdot h^{\\frac{p^{12}-1}{n}} \\\\ &amp;= g^{\\frac{(p^{12}-p^6)(1+p^6)}{n}} \\cdot h^{\\frac{p^{12}-1}{n}} = g^{\\frac{p^6(p^6-1)(p^6+1)}{n}} \\cdot h^{\\frac{p^{12}-1}{n}} = \\left\\lceil g^{p^6} \\cdot h \\right\\rceil^{\\frac{p^{12}-1}{n}} &amp; \\square \\end{split}</span>$</p>
+
+    <h2 id="sec-10" class="text-2xl font-bold">5.2 Computing <em>u</em>-th powers in <span class="math">\\mathbb{G}_{\\phi_6}(\\mathbb{F}_{p^2})</span></h2>
+
+    <p class="text-gray-300">Let</p>
+
+    <p class="text-gray-300"><span class="math">$g = \\sum_{i=0}^{2} (g_{2i} + g_{2i+1}s)t^i \\in \\mathbb{G}_{\\phi_6}(\\mathbb{F}_{p^2}) \\text{ and } g^2 = \\sum_{i=0}^{2} (h_{2i} + h_{2i+1}s)t^i</span>$</p>
+
+    <p class="text-gray-300">with  <span class="math">g_i, h_i \\in \\mathbb{F}_{p^2}</span> . In [30], it was shown that one can compress g to  <span class="math">\\mathcal{C}(g) = [g_2, g_3, g_4, g_5]</span> , and the compressed representation of  <span class="math">g^2</span>  is computed as  <span class="math">\\mathcal{C}(g^2) = [h_2, h_3, h_4, h_5]</span> , where  <span class="math">h_i</span>  is computed as follows:</p>
+
+    <p class="text-gray-300"><span class="math">$h_2 = 2(g_2 + 3\\xi B_{4,5}),</span>$
+<span class="math">h_3 = 3(A_{4,5} - (\\xi + 1)B_{4,5}) - 2g_3,</span>   <span class="math">h_4 = 3(A_{2,3} - (\\xi + 1)B_{2,3}) - 2g_4,</span>   <span class="math">h_5 = 2(g_5 + 3B_{2,3}),</span>  (5)</p>
+
+    <p class="text-gray-300">where  <span class="math">A_{i,j} = (g_i + g_j)(g_i + \\xi g_j)</span>  and  <span class="math">B_{i,j} = g_i g_j</span> . The above formula requires 4 multiplications in  <span class="math">\\mathbb{F}_{p^2}</span> . Considering the lazy reduction technique discussed in Section 3.3, we propose another formula that is slightly faster and has a cost of  <span class="math">6\\tilde{s}_u + 4\\tilde{r} + 31\\tilde{a}</span> . The formula is given as follows:</p>
+
+    <p class="text-gray-300"><span class="math">$h_2 = 2g_2 + 3(S_{4,5} - S_4 - S_5)\\xi, h_3 = 3(S_4 + S_5\\xi) - 2g_3, h_4 = 3(S_2 + S_3\\xi) - 2g_4, h_5 = 2g_5 + 3(S_{2,3} - S_2 - S_3),</span>$
+(6)</p>
+
+    <p class="text-gray-300">where  <span class="math">S_{i,j} = (g_i + g_j)^2</span>  and  <span class="math">S_i = g_i^2</span> ; also see Appendix A for the correctness of our formula and an explicit implementation.</p>
+
+    <p class="text-gray-300">When g is raised to a power via a square-and-multiply exponentiation algorithm, full representation of elements (decompression) is required because, if  <span class="math">\\mathcal{C}</span>  is used as the compression map, it is not known how to perform multiplication given the compressed representation of elements. Given a compressed representation of  <span class="math">g \\in \\mathbb{G}_{\\phi_6}(\\mathbb{F}_{p^2}) \\setminus \\{1\\}</span> ,  <span class="math">\\mathcal{C}(g) = [g_2, g_3, g_4, g_5]</span> , the decompression map  <span class="math">\\mathcal{D}</span>  is evaluated as follows (see [30] for more details):</p>
+
+    <p class="text-gray-300"><span class="math">$\\mathcal{D}([g_2, g_3, g_4, g_5]) = (g_0 + g_1 s) + (g_2 + g_3 s)t + (g_4 + g_5 s)t^2,</span>$</p>
+
+    <p class="text-gray-300"><span class="math">$\\begin{cases} g_1 = \\frac{g_5^2 \\xi + 3g_4^2 - 2g_3}{4g_2}, &amp; g_0 = (2g_1^2 + g_2 g_5 - 3g_3 g_4)\\xi + 1, &amp; \\text{if } g_2 \\neq 0; \\\\ g_1 = \\frac{2g_4 g_5}{g_3}, &amp; g_0 = (2g_1^2 - 3g_3 g_4)\\xi + 1, &amp; \\text{if } g_2 = 0. \\end{cases}</span>$</p>
+
+    <p class="text-gray-300">In particular,  <span class="math">g^{|u|}</span>  can be computed in three steps:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Compute  <span class="math">C(g^{2^i})</span>  for  <span class="math">1 \\le i \\le 62</span>  using (6) and store  <span class="math">C(g^{2^{55}})</span>  and  <span class="math">C(g^{2^{62}})</span> . 2. Compute  <span class="math">\\mathcal{D}(C(g^{2^{55}})) = g^{2^{55}}</span>  and  <span class="math">\\mathcal{D}(C(g^{2^{62}})) = g^{2^{62}}</span> . 3. Compute  <span class="math">g^{|u|} = g^{2^{62}} \\cdot g^{2^{55}} \\cdot g</span> .</li>
+    </ol></li>
+    </ul>
+
+    <p class="text-gray-300">Step 1 requires 62 squarings in  <span class="math">\\mathbb{G}_{\\phi_6}(\\mathbb{F}_{p^2})</span> . Using Montgomery's simultaneous inversion trick [31], Step 2 requires  <span class="math">9\\tilde{m} + 6\\tilde{s} + 22\\tilde{a} + \\tilde{i}</span> . Step 3 requires 2 multiplications in  <span class="math">\\mathbb{F}_{p^{12}}</span> . The total cost is:</p>
+
+    <p class="text-gray-300"><span class="math">$\\begin{split} Exp &amp;= 62 \\cdot (6\\tilde{s}_u + 4\\tilde{r} + 31\\tilde{a}) + (9\\tilde{m} + 6\\tilde{s} + 22\\tilde{a} + \\tilde{i}) + 2 \\cdot (18\\tilde{m}_u + 6\\tilde{r} + 110\\tilde{a}) \\\\ &amp;= 45\\tilde{m}_u + 378\\tilde{s}_u + 275\\tilde{r} + 2164\\tilde{a} + \\tilde{i}, \\end{split}</span>$</p>
+
+    <p class="text-gray-300">Granger-Scott's [32] formula for squaring can be implemented at a cost of  <span class="math">9\\tilde{s}_u + 6\\tilde{r} + 46\\tilde{a}</span>  if lazy reduction techniques are employed. With this approach, an exponentiation costs:</p>
+
+    <p class="text-gray-300"><span class="math">$Exp&#x27; = 62 \\cdot (9\\tilde{s}_u + 6\\tilde{r} + 46\\tilde{a}) + 2 \\cdot (18\\tilde{m}_u + 6\\tilde{r} + 110\\tilde{a})</span>$</p>
+
+    <p class="text-gray-300">=  <span class="math">36\\tilde{m}_u + 558\\tilde{s}_u + 399\\tilde{r} + 3072\\tilde{a}</span> .</p>
+
+    <p class="text-gray-300">Hence, the faster compressed squaring formulas reduce by 33% the number of squarings and by 30% the number of additions in  <span class="math">\\mathbb{F}_{p^2}</span> .</p>
+
+    <h3 id="sec-11" class="text-xl font-semibold mt-8"><strong>Algorithm 6</strong> Revised Optimal Ate pairing on BN curves (generalized for u &lt; 0).</h3>
+
+    <pre><code class="language-text">Input: P \\in \\mathbb{G}_1, Q \\in \\mathbb{G}_2, r = |6u + 2| = \\sum_{i=0}^{\\log_2(r)} r_i 2^i
+Output: a_{opt}(Q, P)
+ 1: d \\leftarrow l_{Q,Q}(P), T \\leftarrow 2Q, e \\leftarrow 1
+ 2: if r_{\\lfloor \\log_2(r) \\rfloor - 1} = 1 then e \\leftarrow l_{T,Q}(P), T \\leftarrow T + Q
+ 3: f \\leftarrow d \\cdot e
+ 4: for i = \\lfloor \\log_2(r) \\rfloor - 2 downto 0 do
+ 5: f \\leftarrow f^2 \\cdot l_{T,T}(P), T \\leftarrow 2T
+          if r_i = 1 then f \\leftarrow f \\cdot l_{T,Q}(P), T \\leftarrow T + Q
+ 7: end for
+ 8: Q_1 \\leftarrow \\pi_p(Q), Q_2 \\leftarrow \\pi_p^2(Q)
+ 9: if u &lt; 0 then T \\leftarrow -T, f \\leftarrow f^{p^6}
+10: d \\leftarrow l_{T,Q_1}(P), T \\leftarrow T + Q_1, e \\leftarrow l_{T,-Q_2}(P), T \\leftarrow T - Q_2, f \\leftarrow f \\cdot (d \\cdot e)
+11: f \\leftarrow f^{(p^6-1)(p^2+1)(p^4-p^2+1)/n}
+12: return f
+</code></pre>
+
+    <h4 id="sec-12" class="text-lg font-semibold mt-6">6 Computational Cost</h4>
+
+    <p class="text-gray-300">We now consider all the improvements described in the previous sections and present a detailed operation count. Table 1 shows the exact operation count for each operation executed in Miller's Algorithm.</p>
+
+    <p class="text-gray-300"><strong>Table 1.</strong> Operation counts for arithmetic required by Miller's Algorithm. (†) Work [7] counts these additions in a different way. Considering their criteria, costs for multiplication and squaring in  <span class="math">\\mathbb{F}_{p^2}</span>  are  <span class="math">3m_u + 2r + 4a</span>  and  <span class="math">2m_u + 2r + 2a</span> , respectively.</p>
+
+    <div class="overflow-x-auto my-4">
+      <table class="min-w-full text-sm text-gray-300">
+        <thead>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left"><span class="math">E&#x27;(\\mathbb{F}_{p^2})</span> -Arithmetic</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">Operation Count</th>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Doubling/Eval.</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"><span class="math">3\\tilde{m}_u + 6\\tilde{s}_u + 8\\tilde{r} + 22\\tilde{a} + 4m</span></td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Addition/Eval.</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"><span class="math">11\\tilde{m}_u + 2\\tilde{s}_u + 11\\tilde{r} + 12\\tilde{a} + 4m</span></td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">p-power Frobenius</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"><span class="math">6m_u + 4r + 18a</span></td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"><span class="math">p^2</span> -power Frobenius</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">2m + 2a</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Negation</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"><span class="math">\\tilde{a}</span></td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"><span class="math">\\mathbb{F}_{p^2}</span> -Arithmetic</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Operation Count</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Add./Sub./Neg.</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"><span class="math">\\tilde{a} = 2a</span></td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Conjugation</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">a</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Multiplication</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"><span class="math">\\tilde{m} = \\tilde{m}_u + \\tilde{r} = 3m_u + 2r + 8a^{\\dagger}</span></td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Squaring</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"><span class="math">\\tilde{s} = \\tilde{s}_u + \\tilde{r} = 2m_u + 2r + 3a^{\\dagger}</span></td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Multiplication by <span class="math">\\beta</span></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">a</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Multiplication by <span class="math">\\xi</span></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">2a</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Inversion</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"><span class="math">\\tilde{i}</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="overflow-x-auto my-4">
+      <table class="min-w-full text-sm text-gray-300">
+        <thead>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left"><span class="math">\\mathbb{F}_{p^{12}}</span> -Arithmetic</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">Operation Count</th>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Add./Sub.</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"><span class="math">6\\tilde{a}</span></td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Conjugation</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"><span class="math">3\\tilde{a}</span></td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Multiplication</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"><span class="math">18\\tilde{m}_u + 6\\tilde{r} + 110\\tilde{a}</span></td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Sparse Mult.</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"><span class="math">13\\tilde{m}_u + 6\\tilde{r} + 61\\tilde{a}</span></td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Sparser Mult.</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"><span class="math">7\\tilde{m}_u + 5\\tilde{r} + 30\\tilde{a}</span></td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Squaring</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"><span class="math">12\\tilde{m}_u + 6\\tilde{r} + 73\\tilde{a}</span></td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Cyc. Squaring</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"><span class="math">9\\tilde{s}_u + 6\\tilde{r} + 46\\tilde{a}</span></td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Comp. Squaring</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"><span class="math">6\\tilde{s}_u + 4\\tilde{r} + 31\\tilde{a}</span></td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Simult. Decomp.</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"><span class="math">9\\tilde{m} + 6\\tilde{s} + 22\\tilde{a} + \\tilde{i}</span></td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">p-power Frobenius</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"><span class="math">15m_u + 10r + 46a</span></td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"><span class="math">p^2</span> -power Frobenius</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"><span class="math">10m + 2\\tilde{a}</span></td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Inversion</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"><span class="math">25\\tilde{m}_u + 9\\tilde{s}_u + 24\\tilde{r}</span></td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"><span class="math">+112\\tilde{a}+\\tilde{i}</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p class="text-gray-300">For the selected parameters and with the presented improvements, the Miller Loop in Algorithm 6 executes 64 point doublings with line evaluations, 6 point additions with line evaluations (4 inside Miller Loop and 2 more at the final steps), 1 negation in  <span class="math">\\mathbb{F}_{p^2}</span>  to precompute  <span class="math">\\overline{y_P}</span> , 1 p-power Frobenius, 1  <span class="math">p^2</span> -power Frobenius and 2 negations in  <span class="math">E(\\mathbb{F}_{p^2})</span> ; and 1 conjugation, 1 multiplication, 66 sparse multiplications, 2 sparser multiplications and 63 squarings in  <span class="math">\\mathbb{F}_{p^{12}}</span> . The cost of the Miller Loop is:</p>
+
+    <p class="text-gray-300"><span class="math">$\\begin{split} ML &amp;= 64 \\cdot \\left(3\\tilde{m}_u + 6\\tilde{s}_u + 8\\tilde{r} + 22\\tilde{a} + 4m\\right) + 6 \\cdot \\left(11\\tilde{m}_u + 2\\tilde{s}_u + 11\\tilde{r} + 12\\tilde{a} + 4m\\right) \\\\ &amp;+ \\tilde{a} + 6m_u + 4r + 18a + 2m + 2a + 2\\tilde{a} + 3\\tilde{a} + \\left(18\\tilde{m}_u + 6\\tilde{r} + 110\\tilde{a}\\right) \\\\ &amp;+ 66 \\cdot \\left(13\\tilde{m}_u + 6\\tilde{r} + 61\\tilde{a}\\right) + 2 \\cdot \\left(7\\tilde{m}_u + 5\\tilde{r} + 30\\tilde{a}\\right) + 63 \\cdot \\left(12\\tilde{m}_u + 6\\tilde{r} + 73\\tilde{a}\\right) \\\\ &amp;= 1904\\tilde{m}_u + 396\\tilde{s}_u + 1368\\tilde{r} + 10281\\tilde{a} + 282m + 6m_u + 4r + 20a. \\end{split}</span>$</p>
+
+    <p class="text-gray-300">The final exponentiation executes in total 1 inversion, 4 conjugations, 15 multiplications, 3 u-th powers, 4 cyclotomic squarings, 5 p-power Frobenius, 3  <span class="math">p^2</span> -power Frobenius:</p>
+
+    <p class="text-gray-300"><span class="math">$\\begin{split} FE &amp;= 25\\tilde{m}_u + 9\\tilde{s}_u + 24\\tilde{r} + 112\\tilde{a} + \\tilde{i} + 4\\cdot 3\\tilde{a} + 15\\cdot \\left(18\\tilde{m}_u + 6\\tilde{r} + 110\\tilde{a}\\right) \\\\ &amp;+ 3\\cdot Exp + 4\\cdot \\left(9\\tilde{s}_u + 6\\tilde{r} + 46\\tilde{a}\\right) + 5\\cdot \\left(15m_u + 10r + 46a\\right) + 3\\cdot \\left(10m + 2\\tilde{a}\\right) \\\\ &amp;= 430\\tilde{m}_u + 1179\\tilde{s}_u + 963\\tilde{r} + 8456\\tilde{a} + 4\\tilde{i} + 30m + 75m_u + 50r + 230a. \\end{split}</span>$</p>
+
+    <p class="text-gray-300">Table 2 gives a first-order comparison between our implementation and the best implementation available in the literature of the Optimal Ate pairing at the 128-bit security level in the same platform. For the related work, we suppose that lazy reduction is always used in  <span class="math">\\mathbb{F}_{p^2}</span>  and then each multiplication or squaring essentially computes a modular reduction (that is,  <span class="math">\\tilde{m} = \\tilde{m}_u + \\tilde{r} = 3m_u + 2r</span>  and  <span class="math">\\tilde{s} = \\tilde{s}_u + \\tilde{r} = 2m_u + 2r</span> ). Note that our generalization of the lazy reduction techniques to the whole pairing computation brings the number of modular reductions from the expected 7818 (if lazy reduction was only used for  <span class="math">\\mathbb{F}_{p^2}</span>  arithmetic) to just 4662, avoiding more than 40% of the total required modular reductions. The number of multiplications is also reduced by 13% and the</p>
+
+    <p class="text-gray-300">number of additions is increased by 26% due to lazy reduction trade-offs. Our operation count for the pairing computation is apparently more expensive than Pereira et al. [10]. However, the reader should note that, when we consider the real cost of additions in Fp, we cannot exploit the squaring formula in Fp&lt;sup&gt;12&lt;/sup&gt; by [28] (see Section 3.3) and a point doubling formula with fewer multiplications (see Section 4), given the significant increase in the number of additions.</p>
+
+    <p class="text-gray-300">Table 2. Comparison of operation counts for different implementations of the Optimal Ate pairing at the 128-bit security level.</p>
+
+    <div class="overflow-x-auto my-4">
+      <table class="min-w-full text-sm text-gray-300">
+        <thead>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">Work</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">Phase</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">Operations in Fp2</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">Operations in Fp</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left"></th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left"></th>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Beuchat et al.[7]</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">ML</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">1952( ˜mu&lt;br&gt;+ ˜r) + 568(˜su&lt;br&gt;+ ˜r) + 6912˜a</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">6992mu&lt;br&gt;+ 5040r</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">FE</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">403( ˜mu&lt;br&gt;+ ˜r) + 1719(˜su&lt;br&gt;+ ˜r) + 7021˜a</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">4647mu&lt;br&gt;+ 4244r</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">ML+FE 2355( ˜mu&lt;br&gt;+ ˜r) + 2287(˜su&lt;br&gt;+ ˜r) + 13933˜a</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">11639mu&lt;br&gt;+ 9284r</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">This work</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">ML</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">1904 ˜mu&lt;br&gt;+ 396˜su&lt;br&gt;+ 1368˜r + 10281˜a</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">6504mu&lt;br&gt;+ 2736r</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">FE</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">430 ˜mu&lt;br&gt;+ 1179˜su&lt;br&gt;+ 963˜r + 8456˜a</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">3648mu&lt;br&gt;+ 1926r</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">ML+FE</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">2334 ˜mu&lt;br&gt;+ 1575˜su&lt;br&gt;+ 2331˜r + 18737˜a</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">10152mu&lt;br&gt;+ 4662r</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2 id="sec-13" class="text-2xl font-bold">7 Implementation Results</h2>
+
+    <p class="text-gray-300">A software implementation was realized to confirm the performance benefits resulting from the introduced techniques. We implemented Fp&lt;sup&gt;2&lt;/sup&gt; arithmetic directly in Assembly, largely following advice from [7] to optimize carry handling and eliminate function call overheads. Higher-level algorithms were implemented using the C programming language compiled with the GCC compiler using -O3 optimization level. Table 3 presents the relevant timings in millions of cycles. Basic Implementation employs homogeneous projective coordinates and lazy reduction below Fp&lt;sup&gt;2&lt;/sup&gt; . Faster arithmetic in cyclotomic subgroups accelerates the Basic Implementation by 5%-7% and, in conjunction with generalized lazy reduction, it improves the Basic Implementation by 18%-22%.</p>
+
+    <p class="text-gray-300">Table 3. Cumulative performance improvement when using new arithmetic in cyclotomic subgroups (Section 5.2) and generalized lazy reduction (Section 3.1) on several Intel and AMD 64-bit architectures. Improvements are calculated relatively to the Basic Implementation. Timings are presented in millions of clock cycles.</p>
+
+    <div class="overflow-x-auto my-4">
+      <table class="min-w-full text-sm text-gray-300">
+        <thead>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left"></th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">This work</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left"></th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left"></th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left"></th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left"></th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left"></th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left"></th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left"></th>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Method</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Phenom II Impr. Core i5 Impr. Opteron Impr. Core 2 Impr.</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Basic Implementation</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">1.907</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">-</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">2.162</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">-</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">2.127</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">-</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">2.829</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">-</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Cyclotomic Formulas</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">1.777</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">7%</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">2.020</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">7%</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">2.005</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">6%</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">2.677</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">5%</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Lazy Reduction</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">1.562</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">18%</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">1.688</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">22%</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">1.710</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">20%</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">2.194</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">22%</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p class="text-gray-300">Table 4 compares our implementation with related work. To ensure that machines with different configurations but belonging to the same microarchitecture had compatible performance (as is the case with Core i5 and Core i7), software from [7] was benchmarked and the results compared with the ones reported in [7]. Machines considered equivalent by this criteria are presented in the same column. We note that Phenom II was not considered in the original study and that we could not find a Core 2 Duo machine producing the same timings as in [7]. For this reason, timings for these two architectures were taken independently by the authors using the available software. Observe that the Basic Implementation in Table 3 consistently outperforms Beuchat et al. due to our careful implementation of an optimal choice of parameters (E(Fp) : y &lt;sup&gt;2&lt;/sup&gt; = x &lt;sup&gt;3&lt;/sup&gt; + 2, p = 3 mod 4) [10] combined with optimized curve arithmetic in homogeneous coordinates [9]. When lazy reduction and faster cyclotomic formulas are enabled, pairing computation becomes faster than the best previous result by 28%-34%. For extended benchmark results and comparisons with previous works on different 64-bit processors, the reader is referred to our online database [33].</p>
+
+    <p class="text-gray-300">Table 4. Comparison between implementations on 64-bit architectures. Timings are presented in clock cycles. In order to reproduce data from [7], the Turbo Boost overcloking technology had to be enabled on the Core i5. Cycle counts without this feature can be obtained by scaling each figure in the corresponding column by a 1.21 factor (the overclocking ratio for this processor model).</p>
+
+    <div class="overflow-x-auto my-4">
+      <table class="min-w-full text-sm text-gray-300">
+        <thead>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left"></th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">Work/Platform</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left"></th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left"></th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left"></th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left"></th>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Beuchat et al. [7]</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Operation</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Phenom II</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Core i7</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Opteron Core 2 Duo</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Multiplication in Fp2</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">440</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">435</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">443</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">590</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Squaring in Fp2</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">353</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">342</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">355</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">479</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Miller Loop</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">1,338,000 1,330,000 1,360,000</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">1,781,000</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Final Exponentiation 1,020,000 1,000,000 1,040,000</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">1,370,000</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Optimal Ate Pairing</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">2,358,000 2,330,000 2,400,000</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">3,151,000</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">This work</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Operation</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Phenom II</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Core i5</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Opteron Core 2 Duo</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Multiplication in Fp2</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">368</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">412</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">390</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">560</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Squaring in Fp2</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">288</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">328</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">295</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">451</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Miller Loop</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">898,000</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">978,000</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">988,000</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">1,275,000</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Final Exponentiation</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">664,000</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">710,000</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">722,000</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">919,000</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Optimal Ate Pairing</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">1,562,000 1,688,000 1,710,000</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">2,194,000</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Improvement</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">34%</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">28%</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">29%</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">30%</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2 id="sec-14" class="text-2xl font-bold">8 Conclusion</h2>
+
+    <p class="text-gray-300">In this work, we revisited the problem of computing optimal pairings on ordinary pairing-friendly curves over prime fields. Several new techniques were introduced for pairing computation, comprised mainly in the generalization of lazy reduction techniques to arithmetic in extensions above Fp&lt;sup&gt;2&lt;/sup&gt; and inside curve arithmetic; and improvements to the final exponentiation consisting of a formula for compressed squaring in cyclotomic subgroups and an arithmetic trick to remove penalties from negative curve parameterizations. The faster arithmetic in the cyclotomic subgroup improved pairing performance by 5%-7% and the generalized lazy reduction technique was able to eliminate 40% of the required modular reductions, improving pairing performance by further 11%-17%. The introduced techniques allow for the first time a pairing computation under 2 million cycles on 64-bit desktop computing platforms, improving the state-of-the-art by 28%-34%. The performance improvements are expected to be even higher on embedded architectures, where the ratio between multiplication and addition is typically higher.</p>
+
+    <h2 id="sec-15" class="text-2xl font-bold">Acknowledgements</h2>
+
+    <p class="text-gray-300">We would like to express our gratitude to Alfred Menezes, Craig Costello, Michael Scott, Paulo S. L. M. Barreto, Geovandro C. C. F. Pereira and Conrado P. L. Gouvêa for useful discussions during the preparation of this work. The authors thank the Natural Sciences and Engineering Research Council of Canada (NSERC), the Ontario Centres of Excellence (OCE), CNPq, CAPES and FAPESP for partially supporting this work.</p>
+
+    <h2 id="sec-16" class="text-2xl font-bold">References</h2>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Boneh, D., Franklin, M.K.: Identity-Based Encryption from the Weil Pairing. In Kilian, J. (ed.) CRYPTO 2001. LNCS, vol. 2139, pp. 213–229. Springer (2001)</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Sakai, R., Ohgishi, K., Kasahara, M.: Cryptosystems Based on Pairing over Elliptic Curve (in Japanese). In: The 2001 Symposium on Cryptography and Information Security. IEICE, Oiso, Japan (2001)</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Groth, J., Sahai, A.: Efficient Non-interactive Proof Systems for Bilinear Groups. In Smart, N.P. (ed.) EUROCRYPT 2008. LNCS, vol. 4965, pp. 415–432. Springer (2008)</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Joux, A.: A One Round Protocol for Tripartite Diffie-Hellman. Journal of Cryptology 17(4), 263–276 (2004)</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Hankerson, D., Menezes, A., Scott, M.: Identity-Based Cryptography, chapter 12, pp. 188–206. IOS Press, Amsterdam (2008)</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Naehrig, M., Niederhagen, R., Schwabe, P.: New Software Speed Records for Cryptographic Pairings. In Abdalla, M., Barreto, P.S.L.M. (eds.) LATINCRYPT 2010. LNCS, vol. 6212, pp. 109–123. Springer (2010)</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Beuchat, J.L., Díaz, J.E.G., Mitsunari, S., Okamoto, E., Rodríguez-Henríquez, F., Teruya, T.: High-Speed Software Implementation of the Optimal Ate Pairing over Barreto-Naehrig Curves. In Joye, M., Miyaji, A., Otsuka, A. (eds.) Pairing 2010. LNCS, vol. 6487, pp. 21–39. Springer (2010)</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Vercauteren, F.: Optimal pairings. IEEE Transactions on Information Theory 56(1), 455–461 (2010)</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Costello, C., Lange, T., Naehrig, M.: Faster Pairing Computations on Curves with High-Degree Twists. In Nguyen, P.Q., Pointcheval, D. (eds.) PKC 2010. LNCS, vol. 6056, pp. 224–242. Springer (2010)</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Pereira, G.C.C.F., Simplício Jr, M.A., Naehrig, M., Barreto, P.S.L.M.: A Family of Implementation-Friendly BN Elliptic Curves. To appear in Journal of Systems and Software.</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Barreto, P.S.L.M., Naehrig, M.: Pairing-Friendly Elliptic Curves of Prime Order. In Preneel, B., Tavares, S.E. (eds.) SAC 2005. LNCS, vol. 3897, pp. 319–331. Springer (2005)</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Scott, M.: Implementing Cryptographic Pairings. In Takagi, T., Okamoto, T., Okamoto, E., Okamoto, T. (eds.) Pairing 2007. LNCS, vol. 4575, pp. 177–196. Springer (2007)</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Fan, J., Vercauteren, F., Verbauwhede, I.: Faster Fp-arithmetic for Cryptographic Pairings on Barreto-Naehrig Curves. In Clavier, C., Gaj, K. (eds.) CHES 2009. LNCS, vol. 5747, pp. 240–253. Springer (2009)</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Freeman, D., Scott, M., Teske, E.: A Taxonomy of Pairing-Friendly Elliptic Curves. Journal of Cryptology 23(2), 224–280 (2010)</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Hess, F., Smart, N.P., Vercauteren, F.: The Eta Pairing Revisited. IEEE Transactions on Information Theory 52, 4595–4602 (2006)</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>E. Lee, H.L., Park, C.: Efficient and Generalized Pairing Computation on Abelian Varieties. IEEE Transactions on Information Theory 55(4), 1793–1803 (2009)</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Nogami, Y., Akane, M., Sakemi, Y., Kato, H., Morikawa, Y.: Integer Variable χ-Based Ate Pairing. In Galbraith, S.D., Paterson, K.G. (eds.) Pairing 2008. LNCS, vol. 5209, pp. 178–191. Springer (2008)</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Miller, V.: Uses of Elliptic Curves in Cryptography. In Williams, H.C. (ed.) CRYPTO 1985. LNCS, vol. 218, pp. 417–426. Springer (1986)</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Miller, V.S.: The Weil Pairing, and its Efficient Calculation. Journal of Cryptology 17(4), 235–261 (2004)</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Barreto, P.S.L.M., Kim, H.Y., Lynn, B., Scott, M.: Efficient Algorithms for Pairing-Based Cryptosystems. In Yung, M. (ed.) CRYPTO 2002. LNCS, vol. 2442, pp. 354–368. Springer (2002)</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>IEEE: P1363.3: Standard for Identity-Based Cryptographic Techniques using Pairings. http://grouper.ieee.org/groups/1363/IBC/submissions/ (2006)</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Devegili, A.J., Scott, M., Dahab, R.: Implementing Cryptographic Pairings over Barreto-Naehrig Curves. In Takagi, T., Okamoto, T., Okamoto, E., Okamoto, T. (eds.) Pairing 2007. LNCS, vol. 4575, pp. 197–207. Springer (2007)</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Weber, D., Denny, T.F.: The Solution of McCurley's Discrete Log Challenge. In Krawczyk, H. (ed.) CRYPTO 1998. LNCS, vol. 1462, pp. 458–471. Springer (1998)</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Lim, C.H., Hwang, H.S.: Fast Implementation of Elliptic Curve Arithmetic in GF(p n ). In Imai, H., Zheng, Y. (eds.) PKC 2000. LNCS, vol. 1751, pp. 405–421. Springer (2000)</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Avanzi, R.M.: Aspects of Hyperelliptic Curves over Large Prime Fields in Software Implementations. In Joye, M., Quisquater, J.J. (eds.) CHES 2004. LNCS, vol. 3156, pp. 148–162. Springer (2004)</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Benger, N., Scott, M.: Constructing Tower Extensions of Finite Fields for Implementation of Pairing-Based Cryptography. In Hasan, M.A., Helleseth, T. (eds.) WAIFI 2010. LNCS, vol. 6087, pp. 180–195. Springer (2010)</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Montgomery, P.L.: Modular Multiplication Without Trial Division. Mathematics of Computation 44(170), 519–521 (1985)</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Chung, J., Hasan, M.: Asymmetric Squaring Formulae. In: 18th IEEE Symposium on Computer Arithmetic (ARITH-18 2007), pp. 113–122. IEEE Press (2007)</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Scott, M., Benger, N., Charlemagne, M., Perez, L.J.D., Kachisa, E.J.: On the Final Exponentiation for Calculating Pairings on Ordinary Elliptic Curves. In Shacham, H., Waters, B. (eds.) Pairing 2009. LNCS, vol. 5671, pp. 78–88. Springer (2009)</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Karabina, K.: Squaring in Cyclotomic Subgroups. Cryptology ePrint Archive, Report 2010/542. http://eprint.iacr.org/ (2010)</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Montgomery, P.: Speeding the Pollard and Elliptic Curve Methods of Factorization. Mathematics of Computation 48, 243–264 (1987)</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Granger, R., Scott, M.: Faster Squaring in the Cyclotomic Subgroup of Sixth Degree Extensions. In Nguyen, P.Q., Pointcheval, D. (eds.) PKC 2010. LNCS, vol. 6056, pp. 209-223 Springer (2010)</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Longa, P.: Speed Benchmarks for Pairings over Ordinary Curves. Available at http://www.patricklonga.bravehost.com/speed_pairing.html#speed</li>
+    </ol></li>
+    </ul>
+
+    <h2 id="sec-17" class="text-2xl font-bold">Squaring in <span class="math">\\mathbb{G}_{\\phi_6}(\\mathbb{F}_{p^2})</span></h2>
+
+    <p class="text-gray-300">We obtain our formula (6) from (5) as follows:</p>
+
+    <p class="text-gray-300"><span class="math">$h_2 = 2(g_2 + 3\\xi B_{4,5}) = 2(g_2 + 3g_4g_5\\xi) = 2g_2 + 3(S_{4,5} - S_4 - S_5)\\xi,</span>$</p>
+
+    <p class="text-gray-300"><span class="math">$h_3 = 3(A_{4,5} - (\\xi + 1)B_{4,5}) - 2g_3 = 3(g_4^2 + g_5^2\\xi - 2g_4) = 3(S_4 + S_5\\xi) - 2g_3,</span>$</p>
+
+    <p class="text-gray-300"><span class="math">$h_4 = 3(A_{2,3} - (\\xi + 1)B_{2,3}) - 2g_4 = 3(g_2^2 + g_3^2\\xi - 2g_4) = 3(S_2 + S_3\\xi) - 2g_4,</span>$</p>
+
+    <p class="text-gray-300"><span class="math">$h_5 = 2(g_5 + 3B_{2,3}) = 2(g_5 + 3g_2g_3) = 2g_5 + 3(S_{2,3} - S_2 - S_3),</span>$</p>
+
+    <p class="text-gray-300">where  <span class="math">A_{i,j} = (g_i + g_j)(g_i + \\xi g_j)</span> ,  <span class="math">B_{i,j} = g_i g_j</span> ,  <span class="math">S_{i,j} = (g_i + g_j)^2</span>  and  <span class="math">S_i = g_i^2</span> . The implementation of this formula optimized with lazy reduction is detailed in Algorithm 8 with each squaring computed as in Algorithm 7.</p>
+
+    <p class="text-gray-300"><strong>Algorithm 7</strong> Squaring in  <span class="math">\\mathbb{F}_{p^2}</span>  without reduction ( <span class="math">\\times^2</span> , cost of  <span class="math">\\tilde{m}_u = 2m_u + 3a</span> )</p>
+
+    <p class="text-gray-300">Input:  <span class="math">a = (a_0 + a_1 i) \\in \\mathbb{F}_{p^2}</span> . Output:  <span class="math">c = a \\times^2 a = (c_0 + c_1 i) \\in \\mathbb{F}_{p^2}</span> .</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>1:  <span class="math">t_0 \\leftarrow a_0 + a_1, t_1 \\leftarrow a_0 \\ominus a_1</span></li>
+      <li>2:  <span class="math">T_0 \\leftarrow t_0 \\times t_1</span></li>
+      <li>3:  <span class="math">t_0 \\leftarrow a_0 + a_0</span></li>
+      <li>4:  <span class="math">T_1 \\leftarrow t_0 \\times a_1</span></li>
+      <li>5: <strong>return</strong>  <span class="math">C = (T_0 + T_1 i)</span></li>
+    </ul>
+
+    <p class="text-gray-300">The revised formulas below include our optimizations using lazy reduction and minimizing the number of additions and other minor operations.</p>
+
+    <h4 id="sec-18" class="text-lg font-semibold mt-6">B.1<strong>Jacobian Coordinates</strong></h4>
+
+    <p class="text-gray-300">The curve arithmetic in the Miller Loop is traditionally performed using Jacobian coordinates [5,7]. Let the point  <span class="math">T=(X_1,Y_1,Z_1)\\in E&#x27;(\\mathbb{F}_{p^2})</span>  be in Jacobian coordinates. To compute  <span class="math">2T = (X_3, Y_3, Z_3)</span>  and evaluate the arising line function in point  <span class="math">P = (x_P, y_P)</span>  we present the following revised formula that requires fewer  <span class="math">\\mathbb{F}_{p^2}</span>  additions:</p>
+
+    <p class="text-gray-300"><span class="math">$X_{3} = \\frac{9X_{1}^{4}}{4} - 2X_{1}Y_{1}^{2}, \\quad Y_{3} = \\frac{3X_{1}^{2}}{2} \\left( X_{1}Y_{1}^{2} - X_{3} \\right) - Y_{1}^{4}, \\quad Z_{3} = Y_{1}Z_{1},</span>$</p>
+
+    <p class="text-gray-300"><span class="math">$l = Z_{3}Z_{1}^{2}y_{P} - \\left( \\frac{3X_{1}^{2}Z_{1}^{2}x_{P}}{2} \\right) + \\left( \\frac{3X_{1}^{3}}{2} - Y_{1}^{2} \\right),</span>$</p>
+
+    <p class="text-gray-300"><span class="math">$(7)</span>$</p>
+
+    <h3 id="sec-19" class="text-xl font-semibold mt-8"><strong>Algorithm 8</strong> Compressed squaring in <span class="math">\\mathbb{G}_{\\phi_6}(\\mathbb{F}_{p^2})</span> (cost of <span class="math">6\\tilde{s}_u + 4\\tilde{r} + 31\\tilde{a}</span> )</h3>
+
+    <pre><code class="language-text">Input: a = (a_2 + a_3 s)t + (a_4 + a_5 s)t^2 \\in \\mathbb{G}_{\\phi_6}(\\mathbb{F}_{p^2})
+Output: c = a^2 = (c_2 + c_3 s)t + (c_4 + c_5 s)t^2 \\in \\mathbb{G}_{\\phi_6}(\\mathbb{F}_{n^2}).
+ 1: T_0 \\leftarrow a_4 \\times^2 a_4, T_1 \\leftarrow a_5 \\times^2 a_5, t_0 \\leftarrow a_4 \\oplus^2 a_5
+
+2: T_2 \\leftarrow t_0 \\times^2 t_0, T_3 \\leftarrow T_0 +^2 T_1, T_3 \\leftarrow T_0 \\ominus^2 T_3
+
+3: t_0 \\leftarrow T_3 \\mod^2 p, t_1 \\leftarrow a_2 \\oplus^2 a_3, T_3 \\leftarrow t_1 \\times^2 t_1, T_2 \\leftarrow a_2 \\times^2 a_2
+  4: t_{1,0} \\leftarrow t_{0,0} \\ominus t_{0,1}, t_{1,1} \\leftarrow t_{0,0} \\oplus t_{0,1} \\ (\\equiv t1 \\leftarrow \\xi \\cdot t0)
+  5: t_0 \\leftarrow t_1 \\oplus^2 a_2, t_0 \\leftarrow t_0 \\oplus^2 t_0
+  6: c_2 \\leftarrow t_0 \\oplus^2 t_1
+  7: T_{4,0} \\leftarrow T_{1,0} \\ominus T_{1,1}, T_{4,1} \\leftarrow T_{1,0} \\oplus T_{1,1} \\ (\\equiv T_4 \\leftarrow \\xi \\cdot T_1)
+  8: T_4 \\leftarrow T_0 \\oplus^2 T_4
+ 9: t_0 \\leftarrow T_4 \\mod^2 p, t_1 \\leftarrow t_0 \\ominus^2 a_3, t_1 \\leftarrow t_1 \\oplus^2 t_1
+10: c_3 \\leftarrow t_1 \\oplus^2 t_0
+11: T_1 \\leftarrow a_3 \\times^2 a_3
+12: T_{4,0} \\leftarrow T_{1,0} \\ominus T_{1,1}, T_{4,1} \\leftarrow T_{1,0} \\oplus T_{1,1} \\ (\\equiv T_4 \\leftarrow \\xi \\cdot T_1)
+13: T_4 \\leftarrow T_2 \\oplus^2 T_4
+14: t_0 \\leftarrow T_4 \\mod^2 p, t_1 \\leftarrow t_0 \\ominus^2 a_4, t_1 \\leftarrow t_1 \\oplus^2 t_1
+15: c_4 \\leftarrow t_1 \\oplus^2 t_0
+16: T_0 \\leftarrow T_2 +^2 T_1, T_3 \\leftarrow T_3 \\ominus^2 T_0
+17: t_0 \\leftarrow T_3 \\mod^2 p, t_1 \\leftarrow t_0 \\ominus^2 a_5, t_1 \\leftarrow t_1 \\oplus^2 t_1
+18: c_5 \\leftarrow t_1 \\oplus^2 t_0
+19: return C = (c_2 + c_3 s)t + (c_4 + c_5 s)t^2
+</code></pre>
+
+    <p class="text-gray-300">where l is the tangent line evaluated at point  <span class="math">P=(x_P,y_P)\\in E(\\mathbb{F}_p)</span> . This doubling formula was derived from [5, Section 2] and only requires  <span class="math">6\\tilde{m}_u+5\\tilde{s}_u+10\\tilde{r}+10\\tilde{a}+4m</span>  if computed as detailed in Algorithm 9 ( <span class="math">\\overline{x_P}=-x_P</span>  is precomputed):</p>
+
+    <p class="text-gray-300"><span class="math">$\\begin{split} A &amp;= 3X_1^2/2, \\ B = Y_1^2, \\ C = X_1 \\cdot Y_1^2, \\ D = 2C, \\\\ X_3 &amp;= A^2 - D, \\ E = C - X_3, \\ Y_3 = A \\cdot E - B^2, \\ Z_3 = Y_1 \\cdot Z_1, \\ F = Z_1^2, \\\\ l_{0,0} &amp;= Z_3 \\cdot F \\cdot y_P, \\ l_{1,0} = A \\cdot F \\cdot \\overline{x_P}, \\ l_{1,1} = A \\cdot X_1 - B. \\end{split}</span>$</p>
+
+    <p class="text-gray-300">Let the points  <span class="math">T=(X_1,Y_1,Z_1)</span>  and  <span class="math">R=(X_2,Y_2,Z_2)\\in E&#x27;(\\mathbb{F}_{p^2})</span>  be in Jacobian coordinates. To compute  <span class="math">T+R=(X_3,Y_3,Z_3)</span>  and the tangent line l evaluated at point  <span class="math">P=(x_P,y_P)\\in E(\\mathbb{F}_p)</span>  we use the following formula:</p>
+
+    <p class="text-gray-300"><span class="math">$\\theta = Y_2 Z_1^3 - Y_1, \\quad \\lambda = X_2 Z_1^2 - X_1,</span>$</p>
+
+    <p class="text-gray-300"><span class="math">$X_3 = \\theta^2 - 2X_1 \\lambda^2 - \\lambda^3, \\quad Y_3 = \\theta(3X_1 \\lambda^2 - \\theta^2 + \\lambda^3) - Y_1 \\lambda^3, \\quad Z_3 = Z_1 \\lambda, \\quad (8)</span>$</p>
+
+    <p class="text-gray-300"><span class="math">$l = Z_3 y_P + (\\theta \\overline{x_P}) + (\\theta X_2 - Y_2 Z_3),</span>$</p>
+
+    <p class="text-gray-300">that has a total cost of  <span class="math">10\\tilde{m}_u + 3\\tilde{s}_u + 11\\tilde{r} + 10\\tilde{a} + 4m</span>  if computed as detailed in Algorithm 10.</p>
+
+    <p class="text-gray-300"><strong>Algorithm 9</strong> Point doubling in Jacobian coordinates (cost of  <span class="math">6\\tilde{m}_u + 5\\tilde{s}_u + 10\\tilde{r} +</span>  <span class="math">10\\tilde{a} + 4m</span></p>
+
+    <pre><code class="language-text">Input: T = (X_1, Y_1, Z_1) \\in E&#x27;(\\mathbb{F}_{p^2}), P = (x_P, y_P) \\in E(\\mathbb{F}_p) \\text{ and } \\overline{x_P} = -x_P.
+Output: 2T = (X_3, Y_3, Z_3) \\in E&#x27;(\\mathbb{F}_{p^2}) and the tangent line l \\in \\mathbb{F}_{p^{12}}.
+ 1: t_0 \\leftarrow X_1 \\otimes^2 X_1, t_2 \\leftarrow Z_1 \\otimes^2 Z_1
+ 2: t_1 \\leftarrow t_0 \\oplus^2 t_0, Z_3 \\leftarrow Y_1 \\otimes^2 Z_1
+3: t_0 \\leftarrow t_0 \\oplus^2 t_1, t_3 \\leftarrow Y_1 \\otimes^2 Y_1
+ 4: t_0 \\leftarrow t_0/^2 2
+ 5: t_1 \\leftarrow t_0 \\otimes^2 t_2, t_4 \\leftarrow t_0 \\otimes^2 X_1
+ 6: l_{1,0,0} \\leftarrow t_{1,0} \\otimes \\overline{x_P}, l_{1,0,1} \\leftarrow t_{1,1} \\otimes \\overline{x_P}, l_{1,1} \\leftarrow t_4 \\ominus^2 t_3, t_2 \\leftarrow Z_3 \\otimes^2 t_2
+ 7: t_1 \\leftarrow t_3 \\otimes^2 X_1
+ 8: l_{0,0,0} \\leftarrow t_{2,0} \\otimes y_P, l_{0,0,1} \\leftarrow t_{2,1} \\otimes y_P, Y_1 \\leftarrow t_1 \\oplus^2 t_1, X_1 \\leftarrow t_0 \\otimes^2 t_0
+ 9: X_3 \\leftarrow X_1 \\ominus^2 Y_1
+10: t_1 \\leftarrow t_1 \\ominus^2 X_3
+11: T_0 \\leftarrow t_3 \\times^2 t_3, T_1 \\leftarrow t_0 \\times^2 t_1
+                                                                                                                                        (Option 1, h = 2)
+12: T_1 \\leftarrow T_1 \\ominus^2 T_0
+                                                                                                                                                     (Option 2)
+13: Y_3 \\leftarrow T_1 \\mod^2 p
+14: return 2T = (X_3, Y_3, Z_3) and l = (l_0, l_1)
+</code></pre>
+
+    <p class="text-gray-300"><strong>Algorithm 10</strong> Point addition in Jacobian coordinates (cost of  <span class="math">10\\tilde{m}_u + 3\\tilde{s}_u +</span>  <span class="math">11\\tilde{r} + 10\\tilde{a} + 4m</span></p>
+
+    <p class="text-gray-300"><strong>Input:</strong>  <span class="math">T = (X_1, Y_1, Z_1)</span>  and  <span class="math">R = (X_2, Y_2, Z_2) \\in E&#x27;(\\mathbb{F}_{p^2}), P = (x_P, y_P) \\in E(\\mathbb{F}_p)</span>  and</p>
+
+    <pre><code class="language-text">\\overline{x_P} = -x_P.
+Output: T + R = (X_3, Y_3, Z_3) \\in E&#x27;(\\mathbb{F}_{p^2}) and tangent line l \\in \\mathbb{F}_{p^{12}}
+ 1: t_1 \\leftarrow Z_1 \\otimes^2 Z_1
+ 2: t_3 \\leftarrow X_2 \\otimes^2 t_1, t_1 \\leftarrow t_1 \\otimes^2 Z_1
+ 3: t_3 \\leftarrow t_3 \\ominus^2 X_1, t_4 \\leftarrow t_1 \\otimes^2 Y_2
+
+4: Z_3 \\leftarrow Z_1 \\otimes^2 t_3, t_0 \\leftarrow t_4 \\ominus^2 Y_1, t_1 \\leftarrow t_3 \\otimes^2 t_3
+ 5: t_4 \\leftarrow t_1 \\otimes^2 t_3, X_3 \\leftarrow t_0 \\otimes^2 t_0
+ 6: t_1 \\leftarrow t_1 \\otimes^2 X_1
+ 7: t_3 \\leftarrow t_1 \\oplus^2 t_1
+ 8: X_3 \\leftarrow X_3 \\ominus^2 t_3
+ 9: X_3 \\leftarrow X_3 \\ominus^2 t_4
+10: t_1 \\leftarrow t_1 \\ominus^2 X_3
+11: T_0 \\leftarrow t_0 \\times^2 t_1, T_1 \\leftarrow t_4 \\times^2 Y_1
+                                                                                                                                      (Option 1, h=2)
+12: T_0 \\leftarrow T_0 \\ominus^2 T_1
+                                                                                                                                                   (Option 2)
+13: Y_3 \\leftarrow T_0 \\mod^2 p, \\ l_{1,0,0} \\leftarrow t_{0,0} \\otimes \\overline{x_P}, \\ l_{1,0,1} \\leftarrow t_{0,1} \\otimes \\overline{x_P}
+14: T_0 \\leftarrow t_0 \\times^2 X_2, T_1 \\leftarrow Z_3 \\times^2 Y_2
+                                                                                                                                      (Option 1, h=2)
+15: T_0 \\leftarrow T_0 \\ominus^2 T_1
+                                                                                                                                                   (Option 2)
+16: l_{1,1} \\leftarrow T_0 \\mod^2 p, l_{0,0,0} \\leftarrow Z_{3,0} \\otimes y_P, l_{0,0,1} \\leftarrow Z_{3,1} \\otimes y_P
+17: return T + R = (X_3, Y_3, Z_3) and l = (l_0, l_1)
+</code></pre>
+
+    <h3 id="sec-20" class="text-xl font-semibold mt-8"><strong>B.2</strong> Homogeneous Coordinates</h3>
+
+    <p class="text-gray-300">Let the point  <span class="math">T=(X_1,Y_1,Z_1)\\in E&#x27;(\\mathbb{F}_{p^2})</span>  be in homogeneous coordinates. To compute  <span class="math">2T=(X_3,Y_3,Z_3)</span>  and the tangent line evaluated at point  <span class="math">P=(x_P,y_P)\\in E(\\mathbb{F}_p)</span>  we use formula (2) in Section 4 with b=2 (i.e., b'=1-i) that has a total cost of  <span class="math">3\\tilde{m}_u+6\\tilde{s}_u+8\\tilde{r}+22\\tilde{a}+4m</span>  if computed as detailed in Algorithm 11.</p>
+
+    <p class="text-gray-300"><strong>Algorithm 11</strong> Point doubling in homogeneous coordinates (cost of  <span class="math">3\\tilde{m}_u + 6\\tilde{s}_u + 8\\tilde{r} + 22\\tilde{a} + 4m</span> )</p>
+
+    <pre><code class="language-text">\\overline{\\mathbf{Input:}}\\ T=(X_1,Y_1,Z_1)\\in E&#x27;(\\mathbb{F}_{p^2}),\\ P=(x_P,y_P)\\in E(\\mathbb{F}_p)\\ \\mathrm{and}\\ \\overline{y_P}=-y_P.
+Output: 2T = (X_3, Y_3, Z_3) \\in E&#x27;(\\mathbb{F}_{p^2}) and the tangent line l \\in \\mathbb{F}_{p^{12}}
+  1: t_0 \\leftarrow Z_1 \\otimes^2 Z_1, t_4 \\leftarrow X_1 \\otimes^2 Y_1, t_1 \\leftarrow Y_1 \\otimes^2 Y_1
+2: t_3 \\leftarrow t_0 \\oplus^2 t_0, t_4 \\leftarrow t_4/^2 2, t_5 \\leftarrow t_0 \\oplus^2 t_1
+  3: t_0 \\leftarrow t_0 \\oplus^2 t_3
+  4: t_{2,0} \\leftarrow t_{0,0} \\oplus t_{0,1}, t_{2,1} \\leftarrow t_{0,1} \\ominus t_{0,0} \\ (\\equiv t_2 \\leftarrow b&#x27; \\cdot t_0)
+  5: t_0 \\leftarrow X_1 \\otimes^2 X_1, t_3 \\leftarrow t_2 \\oplus^2 t_2
+  6: t_3 \\leftarrow t_2 \\oplus^2 t_3, l_{0,2} \\leftarrow t_0 +^2 t_0
+  7: X_3 \\leftarrow t_1 \\ominus^2 t_3, l_{0,2} \\leftarrow l_{0,2} +^2 t_0, t_3 \\leftarrow t_1 \\oplus^2 t_3
+8: X_3 \\leftarrow t_4 \\otimes^2 X_3, t_3 \\leftarrow t_3/^2 2
+
+9: T_0 \\leftarrow t_3 \\times^2 t_3, T_1 \\leftarrow t_2 \\times^2 t_2
+
+10: T_2 \\leftarrow T_1 +^2 T_1, t_3 \\leftarrow Y_1 \\oplus^2 Z_1
+                                                                                                                                                            (Option 1, h = 2)
+11: T_2 \\leftarrow T_1 + {}^2T_2, t_3 \\leftarrow t_3 \\otimes^2 t_3
+12: t_3 \\leftarrow t_3 \\ominus^2 t_5
+13: T_0 \\leftarrow T_0 \\ominus^2 T_2
+                                                                                                                                                                            (Option 2)
+14: Y_3 \\leftarrow T_0 \\mod^2 p, Z_3 \\leftarrow t_1 \\otimes^2 t_3, t_2 \\leftarrow t_2 \\ominus^2 t_1
+15: l_{0,0,0} \\leftarrow t_{2,0} \\ominus t_{2,1}, l_{0,0,1} \\leftarrow t_{2,0} \\oplus t_{2,1} \\ (\\equiv l_{0,0} \\leftarrow \\xi \\cdot t_2)
+16: l_{0,2,0} \\leftarrow l_{0,2,0} \\otimes x_P, l_{0,2,1} \\leftarrow l_{0,2,1} \\otimes x_P
+17: l_{1,1,0} \\leftarrow t_{3,0} \\otimes \\overline{y_P}, l_{1,1,1} \\leftarrow t_{3,1} \\otimes \\overline{y_P}
+18: return 2T = (X_3, Y_3, Z_3) and l = (l_0, l_1)
+</code></pre>
+
+    <p class="text-gray-300">Let the points  <span class="math">T=(X_1,Y_1,Z_1)</span>  and  <span class="math">R=(X_2,Y_2,Z_2)\\in E&#x27;(\\mathbb{F}_{p^2})</span>  be in homogeneous coordinates. To compute  <span class="math">T+R=(X_3,Y_3,Z_3)</span>  and the tangent line l evaluated at point  <span class="math">P=(x_P,y_P)\\in E(\\mathbb{F}_p)</span>  we use the following formula:</p>
+
+    <p class="text-gray-300"><span class="math">$\\theta = Y_1 - Y_2 Z_1, \\quad \\lambda = X_1 - X_2 Z_1,</span>$</p>
+
+    <p class="text-gray-300"><span class="math">$X_3 = \\lambda (\\lambda^3 + Z_1 \\theta^2 - 2X_1 \\lambda^2), \\quad Y_3 = \\theta (3X_1 \\lambda^2 - \\lambda^3 - Z_1 \\theta^2) - Y_1 \\lambda^3, \\quad Z_3 = Z_1 \\lambda^3,</span>$</p>
+
+    <p class="text-gray-300"><span class="math">$l = \\lambda \\overline{y_P} - (\\theta x_P) v^2 + \\xi (\\theta X_2 - \\lambda Y_2) vw,</span>$
+(9)</p>
+
+    <p class="text-gray-300">that has a total cost of  <span class="math">11\\tilde{m}_u + 2\\tilde{s}_u + 11\\tilde{r} + 12\\tilde{a} + 4m</span>  if computed as detailed in Algorithm 12.</p>
+
+    <pre><code class="language-text">Algorithm 12 Point addition in homogeneous coordinates (cost of 11 ˜mu+2˜su+
+11˜r + 12˜a + 4m)
+</code></pre>
+
+    <pre><code class="language-text">Input: T = (X1, Y1, Z1) and R = (X2, Y2, Z2) ∈ E
+                                           0
+                                            (Fp2 ), P = (xP , yP ) ∈ E(Fp) and
+yP = −yP .
+Output: T + R = (X3, Y3, Z3) ∈ E
+                              0
+                              (Fp2 ) and tangent line l ∈ Fp12
+1: t1 ← Z1 ⊗
+            2 X2, t2 ← Z1 ⊗
+                         2 Y2
+2: t1 ← X1
+             t1, t2 ← Y1
+                          t2
+3: t3 ← t1 ⊗
+           2
+            t1
+4: X3 ← t3 ⊗
+            2 X1, t4 ← t2 ⊗
+                         2
+                          t2
+5: t3 ← t1 ⊗
+           2
+            t3, t4 ← t4 ⊗
+                       2 Z1
+6: t4 ← t3 ⊕
+           2
+            t4
+7: t4 ← t4
+           2 X3
+8: t4 ← t4
+           2 X3
+9: X3 ← X3
+             2
+              t4
+10: T1 ← t2 ×
+            2 X3, T2 ← t3 ×
+                         2 Y1 (Option 1, h = 2)
+11: T2 ← T1
+            2 T2 (Option 2)
+12: Y3 ← T2 mod2
+                p, X3 ← t1 ⊗
+                           2
+                            t4, Z3 ← t3 ⊗
+                                        2 Z1
+13: l0,2,0 ← t2,0 ⊗ xP , l0,2,1 ← t2,1 ⊗ xP
+14: l0,2 ← −2
+           l0,2
+15: T1 ← t2 ×
+            2 X2, T2 ← t1 ×
+                         2 Y2 (Option 1, h = 2)
+16: T1 ← T1
+            2 T2 (Option 2)
+17: t2 ← T1 mod2
+                p
+18: l0,0,0 ← t2,0 	 t2,1, l0,0,1 ← t2,0 ⊕ t2,1 (≡ l0,0 ← ξ · t2)
+19: l1,1,0 ← t1,0 ⊗ yP , l1,1,1 ← t1,1 ⊗ yP
+</code></pre>
+
+    <p class="text-gray-300">20: return T + R = (X3, Y3, Z3) and l = (l0, l1)</p>
+
+`;
+---
+
+<BaseLayout title="Faster Explicit Formulas for Computing Pairings over Ordinar... (2010/526)">
+  <article class="max-w-4xl mx-auto article-prose">
+    <nav class="mb-8">
+      <a href="/papers" class="text-blue-400 hover:text-blue-300">
+        &larr; Back to Papers
+      </a>
+    </nav>
+
+    <header class="mb-12">
+      <h1 class="text-3xl font-bold mb-4"
+        set:html={TITLE_HTML} />
+      <p class="text-gray-400 mb-2"
+        set:html={AUTHORS_HTML} />
+      <p class="text-gray-500 text-sm mb-4">
+        2010 &middot; eprint 2010/526
+      </p>
+      <div class="flex gap-4 text-sm">
+        <a
+          href={EPRINT_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          class="text-blue-400 hover:text-blue-300"
+        >
+          Paper (eprint) &rarr;
+        </a>
+      </div>
+      <PaperDisclaimer eprintUrl={EPRINT_URL} />
+      <p class="mt-1 text-xs text-gray-600">
+        Converted with: {CRAWLER} &middot; {CONVERTED_DATE}
+      </p>
+    </header>
+
+    <Fragment set:html={CONTENT} />
+
+    <PaperHistory slug="faster-explicit-formulas-for-computing-pairings-over-2010" />
+  </article>
+</BaseLayout>

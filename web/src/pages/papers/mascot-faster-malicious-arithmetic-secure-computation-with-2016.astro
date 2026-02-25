@@ -1,0 +1,1219 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import PaperDisclaimer from '../../components/PaperDisclaimer.astro';
+import PaperHistory from '../../components/PaperHistory.astro';
+
+const EPRINT_URL = 'https://eprint.iacr.org/2016/505';
+const CRAWLER = 'marker';
+const CONVERTED_DATE = '2026-02-20';
+const TITLE_HTML = 'MASCOT: Faster Malicious Arithmetic Secure Computation with Oblivious Transfer';
+const AUTHORS_HTML = 'Marcel Keller&lt;sup&gt;∗&lt;/sup&gt; Emmanuela Orsini†';
+
+const CONTENT = `    <p class="text-gray-300">Marcel Keller&lt;sup&gt;∗&lt;/sup&gt; Emmanuela Orsini†</p>
+
+    <p class="text-gray-300">Peter Scholl‡</p>
+
+    <p class="text-gray-300">Department of Computer Science, University of Bristol {m.keller,emmanuela.orsini,peter.scholl}@bristol.ac.uk</p>
+
+    <h2 id="sec-1" class="text-2xl font-bold">Abstract</h2>
+
+    <p class="text-gray-300">We consider the task of secure multi-party computation of arithmetic circuits over a finite field. Unlike Boolean circuits, arithmetic circuits allow natural computations on integers to be expressed easily and efficiently. In the strongest setting of malicious security with a dishonest majority where any number of parties may deviate arbitrarily from the protocol — most existing protocols require expensive public-key cryptography for each multiplication in the preprocessing stage of the protocol, which leads to a high total cost.</p>
+
+    <p class="text-gray-300">We present a new protocol that overcomes this limitation by using oblivious transfer to perform secure multiplications in general finite fields with reduced communication and computation. Our protocol is based on an arithmetic view of oblivious transfer, with careful consistency checks and other techniques to obtain malicious security at a cost of less than 6 times that of semi-honest security. We describe a highly optimized implementation together with experimental results for up to five parties. By making extensive use of parallelism and SSE instructions, we improve upon previous runtimes for MPC over arithmetic circuits by more than 200 times.</p>
+
+    <p class="text-gray-300">Keywords: Multi-party computation; oblivious transfer</p>
+
+    <h2 id="sec-2" class="text-2xl font-bold">1 Introduction</h2>
+
+    <p class="text-gray-300">Secure multi-party computation (MPC) allows a set of parties to jointly compute a function on their private inputs, learning only the output of the function. In the last decade, MPC has rapidly moved from purely theoretical study to an object of practical interest, with a growing interest in practical applications, and many implementations now capable of handling complex computations <a href="#page-27-0">[30,</a> <a href="#page-27-1">31]</a>.</p>
+
+    <p class="text-gray-300">Most MPC protocols either perform secure computation of Boolean circuits, or arithmetic circuits over a finite ring or field such as Fp, for some prime p. Historically, the Boolean circuit</p>
+
+    <p class="text-gray-300">&lt;sup&gt;∗&lt;/sup&gt;Supported by EPSRC via grant EP/M016803.</p>
+
+    <p class="text-gray-300">&lt;sup&gt;†&lt;/sup&gt;Supported by ERC Advanced Grant ERC-2010-AdG-267188-CRIPTO.</p>
+
+    <p class="text-gray-300">&lt;sup&gt;‡&lt;/sup&gt;Supported by the Defense Advanced Research Projects Agency (DARPA) and Space and Naval Warfare Systems Center, Pacific (SSC Pacific) under contract No. N66001-15-C-4070.</p>
+
+    <p class="text-gray-300">approach has led to fast protocols that mostly need only symmetric cryptography, such as twoparty protocols based on Yao's garbled circuits <a href="#page-28-0">[43]</a>, or protocols based on fast oblivious transfer techniques <a href="#page-27-2">[32,</a> <a href="#page-27-3">36]</a>. In contrast, protocols for arithmetic circuits are typically based on more expensive, public-key technology (except for special cases when a majority of the parties are honest).</p>
+
+    <p class="text-gray-300">Despite the need for expensive techniques, secret-sharing-based MPC protocols for arithmetic circuits have the key advantage that secure addition requires no communication and essentially come 'for free', whereas with current Boolean circuit-based 2-PC, the only 'free' operation is XOR.</p>
+
+    <p class="text-gray-300">The following motivating examples further highlight the practical applicability of integer-based secure computation, compared with Boolean circuits:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Bogdanov et al. <a href="#page-25-0">[8,</a> <a href="#page-25-1">9]</a> describe using MPC to perform secure statistical analysis of income tax records for the Estonian government. The latter work analyzed a large database with over 600000 students and 10 million tax records. The kinds of computations involved were very simple statistics, but made heavy use of the fact that secure additions are non-interactive.</li>
+      <li>In <a href="#page-26-0">[14]</a>, an application of MPC to confidential benchmarking was presented, allowing banks to jointly evaluate customers' risks whilst retaining privacy for the customers' data. They used secure linear programming, which is a highly complex task in MPC, requiring either secure floating point arithmetic or very large integer arithmetic (to emulate real numbers without overflow), both of which would be impractical using Boolean circuits.</li>
+      <li>MPC has been suggested as a tool for helping prevent collisions between satellites, by securely performing collision detection using sensitive location and trajectory data. Kamm et al. <a href="#page-27-4">[27]</a> showed how to implement the relevant conjunction analysis algorithms in MPC with a protocol based on secret-sharing. This also requires secure floating point operations.</li>
+    </ul>
+
+    <p class="text-gray-300">Unfortunately, all of the above case studies are somewhat limited, in either the security properties obtained, or the efficiency. The first and third examples above used the Sharemind system <a href="#page-24-0">[1]</a>, which is restricted to semi-honest security with three parties, where at most one is corrupt. The second example used the SPDZ MPC protocol <a href="#page-26-1">[18]</a>, which has security against any number of maliciously corrupted parties, but is much slower. They report a fairly quick evaluation time of around 20–30 s with a prototype implementation, but this does not include the costly 'preprocessing' stage required in SPDZ, which would likely take several hours.</p>
+
+    <p class="text-gray-300">We conclude that although these applications are practical, the MPC protocols used still fall short: in many real-world applications, semi-honest adversaries and an honest majority are not realistic assumptions, and MPC may not be cost-effective if it requires several hours of heavy computation.</p>
+
+    <p class="text-gray-300">Furthermore, it is the case that all known practical protocols for MPC with integer operations either require an honest majority, or expensive public-key techniques for every multiplication in the circuit. For example, the SPDZ protocol <a href="#page-26-2">[16,</a> <a href="#page-26-1">18]</a> mentioned above uses a somewhat homomorphic encryption scheme to perform secure multiplications, whilst the BDOZ protocol <a href="#page-25-2">[6]</a> uses additively homomorphic encryption, and both of these require expensive zero-knowledge proofs or cut-andchoose techniques to achieve security against malicious adversaries.</p>
+
+    <p class="text-gray-300">These protocols mitigate this cost to an extent by restricting the expensive computation to a preprocessing phase, which is independent of the inputs and can be done in advance. Although this is highly effective for reducing the latency of the secure computation — as the online phase is indeed very efficient — the <em>total cost</em> of these protocols can still be thousands of times greater than the online phase, which may render them ineffective for many applications.</p>
+
+    <p class="text-gray-300">Frederiksen et al. [20] recently showed how to efficiently use oblivious transfer to generate multiplication triples — the main task of the SPDZ preprocessing — in binary fields, and estimated much improved performance, compared with previous methods. However, this does not give the benefits of general arithmetic circuits that allow integer operations.</p>
+
+    <h4 id="sec-3" class="text-lg font-semibold mt-6">1.1 Our contributions</h4>
+
+    <p class="text-gray-300">In this paper, we present MASCOT: a new MPC protocol designed to overcome the above limitations of the preprocessing phase, allowing for efficient, secure computation of general arithmetic circuits using almost exclusively fast, symmetric cryptography.</p>
+
+    <div class="overflow-x-auto my-4">
+      <table class="min-w-full text-sm text-gray-300">
+        <thead>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">Protocol</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">Field</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">Comms. (kbit)</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">Throughput, <span class="math">n = 2</span> (/s)</th>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">SPDZ (active)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"><span class="math">\\mathbb{F}_p</span> , 128-bit</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">215n(n-1)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">23.5</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"><span class="math">\\mathbb{F}_{2^{40}}</span></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">2272n(n-1)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">3.68</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">SPDZ (covert,</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"><span class="math">\\mathbb{F}_p</span> , 128-bit</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">66n(n-1)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">204</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">pr. <span class="math">1/10</span> )</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"><span class="math">\\mathbb{F}_{2^{40}}</span></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">844n(n-1)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">31.9</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Ours (active)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"><span class="math">\\mathbb{F}_p</span> , 128-bit</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">180n(n-1)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">4842</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"><span class="math">\\mathbb{F}_{2^{128}}</span></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">180n(n-1)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">4827</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p class="text-gray-300">&lt;span id=&quot;page-2-0&quot;&gt;&lt;/span&gt;Table 1: Comparing the cost of <em>n</em>-party secure multiplication in our OT-based protocol with previous implementations of SPDZ [15, 16].</p>
+
+    <p class="text-gray-300">Arithmetic-circuit MPC from OT. We present a practical protocol for secure multi-party computation of arithmetic circuits based on oblivious transfer (OT), for the first time with malicious security in the dishonest majority setting. We achieve this by taking an &quot;arithmetic&quot; view of OT (as was done by Gilboa for two-party RSA key generation [21] and Demmler et al. [19] for two-party computation in the semi-honest model), which allows us to generalize the preprocessing protocol by Frederiksen et al. [20] to create multiplication triples in any (sufficiently large) finite field, instead of just binary fields. We achieve security against malicious adversaries using simple consistency checking and privacy amplification techniques, with the result that our maliciously secure protocol is only 6 times less efficient than a semi-honest version of the protocol. Moreover, our protocol can be based entirely on symmetric primitives, after a one-time setup phase, by using efficient OT extensions [25, 28].</p>
+
+    <p class="text-gray-300">Implementation. A key advantage of our approach to triple generation is that we obtain a streamlined protocol, which is highly amenable to a parallelized and pipelined implementation that interleaves computation and communication. The results from our open source implementation [29], shown in Table 1, highlight this: the time for a single secure multiplication in a prime field is 200 times faster than the previous best actively secure implementation based on somewhat homomorphic encryption [16], in spite of a fairly small improvement in communication cost. Compared with a covertly secure implementation using SHE [16], our actively secure protocol requires slightly</p>
+
+    <p class="text-gray-300">&lt;span id=&quot;page-2-1&quot;&gt;&lt;/span&gt; <span class="math">&lt;sup&gt;^{1}&lt;/sup&gt;</span> For  <span class="math">\\mathbb{F}_{2^{40}}</span>  in SPDZ with covert security, we could not find precise figures so the throughput in Table 1 is estimated based on other results.</p>
+
+    <p class="text-gray-300">more communication, but still runs over 20 times faster. In binary fields, where SHE is much less suited, the improvement is over 1000 times, compared to previous figures <a href="#page-26-4">[15]</a>. Note that the online phase of our protocol is identical to that of SPDZ, which has been previously reported to achieve very practical performance for a range of applications <a href="#page-27-0">[30]</a>.</p>
+
+    <p class="text-gray-300">Our optimized implementation utilizes over 80% of the network's capacity, whereas the previous schemes based on SHE are so computation-intensive that the network cannot come close to capacity. We also describe new techniques for reducing the cost of OT extension using consumer hardware instructions, namely efficient matrix transposition using SSE instead of Eklundh's algorithm, and hashing using the Matyas–Meyer–Oseas construction from any block cipher, which allows hashing 128-bit messages with AES-NI whilst avoiding a re-key for every hash.</p>
+
+    <p class="text-gray-300">More general assumptions. We also improve upon the previous most practical protocol by allowing a much wider variety of cryptographic assumptions, since we only require a secure OT protocol, which can be built from DDH, quadratic residuosity or lattices <a href="#page-27-8">[38]</a>. In contrast, security of the SHE scheme used in SPDZ is based on the ring learning with errors assumption, which is still relatively poorly understood — it is possible that new attacks could surface that render the protocol totally impractical for secure parameters. So as well as increasing efficiency, we obtain much greater confidence in the security of our protocol, and it seems more likely to withstand the test of time.</p>
+
+    <h2 id="sec-4" class="text-2xl font-bold">1.2 Technical overview</h2>
+
+    <p class="text-gray-300">The main goal of our MPC protocol is to create multiplication triples, which are essentially additive secret sharings of tuples (a, b, a· b, a·∆, b ·∆, a· b ·∆) where a, b are random values and ∆ is a secretshared global random MAC key. Shares of a, b and ∆ can be generated by every party choosing a random share. It remains to generate secret sharings of the products.</p>
+
+    <p class="text-gray-300">Our starting point is the passively secure two-party product-sharing protocol of Gilboa <a href="#page-26-5">[21]</a>, which uses k oblivious transfers to multiply two k-bit field elements. By running OT instances between every pair of parties, the multiplication triples can be created.</p>
+
+    <p class="text-gray-300">However, corrupted parties can deviate by providing inconsistent inputs to the different OT instances.<a href="#page-3-0">2</a> These deviations will not only lead to potentially incorrect results when the triples are used in SPDZ but also to selective failures, that is, the checks used in SPDZ might fail (or not) depending on secret information.</p>
+
+    <p class="text-gray-300">To obtain an actively secure protocol, we use two different strategies: one to ensure correctness of the products in the MAC generation, and one to ensure correctness and privacy of the multiplication triples themselves.</p>
+
+    <p class="text-gray-300">For the MAC generation, it turns out the passively secure protocol is almost enough; we just need to check random linear combinations of the MACs immediately after creation, and also when later opening values. Proving the security of this, however, is not straightforward and requires a careful, technical analysis of the possible deviations. To simplify this as much as possible, we model the MAC generation and opening requirements in a separate functionality, &lt;sup&gt;F&lt;/sup&gt;J·&lt;sup&gt;K&lt;/sup&gt; , which can be seen as a generalization of verifiable secret-sharing to the case of full-threshold corruption. This greatly reduces the work in proving higher-level protocols secure, as these can then be made independent of the MAC scheme and underlying MAC keys.</p>
+
+    <p class="text-gray-300">&lt;span id=&quot;page-3-0&quot;&gt;&lt;/span&gt;&lt;sup&gt;2&lt;/sup&gt;We assume that the OT instances themselves are secure against malicious parties.</p>
+
+    <p class="text-gray-300">For triple generation, we need to ensure correctness and privacy of the triples. Correctness is easily verified with a standard sacrifice technique <a href="#page-26-7">[17,</a> <a href="#page-26-1">18]</a>, which checks a pair of triples such that one can then be used securely. To guarantee privacy we use a simple variant of privacy amplification, where first several leaky triples are produced, from which a single, random triple is extracted by taking random combinations.</p>
+
+    <p class="text-gray-300">In more detail, the protocol starts by generating shares of a correlated vector triple (a, b, c), where b ∈ F and a, c ∈ F τ for some constant τ , using Gilboa's multiplication protocol. If at this point the triple is checked with a sacrifice, b is guaranteed to be uniformly random, but the fact that the sacrifice passes may leak a few bits of a, if a corrupt party used inconsistent inputs to some of the OTs. To counteract this, the parties sample a public random vector r ∈ F &lt;sup&gt;τ&lt;/sup&gt; and obtain the triple (a, b, c) by defining</p>
+
+    <p class="text-gray-300"><span class="math">$a = \\langle \\mathbf{a}, \\mathbf{r} \\rangle, \\quad c = \\langle \\mathbf{c}, \\mathbf{r} \\rangle</span>$</p>
+
+    <p class="text-gray-300">Intuitively, taking inner products ensures that any leaking bits of a are randomly combined with non-leaking bits, so that the final value a appears uniformly random. In the security proof, the simulator can precisely define any leakage of a and bound its min-entropy by analysing the adversary's inputs to the OTs. Since the inner product defines a universal hash function, we can then use the leftover hash lemma to show that a is uniformly random when τ is large enough.</p>
+
+    <p class="text-gray-300">At this point, we could repeat the process to obtain another triple, then authenticate both triples and check correctness with a sacrifice. However, we observe that this stage can be optimized by using the original vector triple (a, b, c) to obtain a second, correlated triple, with the same b value, at a lower cost. To do this, we simply sample another random vector ˆr and compute ˆa, cˆ accordingly. Again, we can show (for suitable τ ) that ˆa is uniformly random and independent of a. We can then use (ˆa, b, cˆ) to check correctness of (a, b, c), as follows. After adding MACs to both triples, the parties sample a random value &lt;sup&gt;s&lt;/sup&gt; &lt;sup&gt;∈&lt;/sup&gt; &lt;sup&gt;F&lt;/sup&gt; and open &lt;sup&gt;ρ&lt;/sup&gt; &lt;sup&gt;=&lt;/sup&gt; &lt;sup&gt;s&lt;/sup&gt; · &lt;sup&gt;J&lt;/sup&gt;a&lt;sup&gt;K&lt;/sup&gt; &lt;sup&gt;−&lt;/sup&gt; &lt;sup&gt;J&lt;/sup&gt;aˆK, where &lt;sup&gt;J&lt;/sup&gt;·&lt;sup&gt;K&lt;/sup&gt; denotes the linear authenticated secret sharing scheme. Now, we have:</p>
+
+    <p class="text-gray-300"><span class="math">$s \\cdot \\llbracket c \\rrbracket - \\llbracket \\hat{c} \\rrbracket - \\llbracket b \\rrbracket \\cdot \\rho = \\llbracket s \\cdot (c - a \\cdot b) + (\\hat{a} \\cdot b - \\hat{c}) \\rrbracket</span>$</p>
+
+    <p class="text-gray-300">Since the left-hand side is linear in the shared values, the parties can compute this and check that it opens to zero. If one or both triples are incorrect then this is non-zero with probability at most 1/|F|, since s is uniformly random and unknown at the time of authentication.</p>
+
+    <p class="text-gray-300">It turns out that for this optimized method, using τ = 4 suffices to give a correct triple and ensure a distinguishing advantage in O(1/|F|). If we allow this to be O(1/ p |F|) then we can have τ = 3. Concretely, this means that we can use τ = 3 for ≥ 128-bit fields with 64-bit statistical security.</p>
+
+    <p class="text-gray-300">Comparison with Previous Techniques. Previous works have used similar privacy amplification techniques for MPC. In <a href="#page-26-7">[17]</a>, privacy amplification was done on a large batch of triples using packed Shamir secret-sharing, which leads to high computation costs. In contrast, our protocol only requires removing leakage on one of the three triple values, which we do very efficiently by combining a constant-sized vector of correlated triples. In situations where leakage is possible on more than one triple component, our techniqe would have to be repeated and <a href="#page-26-7">[17]</a> may be more efficient, at least in terms of communication. Other works use more complex 'bucketing' techniques <a href="#page-27-9">[37]</a> to remove leakage in F2, but when working in large finite fields this is not needed.</p>
+
+    <p class="text-gray-300">We also note that our authentication method is similar to that of the triple generation protocol for binary fields in [20], except there, MACs are only checked after opening values, whereas we also check MACs at time of creation. That work did not describe the online phase of the resulting MPC protocol, and it turns out that for creating inputs in the online phase, this is not enough, and our additional check is crucial for security of the whole protocol.</p>
+
+    <p class="text-gray-300"><strong>Roadmap.</strong> We model oblivious transfer and random oblivious transfer with  <span class="math">\\mathcal{F}_{\\mathsf{OT}}</span>  and  <span class="math">\\mathcal{F}_{\\mathsf{ROT}}</span> , respectively. The multiplication with fixed element provided by OT extension with  <span class="math">\\mathcal{F}_{\\mathsf{COPEe}}</span>  described in Section 3. This functionality is then used to implement  <span class="math">\\mathcal{F}_{\\llbracket.\\rrbracket}</span>  in Section 4, which guarantees the correctness of linear operations. Both  <span class="math">\\mathcal{F}_{\\mathsf{ROT}}</span>  and  <span class="math">\\mathcal{F}_{\\llbracket.\\rrbracket}</span>  are required to implement the triple generation functionality  <span class="math">\\mathcal{F}_{\\mathsf{Triple}}</span>  in Section 5, which is used for the online protocol described in Appendix 6. In Section 7, we evaluate the complexity and the implementation of our protocol. Fig. 1 illustrates the relationship between our functionalities.</p>
+
+    <p class="text-gray-300">    <img src="_page_5_Figure_2.jpeg" alt="" class="my-4 max-w-full" />
+</p>
+
+    <p class="text-gray-300">&lt;span id=&quot;page-5-0&quot;&gt;&lt;/span&gt;Figure 1: Dependency among functionalities</p>
+
+    <h4 id="sec-5" class="text-lg font-semibold mt-6">1.3 Related work</h4>
+
+    <p class="text-gray-300">Aside from the works already mentioned, many other secure computation protocols use oblivious transfer. Protocols based on GMW [2, 22] and TinyOT [10, 32, 36] use OT extensions for efficient MPC on binary circuits, and fast garbled circuit protocols use OT extensions in the input stage of the protocol [33]. Pinkas et al. [39, 40] used OT extensions to achieve a very efficient and scalable protocol for the dedicated application of private set intersection.</p>
+
+    <p class="text-gray-300">Ishai et al. [26] present another protocol achieving malicious security based on OT. However, they only give asymptotic complexity measures. Furthermore, the building blocks of their protocol such as codes and fast fourier transforms suggest more expensive computation than our protocol, where the computation mainly consists of a few field operations.</p>
+
+    <p class="text-gray-300">Baum et al. [3] described improvements to the 'sacrifice' step and the zero-knowledge proofs used with somewhat homomorphic encryption in SPDZ. Their sacrifice technique requires generating triples that form codewords, which does not seem straightforward with our protocol. Their zero-knowledge proofs improve upon the method by Damgård et al. [16] by roughly a factor of two, but our protocol still performs much faster.</p>
+
+    <h3 id="sec-6" class="text-xl font-semibold mt-8">2 Preliminaries</h3>
+
+    <p class="text-gray-300">In this section, we describe the security model, introduce some important notation, define the oblivious transfer primitive, and give a basic overview of the SPDZ protocol.</p>
+
+    <p class="text-gray-300">Security model. We prove our security statements in the universal composition (UC) framework of Canetti [11], and assume familiarity with this. Our protocols work with n parties from the set  <span class="math">\\mathcal{P} = \\{P_1, \\ldots, P_n\\}</span> , and we consider security against malicious, static adversaries, i.e. corruption may only take place before the protocols start, corrupting up to n-1 parties. When we say that a protocol  <span class="math">\\Pi</span>  securely implements a functionality  <span class="math">\\mathcal{F}</span>  with statistical (resp. computational) security parameter  <span class="math">\\kappa</span>  (resp.  <span class="math">\\lambda</span> ), our theorems guarantee that the advantage of any environment in distinguishing the real and ideal executions is in  <span class="math">O(2^{-\\kappa})</span>  (resp.  <span class="math">O(2^{-\\lambda})</span> ). Here,  <span class="math">\\kappa</span>  and  <span class="math">\\lambda</span>  denote the statistical and computational security parameters, respectively.</p>
+
+    <p class="text-gray-300"><strong>Notation.</strong> The protocols we present in this paper work in both  <span class="math">\\mathbb{F}_p</span> , for prime  <span class="math">p = 2^k + \\mu</span> , and  <span class="math">\\mathbb{F}_{2^k}</span> ; we introduce some notation to unify the two finite fields. First note that if  <span class="math">k \\geq \\kappa</span> , for statistical security parameter  <span class="math">\\kappa</span> , and  <span class="math">\\mu \\in \\mathsf{poly}(k)</span>  then with overwhelming probability a random element of  <span class="math">\\mathbb{F}_p</span>  can be represented with k bits in  <span class="math">\\{0,1\\}</span> , and likewise for any element of  <span class="math">\\mathbb{F}_{2^k}</span> . Let  <span class="math">\\mathbb{F}</span>  denote the finite field, which will be either  <span class="math">\\mathbb{F}_p</span>  or  <span class="math">\\mathbb{F}_{2^k}</span> , and write  <span class="math">\\mathbb{F}_{2^k} \\cong \\mathbb{F}_2[X]/f(X)</span>  for some monic, irreducible polynomial f(X) of degree k. We use lower case letters to denote finite field elements and bold lower case letters for vectors in  <span class="math">\\mathbb{F}</span> , for any finite field  <span class="math">\\mathbb{F}</span> . If  <span class="math">\\mathbf{x}, \\mathbf{y}</span>  are vectors over  <span class="math">\\mathbb{F}</span> , then  <span class="math">\\mathbf{x} * \\mathbf{y}</span>  denotes the component-wise products of the vectors. We denote by  <span class="math">a \\stackrel{\\</span>}{\\leftarrow} A$  the uniform sampling of a from a set A, and by [d] the set of integers  <span class="math">\\{1, \\ldots, d\\}</span> .</p>
+
+    <p class="text-gray-300">Following notation often used in lattice-based cryptography, define the 'gadget' vector <strong>g</strong> consisting of the powers of two (in  <span class="math">\\mathbb{F}_p</span> ) or powers of X (in  <span class="math">\\mathbb{F}_{2^k}</span> ), so that</p>
+
+    <p class="text-gray-300"><span class="math">$\\mathbf{g} = (1, g, g^2, \\dots, g^{k-1}) \\in \\mathbb{F}^k,</span>$</p>
+
+    <p class="text-gray-300">where g=2 in  <span class="math">\\mathbb{F}_p</span>  and g=X in  <span class="math">\\mathbb{F}_{2^k}</span> . Let  <span class="math">\\mathbf{g}^{-1}:\\mathbb{F}\\to\\{0,1\\}^k</span>  be the 'bit decomposition' function that maps  <span class="math">x\\in\\mathbb{F}</span>  to a bit vector  <span class="math">\\mathbf{x}_B=\\mathbf{g}^{-1}(x)\\in\\{0,1\\}^k</span> , such that  <span class="math">\\mathbf{x}_B</span>  can be mapped back to  <span class="math">\\mathbb{F}</span>  by taking the inner product  <span class="math">\\langle \\mathbf{g}, \\mathbf{g}^{-1}(x) \\rangle = x</span> . These basic tools allow us to easily switch between field elements and vectors of bits whilst remaining independent of the underlying finite field.</p>
+
+    <p class="text-gray-300">Oblivious Transfer. Oblivious transfer (OT) is a protocol between a sender and a receiver, where the sender transmits one of several messages to the receiver, whilst remaining oblivious to which message was sent. All known constructions of OT require public-key cryptography, but in 1996, Beaver [5] introduced the concept of OT extensions, where cheap, symmetric primitives (often available in consumer hardware) are used to produce many OTs from only a few. Ishai et al. [25] later optimized this concept to the form that we will use in this paper.</p>
+
+    <p class="text-gray-300">Recently, Keller et al. [28] presented a simple consistency check that allows maliciously secure OT extension at essentially no extra cost: the cost for a single OT on random strings is almost that of computing two hash function evaluations and sending one string.</p>
+
+    <p class="text-gray-300">The ideal functionality for a single 1-out-of-2 oblivious transfer on k-bit strings is specified as follows, along with the random OT variant, where the sender's messages are sampled at random:</p>
+
+    <p class="text-gray-300"><span class="math">$\\mathcal{F}_{\\mathsf{OT}}^{1,k}: ((s_0,s_1),b) \\quad \\mapsto \\quad (\\bot,s_b)</span>$</p>
+
+    <p class="text-gray-300"><span class="math">$\\mathcal{F}_{\\mathsf{ROT}}^{1,k}: (\\bot,b) \\qquad \\mapsto \\quad ((r_0,r_1),r_b),</span>$</p>
+
+    <p class="text-gray-300">where  <span class="math">r_0, r_1 \\stackrel{\\</span>}{\\leftarrow} {0, 1}^k$ , and  <span class="math">b \\in \\{0, 1\\}</span>  is the receiver's input. We use the notation  <span class="math">\\mathcal{F}_{\\mathsf{OT}}^{l, k}, \\mathcal{F}_{\\mathsf{ROT}}^{l, k}</span>  to denote l sets of oblivious transfers on k-bit strings.</p>
+
+    <h4 id="sec-7" class="text-lg font-semibold mt-6">2.1 The SPDZ Protocol</h4>
+
+    <p class="text-gray-300">The online phase of SPDZ [16, 18] uses additive secret sharing over a finite field, combined with information-theoretic MACs to ensure active security. A secret value  <span class="math">x \\in \\mathbb{F}</span>  is represented by</p>
+
+    <p class="text-gray-300"><span class="math">$[\\![x]\\!] = (x^{(1)}, \\dots, x^{(n)}, m^{(1)}, \\dots, m^{(n)}, \\Delta^{(1)}, \\dots, \\Delta^{(n)}),</span>$</p>
+
+    <p class="text-gray-300">where each party  <span class="math">P_i</span>  holds the random share  <span class="math">x^{(i)}</span> , the random MAC share  <span class="math">m^{(i)}</span>  and the fixed MAC key share  <span class="math">\\Delta^{(i)}</span> , such that the MAC relation  <span class="math">m = x \\cdot \\Delta</span>  holds, for</p>
+
+    <p class="text-gray-300"><span class="math">$x = \\sum_i x^{(i)}, \\quad m = \\sum_i m^{(i)}, \\quad \\Delta = \\sum_i \\Delta^{(i)}</span>$</p>
+
+    <p class="text-gray-300">over  <span class="math">\\mathbb{F}</span> .</p>
+
+    <p class="text-gray-300">When opening a shared value  <span class="math">[\\![x]\\!]</span> , parties first broadcast their shares  <span class="math">x^{(i)}</span>  and compute x. To ensure that x is correct, they then check the MAC by committing to and opening  <span class="math">m^{(i)} - x \\cdot \\Delta^{(i)}</span> , and checking these shares sum up to zero. To increase efficiency when opening many values, a random linear combination of the MACs can be checked instead.</p>
+
+    <p class="text-gray-300">The main task of the SPDZ preprocessing phase is to produce the following types of random, authenticated shared values:</p>
+
+    <p class="text-gray-300"><strong>Input</strong>  <span class="math">P_i</span> : ([r], i) a random, shared value r, such that only party  <span class="math">P_i</span>  knows the value r.</p>
+
+    <p class="text-gray-300"><strong>Triple:</strong>  <span class="math">(\\llbracket a \\rrbracket, \\llbracket b \\rrbracket, \\llbracket c \\rrbracket)</span>  for uniformly random a, b, with  <span class="math">c = a \\cdot b</span> .</p>
+
+    <p class="text-gray-300">In the online phase, parties interact and use the <strong>Input</strong> values to create shared representations of their private inputs, and the <strong>Triple</strong> values to perform multiplications on secret-shared values. Note that since the  <span class="math">\\llbracket \\cdot \\rrbracket</span>  representation is linear, additions and linear functions can be computed locally.</p>
+
+    <h2 id="sec-8" class="text-2xl font-bold">&lt;span id=&quot;page-7-0&quot;&gt;&lt;/span&gt;3 Correlated oblivious product evaluation</h2>
+
+    <p class="text-gray-300">In this section we describe an arithmetic generalization of the passively secure OT extension of Ishai et al. [25], which we call <em>correlated oblivious product evaluation</em> (COPE). This allows two parties to obtain an additive sharing of the product  <span class="math">x \\cdot \\Delta</span> , where one party holds  <span class="math">x \\in \\mathbb{F}</span>  and the other party holds  <span class="math">\\Delta \\in \\mathbb{F}</span> . The correlation,  <span class="math">\\Delta</span> , is fixed at the start of the protocol, and then future iterations create sharings for different values of x.</p>
+
+    <p class="text-gray-300"><strong>Oblivious product evaluation.</strong> The key mechanism behind COPE is Gilboa's method for (possibly non-correlated) oblivious product evaluation, which is illustrated for  <span class="math">\\mathbb{F}_p</span>  in Fig. 2, and also used in our triple generation protocol later. The two parties run k sets of OTs on k-bit strings, where in each OT the sender,  <span class="math">P_S</span> , inputs a random value  <span class="math">t_i \\stackrel{\\</span>}{\\leftarrow} \\mathbb{F}$  and the correlated value  <span class="math">t_i + a</span> , where  <span class="math">a \\in \\mathbb{F}</span>  is the sender's input. The receiver inputs the bit decomposition of their input,  <span class="math">(b_1, \\ldots, b_k) \\in \\{0, 1\\}^k</span> , and receives back either  <span class="math">t_i</span>  or  <span class="math">t_i + a</span> , depending on the bit  <span class="math">b_i</span> . Since the sender's correlation is computed over  <span class="math">\\mathbb{F}</span> , we have the relation</p>
+
+    <p class="text-gray-300"><span class="math">$q_i = t_i + b_i \\cdot a</span>$</p>
+
+    <p class="text-gray-300">    <img src="_page_8_Figure_0.jpeg" alt="" class="my-4 max-w-full" />
+</p>
+
+    <p class="text-gray-300">&lt;span id=&quot;page-8-0&quot;&gt;&lt;/span&gt;Figure 2: Two-party secret-shared multiplication in  <span class="math">\\mathbb{F}_p</span>  using 1-out-of-2 OT</p>
+
+    <p class="text-gray-300">where  <span class="math">q_i</span>  is the receiver's output in the <em>i</em>-th OT. Now both parties simply compute the inner product of their values  <span class="math">(q_i)_i</span> ,  <span class="math">(-t_i)_i</span>  with the gadget vector <strong>g</strong> to obtain values q and t which form an additive sharing of the product of the inputs, so that</p>
+
+    <p class="text-gray-300"><span class="math">$a + t = a \\cdot b \\in \\mathbb{F}</span>$
+.</p>
+
+    <p class="text-gray-300"><strong>Correlated OPE.</strong> To obtain COPE, where one party's input is fixed for many protocol runs, we only need to perform the k OTs once, where the receiver,  <span class="math">P_B</span> , inputs their bits of  <span class="math">\\Delta \\in \\mathbb{F}</span>  and the sender,  <span class="math">P_A</span> , inputs k pairs of random  <span class="math">\\lambda</span> -bit seeds (recall that  <span class="math">\\lambda</span>  is the computational security parameter and  <span class="math">k = |\\log |\\mathbb{F}|</span> ). This is the <strong>Initialize</strong> phase of  <span class="math">\\Pi_{\\text{COPEe}}</span>  (Protocol 1).</p>
+
+    <p class="text-gray-300">After initialization, on each <strong>Extend</strong> call the parties expand the original seeds using a PRF to create k bits of fresh random OTs, with the same receiver's choice bits  <span class="math">\\Delta_B</span> . Party  <span class="math">P_A</span>  now creates a correlation between the two sets of PRF outputs using their input, x (step (b)). The masked correlation is sent to  <span class="math">P_B</span> , who uses this to adjust the PRF output accordingly; now both parties have k correlated OTs on field elements. These are then mapped into a single field element by taking the inner product of their outputs with the gadget vector  <span class="math">\\mathbf{g}</span>  to obtain an additive sharing of  <span class="math">x \\cdot \\Delta</span>  in steps 4–5.</p>
+
+    <p class="text-gray-300"><strong>Malicious behavior.</strong> Now consider what happens in  <span class="math">\\Pi_{\\mathsf{COPEe}}</span>  if the parties do not follow the protocol. Party  <span class="math">P_B</span>  fixes their input  <span class="math">\\Delta</span>  at the start of the protocol, and sends no more messages thereafter, so cannot possibly cheat. On the other hand,  <span class="math">P_A</span>  may use different values of x in each  <span class="math">u^i</span>  that is sent in step 2 of <strong>Extend</strong>. Suppose a corrupt  <span class="math">P_A</span>  uses  <span class="math">x^i</span>  to compute  <span class="math">u^i</span> , for  <span class="math">i \\in [k]</span> , then in step 4 we will instead have  <span class="math">\\mathbf{q} = \\mathbf{t} + \\mathbf{x} * \\Delta_B</span> , where  <span class="math">\\mathbf{x} = (x^1, \\dots, x^k)</span> , which then results in</p>
+
+    <p class="text-gray-300"><span class="math">$t + q = \\langle \\mathbf{g} * \\mathbf{x}, \\mathbf{\\Delta}_B \\rangle</span>$</p>
+
+    <p class="text-gray-300">We do not prevent this in our protocol, but instead model this behavior in the functionality  <span class="math">\\mathcal{F}_{\\mathsf{COPEe}}</span>  (Fig. 3).</p>
+
+    <p class="text-gray-300">The proof of the following theorem, showing that our protocol securely implements  <span class="math">\\mathcal{F}_{COPEe}</span>  in the  <span class="math">\\mathcal{F}_{OT}</span> -hybrid model if F is a PRF, is given in Appendix A.</p>
+
+    <p class="text-gray-300">&lt;span id=&quot;page-9-1&quot;&gt;&lt;/span&gt;<strong>Protocol 1</strong> The protocol  <span class="math">\\Pi_{\\mathsf{COPEe}}</span> : Oblivious correlated product evaluation with errors over the finite field  <span class="math">\\mathbb{F}</span> .</p>
+
+    <p class="text-gray-300">The protocol uses a PRF  <span class="math">F: \\{0,1\\}^{\\lambda} \\times \\{0,1\\}^{\\lambda} \\to \\mathbb{F}</span>  and maintains a counter j:=0. After initialization, <strong>Extend</strong> may be called multiple times.</p>
+
+    <p class="text-gray-300"><strong>Initialize:</strong> On input  <span class="math">\\Delta \\in \\mathbb{F}</span>  from  <span class="math">P_B</span> :</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>1:  <span class="math">P_A</span>  samples k pairs of seeds,  <span class="math">\\{(\\mathbf{k}_0^i, \\mathbf{k}_1^i)\\}_{i=1}^k</span> , each in  <span class="math">\\{0, 1\\}^{\\lambda}</span> .</li>
+      <li>2: Both parties call  <span class="math">\\mathcal{F}_{\\mathsf{OT}}^{k,\\lambda}</span>  with inputs  <span class="math">\\{\\mathbf{k}_0^i,\\mathbf{k}_1^i\\}_{i\\in[k]}</span>  from  <span class="math">P_A</span>  and  <span class="math">\\Delta_B = (\\Delta_0,\\ldots,\\Delta_{k-1}) \\in \\{0,1\\}^k</span>  from  <span class="math">P_B</span> .</li>
+      <li>3:  <span class="math">P_B</span>  receives  <span class="math">\\mathbf{k}_{\\Delta_i}^i</span>  for  <span class="math">i \\in [k]</span> .</li>
+    </ul>
+
+    <p class="text-gray-300"><strong>Extend:</strong> On input  <span class="math">x \\in \\mathbb{F}</span>  from  <span class="math">P_A</span> :</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>1: For each i = 1, ..., k:    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>(a) Define</li>
+    </ul></li>
+    </ul>
+
+    <p class="text-gray-300"><span class="math">$t_0^i = F(\\mathbf{k}_0^i, j) \\in \\mathbb{F}</span>$
+and  <span class="math">t_1^i = F(\\mathbf{k}_1^i, j) \\in \\mathbb{F}</span></p>
+
+    <p class="text-gray-300">so  <span class="math">P_A</span>  knows  <span class="math">(t_0^i, t_1^i)</span>  and  <span class="math">P_B</span>  knows  <span class="math">t_{\\Delta_i}^i</span> .</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>&lt;span id=&quot;page-9-2&quot;&gt;&lt;/span&gt;(b)  <span class="math">P_A</span>  sends  <span class="math">u^i = t_0^i - t_1^i + x</span>  to  <span class="math">P_B</span> .</li>
+      <li>&lt;span id=&quot;page-9-3&quot;&gt;&lt;/span&gt;(c)  <span class="math">P_B</span>  computes</li>
+    </ul>
+
+    <p class="text-gray-300"><span class="math">$q^{i} = \\Delta_{i} \\cdot u^{i} + t_{\\Delta_{i}}^{i}</span>$
+<span class="math">$= t_{0}^{i} + \\Delta_{i} \\cdot x</span>$</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>2: Store j := j + 1</li>
+      <li>3: Let  <span class="math">\\mathbf{q} = (q^1, \\dots, q^k)</span>  and  <span class="math">\\mathbf{t} = (t_0^1, \\dots, t_0^k)</span> . Note that</li>
+    </ul>
+
+    <p class="text-gray-300"><span class="math">$\\mathbf{q} = \\mathbf{t} + x \\cdot \\mathbf{\\Delta}_B \\in \\mathbb{F}^k.</span>$</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>4:  <span class="math">P_B</span>  outputs  <span class="math">q = \\langle \\mathbf{g}, \\mathbf{q} \\rangle</span> .</li>
+      <li>5:  <span class="math">P_A</span>  outputs  <span class="math">t = -\\langle \\mathbf{g}, \\mathbf{t} \\rangle</span> .</li>
+      <li>6: Now it holds that  <span class="math">t + q = x \\cdot \\Delta \\in \\mathbb{F}</span> .</li>
+    </ul>
+
+    <p class="text-gray-300"><strong>Theorem 1.</strong> The protocol  <span class="math">\\Pi_{\\mathsf{COPEe}}</span>  securely implements  <span class="math">\\mathcal{F}_{\\mathsf{COPEe}}</span>  in the  <span class="math">\\mathcal{F}_{\\mathsf{OT}}</span> -hybrid model with computational security parameter  <span class="math">\\lambda</span> , if F is a PRF.</p>
+
+    <p class="text-gray-300"><strong>Complexity.</strong> The communication complexity of a single iteration of our COPE protocol, after the k base OTs in initialization, is k field elements, for a total of  <span class="math">k^2</span>  bits. The computation cost is 3k PRF evaluations and 8k finite field operations between the two parties.</p>
+
+    <h2 id="sec-9" class="text-2xl font-bold">&lt;span id=&quot;page-9-0&quot;&gt;&lt;/span&gt;4 Authenticating and opening additive shares</h2>
+
+    <p class="text-gray-300">In this section we show how to create authenticated SPDZ shares using COPE and securely open linear combinations of these shares with a MAC checking procedure. The main challenge is to ensure that an adversary who inputs errors in our COPE protocol cannot later open an authenticated share to the incorrect value. We model these requirements in a single functionality,  <span class="math">\\mathcal{F}_{\\llbracket \\cdot \\rrbracket}</span>  (Fig. 4), which is independent of the details of the MAC scheme used and the underlying MAC keys. One can</p>
+
+    <h3 id="sec-10" class="text-xl font-semibold mt-8">Functionality <span class="math">\\mathcal{F}_{\\mathsf{COPEe}}</span></h3>
+
+    <p class="text-gray-300">The functionality uses a finite field  <span class="math">\\mathbb{F}</span> , of bit length k, and runs with with parties  <span class="math">P_A</span> ,  <span class="math">P_B</span>  and an adversary  <span class="math">\\mathcal{A}</span> .</p>
+
+    <p class="text-gray-300"><strong>Initialize</strong>( <span class="math">\\mathbb{F}</span> ): Upon receiving  <span class="math">\\Delta \\in \\mathbb{F}</span>  from  <span class="math">P_B</span> , the functionality stores  <span class="math">\\Delta</span> . Let  <span class="math">\\Delta_B = \\mathbf{g}^{-1}(\\Delta)</span> .</p>
+
+    <p class="text-gray-300"><strong>Extend:</strong> Upon receiving  <span class="math">x \\in \\mathbb{F}</span>  from  <span class="math">P_A</span> :</p>
+
+    <p class="text-gray-300">1: If  <span class="math">P_A</span>  is corrupt then receive  <span class="math">t \\in \\mathbb{F}</span>  and  <span class="math">\\mathbf{x} \\in \\mathbb{F}^k</span>  from  <span class="math">\\mathcal{A}</span> , and compute q such that</p>
+
+    <p class="text-gray-300"><span class="math">$q + t = \\langle \\mathbf{g} * \\mathbf{x}, \\mathbf{\\Delta}_B \\rangle</span>$</p>
+
+    <p class="text-gray-300">Otherwise, sample  <span class="math">t \\overset{\\</span>}{\\leftarrow} \\mathbb{F}$  and compute q such that</p>
+
+    <p class="text-gray-300"><span class="math">$q + t = x \\cdot \\Delta</span>$</p>
+
+    <p class="text-gray-300">2: If only  <span class="math">P_B</span>  is corrupt then receive  <span class="math">q \\in \\mathbb{F}</span>  from  <span class="math">\\mathcal{A}</span>  and recompute t to satisfy the above. Output t to  <span class="math">P_A</span>  and q to  <span class="math">P_B</span> .</p>
+
+    <p class="text-gray-300">&lt;span id=&quot;page-10-0&quot;&gt;&lt;/span&gt;Figure 3: Correlated oblivious product evaluation with errors</p>
+
+    <h3 id="sec-11" class="text-xl font-semibold mt-8">Functionality <span class="math">\\mathcal{F}_{\\llbracket \\cdot \\rrbracket}</span></h3>
+
+    <p class="text-gray-300">The functionality maintains a dictionary, Val, to keep track of the authenticated values. Entries of Val lie in the (fixed) finite field  <span class="math">\\mathbb{F}</span>  and cannot be changed, for simplicity.</p>
+
+    <p class="text-gray-300"><strong>Input:</strong> On receiving (Input,  <span class="math">\\mathsf{id}_1, \\ldots, \\mathsf{id}_l, x_1, \\ldots, x_l, P_j</span> ) from party  <span class="math">P_j</span>  and (Input,  <span class="math">\\mathsf{id}_1, \\ldots, \\mathsf{id}_l, P_j</span> ) from all other parties, where  <span class="math">x_i \\in \\mathbb{F}</span> , set  <span class="math">\\mathsf{Val}[\\mathsf{id}_i] \\leftarrow x_i</span>  for  <span class="math">i = 1, \\ldots, l</span> .</p>
+
+    <p class="text-gray-300"><strong>Linear comb.:</strong> On receiving (LinComb,  <span class="math">\\overline{\\mathsf{id}}</span> ,  <span class="math">\\mathsf{id}_1, \\ldots, \\mathsf{id}_t, c_1, \\ldots, c_t, c</span> ) from all parties, where  <span class="math">(\\mathsf{id}_1, \\ldots, \\mathsf{id}_t) \\subseteq \\mathsf{Val}.\\mathsf{keys}()</span>  and the combination coefficients  <span class="math">c_1, \\ldots, c_t, c \\in \\mathbb{F}</span> , set  <span class="math">\\mathsf{Val}[\\overline{\\mathsf{id}}] \\leftarrow \\sum_{i=1}^t \\mathsf{Val}[\\mathsf{id}_i] \\cdot c_i + c</span> .</p>
+
+    <p class="text-gray-300"><strong>Open:</strong> On receiving (Open, id) from all parties, where id  <span class="math">\\in</span>  Val.keys(), send Val[id], wait for x from the adversary, and output x to all parties.</p>
+
+    <p class="text-gray-300">Check: On receiving (Check,  <span class="math">\\mathsf{id}_1, \\ldots, \\mathsf{id}_t, x_1, \\ldots, x_t</span> ) from every party  <span class="math">P_i</span> , wait for an input from the adversary. If it inputs  <span class="math">\\mathsf{OK}</span> , and  <span class="math">\\mathsf{Val}[\\mathsf{id}_j] = x_j</span>  for all j, return  <span class="math">\\mathsf{OK}</span>  to all parties, otherwise return  <span class="math">\\bot</span>  and terminate.</p>
+
+    <p class="text-gray-300">&lt;span id=&quot;page-10-1&quot;&gt;&lt;/span&gt;<strong>Abort:</strong> On receiving Abort from the adversary, send  <span class="math">\\perp</span>  to all parties and terminate.</p>
+
+    <p class="text-gray-300">Figure 4: Functionality for authenticating, computing linear combinations of, and opening additively shared values</p>
+
+    <p class="text-gray-300">see this functionality as a generalization of verifiable secret sharing with the main difference that it allows full-threshold corruption. We first explain the mechanics of the functionality, and then describe the protocols for implementing it.</p>
+
+    <p class="text-gray-300">Inputs are provided to the functionality with the Input command, which takes as input a list of values  <span class="math">x_1, \\ldots, x_l</span>  from one party and stores these along with the identifiers  <span class="math">\\mathsf{id}_1, \\ldots, \\mathsf{id}_l</span> . Linear functions can then be computed on values that have been input using the  <span class="math">\\mathsf{LinComb}</span>  command.</p>
+
+    <h4 id="sec-12" class="text-lg font-semibold mt-6">Protocol 2 MAC checking subprotocol</h4>
+
+    <p class="text-gray-300">On input an opened value y, a MAC share  <span class="math">m^{(i)}</span>  and a MAC key share  <span class="math">\\Delta^{(i)}</span>  from party  <span class="math">P_i</span> , each  <span class="math">P_i</span>  does the following:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>1: Compute  <span class="math">\\sigma^{(i)} \\leftarrow m^{(i)} y \\cdot \\Delta^{(i)}</span>  and call  <span class="math">\\mathcal{F}_{\\mathsf{Comm}}</span>  to commit to this and receive the handle  <span class="math">\\tau_i</span> .</li>
+      <li>2: Call  <span class="math">\\mathcal{F}_{\\mathsf{Comm}}</span>  with  <span class="math">(\\mathsf{Open}, \\tau_i)</span>  to open the commitments.</li>
+      <li>3: If  <span class="math">\\sigma^{(1)} + \\cdots + \\sigma^{(n)} \\neq 0</span> , output  <span class="math">\\perp</span>  and abort, otherwise continue.</li>
+    </ul>
+
+    <p class="text-gray-300">The Open command lets the adversary output inconsistent or incorrect values. However, if this happened to honest parties, the Check command will reveal this.</p>
+
+    <h2 id="sec-13" class="text-2xl font-bold">4.1 Authentication using COPE</h2>
+
+    <p class="text-gray-300">We first consider a natural approach for one party to create an authenticated sharing of their private inputs using the correlated oblivious product evaluation protocol, and describe why this is not sufficient for active security on its own. We then show that an actively secure protocol can be obtained by authenticating one extra random value and checking a random linear combination of all MACs during the input phase. For ease of exposition, we restrict ourselves to the two-party setting, and briefly explain at the end how  <span class="math">\\Pi_{\\mathbb{F}.\\mathbb{F}}</span>  (Protocol 3) extends this to n parties.</p>
+
+    <p class="text-gray-300">Suppose party  <span class="math">P_1</span>  is honest and wishes to authenticate an input  <span class="math">x \\in \\mathbb{F}</span> .  <span class="math">P_1</span>  runs an instance of  <span class="math">\\mathcal{F}_{\\mathsf{COPEe}}</span>  with  <span class="math">P_2</span>  and inputs x into the <strong>Extend</strong> command, whilst  <span class="math">P_2</span>  inputs a MAC key share  <span class="math">\\Delta^{(2)}</span> .  <span class="math">P_1</span>  then receives t and  <span class="math">P_j</span>  receives q such that  <span class="math">q + t = x \\cdot \\Delta^{(2)}</span> .  <span class="math">P_1</span>  then defines the MAC share  <span class="math">m^{(1)} = x \\cdot \\Delta^{(1)} + t</span> , and  <span class="math">P_2</span>  defines the MAC share  <span class="math">m^{(2)} = q</span> . Clearly, we have  <span class="math">m^{(1)} + m^{(2)} = x \\cdot \\Delta</span> , as required.</p>
+
+    <p class="text-gray-300">To convert x into shares,  <span class="math">P_1</span>  simply generates random additive shares  <span class="math">x^{(1)}, x^{(2)}</span>  and sends  <span class="math">x^{(2)}</span>  to  <span class="math">P_2</span> . Note that since the shares and MACs are linear, computing linear combinations on authenticated values is straightforward. Parties can also add a constant by adjusting their MAC shares accordingly, and choosing one party (say,  <span class="math">P_1</span> ) to adjust their share.</p>
+
+    <p class="text-gray-300">Now consider a corrupt  <span class="math">P_1^*</span> , who can input a vector  <span class="math">\\mathbf{x}</span>  into  <span class="math">\\mathcal{F}_{\\mathsf{COPEe}}</span> . If  <span class="math">P_1^*</span>  chooses  <span class="math">\\mathbf{x} = (1, \\dots, 1, 0, \\dots, 0) \\in \\mathbb{F}^k</span> , where this is 1 in the first k/2 positions and 0 elsewhere, then the relation between the MAC shares becomes:</p>
+
+    <p class="text-gray-300"><span class="math">$m^{(1)} + m^{(2)} = \\langle \\mathbf{g} * (1, \\dots, 1, 0, \\dots, 0), \\mathbf{\\Delta}_B \\rangle</span>$</p>
+
+    <p class="text-gray-300">where we have defined  <span class="math">m^{(1)} = t + \\langle \\mathbf{g} * \\mathbf{x}, \\mathbf{\\Delta}^{(1)} \\rangle</span>  for convenience.</p>
+
+    <p class="text-gray-300">If  <span class="math">P_1^*</span> 's input is later opened, then to pass the MAC check,  <span class="math">P_1^*</span>  essentially needs to come up with a value x and a valid MAC share  <span class="math">m^*</span>  such that  <span class="math">m^* + m^{(2)} = x \\cdot \\Delta</span> . One possibility is to guess the first k/2 bits of  <span class="math">\\Delta</span> , denoted  <span class="math">\\Delta&#x27;</span> , and compute</p>
+
+    <p class="text-gray-300"><span class="math">$m^* = m^{(1)} - \\langle \\mathbf{g}, \\mathbf{\\Delta}_B&#x27; \\rangle</span>$</p>
+
+    <p class="text-gray-300">which gives a valid MAC relation for x = 0. However,  <span class="math">P_1^*</span>  could similarly try to guess the latter k/2 bits of  <span class="math">\\Delta</span> , which corresponds to opening to x = 1. Note that each of these openings only succeeds with probability  <span class="math">2^{-k/2}</span> , but for efficiency we would like to achieve a failure probability much closer to  <span class="math">2^{-k}</span> .</p>
+
+    <h2 id="sec-14" class="text-2xl font-bold">&lt;span id=&quot;page-12-0&quot;&gt;&lt;/span&gt;<strong>Protocol 3</strong> <span class="math">\\Pi_{\\llbracket \\cdot \\rrbracket}</span> , creating <span class="math">\\llbracket \\cdot \\rrbracket</span> elements</h2>
+
+    <p class="text-gray-300">This protocol additively shares and authenticates inputs in  <span class="math">\\mathbb{F}</span> , and allows linear operations and openings to be carried out on these shares. Note that the <strong>Initialize</strong> procedure only needs to be called once, to set up the MAC key.</p>
+
+    <p class="text-gray-300">Each party  <span class="math">P_i</span>  samples a MAC key share  <span class="math">\\Delta^{(i)} \\in \\mathbb{F}</span> . Each pair of parties  <span class="math">(P_i, P_i)</span>  (for  <span class="math">i \\neq j</span> ) calls  <span class="math">\\mathcal{F}_{\\mathsf{COPEe}}</span> .Initialize( <span class="math">\\mathbb{F}</span> ) where  <span class="math">P_j</span>  inputs  <span class="math">\\Delta^{(j)}</span> .</p>
+
+    <p class="text-gray-300"><strong>Input:</strong> On input  <span class="math">(\\mathsf{Input}, \\mathsf{id}_1, \\dots, \\mathsf{id}_l, x_1, \\dots, x_l, P_j)</span>  from  <span class="math">P_j</span>  and  <span class="math">(\\mathsf{Input}, \\mathsf{id}_1, \\dots, \\mathsf{id}_l, P_j)</span>  from all other</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>1:  <span class="math">P_i</span>  samples  <span class="math">x_0 \\stackrel{\\</span>}{\\leftarrow} \\mathbb{F}$ .</li>
+      <li>2: For  <span class="math">h=0,\\ldots,l,</span>   <span class="math">P_j</span>  generates a random additive sharing  <span class="math">\\sum_i x_h^{(i)} = x_h</span>  and sends  <span class="math">x_h^{(i)}</span>  to  <span class="math">P_i</span> . 3: For every  <span class="math">i \\neq j,</span>   <span class="math">P_i</span>  and  <span class="math">P_j</span>  call  <span class="math">\\mathcal{F}_{\\mathsf{COPEe}}</span> . Extend, where  <span class="math">P_j</span>  inputs  <span class="math">(x_0,\\ldots,x_l) \\in \\mathbb{F}^{l+1}</span> .</li>
+      <li>4:  <span class="math">P_i</span>  receives  <span class="math">q_h^{(i,j)}</span>  and  <span class="math">P_j</span>  receives  <span class="math">t_h^{(j,i)}</span>  such that</li>
+    </ul>
+
+    <p class="text-gray-300"><span class="math">$q_h^{(i,j)} + t_h^{(j,i)} = x_h \\cdot \\Delta^{(i)}, \\text{ for } h = 0, \\dots, l.</span>$</p>
+
+    <p class="text-gray-300">5: Each  <span class="math">P_i</span> ,  <span class="math">i \\neq j</span> , defines the MAC shares  <span class="math">m_h^{(i)} = q_h^{(i,j)}</span> , and  <span class="math">P_j</span>  computes the MAC shares</p>
+
+    <p class="text-gray-300"><span class="math">$m_h^{(j)} = x_h \\cdot \\Delta^{(j)} + \\sum_{j \\neq i} t_h^{(j,i)}</span>$</p>
+
+    <p class="text-gray-300">to obtain  <span class="math">[x_h]</span> , for  <span class="math">h = 0, \\ldots, l</span> .</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>6: The parties sample  <span class="math">\\mathbf{r} \\leftarrow \\mathcal{F}_{\\mathsf{Rand}}(\\mathbb{F}^{l+1})</span> .
+7:  <span class="math">P_j</span>  computes and broadcasts  <span class="math">y = \\sum_{h=0}^l r_h \\cdot x_h</span> .
+8: Each party  <span class="math">P_i</span>  computes  <span class="math">m^{(i)} = \\sum_{h=0}^l r_h \\cdot m_h^{(i)}</span> .
+9: The parties execute  <span class="math">\\Pi_{\\mathsf{MACCheck}}</span>  with y and  <span class="math">\\{m^{(i)}\\}_{i \\in [n]}</span> .</li>
+      <li>10: All parties store their shares and MAC shares under the handles  <span class="math">id_1, \\ldots, id_l</span> .</li>
+    </ul>
+
+    <h4 id="sec-15" class="text-lg font-semibold mt-6">Linear comb.:</h4>
+
+    <p class="text-gray-300">On input (LinComb, id,  <span class="math">id_1, \\ldots, id_t, c_1, \\ldots, c_t, c</span> ), the parties retrieve their shares and MAC shares  <span class="math">\\{x_i^{(i)}, m(x_j)^{(i)}\\}_{j \\in [t], i \\in [n]}</span>  corresponding to  <span class="math">\\mathsf{id}_1, \\ldots, \\mathsf{id}_t</span> , and each  <span class="math">P_i</span>  computes:</p>
+
+    <p class="text-gray-300"><span class="math">$y^{(i)} = \\sum_{j=1}^{t} c_j \\cdot x_j^{(i)} + \\begin{cases} c &amp; i = 1\\\\ 0 &amp; i \\neq 1 \\end{cases}</span>$</p>
+
+    <p class="text-gray-300"><span class="math">$m(y)^{(i)} = \\sum_{j=1}^{t} c_j \\cdot m(x_j)^{(i)} + c \\cdot \\Delta^{(i)},</span>$</p>
+
+    <p class="text-gray-300">They then store the new share and MAC of [y] under the handle  <span class="math">\\overline{id}</span> .</p>
+
+    <p class="text-gray-300">The main problem here is that  <span class="math">P_1^*</span>  can choose, at the time of opening, what to open to, and is not committed to one particular value. This means the simulator cannot compute a valid input during the <strong>Input</strong> stage, and we cannot securely realize the functionality.</p>
+
+    <p class="text-gray-300">To get around this problem, we require two changes to the <strong>Input</strong> stage. Firstly,  <span class="math">P_1</span>  samples a random dummy input  <span class="math">x_0 \\stackrel{\\</span>}{\\leftarrow} \\mathbb{F}$ , and authenticates this as well as the m actual inputs. Secondly,</p>
+
+    <p class="text-gray-300">Protocol  <span class="math">\\Pi_{\\llbracket . \\rrbracket}</span>  (continued)</p>
+
+    <p class="text-gray-300"><strong>Open:</strong> On input (Open, id):</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>1: Each  <span class="math">P_i</span>  retrieves and broadcasts their share  <span class="math">x^{(i)}</span> .</li>
+      <li>2: Parties reconstruct  <span class="math">x = \\sum_{i=1}^{n} x^{(i)}</span>  and output it.</li>
+    </ul>
+
+    <p class="text-gray-300"><strong>Check:</strong> On input (Check,  <span class="math">id_1, \\ldots, id_t, x_1, \\ldots, x_t</span> ), the parties do the following:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>1: Sample a public, random vector  <span class="math">\\mathbf{r} \\leftarrow \\mathcal{F}_{\\mathsf{Rand}}(\\mathbb{F}^t)</span> .</li>
+      <li>2: Compute  <span class="math">y \\leftarrow \\sum_{j=1}^{t} r_j \\cdot x_j</span>  and  <span class="math">m(y)^{(i)} \\leftarrow \\sum_{j=1}^{t} r_j \\cdot m_{\\mathsf{id}_j}^{(i)}</span> , where  <span class="math">m_{\\mathsf{id}_j}^{(i)}</span>  denotes  <span class="math">P_i</span> 's MAC share stored under  <span class="math">\\mathsf{id}_j</span>  for all  <span class="math">i \\in [n]</span>  and  <span class="math">j \\in [t]</span> .</li>
+      <li>3: Execute  <span class="math">\\Pi_{\\mathsf{MACCheck}}</span>  with y and  <span class="math">m(y)^{(i)}</span> .</li>
+    </ul>
+
+    <p class="text-gray-300">after computing the MACs using  <span class="math">\\mathcal{F}_{\\mathsf{COPEe}}</span> ,  <span class="math">P_1</span>  opens a random linear combination of the inputs  <span class="math">x_0, \\ldots, x_l</span> , and the MAC on this is checked by all parties. This ensures that  <span class="math">P_1</span>  is committed to their inputs during the input stage and cannot later open to a different value, whilst  <span class="math">x_0</span>  masks the actual inputs in this opening.</p>
+
+    <p class="text-gray-300">We now examine in more detail why this suffices. Suppose a corrupt  <span class="math">P_1^*</span>  is meant to input m values to be shared, in the actual protocol  <span class="math">\\Pi_{\\llbracket \\cdot \\rrbracket}</span> . A dummy value  <span class="math">x_0 \\in \\mathbb{F}</span>  is sampled, and  <span class="math">P_1^*, P_2</span>  can obtain MAC shares such that:</p>
+
+    <p class="text-gray-300"><span class="math">$m_h^{(1)} + m_h^{(2)} = \\langle \\mathbf{g} * \\mathbf{x}_h, \\mathbf{\\Delta}_B \\rangle, \\quad \\text{for } h = 0, \\dots, l</span>$</p>
+
+    <p class="text-gray-300">where  <span class="math">\\mathbf{x}_h</span>  are  <span class="math">P_1^*</span> 's inputs to  <span class="math">\\mathcal{F}_{\\mathsf{COPEe}}</span> . In the MAC check of the <strong>Input</strong> stage, the parties sample a random  <span class="math">\\mathbf{r} \\in \\mathbb{F}^{l+1}</span> , and  <span class="math">P_1^*</span>  then opens the value y, which  <span class="math">P_1^*</span>  can force to be any value. Next,  <span class="math">P_2</span>  computes during steps 8–9 the values:</p>
+
+    <p class="text-gray-300">&lt;span id=&quot;page-13-0&quot;&gt;&lt;/span&gt;
+<span class="math">$m^{(2)} = \\sum_{h=0}^{l} r_h \\cdot m_h^{(2)}</span>$
+<span class="math">$\\sigma^{(2)} = m^{(2)} - y \\cdot \\Delta.</span>$</p>
+
+    <p class="text-gray-300"><span class="math">P_1^*</span>  must then come up with a value  <span class="math">\\sigma^{(1)}</span>  such that  <span class="math">\\sigma^{(1)} + \\sigma^{(2)} = 0</span> , which implies:</p>
+
+    <p class="text-gray-300"><span class="math">$\\sigma^{(1)} = -\\sigma^{(2)} = y \\cdot \\Delta - \\sum_{h=0}^{l} r_h \\cdot (\\langle \\mathbf{g} * \\mathbf{x}_h, \\mathbf{\\Delta}_B \\rangle - m_h^{(1)})</span>$</p>
+
+    <p class="text-gray-300"><span class="math">$\\Leftrightarrow \\sigma^{(1)} - \\sum_{h} r_h \\cdot m_h^{(1)} = y \\cdot \\Delta - \\sum_{h=0}^{l} r_h \\cdot \\langle \\mathbf{g} * \\mathbf{x}_h, \\mathbf{\\Delta}_B \\rangle. \\tag{1}</span>$</p>
+
+    <p class="text-gray-300">Since  <span class="math">r_h, m_h^{(1)}</span>  are known to  <span class="math">P_1^*</span> , this is equivalent to guessing the right-hand side of (1), after choosing  <span class="math">\\mathbf{x}_h</span>  (independently of  <span class="math">r_h</span> ) and y.</p>
+
+    <p class="text-gray-300">Clearly, one way of achieving this is letting  <span class="math">\\mathbf{x}_h = (x_h, \\dots, x_h)</span>  for some  <span class="math">x_h \\in \\mathbb{F}</span> , which implies that  <span class="math">\\langle \\mathbf{g} * \\mathbf{x}_h, \\mathbf{\\Delta}_B \\rangle = x_h \\cdot \\Delta</span> , and letting  <span class="math">y = \\sum_{h=0}^l r_h \\cdot x_h</span> . This corresponds to the honest behavior. Otherwise, we prove in the full version that for  <span class="math">P_1^*</span> , passing the check implies being able to compute a correct MAC share for  <span class="math">x_h</span> . Once a correct MAC share for a specific value is known, passing a later MAC check for another value implies knowledge of the MAC key.</p>
+
+    <p class="text-gray-300">As an example, consider the case of  <span class="math">\\mathbf{x}_h = (0, x_h, \\dots, x_h)</span>  for some  <span class="math">x_h \\neq 0, h \\in [l]</span> . This implies that</p>
+
+    <p class="text-gray-300"><span class="math">$\\sum_{i=0}^{l} r_h \\cdot \\langle \\mathbf{g} * \\mathbf{x}_h, \\mathbf{\\Delta}_B \\rangle = \\sum_{h=0}^{l} r_h \\cdot (x_h \\cdot \\Delta - x_h \\cdot \\Delta_1)</span>$
+<span class="math">$= \\sum_{h=0}^{l} r_h \\cdot x_h \\cdot (\\Delta - \\Delta_1),</span>$</p>
+
+    <p class="text-gray-300">where  <span class="math">\\Delta_1</span>  denotes the first bit of  <span class="math">\\Delta_B</span> . Define  <span class="math">\\Delta&#x27; = \\Delta - \\Delta_1</span> . Then, (1) can be written as</p>
+
+    <p class="text-gray-300"><span class="math">$\\sigma^{(1)} - \\sum_{h=0}^{l} r_h \\cdot m_h^{(1)} = (y - \\sum_{h=0}^{l} r_h \\cdot x_h) \\cdot \\Delta&#x27; - \\sum_{h=0}^{l} r_h \\cdot x_h \\cdot \\Delta_1.</span>$</p>
+
+    <p class="text-gray-300">If  <span class="math">y \\neq \\sum_{h=0}^{l} r_h \\cdot x_h</span> ,  <span class="math">P_1^*</span>  has only negligible chance of passing the check. Otherwise,  <span class="math">P_1^*</span>  can succeed with probability 1/2 by &quot;guessing&quot;  <span class="math">\\Delta_1</span> . If successful,  <span class="math">P_1^*</span>  can compute  <span class="math">m_h^{(1)} + x_h \\cdot \\Delta_1</span> , which is a correct MAC share for  <span class="math">x_h</span>  because</p>
+
+    <p class="text-gray-300"><span class="math">$m_h^{(1)} + x_h \\cdot \\Delta_1 + m_h^{(2)} = \\langle \\mathbf{g} * \\mathbf{x}_h, \\mathbf{\\Delta}_B \\rangle + x_h \\cdot \\Delta_1</span>$
+<span class="math">$= \\langle \\mathbf{g} \\cdot x_h, \\mathbf{\\Delta}_B \\rangle</span>$
+<span class="math">$= x_h \\cdot \\Delta.</span>$</p>
+
+    <p class="text-gray-300">This means that  <span class="math">P_1^*</span>  is effectively committed to  <span class="math">x_h</span> . Finally, the simulation involves solving</p>
+
+    <p class="text-gray-300"><span class="math">$0 = \\left\\langle \\mathbf{g} \\cdot y - \\mathbf{g} * \\sum_{h=0}^{l} r_h \\cdot \\mathbf{x}_h, \\tilde{\\mathbf{\\Delta}}_B \\right\\rangle</span>$
+<span class="math">$= \\sum_{h=0}^{l} r_h \\cdot x_h \\cdot \\tilde{\\Delta}_1</span>$</p>
+
+    <p class="text-gray-300">for  <span class="math">\\tilde{\\Delta}</span> . Clearly, the first bit of any solution  <span class="math">\\tilde{\\Delta}</span>  must be zero. It is easy to see that</p>
+
+    <p class="text-gray-300"><span class="math">$\\tilde{\\Delta}^{-1} \\cdot \\langle \\mathbf{g} * \\mathbf{x}_h, \\tilde{\\Delta} \\rangle = x_h</span>$</p>
+
+    <p class="text-gray-300">for any such  <span class="math">\\tilde{\\Delta}</span> . This is how the simulator in our proof computes the value  <span class="math">P_1^*</span>  is committed to after passing the check.</p>
+
+    <p class="text-gray-300">We need that, once  <span class="math">P_1^*</span>  has passed the check in the input phase, they are committed to a particular value. However, the adversary has an edge because only a random combination of inputs can be checked (otherwise all the inputs would be revealed). This can be seen as follows: Denote by  <span class="math">x_{h,g}</span>  the g-th entry of the vector  <span class="math">\\mathbf{x}_h</span>  input when authenticating the h-th value, and denote by  <span class="math">\\{r_h\\}_{h\\in[l]}</span>  the random coefficients generated using  <span class="math">\\mathcal{F}_{\\mathsf{Rand}}</span> . For  <span class="math">g\\neq g&#x27;\\in[k]</span> , if  <span class="math">x_{h,g}\\neq x_{h,g&#x27;}</span> , there is a</p>
+
+    <p class="text-gray-300"><span class="math">1/|\\mathbb{F}|</span>  chance that  <span class="math">\\sum r_h x_{h,g} = \\sum r_h x_{h,g&#x27;}</span> . Because the check only relates to the randomly weighted sum, the adversary could therefore act as if  <span class="math">x_{h,g} = x_{h,g&#x27;}</span>  and decide later between  <span class="math">\\{x_{h,g}\\}_{h \\in [l]}</span>  and  <span class="math">\\{x_{h,g&#x27;}\\}_{h \\in [l]}</span> . The fact that there are  <span class="math">\\log |\\mathbb{F}|(\\log |\\mathbb{F}| - 1)/2</span>  such pairs  <span class="math">g \\neq g&#x27;</span>  explains the  <span class="math">2 \\log \\log |\\mathbb{F}|</span>  subtrahend in the theorem below. It is easy to see that a repeated check would suffice for security parameter  <span class="math">\\log |\\mathbb{F}|</span> .</p>
+
+    <p class="text-gray-300">Extension to more than two parties. Extending the authentication protocol to n parties is relatively straightforward. When party  <span class="math">P_j</span>  is inputing a value x,  <span class="math">P_j</span>  runs  <span class="math">\\mathcal{F}_{\\mathsf{COPEe}}</span>  (on input x) with every other party  <span class="math">P_i \\neq P_j</span> , who each inputs the MAC key share  <span class="math">\\Delta^{(i)}</span> . Summing up these outputs allows  <span class="math">P_j</span>  to obtain an authenticated share under the global MAC key,  <span class="math">\\Delta = \\sum_i \\Delta^{(i)}</span> . Note that this introduces further potential avenues for cheating, as  <span class="math">P_j</span>  may provide inconsistent x's to  <span class="math">\\mathcal{F}_{\\mathsf{COPEe}}</span>  with different parties, and the other parties may not use the correct  <span class="math">\\Delta^{(i)}</span> . However, it is easy to see that except with probability  <span class="math">1/|\\mathbb{F}|</span> , these deviations will cause the MAC check to fail in the <strong>Input</strong> stage, so are not a problem.</p>
+
+    <p class="text-gray-300">The security of our authentication and MAC checking protocols is given formally in the following theorem, which we prove in Appendix B.</p>
+
+    <p class="text-gray-300">&lt;span id=&quot;page-15-1&quot;&gt;&lt;/span&gt;<strong>Theorem 2.</strong> The protocol  <span class="math">\\Pi_{\\llbracket \\cdot \\rrbracket}</span>  securely implements  <span class="math">\\mathcal{F}_{\\llbracket \\cdot \\rrbracket}</span>  in the  <span class="math">(\\mathcal{F}_{\\mathsf{COPEe}}, \\mathcal{F}_{\\mathsf{Comm}}, \\mathcal{F}_{\\mathsf{Rand}})</span> -hybrid model, with statistical security parameter  <span class="math">\\log |\\mathbb{F}| - 2 \\log \\log |\\mathbb{F}|</span> .</p>
+
+    <h2 id="sec-16" class="text-2xl font-bold">&lt;span id=&quot;page-15-0&quot;&gt;&lt;/span&gt;5 Multiplication triples using oblivious transfer</h2>
+
+    <p class="text-gray-300">In the previous section we showed how parties can compute linear functions on their private inputs using the authentication and MAC checking protocols. We now extend this to arbitrary functions, by showing how to create multiplication triples using  <span class="math">\\mathcal{F}_{\\mathbb{L}^{\\parallel}}</span>  and OT.</p>
+
+    <p class="text-gray-300">Recall that a multiplication triple is a tuple of shared values ([a], [b], [c]) where  <span class="math">a, b \\stackrel{\\</span>}{\\leftarrow} \\mathbb{F}$  and  <span class="math">c = a \\cdot b</span> . Given  <span class="math">\\mathcal{F}_{[\\cdot]}</span>  and a protocol for preprocessing triples, the online phase of the resulting MPC protocol is straightforward, using Beaver's method for multiplying two secret-shared values [4]. For completeness, this is detailed in Appendix 6.</p>
+
+    <p class="text-gray-300">Our protocol is designed to use  <span class="math">\\mathcal{F}_{\\llbracket \\cdot \\rrbracket}</span>  and an ideal OT functionality to securely implement the functionality  <span class="math">\\mathcal{F}_{\\mathsf{Triple}}</span> , which has all of the same features as  <span class="math">\\mathcal{F}_{\\llbracket \\cdot \\rrbracket}</span> , with the following additional command:</p>
+
+    <p class="text-gray-300"><span class="math">\\mathcal{F}_{\\mathsf{Triple}}</span> : On input  <span class="math">(\\mathsf{Triple},\\mathsf{id}_a,\\mathsf{id}_b,\\mathsf{id}_c)</span>  from all parties, sample two random values  <span class="math">a,b \\overset{\\</span>}{\\leftarrow} \\mathbb{F}$  and set  <span class="math">(\\mathsf{Val}[\\mathsf{id}_a],\\mathsf{Val}[\\mathsf{id}_b],\\mathsf{Val}[\\mathsf{id}_c]) \\leftarrow (a,b,a\\cdot b).</span></p>
+
+    <p class="text-gray-300">Figure 5: Triple generation command for  <span class="math">\\mathcal{F}_{\\mathsf{Triple}}</span></p>
+
+    <p class="text-gray-300">Throughout this section, we write  <span class="math">[\\![x]\\!]</span>  to mean that each party holds a random, additive share of x, and the value of x is stored in the ideal functionality  <span class="math">\\mathcal{F}_{[\\![.]\\!]}</span> .</p>
+
+    <p class="text-gray-300">The protocol  <span class="math">\\Pi_{\\mathsf{Triple}}</span>  (Protocol 4) begins with the <strong>Multiply</strong> step, which uses  <span class="math">\\mathcal{F}_{\\mathsf{OT}}</span>  to compute a secret sharing of the product of  <span class="math">b \\in \\mathbb{F}</span>  and  <span class="math">\\mathbf{a} \\in \\mathbb{F}^{\\tau}</span> , where  <span class="math">\\tau \\geq 3</span>  is a parameter affecting security. This is done by running  <span class="math">\\tau</span>  copies of the basic two-party product sharing protocol between every pair of parties (steps (a)–(g)), followed by each party locally summing up their shares.</p>
+
+    <h4 id="sec-17" class="text-lg font-semibold mt-6">&lt;span id=&quot;page-16-0&quot;&gt;&lt;/span&gt;<strong>Protocol 4</strong> Triple generation protocol, <span class="math">\\Pi_{\\mathsf{Triple}}</span></h4>
+
+    <p class="text-gray-300">The integer parameter  <span class="math">\\tau \\geq 3</span>  specifies the number of triples to be generated per output triple.</p>
+
+    <h2 id="sec-18" class="text-2xl font-bold">Multiply:</h2>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>1: Each party samples  <span class="math">\\mathbf{a}^{(i)} \\stackrel{\\</span>}{\\leftarrow} \\mathbb{F}^{\\tau}, b^{(i)} \\stackrel{$}{\\leftarrow} \\mathbb{F}$ .</li>
+      <li>&lt;span id=&quot;page-16-3&quot;&gt;&lt;/span&gt;&lt;span id=&quot;page-16-1&quot;&gt;&lt;/span&gt;2: Every ordered pair of parties  <span class="math">(P_i, P_j)</span>  does the following:    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>(a) Both parties call  <span class="math">\\mathcal{F}_{\\mathsf{ROT}}^{\\tau k, k}</span>  where  <span class="math">P_i</span>  inputs  <span class="math">(a_1^{(i)}, \\dots, a_{\\tau k}^{(i)}) = \\mathbf{g}^{-1}(\\mathbf{a}^{(i)}) \\in \\mathbb{F}_2^{\\tau k}</span> .</li>
+      <li>(b)  <span class="math">P_j</span>  receives  <span class="math">q_{0,h}^{(j,i)}, q_{1,h}^{(j,i)} \\in \\mathbb{F}</span>  and  <span class="math">P_i</span>  receives  <span class="math">s_h^{(i,j)} = q_{a_h^{(i)},h}^{(j)}</span> , for  <span class="math">h = 1, \\dots, \\tau k</span> .</li>
+      <li>(c)  <span class="math">P_j</span>  sends  <span class="math">d_h^{(j,i)} = q_{0,h}^{(j,i)} q_{1,h}^{(j,i)} + b^{(j)}, h \\in [\\tau k].</span></li>
+      <li>(d)  <span class="math">P_i</span>  sets  <span class="math">t_h^{(i,j)} = s_h^{(i,j)} + a^{(i)} \\cdot d_h^{(j,i)} = q_{0,h}^{(j,i)} + a_h^{(i)} \\cdot b^{(j)}</span> , for  <span class="math">h = 1, \\dots, \\tau k</span> . Set  <span class="math">q_h^{(j,i)} = q_{0,h}^{(j,i)}</span> .</li>
+      <li>(e) Split  <span class="math">(t_1^{(i,j)}, \\ldots, t_{\\tau k}^{(i,j)})</span>  and  <span class="math">(q_1^{(j,i)}, \\ldots, q_{\\tau k}^{(j,i)})</span>  into  <span class="math">\\tau</span>  vectors of k components each,  <span class="math">(\\mathbf{t}_1, \\ldots, \\mathbf{t}_{\\tau})</span>  and  <span class="math">(\\mathbf{q}_1, \\ldots, \\mathbf{q}_{\\tau})</span> .</li>
+      <li>(f)  <span class="math">P_i</span>  sets  <span class="math">\\mathbf{c}_{i,j}^{(i)} = (\\langle \\mathbf{g}, \\mathbf{t}_1 \\rangle, \\dots, \\langle \\mathbf{g}, \\mathbf{t}_{\\tau} \\rangle) \\in \\mathbb{F}^{\\tau}</span> .</li>
+      <li>(g)  <span class="math">P_j</span>  sets  <span class="math">\\mathbf{c}_{i,j}^{(j)} = -(\\langle \\mathbf{g}, \\mathbf{q}_1 \\rangle, \\dots, \\langle \\mathbf{g}, \\mathbf{q}_{\\tau} \\rangle) \\in \\mathbb{F}^{\\tau}</span> .</li>
+      <li>(h) Now we have</li>
+    </ul></li>
+    </ul>
+
+    <p class="text-gray-300"><span class="math">$\\mathbf{c}_{i,j}^{(i)} + \\mathbf{c}_{i,j}^{(j)} = \\mathbf{a}^{(i)} \\cdot b^{(j)} \\in \\mathbb{F}^{\\tau}</span>$</p>
+
+    <p class="text-gray-300">&lt;span id=&quot;page-16-2&quot;&gt;&lt;/span&gt;3: Each party  <span class="math">P_i</span>  computes:</p>
+
+    <p class="text-gray-300"><span class="math">$\\mathbf{c}^{(i)} = \\mathbf{a}^{(i)} \\cdot b^{(i)} + \\sum_{j \\neq i} (\\mathbf{c}_{i,j}^{(i)} + \\mathbf{c}_{j,i}^{(i)})</span>$</p>
+
+    <h4 id="sec-19" class="text-lg font-semibold mt-6">Combine:</h4>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>1: Sample  <span class="math">\\mathbf{r}, \\hat{\\mathbf{r}} \\leftarrow \\mathcal{F}_{\\mathsf{Rand}}(\\mathbb{F}^{\\tau})</span> .</li>
+      <li>2: Each party  <span class="math">P_i</span>  sets</li>
+    </ul>
+
+    <p class="text-gray-300"><span class="math">$a^{(i)} = \\langle \\mathbf{a}^{(i)}, \\mathbf{r} \\rangle, \\qquad c^{(i)} = \\langle \\mathbf{c}^{(i)}, \\mathbf{r} \\rangle \\qquad \\text{and}</span>$</p>
+
+    <p class="text-gray-300"><span class="math">\\hat{a}^{(i)} = \\langle \\mathbf{a}^{(i)}, \\hat{\\mathbf{r}} \\rangle, \\qquad \\hat{c}^{(i)} = \\langle \\mathbf{c}^{(i)}, \\hat{\\mathbf{r}} \\rangle</span></p>
+
+    <p class="text-gray-300"><strong>Authenticate:</strong> Each party  <span class="math">P_i</span>  runs  <span class="math">\\mathcal{F}_{\\llbracket.\\rrbracket}</span> .Input on their shares to obtain authenticated shares  <span class="math">\\llbracket a \\rrbracket, \\llbracket b \\rrbracket, \\llbracket c \\rrbracket, \\llbracket \\hat{a} \\rrbracket, \\llbracket \\hat{c} \\rrbracket</span> .</p>
+
+    <p class="text-gray-300"><strong>Sacrifice:</strong> Check correctness of the triple ( <span class="math">[\\![a]\\!], [\\![b]\\!], [\\![c]\\!]</span> ) by sacrificing  <span class="math">[\\![\\hat{a}]\\!], [\\![\\hat{c}]\\!]</span> .</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>1: Sample  <span class="math">s \\leftarrow \\mathcal{F}_{\\mathsf{Rand}}(\\mathbb{F})</span> .</li>
+      <li>2: Call  <span class="math">\\mathcal{F}_{\\llbracket \\cdot \\rrbracket}</span> .LinComb to store  <span class="math">s \\cdot \\llbracket a \\rrbracket \\llbracket \\hat{a} \\rrbracket</span>  under  <span class="math">\\llbracket \\rho \\rrbracket</span> .</li>
+      <li>3: Call  <span class="math">\\mathcal{F}_{\\llbracket \\cdot \\rrbracket}</span> . Open on input  <span class="math">\\llbracket \\rho \\rrbracket</span>  to obtain  <span class="math">\\rho</span> .</li>
+      <li>4: Call  <span class="math">\\mathcal{F}_{\\llbracket \\cdot \\rrbracket}</span> .LinComb to store  <span class="math">s \\cdot \\llbracket c \\rrbracket \\llbracket \\hat{c} \\rrbracket \\llbracket b \\rrbracket \\cdot \\rho</span>  under  <span class="math">\\llbracket \\sigma \\rrbracket</span> .</li>
+      <li>5: Run  <span class="math">\\mathcal{F}_{\\llbracket \\cdot \\rrbracket}</span> .Check( <span class="math">\\llbracket \\rho \\rrbracket</span> ,  <span class="math">\\llbracket \\sigma \\rrbracket</span> ,  <span class="math">\\rho</span> , 0) and abort if  <span class="math">\\mathcal{F}_{\\llbracket \\cdot \\rrbracket}</span>  aborts.</li>
+    </ul>
+
+    <p class="text-gray-300"><strong>Output:</strong>  <span class="math">(\\llbracket a \\rrbracket, \\llbracket b \\rrbracket, \\llbracket c \\rrbracket)</span>  as a valid triple.</p>
+
+    <p class="text-gray-300">During this stage, a corrupt  <span class="math">P_j</span>  may attempt to guess some bits of  <span class="math">\\mathbf{a}</span>  by using values other than  <span class="math">b^{(j)}</span>  in step (c). This is why we start with  <span class="math">\\tau</span>  components for  <span class="math">\\mathbf{a}</span>  instead of just one, ensuring that  <span class="math">\\mathbf{a}</span>  still has sufficient randomness to produce a triple. Note that there is no need for privacy amplification on b, which is already protected by the protocol because the shares  <span class="math">b^{(j)}</span>  are only used to compute  <span class="math">d^{(j,i)} = q_{0,h}^{(j,i)} - q_{1,h}^{(j,i)} + b^{(j)}</span> , which is uniformly random because  <span class="math">P_j</span>  learns only one of</p>
+
+    <p class="text-gray-300"><span class="math">q_{0,h}^{(j,i)}</span>  and  <span class="math">q_{1,h}^{(j,i)}</span> .</p>
+
+    <p class="text-gray-300">After the <strong>Multiply</strong> step, the parties have an additively shared triple  <span class="math">(\\mathbf{a}, b, \\mathbf{c})</span> , which may be incorrect if someone was dishonest. In the <strong>Combine</strong> step, they take random linear combinations of the  <span class="math">\\tau</span>  components of  <span class="math">(\\mathbf{a}, b, \\mathbf{c})</span>  using random  <span class="math">\\mathbf{r}</span>  and  <span class="math">\\hat{\\mathbf{r}}</span>  in  <span class="math">\\mathbb{F}^{\\tau}</span>  obtained from  <span class="math">\\mathcal{F}_{\\mathsf{Rand}}</span> . By using two sets of random coefficients, this produces two triples with the same b component; later, one of these will be 'sacrificed' to check correctness of the other.</p>
+
+    <p class="text-gray-300">Using random combinations ensures that even if a few bits of the vector  <span class="math">\\mathbf{a}</span>  are leaked to the adversary, the values  <span class="math">a, \\hat{a}</span>  are still statistically close to uniform. The parties then use  <span class="math">\\mathcal{F}_{\\llbracket \\cdot \\rrbracket}</span>  to <strong>Authenticate</strong> their shares of  <span class="math">a, \\hat{a}, b, c</span>  and  <span class="math">\\hat{c}</span> .</p>
+
+    <p class="text-gray-300">Finally, correctness of the triple [a], [b], [c] is checked in a <strong>Sacrifice</strong> phase, using  <span class="math">[\\hat{a}]</span>  and  <span class="math">[\\hat{c}]</span> . The idea of this step is similar to the corresponding step in previous works [16, 18], with the key difference that in our case both triples have the same b value. We observe that this still suffices to check correctness of the triples, and means we only need to authenticate 5 values instead of 6.</p>
+
+    <h2 id="sec-20" class="text-2xl font-bold">&lt;span id=&quot;page-17-0&quot;&gt;&lt;/span&gt;5.1 Security analysis</h2>
+
+    <p class="text-gray-300">We now give some more intuition behind the security of the protocol. Let us first examine the possible adversarial deviations in the <strong>Multiply</strong> step.</p>
+
+    <p class="text-gray-300">Suppose  <span class="math">P_j</span>  is corrupt. Let  <span class="math">\\mathbf{a}^{(j,i)} \\in \\mathbb{F}^{\\tau}</span>  and  <span class="math">\\mathbf{b}^{(j,i)} \\in \\mathbb{F}^{\\tau k}</span>  be the <em>actual</em> values used by  <span class="math">P_j</span>  in the two executions of steps 1 and 3 with an honest  <span class="math">P_i</span> , instead of  <span class="math">\\mathbf{a}^{(j)}</span>  and  <span class="math">b^{(j)}</span> . Define the values  <span class="math">\\mathbf{a}^{(j)}</span>  and  <span class="math">b^{(j)}</span>  to be those values used in the instance with an arbitrary (e.g. lowest index) honest party  <span class="math">P_{i_0}</span> .</p>
+
+    <p class="text-gray-300">Then, for each  <span class="math">i \\notin A</span> , let  <span class="math">\\boldsymbol{\\delta}_a^{(j,i)} = \\mathbf{a}^{(j,i)} - \\mathbf{a}^{(j)} \\in \\mathbb{F}^{\\tau}</span>  and  <span class="math">\\boldsymbol{\\delta}_b^{(j,i)} = \\mathbf{b}^{(j,i)} - (b^{(j)}, \\dots, b^{(j)}) \\in \\mathbb{F}^{\\tau k}</span>  be the deviation in  <span class="math">P_j</span> 's input with an honest  <span class="math">P_i</span> . Let  <span class="math">\\boldsymbol{\\delta}_a^{(i)} = \\sum_{j \\in A} \\boldsymbol{\\delta}_a^{(j,i)}</span>  and  <span class="math">\\boldsymbol{\\delta}_b^{(i)} = \\sum_{j \\in A} \\boldsymbol{\\delta}_b^{(j,i)}</span> , and consider  <span class="math">\\boldsymbol{\\delta}_b^{(i)}</span>  as a length  <span class="math">\\tau</span>  vector with components in  <span class="math">\\mathbb{F}^k</span>  (similarly to  <span class="math">\\mathbf{t}_h, \\mathbf{q}_h</span>  in the protocol).</p>
+
+    <p class="text-gray-300">Now by analyzing the possible adversarial deviations and summing up shares, we can see that the h-th component of  <span class="math">\\mathbf{c}</span>  (for  <span class="math">h \\in [\\tau]</span> ), at the end of the <strong>Multiply</strong> stage, is</p>
+
+    <p class="text-gray-300">&lt;span id=&quot;page-17-1&quot;&gt;&lt;/span&gt;
+<span class="math">$\\mathbf{c}[h] = \\mathbf{a}[h] \\cdot b + \\underbrace{\\sum_{i \\notin A} \\langle (\\mathbf{a}^{(i)}[h])_B, \\boldsymbol{\\delta}_b^{(i)}[h] \\rangle}_{=e_{a_h}} + \\underbrace{\\sum_{i \\notin A} b^{(i)} \\cdot \\boldsymbol{\\delta}_a^{(i)}[h]}_{=e_{b_h}}. \\tag{2}</span>$</p>
+
+    <p class="text-gray-300">Intuitively, it is easy to see that any non-zero  <span class="math">\\delta_a^{(i)}</span>  errors will be blown up by the random honest party's share  <span class="math">b^{(i)}</span> , so should result in an incorrect triple with high probability. On the other hand, the  <span class="math">\\delta_b^{(i)}</span>  errors can be chosen so that  <span class="math">e_{a_h}</span>  only depends on single bits of the shares  <span class="math">\\mathbf{a}^{(i)}</span> . This means that a corrupt party can attempt to guess a few bits (or linear combinations of bits) of  <span class="math">\\mathbf{a}^{(i)}</span> . If this guess is incorrect then the resulting triple should be incorrect; however, if all guesses succeed then the triple is correct and the sacrifice step will pass, whilst the adversary learns the bits that were guessed.</p>
+
+    <p class="text-gray-300">This potential leakage (or selective failure attack) is mitigated by the <strong>Combine</strong> stage. The intuition here is that, to be able to guess a single bit of the final shares  <span class="math">a^{(i)}, \\hat{a}^{(i)}</span> , the adversary must have guessed many bits from the input vector  <span class="math">\\mathbf{a}^{(i)}</span> , which is very unlikely to happen. To prove this intuition, we analyze the distribution of the honest party's output shares using the Leftover Hash Lemma, and show that if  <span class="math">\\tau</span>  is large enough, the combined output is statistically close to uniform to the adversary.</p>
+
+    <p class="text-gray-300">&lt;span id=&quot;page-18-1&quot;&gt;&lt;/span&gt;Protocol 5 Preprocessing input tuples, ΠInputTuple</p>
+
+    <p class="text-gray-300">Input: On input (Input, P&lt;sup&gt;j&lt;/sup&gt; ) from all parties, do the following:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>1: P&lt;sup&gt;j&lt;/sup&gt; samples r $&lt;sup&gt;←&lt;/sup&gt; &lt;sup&gt;F&lt;/sup&gt;, and calls &lt;sup&gt;F&lt;/sup&gt;J·&lt;sup&gt;K&lt;/sup&gt; with (Input, r, P&lt;sup&gt;j&lt;/sup&gt; ).</li>
+      <li>2: All parties output &lt;sup&gt;J&lt;/sup&gt;r&lt;sup&gt;K&lt;/sup&gt; and &lt;sup&gt;P&lt;/sup&gt;&lt;sup&gt;j&lt;/sup&gt; outputs &lt;sup&gt;r&lt;/sup&gt;.</li>
+    </ul>
+
+    <p class="text-gray-300">Regarding the Sacrifice stage, note that the check first opens ρ = s ·a−aˆ and then checks that</p>
+
+    <p class="text-gray-300"><span class="math">$s \\cdot c - \\hat{c} - b \\cdot \\rho = 0</span>$</p>
+
+    <p class="text-gray-300">which is equivalent to s · (c − a · b) = ˆc − aˆ · b. If the triples are incorrect then this will only pass with probability 1/|F|, since s is random and unknown when the triples are authenticated.</p>
+
+    <p class="text-gray-300">The following results (proven in Appendix <a href="#page-34-0">C)</a> state the security of our protocol. The first requires the combining parameter set to τ = 4, to obtain a a general result for any k-bit field, whilst the second (which is evident from the proof of the theorem) shows that for k-bit fields and k/2-bit statistical security, τ = 3 suffices.</p>
+
+    <p class="text-gray-300">&lt;span id=&quot;page-18-2&quot;&gt;&lt;/span&gt;Theorem 3. If τ = 4 then the protocol ΠTriple (Protocol <a href="#page-16-0">4)</a> securely implements FTriple in the (FROT, &lt;sup&gt;F&lt;/sup&gt;J·&lt;sup&gt;K&lt;/sup&gt; )-hybrid model with statistical security parameter k.</p>
+
+    <p class="text-gray-300">&lt;span id=&quot;page-18-3&quot;&gt;&lt;/span&gt;Corollary 1. If &lt;sup&gt;τ&lt;/sup&gt; = 3 then &lt;sup&gt;Π&lt;/sup&gt;Triple securely implements &lt;sup&gt;F&lt;/sup&gt;Triple in the (FROT, &lt;sup&gt;F&lt;/sup&gt;J·&lt;sup&gt;K&lt;/sup&gt; )-hybrid model with statistical security parameter k/2.</p>
+
+    <h2 id="sec-21" class="text-2xl font-bold">&lt;span id=&quot;page-18-0&quot;&gt;&lt;/span&gt;6 Complete preprocessing and online protocols</h2>
+
+    <p class="text-gray-300">We now describe the complete protocols for preprocessing and the online phase of our MPC protocol.</p>
+
+    <h2 id="sec-22" class="text-2xl font-bold">6.1 Preprocessing</h2>
+
+    <p class="text-gray-300">As well as multiplication triples, we also want the preprocessing to produce random, shared values known by a single party (called input tuples), to allow that party to provide inputs in the online phase. This is easy to do with Protocol <a href="#page-18-1">5:</a> the relevant party simply inputs a random value to &lt;sup&gt;F&lt;/sup&gt;J·&lt;sup&gt;K&lt;/sup&gt; . In the online phase, they broadcast the difference of this and their actual input, so that the shared random value can then be adjusted to the correct value by all parties. Note that this method avoids having to use the Input command of &lt;sup&gt;F&lt;/sup&gt;Prep (and hence of ΠJ·&lt;sup&gt;K&lt;/sup&gt; in the actual protocol) in the online phase, by instead offloading this cost to the preprocessing.</p>
+
+    <p class="text-gray-300">The requirements for input tuple and triple generation are specified in the functionality FPrep (Fig. <a href="#page-19-0">6)</a>, which also contains all features from &lt;sup&gt;F&lt;/sup&gt;J·&lt;sup&gt;K&lt;/sup&gt; (like FTriple). Given this and the proof of Theorem <a href="#page-18-2">3,</a> it is straightforward to show that the triple generation and input tuple generation protocols securely implement FPrep.</p>
+
+    <p class="text-gray-300">Theorem 4. The protocols ΠTriple and ΠInputTuple together securely realize the functionality FPrep, in the (FJ·&lt;sup&gt;K&lt;/sup&gt; , FROT, FRand)-hybrid model.</p>
+
+    <h3 id="sec-23" class="text-xl font-semibold mt-8">Functionality <span class="math">\\mathcal{F}_{\\mathsf{Prep}}</span></h3>
+
+    <p class="text-gray-300"><span class="math">\\mathcal{F}_{\\mathsf{Prep}}</span>  has all of the same features as  <span class="math">\\mathcal{F}_{\\llbracket \\cdot \\rrbracket}</span> , with the following additional commands:</p>
+
+    <p class="text-gray-300">Input Tuple: On input (InputTuple,  <span class="math">P_j</span> , id) from all parties, sample  <span class="math">Val[id] \\stackrel{\\</span>}{\\leftarrow} \\mathbb{F}$ , and output it to  <span class="math">P_j</span> .</p>
+
+    <p class="text-gray-300"><strong>Triple:</strong> On input (Triple,  <span class="math">\\mathsf{id}_a</span> ,  <span class="math">\\mathsf{id}_b</span> ,  <span class="math">\\mathsf{id}_c</span> ) from all parties, sample two random values  <span class="math">a, b \\stackrel{\\</span>}{\\leftarrow} \\mathbb{F}$  and set  <span class="math">(\\mathsf{Val}[\\mathsf{id}_a], \\mathsf{Val}[\\mathsf{id}_b], \\mathsf{Val}[\\mathsf{id}_c]) \\leftarrow (a, b, a \\cdot b)</span> .</p>
+
+    <p class="text-gray-300">&lt;span id=&quot;page-19-0&quot;&gt;&lt;/span&gt;Figure 6: Ideal functionality for the SPDZ preprocessing phase.</p>
+
+    <h4 id="sec-24" class="text-lg font-semibold mt-6">Functionality <span class="math">\\mathcal{F}_{\\mathsf{ABB}}</span></h4>
+
+    <p class="text-gray-300"><strong>Initialize:</strong> On input  <span class="math">(Init, \\mathbb{F})</span>  from all parties, store  <span class="math">\\mathbb{F}</span> .</p>
+
+    <p class="text-gray-300"><strong>Input:</strong> On input (Input,  <span class="math">P_i</span> , id, x) from  <span class="math">P_i</span>  and (Input,  <span class="math">P_i</span> , id) from all other parties, with id a fresh identifier and  <span class="math">x \\in \\mathbb{F}</span> , store (id, x).</p>
+
+    <p class="text-gray-300"><strong>Add:</strong> On command  <span class="math">(\\mathsf{Add},\\mathsf{id}_1,\\mathsf{id}_2,\\mathsf{id}_3)</span>  from all parties (where  <span class="math">\\mathsf{id}_1,\\mathsf{id}_2</span>  are present in memory), retrieve  <span class="math">(\\mathsf{id}_1,x)</span> ,  <span class="math">(\\mathsf{id}_2,y)</span>  and store  <span class="math">(\\mathsf{id}_3,x+y)</span> .</p>
+
+    <p class="text-gray-300"><strong>Multiply:</strong> On input  <span class="math">(\\mathsf{Mult}, \\mathsf{id}_1, \\mathsf{id}_2, \\mathsf{id}_3)</span>  from all parties (where  <span class="math">\\mathsf{id}_1, \\mathsf{id}_2</span>  are present in memory), retrieve  <span class="math">(\\mathsf{id}_1, x)</span> ,  <span class="math">(\\mathsf{id}_2, y)</span>  and store  <span class="math">(\\mathsf{id}_3, x \\cdot y)</span> .</p>
+
+    <p class="text-gray-300">Output: On input (Output, id) from all honest parties (where id is present in memory), retrieve (id, y) and output it to the adversary. Wait for an input from the adversary; if this is Deliver then output y to all parties, otherwise output Abort.</p>
+
+    <p class="text-gray-300">&lt;span id=&quot;page-19-1&quot;&gt;&lt;/span&gt;Figure 7: The ideal functionality for the MPC arithmetic black box.</p>
+
+    <h4 id="sec-25" class="text-lg font-semibold mt-6">6.2 Online phase</h4>
+
+    <p class="text-gray-300">Given the preprocessing data from  <span class="math">\\mathcal{F}_{\\mathsf{Prep}}</span> , the online phase is quite straightforward, essentially the same as in SPDZ [18], and shown in Protocol 6. Note that all of the linear computations on  <span class="math">\\llbracket \\cdot \\rrbracket</span> -shared data are performed by calling the relevant command of  <span class="math">\\mathcal{F}_{\\llbracket \\cdot \\rrbracket}</span> .</p>
+
+    <p class="text-gray-300">To share an input  <span class="math">x_i</span>  by party  <span class="math">P_i</span> , they take a preprocessed random value  <span class="math">\\llbracket r \\rrbracket</span>  and broadcast the value  <span class="math">x_i - r</span> . Since r is uniformly random in  <span class="math">\\mathbb{F}</span>  and unknown to all other parties, it acts as a one-time pad to perfectly hide  <span class="math">x_i</span> . All parties can then locally compute  <span class="math">\\llbracket r \\rrbracket + (x_i - r)</span>  to obtain  <span class="math">\\llbracket x_i \\rrbracket</span> .</p>
+
+    <p class="text-gray-300">Multiplication of two shared values [x] and [y] uses Beaver's circuit randomization technique. Given a multiplication triple [a], [b], [c], first the values x-a and y-b are opened; again, the triple values perfectly mask the inputs, so this appears uniformly random to an adversary. Given this, a sharing of the product  <span class="math">x \\cdot y</span>  can be locally computed by all parties using the triple.</p>
+
+    <p class="text-gray-300">The final functionality that the online phase implements is the arithmetic black box, shown in Fig. 7. The following theorem proves UC security of the protocol.</p>
+
+    <p class="text-gray-300"><strong>Theorem 5.</strong> The protocol  <span class="math">\\Pi_{\\mathsf{Online}}</span>  (Protocol 6) securely implements the functionality  <span class="math">\\mathcal{F}_{\\mathsf{ABB}}</span>  (Fig. 7) against a static, active adversary corrupting up to n-1 parties in the  <span class="math">\\mathcal{F}_{\\mathsf{Prep}}</span> -hybrid model.</p>
+
+    <p class="text-gray-300"><em>Proof.</em> Because most of the protocol purely consists of interaction with  <span class="math">\\mathcal{F}_{\\mathsf{Prep}}</span>  based on value identifiers, the simulation in Fig. 8 is straightforward. The only values sent in the protocol are masked openings for multiplications and outputs.</p>
+
+    <h4 id="sec-26" class="text-lg font-semibold mt-6">&lt;span id=&quot;page-20-0&quot;&gt;&lt;/span&gt;<strong>Protocol 6</strong> Operations for Secure Function Evaluation, <span class="math">\\Pi_{Online}</span></h4>
+
+    <p class="text-gray-300"><strong>Initialize:</strong> The parties call  <span class="math">\\mathcal{F}_{\\mathsf{Prep}}</span>  for the handles of a number of multiplication triples ( <span class="math">[\\![a]\\!]</span> ,  <span class="math">[\\![b]\\!]</span> ,  <span class="math">[\\![c]\\!]</span> ) and mask values  <span class="math">(r_i, [\\![r_i]\\!])</span>  as needed for the function being evaluated. If  <span class="math">\\mathcal{F}_{\\mathsf{Prep}}</span>  aborts then the parties output  <span class="math">\\bot</span>  and abort.</p>
+
+    <p class="text-gray-300"><strong>Input:</strong> To share an input  <span class="math">x_i</span> , party  <span class="math">P_i</span>  takes an available mask value  <span class="math">(r_i, [r_i])</span>  and does the following:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>1: Broadcast  <span class="math">\\epsilon \\leftarrow x_i r_i</span> .</li>
+      <li>2: The parties compute  <span class="math">[x_i] \\leftarrow [r_i] + \\epsilon</span> .</li>
+    </ul>
+
+    <p class="text-gray-300"><strong>Add:</strong> On input ( <span class="math">[\\![x]\\!]</span> ,  <span class="math">[\\![y]\\!]</span> ), locally compute  <span class="math">[\\![x+y]\\!] \\leftarrow [\\![x]\\!] + [\\![y]\\!]</span> .</p>
+
+    <p class="text-gray-300"><strong>Multiply:</strong> On input  <span class="math">(\\llbracket x \\rrbracket, \\llbracket y \\rrbracket)</span> , the parties do the following:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>1: Take one multiplication triple ([a], [b], [c]), compute  <span class="math">[\\epsilon] \\leftarrow [x] [a], [\\rho] \\leftarrow [y] [b]</span>  and call  <span class="math">\\mathcal{F}_{\\mathsf{Prep}}</span> . Open on these shares to get  <span class="math">\\epsilon, \\rho</span>  respectively.</li>
+      <li>2: Set  <span class="math">[\\![z]\\!] \\leftarrow [\\![c]\\!] + \\epsilon \\cdot [\\![b]\\!] + \\rho \\cdot [\\![a]\\!] + \\epsilon \\cdot \\rho</span></li>
+    </ul>
+
+    <p class="text-gray-300"><strong>Output:</strong> To output a share [y], do the following:&lt;sup&gt;3&lt;/sup&gt;</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>1: Call  <span class="math">\\mathcal{F}_{\\mathsf{Prep}}</span> . Check with input all opened values so far. If it fails, output  <span class="math">\\bot</span>  and abort.</li>
+      <li>2: Call  <span class="math">\\mathcal{F}_{\\mathsf{Prep}}</span>  with commands  <span class="math">\\mathsf{Open}</span>  and then  <span class="math">\\mathsf{Check}</span>  to open and verify  <span class="math">[\\![y]\\!]</span> . If the check fails, output  <span class="math">\\bot</span>  and abort, otherwise accept y as a valid output.</li>
+    </ul>
+
+    <h4 id="sec-27" class="text-lg font-semibold mt-6">Simulator <span class="math">S_{Online}</span></h4>
+
+    <p class="text-gray-300">Initialize: The simulation of this procedure is performed by running a local copy of  <span class="math">\\mathcal{F}_{\\mathsf{Prep}}</span> . It is straightforward because the InputTuple and Triple commands of  <span class="math">\\mathcal{F}_{\\mathsf{Prep}}</span>  only involve value identifiers.</p>
+
+    <p class="text-gray-300">Input: Simulate according to the following two cases:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>For inputs from an honest party, broadcast a random value.</li>
+      <li>For inputs from a corrupt party  <span class="math">P_i</span> , wait for  <span class="math">P_i</span>  to broadcast the (possibly incorrect) value  <span class="math">\\epsilon&#x27;</span> , compute  <span class="math">x_i&#x27; \\leftarrow r_i + \\epsilon&#x27;</span>  and use  <span class="math">x_i&#x27;</span>  as input to  <span class="math">\\mathcal{F}_{\\mathsf{ABB}}</span> .</li>
+    </ul>
+
+    <p class="text-gray-300">Add: This local procedure requires no simulation.</p>
+
+    <p class="text-gray-300"><strong>Multiply:</strong> Send random values for  <span class="math">\\epsilon</span>  and  <span class="math">\\rho</span>  to the adversary and wait for it to input  <span class="math">\\epsilon&#x27;</span>  and  <span class="math">\\rho&#x27;</span> . If  <span class="math">(\\epsilon, \\rho) \\neq (\\epsilon&#x27;, \\rho&#x27;)</span> , set Fail.</p>
+
+    <p class="text-gray-300">Output: Simulate the output stage as follows:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>If Fail is set, abort in the first call of  <span class="math">\\mathcal{F}_{\\mathsf{Prep}}</span> . Check.</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Receive the output y from  <span class="math">\\mathcal{F}_{\\mathsf{ABB}}</span>  and forward it to the adversary in  <span class="math">\\mathcal{F}_{\\mathsf{Prep}}</span> . If it returns  <span class="math">y&#x27; \\neq y</span> , input Abort to  <span class="math">\\mathcal{F}_{\\mathsf{ABB}}</span>  and abort in the simulation of the second Check call, otherwise input Deliver to  <span class="math">\\mathcal{F}_{\\mathsf{ABB}}</span>  and continue.</li>
+    </ol></li>
+    </ul>
+
+    <p class="text-gray-300">&lt;span id=&quot;page-20-1&quot;&gt;&lt;/span&gt;Figure 8: Simulator for the online phase.</p>
+
+    <p class="text-gray-300">Since each multiplication triple is only used once, the two values opened during a multiplication call are uniformly random in both worlds. This means that up until the output stage, the two views of the environment in both worlds are identically distributed and so indistinguishable.</p>
+
+    <p class="text-gray-300">The output stage is straightforward to simulate because the  <span class="math">\\sf Check</span>  aborts exactly if the adversary deviated.  <span class="math">\\Box</span></p>
+
+    <h2 id="sec-28" class="text-2xl font-bold">&lt;span id=&quot;page-21-0&quot;&gt;&lt;/span&gt;7 Performance and implementation</h2>
+
+    <p class="text-gray-300">We first analyse the complexity of our preprocessing protocol, and then describe our implementation and experiments.</p>
+
+    <h2 id="sec-29" class="text-2xl font-bold">7.1 Complexity</h2>
+
+    <p class="text-gray-300">We measure the communication complexity of our protocol in terms of the <em>total</em> amount of data sent across the network. Note that the number of rounds of communication is constant ( <span class="math">\\ll 100</span> ), so is unlikely to heavily impact performance when generating large amounts of preprocessing data. Throughout this section, we exclude the cost of the  <span class="math">\\lambda</span>  base OTs (between every pair of parties) in the initialization stages, as this is a one-time setup cost that takes less than a second using [13].</p>
+
+    <p class="text-gray-300"><strong>Input tuple generation.</strong> The main cost of authenticating one party's field element in a k-bit field with  <span class="math">\\Pi_{\\llbracket \\cdot \\rrbracket}</span>  is the n-1 calls to  <span class="math">\\Pi_{\\mathsf{COPEe}}</span> , each of which sends  <span class="math">k^2</span>  bits, plus sending n-1 shares of k bits, for a total of  <span class="math">(n-1)(k^2+k)</span>  bits. We ignore the cost of authenticating one extra value and performing the MAC check, as this is amortized away when creating a large batch of input tuples.</p>
+
+    <p class="text-gray-300"><strong>Triple generation.</strong> To generate a triple, each pair of parties makes  <span class="math">\\tau k</span>  calls to  <span class="math">\\mathcal{F}_{\\mathsf{ROT}}</span> , followed by sending a further  <span class="math">\\tau k^2</span>  bits in step (c) and then 5 calls to  <span class="math">\\Pi_{\\mathsf{COPEe}}</span>  for authentication (ignoring  <span class="math">\\mathcal{F}_{\\mathsf{Rand}}</span>  and sending the input shares as these are negligible). Since each call to  <span class="math">\\mathcal{F}_{\\mathsf{ROT}}</span>  requires communicating  <span class="math">\\lambda</span>  bits, and  <span class="math">\\Pi_{\\mathsf{COPEe}}</span>  requires  <span class="math">k^2</span>  bits, this gives a total of  <span class="math">n(n-1)(\\tau \\lambda k + (\\tau + 5)k^2)</span>  bits sent across the network.</p>
+
+    <p class="text-gray-300">Table 2 shows these complexities for a few choices of field size, with  <span class="math">\\lambda=128</span>  and  <span class="math">\\tau</span>  chosen to achieve at least 64 bit statistical security. We observe that as k increases, the cost of inputs scales almost exactly quadratically. For triples, k=64 is slightly less efficient as we require  <span class="math">\\tau=4</span>  (instead of 3), whilst for larger k the cost reduces slightly as k becomes much larger than  <span class="math">\\lambda</span> . Note also that the cost of an input is much lower than a triple, as the input protocol does not require any of the expensive sacrificing or combining that we use to obtain active security with triples. This is in contrast to the SPDZ protocol [16, 18], where creating input tuples requires complex zero-knowledge or cut-and-choose techniques.</p>
+
+    <p class="text-gray-300">Comparison with a passive protocol. A passively secure (or semi-honest) version of our protocol can be constructed by setting  <span class="math">\\tau=1</span>  and removing the authentication step, saving 5 calls to  <span class="math">\\Pi_{\\text{COPEe}}</span>  for every pair of parties. Note that for two parties this is essentially the same as the protocol in ABY [19]. The communication cost of a single triple is then  <span class="math">n(n-1)(\\lambda k + k^2)</span>  bits. For triples where  <span class="math">k \\geq 128</span> , and 64-bit statistical security, the actively secure protocol achieves  <span class="math">\\tau=3</span> , so is just 5.5 times the cost of the passive variant.</p>
+
+    <h4 id="sec-30" class="text-lg font-semibold mt-6">7.2 Implementation</h4>
+
+    <p class="text-gray-300">As part of our implementation, we have used the optimizations described below. The first two apply to the OT extension by Keller et al. [28].</p>
+
+    <div class="overflow-x-auto my-4">
+      <table class="min-w-full text-sm text-gray-300">
+        <thead>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">Field bit length</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">Input cost (kbit)</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">Triple cost (kbit)</th>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">64</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">4.16(n-1)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">53.25n(n-1)</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">128</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">16.51(n-1)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">180.22n(n-1)</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">256</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">65.79(n-1)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">622.59n(n-1)</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">512</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">262.66(n-1)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">2293.76n(n-1)</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p class="text-gray-300">&lt;span id=&quot;page-22-0&quot;&gt;&lt;/span&gt;Table 2: Communication cost of our protocols for various field sizes, with n parties.</p>
+
+    <p class="text-gray-300">Bit matrix transposition. Asharov et al. [2] mention the bit matrix transposition as the most expensive part of the computation for their OT extension. They propose Eklundh's algorithm to reduce the number of cache misses. Instead of transposing a matrix bit by bit, the matrix is transposed with respect to increasingly small blocks while leaving the blocks internally intact. Keller et al. also use this algorithm.</p>
+
+    <p class="text-gray-300">However, for security parameter  <span class="math">\\lambda</span> , the OT extension requires the transposition of a  <span class="math">n \\times \\lambda</span> -matrix. We store this matrix as list of  <span class="math">\\lambda \\times \\lambda</span> -blocks, and thus, we only have to transpose those blocks. For  <span class="math">\\lambda = 128</span> , one such block is 2 KiB, which easily fits into the L1 cache of most modern processors.</p>
+
+    <p class="text-gray-300">Furthermore, we use the PMOVMSKB instruction from SSE2. It outputs a byte consisting of the most significant bits of 16 bytes in a 128-bit register. Together with a left shift (PSLLQ), this allows a  <span class="math">16 \\times 8</span> -matrix to be transposed [35] with only 24 instructions (eight of PMOVSKB, PSLLQ, and MOV each).</p>
+
+    <p class="text-gray-300">Pseudorandom generator and hashing. Keller et al. [28] used AES-128 in counter mode to implement the PRG needed for the OT extension. This allows to use the AES-NI extension provided by modern processors. We have also implemented the hash function using AES-128 by means of the Matyas–Meyer–Oseas construction [34], which was proven secure by Black et al. [7]. This construction uses the compression function  <span class="math">h_i = E_{g(h_{i-1})}(m_i) \\oplus m_i</span> , where  <span class="math">m_i</span>  denotes the <em>i</em>-th message block,  <span class="math">h_i</span>  is the state after the <em>i</em>-th compression, and g denotes a conversion function. In our case, the input is only one block long (as many bits as the computational security parameter of the OT extension), and g is the identity. This gives a hash function  <span class="math">H(m) = E_{IV}(m) \\oplus m</span>  for some initialization vector IV, which allows to precompute the key schedule. This precomputation in turn allows to easily take advantage of the pipelining capabilities of AES-NI in modern Intel processors: While the latency of the AESENC instruction is seven clock cycles, the throughput is one per clock cycle [24]. This means that the processor is capable of computing seven encryptions in parallel.</p>
+
+    <p class="text-gray-300">Inner product computation. Both  <span class="math">\\Pi_{\\mathsf{COPEe}}</span>  and  <span class="math">\\Pi_{\\mathsf{Triple}}</span>  involve the computation of  <span class="math">\\langle \\mathbf{g}, \\mathbf{x} \\rangle</span>  for  <span class="math">\\mathbf{x} \\in \\mathbb{F}^{\\log |\\mathbb{F}|}</span> . Elements of both  <span class="math">\\mathbb{F}_{2^k}</span>  and  <span class="math">\\mathbb{F}_p</span>  are commonly represented as elements of larger rings  <span class="math">(\\mathbb{F}_2[X]]</span>  and  <span class="math">\\mathbb{Z}</span> , respectively), and some operations involves a modular reduction (modulo an irreducible polynomial or p). When computing, we defer this reduction until after computing the sum. Furthermore, we use the  <span class="math">\\mathtt{mpn}_*</span>  functions of MPIR [42] for the large integer operations for  <span class="math">\\mathbb{F}_p</span> . For  <span class="math">\\mathbb{F}_{2^k}</span>  on the other hand, the computation before the modular reduction is straightforward because addition in  <span class="math">\\mathbb{F}_2[X]</span>  corresponds to XOR.</p>
+
+    <p class="text-gray-300">Multithreading. In order to make optimal use of resources, we have organized the triple generation as follows: There are several threads independently generating triples, and every such thread controls n-1 threads for the OTs with the n-1 other players. Operations independent of OT instances, such as amplification and sacrificing, are performed by the triple generation threads. We found that performance is optimal if the number of generator threads is much larger than the number of processor cores. This is an indication that the communication is the main bottleneck.</p>
+
+    <h3 id="sec-31" class="text-xl font-semibold mt-8">7.3 Experiments</h3>
+
+    <p class="text-gray-300">We have tested our implementation for up to five parties on off-the-shelf machines (eight-core i7 3.1 GHz CPU, 32 GB RAM) in a local network. Fig. 9 shows our results.</p>
+
+    <p class="text-gray-300">    <img src="_page_23_Figure_3.jpeg" alt="" class="my-4 max-w-full" />
+</p>
+
+    <p class="text-gray-300">&lt;span id=&quot;page-23-0&quot;&gt;&lt;/span&gt;Figure 9: Triple generation throughput for 128-bit fields.</p>
+
+    <p class="text-gray-300">We could generate up to 4800 and 1000  <span class="math">\\mathbb{F}_{2^{128}}</span>  triples per second with two and five parties, respectively, using 100 threads. For  <span class="math">\\mathbb{F}_p</span>  with p a 128-bit prime, the figures are the same. These figures come close to the maximum possible throughput of the correlation steps, which is 5500 and 1400, respectively. The maximum figures are computed from the analysis above, with  <span class="math">\\tau=3</span>  and  <span class="math">k=\\lambda=128</span> . Assuming a 1 Gbit/s link per party and unlimited routing capacity gives the desired result.</p>
+
+    <p class="text-gray-300">Using just a single thread, we can produce 2000 triples/s with two parties, which is still over 72 times faster than the single-threaded implementation of SPDZ [16].</p>
+
+    <p class="text-gray-300">By increasing the bandwidth to 2 Gbit/s, we could increase the throughput to 9500 and 1600 triples per seconds for two and five parties, respectively. This confirms the observation that the communication is the main bottleneck. Fig. 10 shows the throughput for two parties in various network environments. The WAN environment was simulated over a LAN by restricting bandwidth to  <span class="math">50\\,\\mathrm{Mbit/s}</span>  and a round-trip latency of  <span class="math">100\\,\\mathrm{ms}</span> .</p>
+
+    <h4 id="sec-32" class="text-lg font-semibold mt-6">7.3.1 Vickrey Auction</h4>
+
+    <p class="text-gray-300">To highlight the practicality of our protocol, we have implemented the Vickrey second-price auction. Figure 11 shows the results for the offline and online phase run between two parties on a local</p>
+
+    <p class="text-gray-300">    <img src="_page_24_Figure_0.jpeg" alt="" class="my-4 max-w-full" />
+</p>
+
+    <p class="text-gray-300">&lt;span id=&quot;page-24-5&quot;&gt;&lt;/span&gt;Figure 10: Throughput and maximum possible throughput for different networks with two parties</p>
+
+    <p class="text-gray-300">network. This clearly illustrates the 200-fold performance improvement of our protocol, compared with (actively secure) SPDZ. Now the preprocessing phase in within 2–3 orders of magnitude of the online phase.</p>
+
+    <h2 id="sec-33" class="text-2xl font-bold">Acknowledgements</h2>
+
+    <p class="text-gray-300">We thank Claudio Orlandi and the anonymous reviewers for valuable feedback that helped to improve the presentation.</p>
+
+    <h2 id="sec-34" class="text-2xl font-bold">References</h2>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>&lt;span id=&quot;page-24-0&quot;&gt;&lt;/span&gt;[1] The Sharemind project. <a href="http://sharemind.cs.ut.ee">http://sharemind.cs.ut.ee</a>, 2007.</li>
+      <li>&lt;span id=&quot;page-24-1&quot;&gt;&lt;/span&gt;[2] Asharov, G., Lindell, Y., Schneider, T., and Zohner, M. More efficient oblivious transfer and extensions for faster secure computation. In Proceedings of the 2013 ACM SIGSAC conference on Computer &amp; communications security (2013), ACM, pp. 535–548.</li>
+      <li>&lt;span id=&quot;page-24-2&quot;&gt;&lt;/span&gt;[3] Baum, C., Damg˚ard, I., Toft, T., and Zakarias, R. Better preprocessing for secure multiparty computation. IACR Cryptology ePrint Archive (2016).</li>
+      <li>&lt;span id=&quot;page-24-4&quot;&gt;&lt;/span&gt;[4] Beaver, D. Efficient multiparty protocols using circuit randomization. Advances in Cryptology - CRYPTO 1991 (1992).</li>
+      <li>&lt;span id=&quot;page-24-3&quot;&gt;&lt;/span&gt;[5] Beaver, D. Correlated pseudorandomness and the complexity of private computations. In Proceedings of the Twenty-Eighth Annual ACM Symposium on the Theory of Computing (1996), G. L. Miller, Ed., ACM, pp. 479–488.</li>
+    </ul>
+
+    <p class="text-gray-300">    <img src="_page_25_Figure_0.jpeg" alt="" class="my-4 max-w-full" />
+</p>
+
+    <p class="text-gray-300">&lt;span id=&quot;page-25-6&quot;&gt;&lt;/span&gt;Figure 11: Vickrey auction run by two parties.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><p class="text-gray-300">&lt;span id=&quot;page-25-2&quot;&gt;&lt;/span&gt;[6] Bendlin, R., Damg˚ard, I., Orlandi, C., and Zakarias, S. Semi-homomorphic encryption and multiparty computation. In Advances in Cryptology - EUROCRYPT 2011 (2011), pp. 169–188.</p></li>
+      <li><p class="text-gray-300">&lt;span id=&quot;page-25-5&quot;&gt;&lt;/span&gt;[7] Black, J., Rogaway, P., Shrimpton, T., and Stam, M. An analysis of the blockcipherbased hash functions from PGV. J. Cryptology 23, 4 (2010), 519–545.</p></li>
+      <li><p class="text-gray-300">&lt;span id=&quot;page-25-0&quot;&gt;&lt;/span&gt;[8] Bogdanov, D., Joemets, M., Siim, S., and Vaht, M. ˜ How the Estonian tax and customs board evaluated a tax fraud detection system based on secure multi-party computation. In Financial Cryptography and Data Security - 19th International Conference, FC 2015, Revised Selected Papers (2015), pp. 227–234.</p></li>
+      <li><p class="text-gray-300">&lt;span id=&quot;page-25-1&quot;&gt;&lt;/span&gt;[9] Bogdanov, D., Kamm, L., Kubo, B., Rebane, R., Sokk, V., and Talviste, R. Students and taxes: a privacy-preserving social study using secure computation. IACR Cryptology ePrint Archive (2015).</p></li>
+      <li><p class="text-gray-300">&lt;span id=&quot;page-25-3&quot;&gt;&lt;/span&gt;[10] Burra, S. S., Larraia, E., Nielsen, J. B., Nordholt, P. S., Orlandi, C., Orsini, E., Scholl, P., and Smart, N. P. High performance multi-party computation for binary circuits based on oblivious transfer. Cryptology ePrint Archive, Report 2015/472, 2015. <a href="http://eprint.iacr.org/">http:</a> <a href="http://eprint.iacr.org/">//eprint.iacr.org/</a>.</p></li>
+      <li><p class="text-gray-300">&lt;span id=&quot;page-25-4&quot;&gt;&lt;/span&gt;[11] Canetti, R. Universally composable security: A new paradigm for cryptographic protocols. In 42nd Annual Symposium on Foundations of Computer Science, FOCS (2001), pp. 136–145.</p></li>
+      <li><p class="text-gray-300">&lt;span id=&quot;page-25-7&quot;&gt;&lt;/span&gt;[12] Carter, L., and Wegman, M. N. Universal classes of hash functions. J. Comput. Syst. Sci. 18, 2 (1979), 143–154.</p></li>
+      <li><p class="text-gray-300">&lt;span id=&quot;page-26-9&quot;&gt;&lt;/span&gt;[13] Chou, T., and Orlandi, C. The simplest protocol for oblivious transfer. In Progress in Cryptology - LATINCRYPT 2015 - 4th International Conference on Cryptology and Information Security in Latin America (2015), pp. 40–58.</p></li>
+      <li><p class="text-gray-300">&lt;span id=&quot;page-26-0&quot;&gt;&lt;/span&gt;[14] Damg˚ard, I., Damg˚ard, K., Nielsen, K., Nordholt, P. S., and Toft, T. Confidential benchmarking based on multiparty computation. In Financial Cryptography (2016).</p></li>
+      <li><p class="text-gray-300">&lt;span id=&quot;page-26-4&quot;&gt;&lt;/span&gt;[15] Damg˚ard, I., Keller, M., Larraia, E., Miles, C., and Smart, N. P. Implementing AES via an actively/covertly secure dishonest-majority MPC protocol. In SCN (2012), I. Visconti and R. D. Prisco, Eds., vol. 7485 of Lecture Notes in Computer Science, Springer, pp. 241–263.</p></li>
+      <li><p class="text-gray-300">&lt;span id=&quot;page-26-2&quot;&gt;&lt;/span&gt;[16] Damg˚ard, I., Keller, M., Larraia, E., Pastro, V., Scholl, P., and Smart, N. P. Practical covertly secure MPC for dishonest majority - or: Breaking the SPDZ limits. In ESORICS (2013), J. Crampton, S. Jajodia, and K. Mayes, Eds., vol. 8134 of Lecture Notes in Computer Science, Springer, pp. 1–18.</p></li>
+      <li><p class="text-gray-300">&lt;span id=&quot;page-26-7&quot;&gt;&lt;/span&gt;[17] Damg˚ard, I., and Orlandi, C. Multiparty computation for dishonest majority: From passive to active security at low cost. In Advances in Cryptology - CRYPTO (2010), pp. 558– 576.</p></li>
+      <li><p class="text-gray-300">&lt;span id=&quot;page-26-1&quot;&gt;&lt;/span&gt;[18] Damg˚ard, I., Pastro, V., Smart, N. P., and Zakarias, S. Multiparty computation from somewhat homomorphic encryption. In Advances in Cryptology – CRYPTO 2012 (2012), R. Safavi-Naini and R. Canetti, Eds., vol. 7417 of Lecture Notes in Computer Science, Springer, pp. 643–662.</p></li>
+      <li><p class="text-gray-300">&lt;span id=&quot;page-26-6&quot;&gt;&lt;/span&gt;[19] Demmler, D., Schneider, T., and Zohner, M. ABY - A framework for efficient mixedprotocol secure two-party computation. In 22nd Annual Network and Distributed System Security Symposium, NDSS (2015), The Internet Society.</p></li>
+      <li><p class="text-gray-300">&lt;span id=&quot;page-26-3&quot;&gt;&lt;/span&gt;[20] Frederiksen, T. K., Keller, M., Orsini, E., and Scholl, P. A unified approach to MPC with preprocessing using OT. In Advances in Cryptology – ASIACRYPT 2015, Part I (2015), T. Iwata and J. H. Cheon, Eds., vol. 9452 of Lecture Notes in Computer Science, Springer, pp. 711–735.</p></li>
+      <li><p class="text-gray-300">&lt;span id=&quot;page-26-5&quot;&gt;&lt;/span&gt;[21] Gilboa, N. Two party RSA key generation. In Advances in Cryptology - CRYPTO (1999), pp. 116–129.</p></li>
+      <li><p class="text-gray-300">&lt;span id=&quot;page-26-8&quot;&gt;&lt;/span&gt;[22] Goldreich, O., Micali, S., and Wigderson, A. How to play any mental game or A completeness theorem for protocols with honest majority. In Proceedings of the 19th Annual ACM Symposium on Theory of Computing (1987), pp. 218–229.</p></li>
+      <li><p class="text-gray-300">&lt;span id=&quot;page-26-11&quot;&gt;&lt;/span&gt;[23] Impagliazzo, R., Levin, L. A., and Luby, M. Pseudo-random generation from one-way functions (extended abstracts). In Proceedings of the 21st Annual ACM Symposium on Theory of Computing, May 14-17, 1989, Seattle, Washigton, USA (1989), pp. 12–24.</p></li>
+      <li><p class="text-gray-300">&lt;span id=&quot;page-26-10&quot;&gt;&lt;/span&gt;[24] Intel. Intel intrinsics guide. <a href="https://software.intel.com/sites/landingpage/IntrinsicsGuide">https://software.intel.com/sites/landingpage/</a> <a href="https://software.intel.com/sites/landingpage/IntrinsicsGuide">IntrinsicsGuide</a>, 2016. Online; accessed February 2016.</p></li>
+      <li><p class="text-gray-300">&lt;span id=&quot;page-27-5&quot;&gt;&lt;/span&gt;[25] Ishai, Y., Kilian, J., Nissim, K., and Petrank, E. Extending oblivious transfers efficiently. In Advances in Cryptology - CRYPTO (2003), pp. 145–161.</p></li>
+      <li><p class="text-gray-300">&lt;span id=&quot;page-27-12&quot;&gt;&lt;/span&gt;[26] Ishai, Y., Prabhakaran, M., and Sahai, A. Secure arithmetic computation with no honest majority. In Reingold <a href="#page-28-4">[41]</a>, pp. 294–314.</p></li>
+      <li><p class="text-gray-300">&lt;span id=&quot;page-27-4&quot;&gt;&lt;/span&gt;[27] Kamm, L., and Willemson, J. Secure floating point arithmetic and private satellite collision analysis. International Journal of Information Security 14, 6 (2015), 531–548.</p></li>
+      <li><p class="text-gray-300">&lt;span id=&quot;page-27-6&quot;&gt;&lt;/span&gt;[28] Keller, M., Orsini, E., and Scholl, P. Actively secure OT extension with optimal overhead. In Advances in Cryptology - CRYPTO 2015, Part I (2015), pp. 724–741.</p></li>
+      <li><p class="text-gray-300">&lt;span id=&quot;page-27-7&quot;&gt;&lt;/span&gt;[29] Keller, M., Rotaru, D., Scholl, P., and Smart, N. P. Multiparty computation with SPDZ online phase and MASCOT offline phase, 2016. <a href="https://github.com/bristolcrypto/SPDZ-2">https://github.com/bristolcrypto/</a> <a href="https://github.com/bristolcrypto/SPDZ-2">SPDZ-2</a>.</p></li>
+      <li><p class="text-gray-300">&lt;span id=&quot;page-27-0&quot;&gt;&lt;/span&gt;[30] Keller, M., Scholl, P., and Smart, N. P. An architecture for practical actively secure MPC with dishonest majority. In ACM Conference on Computer and Communications Security (2013), pp. 549–560.</p></li>
+      <li><p class="text-gray-300">&lt;span id=&quot;page-27-1&quot;&gt;&lt;/span&gt;[31] Kreuter, B., Shelat, A., and Shen, C. Billion-gate secure computation with malicious adversaries. In Proceedings of the 21st USENIX conference on Security symposium (2012), USENIX Association, pp. 14–14.</p></li>
+      <li><p class="text-gray-300">&lt;span id=&quot;page-27-2&quot;&gt;&lt;/span&gt;[32] Larraia, E., Orsini, E., and Smart, N. P. Dishonest majority multi-party computation for binary circuits. In Advances in Cryptology - CRYPTO 2014, Part II (2014), pp. 495–512.</p></li>
+      <li><p class="text-gray-300">&lt;span id=&quot;page-27-10&quot;&gt;&lt;/span&gt;[33] Lindell, Y., and Riva, B. Blazing fast 2PC in the offline/online setting with security for malicious adversaries. In Proceedings of the 22nd ACM SIGSAC Conference on Computer and Communications Security (2015), pp. 579–590.</p></li>
+      <li><p class="text-gray-300">&lt;span id=&quot;page-27-14&quot;&gt;&lt;/span&gt;[34] Matyas, S. M., Meyer, C. H., and Oseas, J. Generating strong one-way functions with cryptographic algorithm. IBM Technical Disclosure Bulletin 27, 10A (1985), 5658–5659.</p></li>
+      <li><p class="text-gray-300">&lt;span id=&quot;page-27-13&quot;&gt;&lt;/span&gt;[35] mischasan. What is SSE !@# good for? Transposing a bit matrix. <a href="https://mischasan.wordpress.com/2011/07/24/what-is-sse-good-for-transposing-a-bit-matrix">https://mischasan.</a> <a href="https://mischasan.wordpress.com/2011/07/24/what-is-sse-good-for-transposing-a-bit-matrix">wordpress.com/2011/07/24/what-is-sse-good-for-transposing-a-bit-matrix</a>, 2011. Online; accessed February 2016.</p></li>
+      <li><p class="text-gray-300">&lt;span id=&quot;page-27-3&quot;&gt;&lt;/span&gt;[36] Nielsen, J. B., Nordholt, P. S., Orlandi, C., and Burra, S. S. A new approach to practical active-secure two-party computation. In Advances in Cryptology–CRYPTO 2012. Springer, 2012, pp. 681–700.</p></li>
+      <li><p class="text-gray-300">&lt;span id=&quot;page-27-9&quot;&gt;&lt;/span&gt;[37] Nielsen, J. B., and Orlandi, C. LEGO for two-party secure computation. In Reingold <a href="#page-28-4">[41]</a>, pp. 368–386.</p></li>
+      <li><p class="text-gray-300">&lt;span id=&quot;page-27-8&quot;&gt;&lt;/span&gt;[38] Peikert, C., Vaikuntanathan, V., and Waters, B. A framework for efficient and composable oblivious transfer. In Advances in Cryptology - CRYPTO (2008), pp. 554–571.</p></li>
+      <li><p class="text-gray-300">&lt;span id=&quot;page-27-11&quot;&gt;&lt;/span&gt;[39] Pinkas, B., Schneider, T., Segev, G., and Zohner, M. Phasing: Private set intersection using permutation-based hashing. In 24th USENIX Security Symposium, USENIX Security 15 (2015), pp. 515–530.</p></li>
+      <li><p class="text-gray-300">&lt;span id=&quot;page-28-1&quot;&gt;&lt;/span&gt;[40] PINKAS, B., SCHNEIDER, T., AND ZOHNER, M. Faster private set intersection based on OT extension. In <em>Proceedings of the 23rd USENIX Security Symposium</em> (2014), pp. 797–812.</p></li>
+      <li><p class="text-gray-300">&lt;span id=&quot;page-28-4&quot;&gt;&lt;/span&gt;[41] REINGOLD, O., Ed. Theory of Cryptography, 6th Theory of Cryptography Conference, TCC (2009), vol. 5444 of Lecture Notes in Computer Science, Springer.</p></li>
+      <li><p class="text-gray-300">&lt;span id=&quot;page-28-3&quot;&gt;&lt;/span&gt;[42] The MPIR Team. Multiple precision integers and rationals. https://www.mpir.org, 2016. Online; accessed February 2016.</p></li>
+      <li><p class="text-gray-300">&lt;span id=&quot;page-28-0&quot;&gt;&lt;/span&gt;[43] YAO, A. C. How to generate and exchange secrets (extended abstract). In 27th Annual Symposium on Foundations of Computer Science (1986).</p></li>
+    </ul>
+
+    <h2 id="sec-35" class="text-2xl font-bold">&lt;span id=&quot;page-28-2&quot;&gt;&lt;/span&gt;A Security of the <span class="math">\\Pi_{COPEe}</span> Protocol</h2>
+
+    <p class="text-gray-300"><strong>Lemma 1.</strong> The protocol  <span class="math">\\Pi_{\\mathsf{COPEe}}</span>  securely implements  <span class="math">\\mathcal{F}_{\\mathsf{COPEe}}</span>  in the OT-hybrid model, with computational security  <span class="math">\\lambda</span> .</p>
+
+    <p class="text-gray-300"><em>Proof.</em> We construct a simulator  <span class="math">\\mathcal{S}</span>  such that for any adversary  <span class="math">\\mathcal{A}</span>  who corrupts one party, and any environment  <span class="math">\\mathcal{Z}</span>  who chooses both parties' inputs and sees all outputs,  <span class="math">\\mathcal{Z}</span>  cannot distinguish between a real execution of the protocol between  <span class="math">\\mathcal{A}</span>  and an honest party, or a simulated execution of the protocol between  <span class="math">\\mathcal{S}</span>  and the ideal functionality  <span class="math">\\mathcal{F}_{\\mathsf{COPEe}}</span> .</p>
+
+    <p class="text-gray-300">We consider two cases, depending on whether party  <span class="math">P_A</span>  or  <span class="math">P_B</span>  is corrupted (if  <span class="math">\\mathcal{A}</span>  corrupts no parties or both parties then simulation is trivial).  <span class="math">\\mathcal{S}</span>  begins by receiving the corrupted party's input from  <span class="math">\\mathcal{Z}</span> , copying this onto the input tape of  <span class="math">\\mathcal{A}</span>  and invoking  <span class="math">\\mathcal{A}</span> . All communication with  <span class="math">\\mathcal{A}</span>  is then passed back to  <span class="math">\\mathcal{Z}</span> .</p>
+
+    <p class="text-gray-300">Corrupt  <span class="math">P_B</span> . The simulator receives  <span class="math">\\Delta \\in \\{0,1\\}^{\\lambda}</span>  from  <span class="math">\\mathcal{A}</span> , and sends this to  <span class="math">\\mathcal{F}_{\\mathsf{COPEe}}</span>  for the Initialize stage.  <span class="math">\\mathcal{S}</span>  samples random seeds  <span class="math">\\{(\\mathbf{k}_0^i, \\mathbf{k}_1^i)\\}_{i=1}^{\\lambda}</span> , and sends  <span class="math">\\mathbf{k}_{\\Delta_i}^i</span>  to  <span class="math">\\mathcal{A}</span> , for  <span class="math">i=1,\\ldots,\\lambda</span> . During the <strong>Extend</strong> stage,  <span class="math">\\mathcal{S}</span>  simulates the honest  <span class="math">P_A</span> 's messages  <span class="math">u^i</span>  with uniformly random values  <span class="math">\\tilde{u}^i \\in \\mathbb{F}</span> .  <span class="math">\\mathcal{S}</span>  then computes q as an honest  <span class="math">P_B</span>  would in the protocol and sends q to  <span class="math">\\mathcal{F}_{\\mathsf{COPEe}}</span> .</p>
+
+    <p class="text-gray-300">Indistinguishability. We now argue indistinguishability of the real and ideal executions to an environment,  <span class="math">\\mathcal{Z}</span> . Recall that  <span class="math">\\mathcal{Z}</span>  can choose the inputs of both parties (the values  <span class="math">\\Delta, x</span> ). The view of  <span class="math">\\mathcal{Z}</span>  in the real world then consists of these inputs, the messages received by the adversary (namely  <span class="math">\\mathbf{k}_{\\Delta_i}^i</span>  and a set of  <span class="math">\\tilde{u}^i</span>  for each call to <strong>Extend</strong>), and both parties' outputs t, q. In the ideal world, the values  <span class="math">\\mathbf{k}_{\\Delta_i}^i</span>  and  <span class="math">u^i</span>  are randomly generated by the simulator, while each receiver's output t is computed by the functionality, according to the input q provided by  <span class="math">\\mathcal{S}</span>  and the honest input x.</p>
+
+    <p class="text-gray-300">In the real world, since  <span class="math">P_A</span>  is honest, the seeds are also uniformly random, so these values are identically distributed in both worlds. Note also that in both worlds, t and q are entirely determined by the remainder of the transcript, so we only need to show that the real world values  <span class="math">u^i = F(\\mathbf{k}_0^i, j) - F(\\mathbf{k}_1^i, j) + x^i</span>  are indistinguishable from the uniformly random  <span class="math">\\tilde{u}^i</span>  values in the ideal world.</p>
+
+    <p class="text-gray-300">To do this, we define a sequence of hybrid experiments,  <span class="math">H_1, \\ldots, H_{k+1}</span> , with the environment  <span class="math">\\mathcal{Z}</span> , as follows.</p>
+
+    <p class="text-gray-300"><strong>Hybrid</strong>  <span class="math">\\mathsf{H}_1</span> : This models an interaction of  <span class="math">\\mathcal{Z}</span>  with the real world protocol. Here, in each invocation of <strong>Extend</strong>,  <span class="math">\\mathcal{Z}</span>  provides  <span class="math">P_A</span> 's input x and receives the messages  <span class="math">u^i = t^i_0 - t^i_1 + x</span> , where  <span class="math">t^i_0, t^i_1</span>  are computed from the PRF F using uniformly random keys  <span class="math">\\mathbf{k}^i_0, \\mathbf{k}^i_1</span> .  <span class="math">\\mathcal{Z}</span>  also receives the outputs t, q, which are computed as in the protocol.</p>
+
+    <p class="text-gray-300"><strong>Hybrid</strong>  <span class="math">\\mathsf{H}_h</span>  ( <span class="math">2 \\le h \\le k</span> ): In the h-th experiment, values  <span class="math">u^1, \\ldots, u^{h-1}</span>  are sampled uniformly at random, whilst for  <span class="math">i \\ge h</span> ,  <span class="math">u^i</span>  is computed as in  <span class="math">\\mathsf{H}_1</span> . The q outputs are computed as an honest  <span class="math">P_B</span>  would, and t computed to satisfy  <span class="math">q + t = x \\cdot \\Delta</span> .</p>
+
+    <p class="text-gray-300"><strong>Hybrid</strong>  <span class="math">H_{k+1}</span> : The final experiment models the ideal world, where all of the  <span class="math">u^i</span>  values sent to  <span class="math">\\mathcal{Z}</span>  during <strong>Extend</strong> are uniformly random.</p>
+
+    <p class="text-gray-300">Claim 1. Hybrids  <span class="math">H_h</span>  and  <span class="math">H_{h+1}</span>  are indistinguishable, for every  <span class="math">1 \\le h \\le k</span> .</p>
+
+    <p class="text-gray-300">Proof. Suppose  <span class="math">\\mathcal{Z}</span>  distinguishes between  <span class="math">\\mathsf{H}_h</span>  and  <span class="math">\\mathsf{H}_{h+1}</span>  with advantage  <span class="math">\\epsilon</span> . We construct an algorithm,  <span class="math">\\mathcal{D}</span> , that breaks the security of the PRF.  <span class="math">\\mathcal{D}</span>  has access to an oracle  <span class="math">\\mathcal{O}_{\\mathsf{PRF}}</span> , which either returns uniformly random values in  <span class="math">\\mathbb{F}</span> , or outputs from F.  <span class="math">\\mathcal{D}</span>  runs  <span class="math">\\mathcal{Z}</span> , and samples random seeds  <span class="math">\\{\\mathbf{k}_0^i, \\mathbf{k}_1^i\\}_{i=1}^k</span>  for the <strong>Initialize</strong> stage.  <span class="math">\\mathcal{D}</span>  receives the inputs  <span class="math">\\{\\Delta_i\\}_i</span>  from  <span class="math">\\mathcal{Z}</span> , and sends back  <span class="math">\\mathbf{k}_{\\Delta_i}^i</span> . For the j-th <strong>Extend</strong> invocation by  <span class="math">\\mathcal{Z}</span>  on input x,  <span class="math">\\mathcal{D}</span>  computes  <span class="math">u^1, \\ldots, u^{h-1}</span>  uniformly at random. The values  <span class="math">u^{h+1}, \\ldots, u^k</span>  are computed using the keys  <span class="math">(\\mathbf{k}_0^{h+1}, \\mathbf{k}_1^{h+1}), \\ldots, (\\mathbf{k}_0^k, \\mathbf{k}_1^k)</span> , as in the protocol. For the h-th value,  <span class="math">\\mathcal{D}</span>  obtains  <span class="math">t_{1-\\Delta_h}^h \\leftarrow \\mathcal{O}_{\\mathsf{PRF}}(j)</span>  and computes  <span class="math">u^h = t_0^h - t_1^h + x</span> , where  <span class="math">t_{\\Delta_h}^h</span>  is computed as  <span class="math">F(\\mathbf{k}_{\\Delta_h}^h, j)</span> .</p>
+
+    <p class="text-gray-300">Notice that, if  <span class="math">\\mathcal{O}_{\\mathsf{PRF}}</span>  gives outputs from the PRF then the view of  <span class="math">\\mathcal{Z}</span>  is identically distributed to a run of the experiment  <span class="math">\\mathsf{H}_h</span> . If the outputs of  <span class="math">\\mathcal{O}_{\\mathsf{PRF}}</span>  are uniformly random then  <span class="math">u^h</span>  is uniformly random, so the view of  <span class="math">\\mathcal{Z}</span>  is identical to that of experiment  <span class="math">\\mathsf{H}_{h+1}</span> . Therefore, the distinguishing advantage of  <span class="math">\\mathcal{D}</span>  with  <span class="math">\\mathcal{O}_{\\mathsf{PRF}}</span>  is  <span class="math">\\epsilon</span> , the same as  <span class="math">\\mathcal{Z}</span> .</p>
+
+    <p class="text-gray-300">It follows that any  <span class="math">\\mathcal{Z}</span>  who distinguishes between  <span class="math">\\mathsf{H}_1</span>  and  <span class="math">\\mathsf{H}_{k+1}</span>  with advantage  <span class="math">\\epsilon</span>  can be used to distinguish the outputs of the PRF with advantage at least  <span class="math">\\frac{\\epsilon}{k}</span> .</p>
+
+    <p class="text-gray-300">Corrupt  <span class="math">P_A</span> . In the Initialize stage,  <span class="math">\\mathcal{S}</span>  receives and stores the seeds  <span class="math">\\{(\\mathbf{k}_0^i, \\mathbf{k}_1^i)\\}_{i=1}^k</span>  from the corrupt  <span class="math">P_A</span> , as input to the functionality  <span class="math">\\kappa \\times \\mathsf{OT}_{\\kappa}</span> . Whenever <strong>Extend</strong> is called,  <span class="math">\\mathcal{S}</span>  computes  <span class="math">t_0^i, t_1^i</span>  using these seeds and the PRF, as in the protocol. The corrupt  <span class="math">P_A</span>  sends the vectors  <span class="math">u^i</span>  for  <span class="math">i = 1, \\ldots, k</span> , and  <span class="math">\\mathcal{S}</span>  extracts the inputs by computing  <span class="math">x^i = u^i - t_0^i + t_1^i</span> , and then  <span class="math">t = -\\langle \\mathbf{g}, (t_0^1, \\ldots, t_0^k) \\rangle</span>  as in the protocol and sends  <span class="math">t, \\mathbf{x}</span>  to the  <span class="math">\\mathcal{F}_{\\mathsf{COPEe}}</span>  functionality.</p>
+
+    <p class="text-gray-300">Since no messages are sent to the adversary, and all outputs are computed identically in both worlds, it is clear that the real and ideal worlds are perfectly indistinguishable.</p>
+
+    <h2 id="sec-36" class="text-2xl font-bold">&lt;span id=&quot;page-29-0&quot;&gt;&lt;/span&gt;B Authentication and MAC checking security proof</h2>
+
+    <p class="text-gray-300">We now prove security of the authentication and MAC checking protocol.</p>
+
+    <p class="text-gray-300"><strong>Theorem 6</strong> (Theorem 2, restated). The protocol  <span class="math">\\Pi_{\\llbracket \\cdot \\rrbracket}</span>  securely implements  <span class="math">\\mathcal{F}_{\\llbracket \\cdot \\rrbracket}</span>  in the  <span class="math">(\\mathcal{F}_{\\mathsf{COPEe}}, \\mathcal{F}_{\\mathsf{Comm}}, \\mathcal{F}_{\\mathsf{Rand}})</span> -hybrid model, with statistical security parameter  <span class="math">\\log |\\mathbb{F}| - 2 \\log \\log |\\mathbb{F}|</span> .</p>
+
+    <p class="text-gray-300"><em>Proof.</em> We describe a simulator,  <span class="math">\\mathcal{S}</span> , that interacts with  <span class="math">\\mathcal{F}_{\\llbracket \\cdot \\rrbracket}</span> , such that no environment  <span class="math">\\mathcal{Z}</span>  can distinguish between an interaction with  <span class="math">\\mathcal{S}</span>  and  <span class="math">\\mathcal{F}_{\\llbracket \\cdot \\rrbracket}</span>  and an interaction with the real adversary  <span class="math">\\mathcal{A}</span>  and  <span class="math">\\Pi_{\\llbracket \\cdot \\rrbracket}</span> . After describing the simulator we then argue indistinguishability of the real and ideal worlds.</p>
+
+    <p class="text-gray-300"><span class="math">\\mathcal S</span>  maintains several databases, LC for linear combinations, HS for simulated shares of honest parties in the open and check phases, and CS for the sums of shares of corrupted parties.</p>
+
+    <p class="text-gray-300">Simulating the Initialize phase. Emulating  <span class="math">\\mathcal{F}_{\\mathsf{COPEe}}</span>  instances between every pair of corrupt party  <span class="math">P_i</span>  and honest party  <span class="math">P_j</span> , receive  <span class="math">\\Delta^{(i,j)}</span>  input by  <span class="math">P_i</span>  to the respective instance. Furthermore, sample  <span class="math">\\Delta^{(i)} \\stackrel{\\</span>}{\\leftarrow} \\mathbb{F}$  for all  <span class="math">i \\notin A</span> .</p>
+
+    <h3 id="sec-37" class="text-xl font-semibold mt-8">Simulating the Input phase.</h3>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>If  <span class="math">P_j</span>  is corrupted, emulate the communication channels and instances of  <span class="math">\\mathcal{F}_{\\mathsf{COPEe}}</span>  with honest parties  <span class="math">P_i</span> ,  <span class="math">i \\notin A</span> . For the  <span class="math">\\mathcal{F}_{\\mathsf{COPEe}}</span>  instance with  <span class="math">P_i</span> , receive  <span class="math">\\mathbf{x}_h^{(i,j)}, t_h^{j,i}</span>  from the adversary and set it to the input of  <span class="math">P_j</span> , for  <span class="math">i = 1, \\ldots, n</span>  and  <span class="math">h = 0, \\ldots, l</span> . For the checking, sample  <span class="math">\\mathbf{r} \\stackrel{\\</span>}{\\leftarrow} \\mathbb{F}^{l+1}$  to emulate  <span class="math">\\mathcal{F}_{\\mathsf{Rand}}</span> , receive y from  <span class="math">P_j</span> , and receive  <span class="math">\\{\\sigma^{(i)}\\}_{i\\in A}</span>  emulating  <span class="math">\\mathcal{F}_{\\mathsf{Comm}}</span> . Compute  <span class="math">\\sigma^{(i)} = \\sum_{h=0}^{l} r_h \\cdot (\\langle \\mathbf{g} * \\mathbf{x}_h^{(i,j)}, \\boldsymbol{\\Delta}_B^{(i)} \\rangle - t^{(i,j)})</span>  for all  <span class="math">i \\notin A</span> . If  <span class="math">\\sum_{i=1}^{n} \\sigma_i \\neq 0</span> , abort. Otherwise, solve</li>
+    </ul>
+
+    <p class="text-gray-300">&lt;span id=&quot;page-30-0&quot;&gt;&lt;/span&gt;
+<span class="math">$\\sum_{i \\notin A} \\left\\langle \\mathbf{g} \\cdot y - \\mathbf{g} * \\sum_{h=0}^{l} r_h \\cdot \\sum_{j \\in A} \\mathbf{x}_h^{(i,j)}, \\tilde{\\mathbf{\\Delta}}_B^{(i)} \\right\\rangle = 0</span>$
+(3)</p>
+
+    <p class="text-gray-300">for  <span class="math">\\{\\tilde{\\Delta}_B^{(i)}\\}_{i\\notin A}</span>  in  <span class="math">\\mathbb{F}</span> . The solutions represent the set of all possible MAC keys of honest parties that let the MAC check pass, not just the concrete MAC keys chosen by the simulator. If  <span class="math">\\sum_{i\\notin A}\\tilde{\\Delta}^{(i)}=0</span>  for all solutions, abort. Otherwise, for some  <span class="math">\\{\\tilde{\\Delta}^{(i)}\\}_{i\\notin A}</span>  such that  <span class="math">\\sum_{i\\notin A}\\tilde{\\Delta}^{(i)}\\neq 0</span>  and for each  <span class="math">h\\in [l]</span> , compute</p>
+
+    <p class="text-gray-300">&lt;span id=&quot;page-30-1&quot;&gt;&lt;/span&gt;
+<span class="math">$x_h = \\left(\\sum_{i \\notin A} \\langle \\mathbf{g}, \\tilde{\\mathbf{\\Delta}}_B^{(i)} \\rangle\\right)^{-1} \\cdot \\sum_{i \\notin A} \\sum_{j \\in A} \\langle \\mathbf{g} * \\mathbf{x}_h^{(i,j)}, \\tilde{\\mathbf{\\Delta}}_B^{(i)} \\rangle, \\tag{4}</span>$</p>
+
+    <p class="text-gray-300">and input  <span class="math">\\{x_h\\}_{h\\in[l]}</span>  to  <span class="math">\\mathcal{F}_{\\llbracket\\cdot\\rrbracket}</span>  on behalf of  <span class="math">P_j</span> . We will show that, with overwhelming probability,  <span class="math">x_h</span>  is unique over all possible  <span class="math">\\tilde{\\Delta}^{(i)}</span> .</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Otherwise, emulate communication channels and instances of  <span class="math">\\mathcal{F}_{\\mathsf{COPEe}}</span>  with corrupted parties  <span class="math">P_i, i \\in A</span> . For the channel with  <span class="math">P_i</span> , send a random share  <span class="math">x^{(i)}</span> , and for the  <span class="math">\\mathcal{F}_{\\mathsf{COPEe}}</span>  instance, receive  <span class="math">q^{(i,j)}</span>  from  <span class="math">\\mathcal{A}</span> , for  <span class="math">h = 0, \\ldots, l</span> . Store  <span class="math">\\sum_{i \\in A} x_h^{(i)}</span>  and  <span class="math">\\sum_{i \\in A} m_h^{(i)} = \\sum_{i \\in A} x^{(i)} \\cdot \\Delta^{(i)} + q^{(i,j)}</span>  in CS. Sample  <span class="math">\\mathbf{r} \\overset{\\</span>}{\\leftarrow} \\mathbb{F}^t$  to emulate  <span class="math">\\mathcal{F}_{\\mathsf{Rand}}</span> , sample  <span class="math">y \\overset{\\</span>}{\\leftarrow} \\mathbb{F}$ , and send both to the corrupted parties. Compute  <span class="math">\\sum_{i \\in A} \\sigma^{(i)} = \\sum_{j=0}^{l} r_h \\cdot \\sum_{i \\in A} m_h^{(i)} - y \\cdot \\Delta^{(i)}</span> . Then sample  <span class="math">\\{\\sigma^{(i)}\\}_{i \\notin A}</span>  in  <span class="math">\\mathbb{F}</span>  such that  <span class="math">\\sum_{i=1}^{n} \\sigma^{(i)} = 0</span>  and use  <span class="math">\\{\\sigma^{(i)}\\}_{i \\notin A}</span>  to emulate  <span class="math">\\mathcal{F}_{\\mathsf{Comm}}</span>  just as in the Check phase below.</li>
+    </ul>
+
+    <p class="text-gray-300">Simulating the Linear comb. phase. Store the linear combination in LC under  <span class="math">\\overline{id}</span> .</p>
+
+    <p class="text-gray-300">Simulating the Open phase. Receive the constraints on x from  <span class="math">\\mathcal{F}_{\\llbracket \\cdot \\rrbracket}</span>  and check if the value to be opened and the previously opened values form a linearly dependent set in the input values w.r.t. LC. If so, compute the shares of the honest parties accordingly from the entries in HS. Otherwise, sample random shares  <span class="math">\\{x^{(i)}\\}_{i\\notin A}</span>  and MAC shares  <span class="math">\\{m^{(i)}\\}_{i\\notin A}</span>  such that  <span class="math">\\sum_i x^{(i)} = x</span>  and  <span class="math">\\sum_i m^{(i)} = x \\cdot \\Delta</span>  with  <span class="math">\\sum_{i\\in A} x^{(i)}</span>  and  <span class="math">\\sum_{i\\in A} m^{(i)}</span>  taken from the relevant linear combination of values from CS. Emulating the broadcast channel send  <span class="math">\\{x^{(i)}\\}_{i\\notin A}</span>  and receive  <span class="math">\\{x^{(j)}\\}_{j\\in A}</span> . Compute  <span class="math">x = \\sum_i x^{(i)}</span>  and input it to  <span class="math">\\mathcal{F}_{\\llbracket \\cdot \\rrbracket}</span> .</p>
+
+    <p class="text-gray-300">Simulating the Check phase. Sample  <span class="math">\\mathbf{r} \\stackrel{\\</span>}{\\leftarrow} \\mathbb{F}^t$  to emulate  <span class="math">\\mathcal{F}_{\\mathsf{Rand}}</span>  and send it to the corrupted parties. Emulating  <span class="math">\\mathcal{F}_{\\mathsf{Comm}}</span> , receive  <span class="math">\\sigma_i</span>  from corrupted party  <span class="math">P_i</span>  for  <span class="math">i \\in A</span> .</p>
+
+    <p class="text-gray-300">For  <span class="math">j \\in [t]</span> , compute  <span class="math">x_j&#x27;</span>  and  <span class="math">m_j&#x27;</span>  as the respective linear combination from values in CS. Furthermore, look up  <span class="math">m_j^{(i)}</span>  in HS for all  <span class="math">i \\notin A</span> . For  <span class="math">i \\notin A</span> , compute  <span class="math">\\sigma_i = \\sum_{j=1}^t r_j \\cdot (m_j^{(i)} - \\Delta^{(i)} \\cdot x_j)</span>  and complete the emulation of  <span class="math">\\mathcal{F}_{\\mathsf{Comm}}</span> . If  <span class="math">\\sum_i \\sigma_i = 0</span> , input OK to  <span class="math">\\mathcal{F}_{\\llbracket \\cdot \\rrbracket}</span>  and  <span class="math">\\bot</span>  otherwise.</p>
+
+    <p class="text-gray-300">Indistinguishability. Now we argue indistinguishability. The LinComb command does not require communication, and the Initialize command only involve sending random shares and using  <span class="math">\\mathcal{F}_{\\mathsf{COPEe}}</span> , which only outputs random information from the point of view of a single party. Therefore, the simulation of these commands is easily seen to indistinguishable. It remains to discuss Input, Open, and Check.</p>
+
+    <p class="text-gray-300">If  <span class="math">P_j</span>  in the Input phase is not corrupted, it is easy to see that adversary only learns random information.  <span class="math">\\mathcal{F}_{\\mathsf{COPEe}}</span>  only outputs random shares, y has  <span class="math">r_0 \\cdot x_0</span>  as summand for random single-use  <span class="math">x_0</span> , and  <span class="math">\\Pi_{\\mathsf{MACCheck}}</span>  only reveals a random secret sharing of zero because it also contains one-time randomness in the MAC of  <span class="math">x_0</span> . The simulation therefore simply generates the required randomness.</p>
+
+    <p class="text-gray-300">More intricate is the simulation for a corrupted  <span class="math">P_j</span> . While it is easy to simulate all information sent to the adversary, the simulation aborts if there is no adequate solution of (3) to be used in (4). A solution is inadequate if  <span class="math">\\sum_{i \\notin A} \\tilde{\\Delta}^{(i)} = 0</span> . Clearly, there exist  <span class="math">|\\mathbb{F}|^{n-|A|-1}</span>  inadequate solutions. Since every such solution corresponds to a choice of  <span class="math">\\{\\Delta^{(i)}\\}_{i\\notin A}</span>  where the MAC check succeeds, the inexistence of an adequate solution means that the success probability of the adversary is at most  <span class="math">2^{-\\log |\\mathbb{F}|}</span>  because there are  <span class="math">|\\mathbb{F}|^{n-|A|}</span>  possible choices of  <span class="math">\\{\\Delta^{(i)}\\}_{i\\notin A}</span> .</p>
+
+    <p class="text-gray-300">In the Open procedure, corrupted parties learn the honest parties shares. Using HS ensures that all the openings are consistent. Furthermore, the sampling constraints ensure that the simulated honest parties' shares and the correct corrupted parties' shares sum up the correct value. Finally,  <span class="math">\\mathcal{F}_{\\llbracket \\cdot \\rrbracket}</span>  allows the adversary to determine the honest parties' outputs, which the simulator uses with values computed as in the real protocol.</p>
+
+    <p class="text-gray-300">The most intricate phase is the Check procedure. While it is straightforward to simulate  <span class="math">\\sigma_i</span>  sent by an honest party  <span class="math">P_i</span> , the indistinguishability of the abort behavior requires further discussion. The idea of our proof is that, once a corrupted player has passed the MAC check in the Input phase, they only can pass the MAC check for a specific value for each of their inputs, namely  <span class="math">x_h</span>  computed in (4). In the following, we will focus on  <span class="math">\\mathbb{F} = \\mathbb{F}_{2^k}</span> . Later we will discuss  <span class="math">\\mathbb{F} = \\mathbb{F}_p</span> .</p>
+
+    <p class="text-gray-300">Generally, the sum of the honest parties' MACs is given by</p>
+
+    <p class="text-gray-300"><span class="math">$\\begin{split} &amp;\\sum_{i \\notin A} m^{(i)} = \\sum_{i \\notin A} x^{(i)} \\cdot \\Delta^{(i)} + \\sum_{i \\notin A} \\sum_{j \\neq i} \\left( q^{(i,j)} + t^{(i,j)} \\right) \\\\ &amp;= \\sum_{i \\notin A} x^{(i)} \\cdot \\Delta^{(i)} + \\sum_{j \\notin A, i \\neq j} x^{(i)} \\cdot \\Delta^{(j)} \\end{split}</span>$</p>
+
+    <p class="text-gray-300"><span class="math">$\\begin{split} &amp;+ \\sum_{i \\notin A} \\sum_{j \\in A} \\langle \\mathbf{g} * \\mathbf{x}^{(i,j)}, \\boldsymbol{\\Delta}_{B}^{(i)} \\rangle - t^{(j,i)} + x^{(i)} \\cdot \\boldsymbol{\\Delta}^{(j,i)} - q^{(j,i)} \\\\ &amp;= \\sum_{i \\notin A} x^{(i)} \\cdot \\boldsymbol{\\Delta}^{(i)} + \\sum_{j \\notin A, i \\neq j} x^{(i)} \\cdot \\boldsymbol{\\Delta}^{(j)} \\\\ &amp;+ \\sum_{i \\notin A} \\sum_{j \\in A} \\langle \\mathbf{g} * \\mathbf{x}^{(i,j)}, \\boldsymbol{\\Delta}_{B}^{(i)} \\rangle - t^{(j,i)} + x^{(i)} \\cdot \\boldsymbol{\\Delta}^{(j,i)} - q^{(j,i)} \\\\ &amp;= \\sum_{i \\notin A} \\left( \\left\\langle \\mathbf{g} \\cdot \\sum_{j \\notin A} x^{(j)} + \\mathbf{g} * \\sum_{j \\in A} \\mathbf{x}^{(i,j)}, \\boldsymbol{\\Delta}_{B}^{(i)} \\right\\rangle \\\\ &amp;+ \\sum_{j \\in A} (-t^{(j,i)} + x^{(i)} \\cdot \\boldsymbol{\\Delta}^{(j,i)} - q^{(j,i)}) \\right). \\end{split}</span>$</p>
+
+    <p class="text-gray-300">Define the second summand to be  <span class="math">R_i</span> . If only checking the opening of this value to x, the honest party  <span class="math">P_i</span>  broadcasts  <span class="math">\\sigma^{(i)} = m^{(i)} - x \\cdot \\Delta^{(i)}</span> . Summing up,</p>
+
+    <p class="text-gray-300">&lt;span id=&quot;page-32-0&quot;&gt;&lt;/span&gt;
+<span class="math">$\\sum_{i \\notin A} m^{(i)} - x \\cdot \\Delta^{(i)}</span>$</p>
+
+    <p class="text-gray-300"><span class="math">$= \\sum_{i \\notin A} \\left( \\left\\langle \\mathbf{g} \\cdot \\sum_{j \\notin A} x^{(j)} + \\mathbf{g} * \\sum_{j \\in A} \\mathbf{x}^{(i,j)} - \\mathbf{g} \\cdot x, \\mathbf{\\Delta}_{B}^{(i)} \\right\\rangle + R_{i} \\right)</span>$</p>
+
+    <p class="text-gray-300"><span class="math">$= \\sum_{i \\notin A} \\left( \\left\\langle \\mathbf{g} \\cdot \\left( \\sum_{j \\notin A} x^{(j)} - x \\right) + \\mathbf{g} * \\sum_{j \\in A} \\mathbf{x}^{(i,j)}, \\mathbf{\\Delta}_{B}^{(i)} \\right\\rangle + R_{i} \\right).</span>$
+(5)</p>
+
+    <p class="text-gray-300">Adapting (5) to the input phase gives that, in order to pass the MAC check, the adversary has to send  <span class="math">\\{\\sigma^{(i)}\\}_{i\\in A}</span>  such that</p>
+
+    <p class="text-gray-300"><span class="math">$-\\sum_{i \\in A} \\sigma^{(i)} = \\sum_{i \\notin A} \\sigma^{(i)}</span>$</p>
+
+    <p class="text-gray-300"><span class="math">$= \\sum_{i \\notin A} m^{(i)} - y \\cdot \\Delta^{(i)}</span>$</p>
+
+    <p class="text-gray-300"><span class="math">$= \\sum_{i \\notin A} \\left( \\left\\langle \\mathbf{g} \\cdot y + \\mathbf{g} * \\sum_{j \\in A} \\sum_{h=0}^{l} r_h \\cdot \\mathbf{x}_h^{(i,j)}, \\mathbf{\\Delta}_B^{(i)} \\right\\rangle + R_i \\right), \\tag{6}</span>$</p>
+
+    <p class="text-gray-300">where  <span class="math">R_i</span>  is computed as the  <span class="math">\\{r_h\\}_{h=0}^l</span> -weighted sum from the equivalent rest terms in (5). Assuming that the above equality is satisfied for a different  <span class="math">\\{\\bar{\\Delta}^{(i)}\\}_{i\\notin A}</span> , we get (3) for  <span class="math">\\tilde{\\Delta}^{(i)} = \\Delta^{(i)} - \\bar{\\Delta}^{(i)}</span>  for all  <span class="math">i\\notin A</span> . This proves that the set  <span class="math">S_{\\Delta}</span>  of  <span class="math">\\{\\Delta^{(i)}\\}_{i\\notin A}</span>  fulfilling (6) is an affine subspace of  <span class="math">\\mathbb{F}_2^{n-|A|}</span> .</p>
+
+    <p class="text-gray-300">Clearly, (4) provides a solution for  <span class="math">y = \\sum_{h=0}^{\\tilde{l}} r_h x_h</span>  such that</p>
+
+    <p class="text-gray-300">&lt;span id=&quot;page-32-3&quot;&gt;&lt;/span&gt;&lt;span id=&quot;page-32-1&quot;&gt;&lt;/span&gt;
+<span class="math">$\\left\\langle \\mathbf{g} \\cdot x_h - \\mathbf{g} * \\sum_{j \\in A} \\mathbf{x}_h^{(i,j)}, \\tilde{\\mathbf{\\Delta}}_B^{(i)} \\right\\rangle = 0</span>$
+(7)</p>
+
+    <p class="text-gray-300">holds for all  <span class="math">h \\in [l]</span>  and some  <span class="math">\\{\\tilde{\\Delta}^{(i)}\\}_{i \\notin A} \\in \\tilde{S}_{\\Delta}</span> , where the latter denotes the linear space parallel to  <span class="math">S_{\\Delta}</span> . We have to prove that this is the only solution for a sufficiently large subspace of  <span class="math">\\tilde{S}_{\\Delta}</span> , otherwise the adversary has two sets of  <span class="math">\\{x_h\\}_{h \\in [l]}</span>  to choose from later. Assume now that, for every  <span class="math">f \\in [l]</span>  for some  <span class="math">l \\in \\mathbb{N}</span> , there is a different set  <span class="math">\\{x_{f,h}\\}_{h \\in [l]}</span>  with  <span class="math">\\sum_{i=1}^{l} r_h \\cdot x_{f,h} = y</span>  and</p>
+
+    <p class="text-gray-300">&lt;span id=&quot;page-32-2&quot;&gt;&lt;/span&gt;
+<span class="math">$\\left\\langle \\mathbf{g} \\cdot x_{f,h} - \\mathbf{g} * \\sum_{j \\in A} \\mathbf{x}_{h}^{(i,j)}, \\tilde{\\boldsymbol{\\Delta}}_{f,B}^{(i)} \\right\\rangle = 0</span>$
+(8)</p>
+
+    <p class="text-gray-300">for all  <span class="math">\\{\\tilde{\\Delta}_f^{(i)}\\}_{i\\notin A}\\in \\tilde{S}_f\\subset \\tilde{S}_\\Delta</span>  such that  <span class="math">|\\tilde{S}_f|&gt;2^{(n-|A|-1)\\log|\\mathbb{F}|}</span> . The latter condition is required for the adversary to be successful with probability more than  <span class="math">2^{-\\log|\\mathbb{F}|}</span>  at the later opening. Since  <span class="math">\\tilde{S}_f</span>  clearly is a linear space for all  <span class="math">f\\in[l]</span> , and  <span class="math">\\tilde{S}_f\\cap \\tilde{S}_{f&#x27;}=\\{0\\}</span>  by definition, and  <span class="math">|\\tilde{S}_\\Delta|\\leq 2^{(n-|A|)\\log|\\mathbb{F}|}</span>  by definition,  <span class="math">l\\leq \\log|\\mathbb{F}|</span> .</p>
+
+    <p class="text-gray-300">Let  <span class="math">f \\neq f&#x27; \\in [l]</span> . Then</p>
+
+    <p class="text-gray-300"><span class="math">$\\sum_{i \\notin A} \\left\\langle \\mathbf{g} \\cdot y - \\mathbf{g} * \\sum_{h=0}^{l} r_h \\cdot \\sum_{j \\in A} \\mathbf{x}_h^{(i,j)}, \\tilde{\\mathbf{\\Delta}}_B^{(i)} \\right\\rangle = 0</span>$</p>
+
+    <p class="text-gray-300">for all  <span class="math">\\{\\tilde{\\Delta}^{(i)}\\}_{i\\notin A}</span>  implies that</p>
+
+    <p class="text-gray-300"><span class="math">$\\sum_{h=0}^{l} r_h \\cdot \\sum_{i \\notin A} \\left\\langle \\mathbf{g} * \\sum_{j \\in A} \\mathbf{x}_h^{(i,j)}, \\tilde{\\mathbf{\\Delta}}_{f,B}^{(i)} - \\tilde{\\mathbf{\\Delta}}_{f&#x27;,B}^{(i)} \\right\\rangle = 0</span>$</p>
+
+    <p class="text-gray-300">for all  <span class="math">\\{\\Delta_f^{(i)}\\}_{i\\notin A}\\in \\tilde{S}_f</span>  and  <span class="math">\\{\\Delta_{f&#x27;}^{(i)}\\}_{i\\notin A}\\in \\tilde{S}_{f&#x27;}</span> . Using (8), we get</p>
+
+    <p class="text-gray-300">&lt;span id=&quot;page-33-0&quot;&gt;&lt;/span&gt;
+<span class="math">$\\sum_{h=0}^{l} r_h \\cdot \\left( x_{f,h} \\cdot \\sum_{i \\notin A} \\tilde{\\Delta}_f^{(i)} - x_{f&#x27;,h} \\cdot \\sum_{i \\notin A} \\tilde{\\Delta}_{f&#x27;}^{(i)} \\right) = 0.</span>$
+(9)</p>
+
+    <p class="text-gray-300">By definition, there exists  <span class="math">\\bar{h} \\in \\{0, \\dots, l\\}</span>  such that  <span class="math">x_{f,h} \\neq x_{f&#x27;,h}</span> . Furthermore, a simple counting argument shows that  <span class="math">\\sum_{i \\notin A} \\tilde{\\Delta}_f^{(i)}</span>  and  <span class="math">\\sum_{i \\notin A} \\tilde{\\Delta}_{f&#x27;}^{(i)}</span>  each have at least two results for  <span class="math">\\{\\tilde{\\Delta}_f^{(i)}\\}_{i \\notin A} \\in \\tilde{S}_f</span>  and  <span class="math">\\{\\tilde{\\Delta}_{f&#x27;}^{(i)}\\}_{i \\notin A} \\in \\tilde{S}_{f&#x27;}</span> . It follows that</p>
+
+    <p class="text-gray-300"><span class="math">$\\left(x_{f,h} \\cdot \\sum_{i \\notin A} \\tilde{\\Delta}_f^{(i)} - x_{f&#x27;,h} \\cdot \\sum_{i \\notin A} \\tilde{\\Delta}_{f&#x27;}^{(i)}\\right) \\neq 0</span>$</p>
+
+    <p class="text-gray-300">for some  <span class="math">\\{\\tilde{\\Delta}_f^{(i)}\\}_{i\\notin A}\\in \\tilde{S}_f</span>  and  <span class="math">\\{\\tilde{\\Delta}_{f&#x27;}^{(i)}\\}_{i\\notin A}\\in \\tilde{S}_{f&#x27;}</span> . Therefore, by applying the principle of deferred decisions, the probability of (9) is  <span class="math">2^{-\\log|\\mathbb{F}|}</span>  over the choice of  <span class="math">\\{r_h\\}_{h=0}^l</span> . Given that there are less than  <span class="math">(\\log|\\mathbb{F}|)^2</span>  pairs  <span class="math">f\\neq f&#x27;\\in [l]</span> , the overall probability is at most  <span class="math">(\\log|\\mathbb{F}|)^2\\cdot 2^{-\\log|\\mathbb{F}|}=2^{-\\log|\\mathbb{F}|+2\\log\\log|\\mathbb{F}|}</span> .</p>
+
+    <p class="text-gray-300">We have established that, for every  <span class="math">h \\in [l]</span> , there exists a unique  <span class="math">x_h</span>  where the adversary can compute</p>
+
+    <p class="text-gray-300"><span class="math">$\\sum_{i \\notin A} \\langle \\mathbf{g} \\cdot x_h - \\mathbf{g} * \\sum_{j \\in A} \\mathbf{x}_h^{(i,j)}, \\mathbf{\\Delta}_B^{(i)} \\rangle.</span>$</p>
+
+    <p class="text-gray-300">(5) shows that this term is viable to passing the MAC check. Furthermore, if the computing this term for a different  <span class="math">x&#x27;_h</span>  is equivalent to guessing  <span class="math">\\sum_{i \\notin A} \\Delta^{(i)}</span>  because the difference between the terms is</p>
+
+    <p class="text-gray-300"><span class="math">$\\langle \\mathbf{g} \\cdot x_h - \\mathbf{g} \\cdot x_h&#x27;, \\mathbf{\\Delta}_B^{(i)} \\rangle = (x_h - x_h&#x27;) \\cdot \\sum_{i \\notin A} \\Delta^{(i)}.</span>$</p>
+
+    <p class="text-gray-300">Since  <span class="math">\\sum_{i \\notin A} \\Delta^{(i)}</span>  is uniformly random the probability of this happening is  <span class="math">2^{-\\log |\\mathbb{F}|}</span> .</p>
+
+    <p class="text-gray-300">We now turn to the discussion of  <span class="math">\\mathbb{F} = \\mathbb{F}_p</span> . The main difference to the case of  <span class="math">\\mathbb{F} = \\mathbb{F}_{2^k}</span>  is that there is no bijection between  <span class="math">\\Delta \\in \\mathbb{F} = \\mathbb{F}_p</span>  and  <span class="math">\\Delta \\in \\mathbb{F}_p^{\\log p}</span> . While there are canonical maps both ways, bit decomposition from  <span class="math">\\mathbb{F}_p</span>  to  <span class="math">\\mathbb{F}_p^{\\log p}</span>  and  <span class="math">\\langle \\mathbf{g}, \\Delta \\rangle</span>  from  <span class="math">\\mathbb{F}_p^{\\log p}</span>  to  <span class="math">\\mathbb{F}_p</span> , the former is not surjective and the latter not injective. This implies that the solutions of (6) or (7) are not necessarily vectors</p>
+
+    <p class="text-gray-300">of bits rather than elements of  <span class="math">\\mathbb{F}_p</span> . Nevertheless, the lemma below proves that, if  <span class="math">\\tilde{S}_f</span>  contains at least  <span class="math">2^{(n-|A|-1)\\log|\\mathbb{F}|}</span>  vectors consisting only of bits (which is necessary for an adversary to pass the MAC check), then it has dimension at least  <span class="math">(n-|A|-1)\\log|\\mathbb{F}|</span>  for all f. Together with the fact that  <span class="math">\\tilde{S}_{\\Delta}</span>  has dimension at most  <span class="math">(n-|A|)\\log|\\mathbb{F}|</span>  by definition and  <span class="math">\\tilde{S}_f\\cap \\tilde{S}_{f&#x27;}=\\{0\\}</span>  for  <span class="math">f\\neq f&#x27;\\in [l]</span> , it follows that  <span class="math">l\\leq \\log|\\mathbb{F}|</span>  as above.</p>
+
+    <p class="text-gray-300"><strong>Lemma 2.</strong> Let V be subspace of  <span class="math">\\mathbb{F}_p^k</span>  containing  <span class="math">2^l</span>  elements of  <span class="math">\\{0,1\\}^k</span> . Then the dimension of V is at least l.</p>
+
+    <p class="text-gray-300">Proof. We prove that if the dimension of V is l, it cannot contain more than  <span class="math">2^l</span>  elements of  <span class="math">\\{0,1\\}^k</span> . There exists a basis  <span class="math">\\mathbf{v}_1,\\ldots,\\mathbf{v}_l</span>  such that  <span class="math">\\mathbf{v}_{i+1}</span>  starts with more zeroes than  <span class="math">\\mathbf{v}_i</span>  for all  <span class="math">i=1,\\ldots,l-1</span> . Such a basis can be constructed from any basis using Gaussian elimination. Every element of V has the form  <span class="math">\\sum_{i=1}^l a_i \\mathbf{v}_i</span> . Now consider the following algorithm for generating an element of  <span class="math">V \\cap \\{0,1\\}^k</span> . For  <span class="math">i \\in [l]</span> , assume that  <span class="math">\\{a_j\\}_{1 \\leq j &lt; i}</span>  have already been chosen. Furthermore let g such that the g-th element of  <span class="math">\\mathbf{v}_i</span>  is not zero but the g-th element of  <span class="math">\\mathbf{v}_{i+1},\\ldots,\\mathbf{v}_l</span>  is. This exists by definition. Then, there exist only two choices of  <span class="math">a_i</span>  in order to let the g-th element of  <span class="math">\\sum_{i=1}^l a_i \\mathbf{v}_i</span>  be in  <span class="math">\\{0,1\\}</span> . Iterating over  <span class="math">a_1,\\ldots,a_l</span> , this proves that the size of  <span class="math">V \\cap \\{0,1\\}^k</span>  is at most  <span class="math">2^l</span> .</p>
+
+    <h2 id="sec-38" class="text-2xl font-bold">&lt;span id=&quot;page-34-0&quot;&gt;&lt;/span&gt;C Triple generation security proof</h2>
+
+    <p class="text-gray-300">Here we give a proof of Theorem 3. First we need to recall some basic facts and definitions about entropy.</p>
+
+    <h2 id="sec-39" class="text-2xl font-bold">C.1 Entropy definitions</h2>
+
+    <p class="text-gray-300">Given a probability distribution X over a sample space S, we denote by  <span class="math">P_X</span>  the probability distribution of X.</p>
+
+    <p class="text-gray-300"><strong>Definition 1.</strong> Let X be a discrete probability distribution. The min-entropy of X is defined as</p>
+
+    <p class="text-gray-300"><span class="math">$H_{\\infty}(X) = -\\log\\left(\\max_{x} \\Pr\\left[X = x\\right]\\right)</span>$</p>
+
+    <p class="text-gray-300">Intuitively, the min-entropy of a distribution is a measure of how predictable the distribution is. We now state some basic properties of min-entropy that easily follow from the definition:</p>
+
+    <h4 id="sec-40" class="text-lg font-semibold mt-6">&lt;span id=&quot;page-34-1&quot;&gt;&lt;/span&gt;Proposition 1.</h4>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>If U is the uniform distribution over a sample space S, then</li>
+    </ol>
+
+    <p class="text-gray-300"><span class="math">$H_{\\infty}(U) = \\log |S|</span>$</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>If X is the joint distribution of  <span class="math">X_1, \\ldots, X_n</span> , then there exists  <span class="math">i \\in [n]</span>  such that</li>
+    </ol>
+
+    <p class="text-gray-300"><span class="math">$H_{\\infty}(X_i) \\ge H_{\\infty}(X)/n</span>$</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Let X and Y be independent distributions over a finite field  <span class="math">\\mathbb{F}</span> . Then</li>
+    </ol>
+
+    <p class="text-gray-300"><span class="math">$H_{\\infty}(X+Y) \\ge \\max(H_{\\infty}(X), H_{\\infty}(Y))</span>$</p>
+
+    <p class="text-gray-300">We will also use the concept of universal hashing, due to Carter and Wegman [12].</p>
+
+    <p class="text-gray-300"><strong>Definition 2.</strong> Let T be a set and  <span class="math">\\mathcal{H} = \\{h_t\\}_{t \\in t}</span>  be a family of keyed hash function  <span class="math">h_t : \\{0,1\\}^n \\to \\{0,1\\}^k</span> . Then  <span class="math">\\{h_t\\}_{t \\in T}</span>  is a 2-universal hash function family, if for every  <span class="math">x, y \\in \\{0,1\\}^n</span>  such that  <span class="math">x \\neq y</span> , we have that</p>
+
+    <p class="text-gray-300"><span class="math">$\\Pr_{t \\in T}[h_t(x) = h_t(y)] \\le 2^{-k}.</span>$</p>
+
+    <p class="text-gray-300">The following is a version of the Leftover Hash Lemma, phrased over finite fields.</p>
+
+    <p class="text-gray-300">&lt;span id=&quot;page-35-0&quot;&gt;&lt;/span&gt;<strong>Lemma 3</strong> (Leftover Hash Lemma [23]). Let S and T be two sets, and  <span class="math">\\mathbb{F}</span>  a finite field. Let X be a random variable over S and  <span class="math">\\mathcal{H} = \\{h_t\\}_{t \\in T}</span> ,  <span class="math">h_t : S \\to \\mathbb{F}</span> , a 2-universal hash function. Let  <span class="math">U_S</span>  and  <span class="math">U_T</span>  be the uniform distribution over S and T, respectively. If</p>
+
+    <p class="text-gray-300"><span class="math">$H_{\\infty}(X) \\ge 2\\kappa + \\log_2 |\\mathbb{F}|</span>$</p>
+
+    <p class="text-gray-300">then for  <span class="math">t \\stackrel{\\</span>}{\\leftarrow} T$  (independent of X), we have</p>
+
+    <p class="text-gray-300"><span class="math">$(h_t(X), U_t) \\stackrel{s}{\\approx} (U_s, U_t)</span>$</p>
+
+    <p class="text-gray-300">for statistical security parameter  <span class="math">\\kappa</span> .</p>
+
+    <h4 id="sec-41" class="text-lg font-semibold mt-6">C.2 Proof of Theorem 3</h4>
+
+    <p class="text-gray-300"><strong>Theorem 7</strong> (Theorem 3, restated). The protocol  <span class="math">\\Pi_{\\mathsf{Triple}}</span>  (Protocol 4) securely implements  <span class="math">\\mathcal{F}_{\\mathsf{Triple}}</span>  in the  <span class="math">(\\mathcal{F}_{\\mathsf{ROT}}, \\mathcal{F}_{\\llbracket.\\rrbracket})</span> -hybrid model, with statistical security parameter  <span class="math">\\log_2|\\mathbb{F}|</span> , for  <span class="math">\\tau=4</span> .</p>
+
+    <p class="text-gray-300"><em>Proof.</em> Let  <span class="math">\\mathcal{A}</span>  be a real world adversary corrupting up to n-1 parties and  <span class="math">A \\subset \\mathcal{P}</span>  the set of corrupt parties. We describe a simulator  <span class="math">\\mathcal{S}</span>  for  <span class="math">\\mathcal{A}</span>  who interacts with  <span class="math">\\mathcal{F}_{\\mathsf{Prep}}</span>  and simulates each received message of  <span class="math">\\mathcal{A}</span>  in the protocol  <span class="math">\\Pi_{\\mathsf{Triple}}</span>  from the honest parties and from the other functionalities, stage by stage.</p>
+
+    <p class="text-gray-300">Simulating the Multiply phase. The simulator emulates  <span class="math">\\mathcal{F}_{\\mathsf{ROT}}^{\\tau k, k}</span>  and sends  <span class="math">\\mathbf{q}_0^{(j,i)}, \\mathbf{q}_1^{(j,i)}, j \\in A</span>  to  <span class="math">\\mathcal{A}</span> . Then for each  <span class="math">j \\in A</span> ,  <span class="math">\\mathcal{S}</span>  receives  <span class="math">d^{(j,i)}</span>  by  <span class="math">\\mathcal{A}</span> , for each  <span class="math">j \\neq i</span> , sets  <span class="math">b^{(j,i)} = d^{(j,i)} - q_{0,h}^{(j,i)} + q_{1,h}^{(j,i)}</span> ,  <span class="math">h \\in [\\tau \\cdot k]</span> , and sends random  <span class="math">d_h^{(i,j)}</span> ,  <span class="math">i \\notin A</span>  to  <span class="math">\\mathcal{A}</span> .</p>
+
+    <p class="text-gray-300">If  <span class="math">P_j</span> ,  <span class="math">j \\in A</span> , gives any inconsistent  <span class="math">b^{(j,i)}</span> , then  <span class="math">\\mathcal{S}</span>  computes  <span class="math">\\boldsymbol{\\delta}_b^{(j,i)} \\in (\\mathbb{F}^k)^{\\tau}</span>  and  <span class="math">\\boldsymbol{\\delta}_b^{(i)} = \\sum_{j \\in A} \\boldsymbol{\\delta}_b^{(j,i)}</span> , as in Section 5.1. Similarly, if some  <span class="math">P_j</span>  inputs inconsistent values  <span class="math">\\mathbf{a}^{(j)}</span> , when playing with  <span class="math">P_i</span> ,  <span class="math">i \\notin A</span> , then  <span class="math">\\mathcal{S}</span>  computes  <span class="math">\\boldsymbol{\\delta}_a[h]^{(j,i)} \\in \\mathbb{F}^{\\tau}</span>  and  <span class="math">\\boldsymbol{\\delta}_a^{(i)} = \\sum_{j \\in A} \\boldsymbol{\\delta}_a^{(j,i)}</span> .</p>
+
+    <p class="text-gray-300">Simulating the Combining phase. All the computations are local, so S just emulates  <span class="math">\\mathcal{F}_{Rand}</span>  and proceeds according to the protocol.</p>
+
+    <p class="text-gray-300">Simulating the Authentication phase. Now  <span class="math">\\mathcal{S}</span>  emulates  <span class="math">\\mathcal{F}_{\\llbracket \\cdot \\rrbracket}</span>  with inputs from the corrupt parties provided by  <span class="math">\\mathcal{A}</span> . So if some inputs are inconsistent with previous computation,  <span class="math">\\mathcal{S}</span>  defines  <span class="math">e_{Auth}, \\hat{e}_{Auth}</span>  to be the deviation introduced by  <span class="math">\\mathcal{A}</span>  in this step. Note that here  <span class="math">e_{Auth}, \\hat{e}_{Auth} \\neq 0</span>  essentially means that the adversary authenticates values different from those computed in the previous phases. If  <span class="math">\\mathcal{A}</span>  sends Abort to  <span class="math">\\mathcal{F}_{\\llbracket \\cdot \\rrbracket}</span>  then  <span class="math">\\mathcal{S}</span>  sends Abort to  <span class="math">\\mathcal{F}_{\\mathsf{Prep}}</span> .</p>
+
+    <p class="text-gray-300">Simulating the Sacrifice step. The simulator emulates the functionalities  <span class="math">\\mathcal{F}_{\\mathsf{Rand}}</span>  and  <span class="math">\\mathcal{F}_{\\llbracket \\cdot \\rrbracket}</span> . Open honestly. Emulating  <span class="math">\\mathcal{F}_{\\llbracket \\cdot \\rrbracket}</span> . Check,  <span class="math">\\mathcal{S}</span>  aborts randomly depending on how many errors there are.</p>
+
+    <p class="text-gray-300"><strong>Indistinguishability.</strong> Now we argue indistinguishability. During the <strong>Multiply</strong> command, in both the simulated and the hybrid model,  <span class="math">\\mathcal{Z}</span>  can see the mask  <span class="math">d_h^{(i,j)}</span> , for each  <span class="math">i \\notin A</span> , but they look perfectly random as the values  <span class="math">q_{1-a_h^{(j)},h}^{(i,j)}</span>  are uniformly random and never revealed to  <span class="math">\\mathcal{Z}</span> .</p>
+
+    <p class="text-gray-300">Then the <strong>Amplify/Combine</strong> command do not require communication and in the <strong>Authenticate</strong> command the simulator honestly runs  <span class="math">\\mathcal{F}_{\\llbracket \\cdot \\rrbracket}</span> , so the view of  <span class="math">\\mathcal{Z}</span>  up to the point where the values  <span class="math">\\rho</span>  and  <span class="math">\\sigma</span>  are opened in the <strong>Sacrifice</strong> step, has exactly the same distribution in both the execution. In the openings, we need to prove that the values produced in the real world and the simulated random values are indistinguishable.</p>
+
+    <p class="text-gray-300">Let us consider  <span class="math">a = \\langle \\mathbf{a}, \\mathbf{r} \\rangle</span>  and  <span class="math">\\hat{a} = \\langle \\mathbf{a}, \\hat{\\mathbf{r}} \\rangle</span> , and let X be the joint distribution of  <span class="math">\\mathbf{a} = (a_1, \\dots, a_{\\tau})</span> . For  <span class="math">\\mathbf{r}, \\hat{\\mathbf{r}} \\stackrel{\\</span>}{\\leftarrow} \\mathbb{F}^{\\tau}$ , let  <span class="math">h_{r,\\hat{r}} : \\mathbb{F}^{\\tau} \\to \\mathbb{F}^2</span>  be defined by</p>
+
+    <p class="text-gray-300"><span class="math">$h_{r,\\hat{r}}(\\mathbf{a}) = (\\langle \\mathbf{r}, \\mathbf{a} \\rangle, \\langle \\hat{\\mathbf{r}}, \\mathbf{a} \\rangle),</span>$</p>
+
+    <p class="text-gray-300">Applying the Leftover Hash Lemma (Lemma 3) with  <span class="math">S = \\mathbb{F}^{\\tau}</span>  and  <span class="math">T = \\mathbb{F}^{\\tau}</span> , we have that  <span class="math">h_{r,\\hat{r}}(X)</span>  is within statistical distance  <span class="math">2^{-\\kappa}</span>  of uniform, provided that</p>
+
+    <p class="text-gray-300">&lt;span id=&quot;page-36-0&quot;&gt;&lt;/span&gt;
+<span class="math">$H_{\\infty}(X) \\ge 2\\kappa + 2\\log|\\mathbb{F}|. \\tag{10}</span>$</p>
+
+    <p class="text-gray-300">In this way, if (10) is satisfied, it is easy to see that the opened value  <span class="math">\\rho</span>  in the real protocol is statistically indistinguishable from the uniformly random value used in the simulation.</p>
+
+    <p class="text-gray-300">Towards analyzing the min-entropy of X, we first consider the probability of passing the sacrificing step. We recall that, from Equation (2), after authentication parties obtain values  <span class="math">[\\![b]\\!], [\\![a]\\!], [\\![c]\\!], [\\![\\hat{a}]\\!], [\\![\\hat{c}]\\!],</span>  which can be seen as:</p>
+
+    <p class="text-gray-300"><span class="math">$c = a \\cdot b + e_a + e_b + e_{Auth}</span>$
+<span class="math">$\\hat{c} = \\hat{a} \\cdot b + \\hat{e}_b + \\hat{e}_a + \\hat{e}_{Auth}</span>$</p>
+
+    <p class="text-gray-300">where we have defined the errors</p>
+
+    <p class="text-gray-300"><span class="math">$e_a = \\sum_{h=1}^{\\tau} r_h \\cdot e_{a,h} = \\sum_{h=1}^{\\tau} r_h \\cdot \\sum_{i \\notin A} \\langle (\\mathbf{a}^{(i)}[h])_B, \\boldsymbol{\\delta}_b^{(i)}[h] \\rangle</span>$</p>
+
+    <p class="text-gray-300"><span class="math">$e_b = \\sum_{h=1}^{\\tau} r_h \\cdot e_{b,h} = \\sum_{h=1}^{\\tau} r_h \\cdot \\sum_{i \\notin A} b^{(i)} \\cdot \\boldsymbol{\\delta}_a^{(i)}[h]</span>$</p>
+
+    <p class="text-gray-300">with  <span class="math">\\mathbf{r} = (r_1, \\dots, r_h)</span> , and  <span class="math">\\hat{e}_a, \\hat{e}_b</span>  defined similarly. First of all, if no Abort occurs, we obtain a correct triple in both worlds with overwhelming probability, as shown by the following claim.</p>
+
+    <p class="text-gray-300">&lt;span id=&quot;page-36-1&quot;&gt;&lt;/span&gt;Claim 2. Let A be the set of the corrupt parties and  <span class="math">B = \\mathcal{P} \\setminus A</span> . If the sacrificing step passes then</p>
+
+    <p class="text-gray-300"><span class="math">$e = e_a + e_b + e_{Auth} = 0</span>$</p>
+
+    <p class="text-gray-300">and</p>
+
+    <p class="text-gray-300"><span class="math">$\\hat{e} = \\hat{e}_a + \\hat{e}_b + \\hat{e}_{Auth} = 0</span>$</p>
+
+    <p class="text-gray-300">with overwhelming probability.</p>
+
+    <p class="text-gray-300"><em>Proof.</em> This is easy to see, following the same argument used for triple generation with SHE in [18]. In particular, rewriting the value  <span class="math">\\sigma</span>  in the second opening of sacrificing as  <span class="math">s \\cdot (c - a \\cdot b) - (\\hat{c} - \\hat{a} \\cdot b)</span> , and assuming that  <span class="math">e, \\hat{e} \\neq 0</span> , then the probability of satisfying the check is  <span class="math">1/|\\mathbb{F}|</span> , since there is only one random challenge  <span class="math">s \\in \\mathbb{F}</span>  for which  <span class="math">\\sigma</span>  would be zero.</p>
+
+    <p class="text-gray-300">We have shown that if the sacrifice test passes then e=0 and the output triple is correct. However this could happen even if  <span class="math">e_a</span> ,  <span class="math">e_b</span>  and  <span class="math">e_{Auth}</span>  are not (all) zero.</p>
+
+    <p class="text-gray-300">Claim 3. If the sacrificing step passes then  <span class="math">\\delta_a^{(i)}[h] = 0</span> , for all  <span class="math">i \\notin A</span>  and  <span class="math">h \\in [\\tau]</span> , with overwhelming probability.</p>
+
+    <p class="text-gray-300"><em>Proof.</em> Suppose that  <span class="math">\\{\\boldsymbol{\\delta}_a^{(i)}[h]\\}_{h,i}</span>  are not all zero. If the sacrificing passes, then by Claim 2,</p>
+
+    <p class="text-gray-300"><span class="math">$-e_{Auth} = e_a + e_b = \\sum_{h \\in \\tau} r_h \\cdot \\big(\\sum_{i \\not\\in A} b^{(i)} \\cdot \\pmb{\\delta}_a^{(i)}[h] + \\sum_{i \\not\\in A} \\langle \\mathbf{a}_B^{(i)}[h], \\pmb{\\delta}_b^{(i)}[h] \\rangle \\big),</span>$</p>
+
+    <p class="text-gray-300">where  <span class="math">\\{b^{(i)}\\}_{i\\notin A}</span>  are uniformly random in  <span class="math">\\mathbb{F}</span>  and all other values are independent of  <span class="math">\\{b^{(i)}\\}_{i\\notin A}</span> . So the probability of passing the check is the same as the probability of guessing  <span class="math">b^{(i)}</span> , i.e.  <span class="math">1/|\\mathbb{F}|</span> .</p>
+
+    <p class="text-gray-300">This shows that  <span class="math">e_b = \\hat{e}_b = 0</span> . Consider now the error</p>
+
+    <p class="text-gray-300"><span class="math">$e_a = \\sum_{h \\in \\tau} r_h \\cdot \\sum_{i \\notin A} \\langle \\mathbf{a}_B^{(i)}[h], \\boldsymbol{\\delta}_b[h]^{(i)} \\rangle,</span>$</p>
+
+    <p class="text-gray-300">and let m = n - |A| be the number of honest parties, and S the set of all possible honest shares  <span class="math">(\\mathbf{a}_B^{(i)})_{i \\notin A}</span>  of  <span class="math">\\mathbf{a}_B</span> , which are determined by the adversarial errors, and for which the sacrifice would pass. The value  <span class="math">(\\mathbf{a}_B^{(i)})_{i \\notin A}</span>  is uniformly distributed in S, and so its min-entropy is  <span class="math">\\log |S|</span> . Using Proposition 1, there exists an i such that  <span class="math">\\mathbf{a}_B^{(i)}</span>  has min-entropy at least  <span class="math">\\log |S|/m</span> . Since at least one  <span class="math">\\mathbf{a}_B^{(i)}</span>  has min-entropy  <span class="math">\\log |S|/m</span> , and each  <span class="math">\\mathbf{a}_B^{(i)}</span>  is independent, it follows that the shared value  <span class="math">\\mathbf{a}_B = \\sum_{i \\in [n]} \\mathbf{a}_B^{(i)}</span>  has min-entropy at least  <span class="math">\\log |S|/m</span> .</p>
+
+    <p class="text-gray-300">Also, let  <span class="math">\\beta</span>  be the probability of passing the sacrifice, so  <span class="math">\\beta := \\frac{|S|}{2^{mk\\tau}}</span> , since  <span class="math">(\\mathbf{a}_B^{(i)})_{i \\notin A}</span>  is chosen at random from a set of size  <span class="math">2^{mk\\tau}</span> . Writing  <span class="math">\\beta = 2^{-c}</span>  for some  <span class="math">c \\geq 0</span> , we get</p>
+
+    <p class="text-gray-300">&lt;span id=&quot;page-37-0&quot;&gt;&lt;/span&gt;
+<span class="math">$H_{\\infty}(\\mathbf{a}) \\ge \\frac{\\log |S|}{m} = \\frac{\\log (\\beta \\cdot 2^{mk\\tau})}{m}</span>$
+<span class="math">$= k \\cdot \\tau - \\frac{c}{m} \\ge k \\cdot \\tau - c \\tag{11}</span>$</p>
+
+    <p class="text-gray-300">Noting that  <span class="math">k = \\lceil \\log |\\mathbb{F}| \\rceil</span> , (11) implies that (10) is satisfied for  <span class="math">\\kappa = (k(\\tau - 2) - c)/2</span> . Now the overall distinguishing advantage of the environment (ignoring the failure events in the previous claims that occur with negligible probability) is obtained by multiplying the probability of passing the sacrifice</p>
+
+    <p class="text-gray-300">check and the probability of distinguishing the output distribution from random (given that the sacrifice passed), so this is given by</p>
+
+    <p class="text-gray-300"><span class="math">$\\beta \\cdot 2^{-\\kappa} = 2^{-\\kappa - c} = 2^{-k(\\tau - 2)/2 - c/2}</span>$</p>
+
+    <p class="text-gray-300">For this to be no more than 2−&lt;sup&gt;k&lt;/sup&gt; (for any c ≥ 0) it suffices to set the number of triples to combine to τ = 4. Note that if the field size is much larger than the statistical security parameter, say k = 2κ, then we only need distinguishing advantage ≤ 2 −k/2 , so could combine just τ = 3 triples to ensure security.</p>
+
+    <p class="text-gray-300">The final analysis in this proof also gives the following special case as a corollary.</p>
+
+    <p class="text-gray-300">Corollary 2 (Corollary <a href="#page-18-3">1,</a> restated). If τ = 3 then ΠTriple securely implements FTriple in the (FROT, &lt;sup&gt;F&lt;/sup&gt;J·&lt;sup&gt;K&lt;/sup&gt; )-hybrid model with statistical security parameter k/2.</p>
+
+`;
+---
+
+<BaseLayout title="MASCOT: Faster Malicious Arithmetic Secure Computation with ... (2016/505)">
+  <article class="max-w-4xl mx-auto article-prose">
+    <nav class="mb-8">
+      <a href="/papers" class="text-blue-400 hover:text-blue-300">
+        &larr; Back to Papers
+      </a>
+    </nav>
+
+    <header class="mb-12">
+      <h1 class="text-3xl font-bold mb-4"
+        set:html={TITLE_HTML} />
+      <p class="text-gray-400 mb-2"
+        set:html={AUTHORS_HTML} />
+      <p class="text-gray-500 text-sm mb-4">
+        2016 &middot; eprint 2016/505
+      </p>
+      <div class="flex gap-4 text-sm">
+        <a
+          href={EPRINT_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          class="text-blue-400 hover:text-blue-300"
+        >
+          Paper (eprint) &rarr;
+        </a>
+      </div>
+      <PaperDisclaimer eprintUrl={EPRINT_URL} />
+      <p class="mt-1 text-xs text-gray-600">
+        Converted with: {CRAWLER} &middot; {CONVERTED_DATE}
+      </p>
+    </header>
+
+    <Fragment set:html={CONTENT} />
+
+    <PaperHistory slug="mascot-faster-malicious-arithmetic-secure-computation-with-2016" />
+  </article>
+</BaseLayout>

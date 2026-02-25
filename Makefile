@@ -211,12 +211,17 @@ check-trailing-whitespace: ## Check for trailing whitespaces
 # Data generation
 # =============================================================================
 
-METADATA_DIR ?= \
-	$(HOME)/codes/dannywillems/poseidon-formalization/data/metadata
+.PHONY: convert-papers
+convert-papers: ## Convert new markdown papers to .astro pages
+	python3 scripts/convert_papers.py
+
+.PHONY: convert-papers-force
+convert-papers-force: ## Reconvert all markdown papers to .astro pages
+	python3 scripts/convert_papers.py --force
 
 .PHONY: generate-papers-data
-generate-papers-data: ## Generate papers.json from .astro files + metadata
-	METADATA_DIR=$(METADATA_DIR) python3 scripts/generate_papers_data.py
+generate-papers-data: ## Generate papers.json from .astro files
+	python3 scripts/generate_papers_data.py
 
 .PHONY: generate-papers-history
 generate-papers-history: ## Generate per-paper git history JSON
