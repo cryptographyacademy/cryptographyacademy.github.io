@@ -218,6 +218,10 @@ METADATA_DIR ?= \
 generate-papers-data: ## Generate papers.json from .astro files + metadata
 	METADATA_DIR=$(METADATA_DIR) python3 scripts/generate_papers_data.py
 
+.PHONY: generate-papers-history
+generate-papers-history: ## Generate per-paper git history JSON
+	python3 scripts/generate_papers_history.py
+
 # =============================================================================
 # Deploy
 # =============================================================================
