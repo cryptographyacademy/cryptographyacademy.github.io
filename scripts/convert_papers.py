@@ -448,12 +448,14 @@ class TailwindRenderer(mistune.HTMLRenderer):
         super().__init__(escape=False)
         self._misc_counter = 0
         self._section_open = False
+        self._in_references = False
         self._skip_h1 = True
 
     def reset(self) -> None:
         """Reset per-document state."""
         self._misc_counter = 0
         self._section_open = False
+        self._in_references = False
 
     def finalize(self) -> str:
         """Close the last open section. Call after rendering."""
@@ -535,6 +537,8 @@ class TailwindRenderer(mistune.HTMLRenderer):
         result = ""
 
         if is_top:
+            # Track whether we are in the references section
+            self._in_references = sec_id == "references"
             # Close previous section, open new one
             result += self._close_section()
             result += (
@@ -564,6 +568,12 @@ class TailwindRenderer(mistune.HTMLRenderer):
         return f'    <p class="text-gray-300">{text}</p>\n\n'
 
     def list(self, text: str, ordered: bool, **attrs: object) -> str:
+        if self._in_references:
+            return (
+                f'    <ul class="space-y-2 text-gray-400'
+                f' text-sm list-none">\n'
+                f"{text}    </ul>\n\n"
+            )
         if ordered:
             return (
                 f'    <ol class="list-decimal list-inside'
@@ -975,6 +985,9 @@ def process_paper(
     renderer.reset()
     content_html = md_parser(md_content)
     content_html += renderer.finalize()
+
+    # Strip Marker page-anchor spans from body content
+    content_html = strip_marker_spans(content_html)
 
     # Apply unicode-to-entity conversion on rendered content
     content_html = unicode_to_html_entities(content_html)
