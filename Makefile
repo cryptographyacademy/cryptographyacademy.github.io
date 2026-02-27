@@ -180,6 +180,7 @@ fix-trailing-whitespace: ## Remove trailing whitespaces from all files
 		-o -name "*.js" -o -name "*.jsx" -o -name "*.sh" \
 		-o -name "*.json" -o -name "*.astro" -o -name "*.mdx" -o -name "*.css" \) \
 		-not -path "./.git/*" \
+		-not -path "./data/*" \
 		-not -path "./lean/.lake/*" \
 		-not -path "./web/node_modules/*" \
 		-not -path "./web/dist/*" \
@@ -195,6 +196,7 @@ check-trailing-whitespace: ## Check for trailing whitespaces
 		-o -name "*.js" -o -name "*.jsx" -o -name "*.sh" \
 		-o -name "*.json" -o -name "*.astro" -o -name "*.mdx" -o -name "*.css" \) \
 		-not -path "./.git/*" \
+		-not -path "./data/*" \
 		-not -path "./lean/.lake/*" \
 		-not -path "./web/node_modules/*" \
 		-not -path "./web/dist/*" \
