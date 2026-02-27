@@ -1,0 +1,744 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import PaperDisclaimer from '../../components/PaperDisclaimer.astro';
+import PaperHistory from '../../components/PaperHistory.astro';
+
+const EPRINT_URL = 'https://eprint.iacr.org/2022/274';
+const CRAWLER = 'marker';
+const CONVERTED_DATE = '2026-02-16';
+const TITLE_HTML = 'EcGFp5: a Specialized Elliptic Curve';
+const AUTHORS_HTML = 'Thomas Pornin';
+
+const CONTENT = `    <section id="abstract" class="mb-10">
+      <h2 class="text-2xl font-bold">Abstract</h2>
+      <p class="text-gray-300">We present here the design and implementation of ecGFp5, an elliptic curve meant for a specific compute model in which operations modulo a given 64-bit prime are especially efficient. This model is primarily intended for running operations in a virtual machine that produces and verifies zero-knowledge STARK proofs. We describe here the choice of a secure curve, amenable to safe cryptographic operations such as digital signatures, that maps to such models, while still providing reasonable performance on general purpose computers.</p>
+      <p class="text-gray-300"><strong>Keywords:</strong> elliptic curve cryptosystems &middot; double-odd curves &middot; zero knowledge</p>
+    </section>
+
+    <section id="sec-2" class="mb-10">
+      <h2 class="text-2xl font-bold">2 Choice of Field</h2>
+
+    <p class="text-gray-300">Since p is a 64-bit integer, we need to work in a field extension  <span class="math">GF(p^k)</span>  in order to have a field large enough to obtain a curve with adequate security. We aim at the usual &quot;128-bit security&quot; level. For such a level, we need a field with at least a 256-bit order, hence  <span class="math">k \\ge 4</span> . Robustness of elliptic curve discrete logarithm in extension fields has been studied in various articles. A rough summary is the following:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>If the extension degree k is composite, then Weil descent attacks may apply, using a tower of field extensions to turn the problem into a discrete logarithm in a higher genus curve on a smaller field [9,3]. To avoid such issues, a prime degree is highly recommended. Diem showed that if k is prime and not lower than 11, then such attacks cannot work [6].</li>
+      <li>A related attack using Gr&ouml;bner bases was described by Gaudry[8]; its complexity was
+further analyzed by Joux and Vitse, along with some possible variants[12].</li>
+    </ul>
+
+    <p class="text-gray-300">For performance reasons, we would like to have k as small as possible; k=11 would lead to a 704-bit field where computations would be too expensive. Using k=4 would allow the known attacks on quartic extension fields[3], with complexity about  <span class="math">O(p^{3/2}) \\approx 2^{96}</span> . Though this value is quite larger than what can practically be implemented, it still falls short of the expected &quot;128-bit&quot; level. Thus, we need at least k=5.</p>
+
+    <p class="text-gray-300">With k=5, Gaudry's attack entails computing about  <span class="math">p^{2-2/5}\\approx 2^{102.4}</span>  systems of polynomial equations, and obtaining a Gr&ouml;bner basis for each of them. Each system would contain 5 equations with 5 unknowns, and a total degree  <span class="math">2^{k-1}=16</span> ; it is expected that obtaining the basis will require using the FGLM algorithm[7] with complexity  <span class="math">O(kD^3)</span> , with k the number of unknowns (here, k=5) and D the degree of the underlying ideal, which should be close to  <span class="math">2^{k(k-1)}=2^{20}</span> . The involved matrix should be mostly empty and a lower complexity might be achieved, but even with very optimistic assumptions, it is unlikely to go below  <span class="math">O(D^2)\\approx 2^{40}</span> . This leads to a total theoretical complexity of at least  <span class="math">2^{142}</span> , well beyond the target 128-bit level. Joux and Vitse's variant has cost  <span class="math">O(Cp^2)</span>  for some constant C that depends on k, again above the 128-bit level.</p>
+
+    <p class="text-gray-300">We can thus claim that a degree-5 extension field,  <span class="math">GF(p^5)</span> , is sufficient to achieve 128-bit security against all known attacks on discrete logarithm on elliptic curves.</p>
+
+    <p class="text-gray-300">All finite fields with the same cardinality are isomorphic to each other; we can thus choose whatever definition of that field provides the best performance. Field extensions of degree k are classically defined as the quotient of the ring of polynomials in the base field, by a given unitary irreducible polynomial M of degree k. Since multiplications in the extension field will involve reductions modulo M, performance should be best if using an M of minimal Hamming weight, and with non-zero coefficients as close to 1 or -1 as possible; moreover, a modulus with format  <span class="math">z^5 - c</span>  for some constant c makes the Frobenius operator especially inexpensive. Among polynomials in GF(p)[z], none of the following polynomials happens to be irreducible:  <span class="math">z^5</span> ,  <span class="math">z^5 \\pm 1</span> ,  <span class="math">z^5 \\pm z^i \\pm 1</span>  for any  <span class="math">i \\in [1;4]</span> ,  <span class="math">z^5 \\pm 2</span> . The next best choices are  <span class="math">z^5 - 3</span>  and  <span class="math">z^5 + 3</span> , which are both irreducible; we thus choose  <span class="math">M = z^5 - 3</span> .</p>
+
+      <h3 id="sec-3.1" class="text-xl font-semibold mt-8">3.1 VM Opcodes</h3>
+
+    <p class="text-gray-300">We assume here that the following opcodes are offered by the target compute model, and all have cost exactly 1 cycle:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>add, sub, mul and div perform respectively addition, subtraction, multiplication and division in GF(p). Division fails if the divisor is zero; it is up to the caller to make sure that this situation does not happen. Negation has a specific opcode (neg) but could also be implemented with a subtraction from zero.</li>
+      <li>and, or, xor and not perform operations on Boolean values. A &quot;true&quot; is represented as the GF(p) element 1, while a &quot;false&quot; is 0. Any other value triggers a failure. Opcodes eq and neq compare two GF(p) elements and return such Boolean value if the two operands, are, respectively, equal to each other, or different from each other.</li>
+      <li>select applied on three values x, y and c returns x if c = 0, or y if c = 1. The control value c must have a Boolean 0-or-1 value.</li>
+    </ul>
+
+    <p class="text-gray-300">&ndash; add32, sub32, mul32, div32, shl32, shr32, and gte32 implement operations on 32-bit values (for addition, subtraction, multiplication, division, shift left, shift right, and greater-or-equal comparisons, respectively). Addition and subtraction are computed modulo  <span class="math">2^{32}</span>  and have carry/borrow support for both input and output. Multiplication yields a 64-bit output (which always fits in a GF(p) element). Shifts and comparisons operate on unsigned values; the left shift truncates its output to 32 bits. Moreover, shift counts must be fixed constants. All 32-bit opcodes assume that the operands are in the proper range (0 to  <span class="math">2^{32} - 1</span> ).</p>
+
+    <p class="text-gray-300">The names above do not exactly match the names used by the Miden VM assembly specification [14]; for instance, what we call here add32 is known as u32addc.unsafe in the specification document.</p>
+
+    <p class="text-gray-300">The compute model should be understood as a general circuit emulation in which only arithmetic gates have a cost, while data routing is free, provided that it can be resolved statically. In the context of a VM executing a program consisting of opcodes, this means that function calls, loop control, reading from memory and writing to memory are all free (their cost is zero); <em>however</em>, this does not extend to data-dependent conditional jumps, and array accesses at data-dependent indexes. These operations are possible in Miden but very expensive; in the context of this paper, we simply consider them to be forbidden. In a sense, we use a compute model which is close to constant-time implementations, although for different reasons.</p>
+
+      <h3 id="sec-3.2" class="text-xl font-semibold mt-8">3.2 Field Operations</h3>
+
+    <p class="text-gray-300">An element x of  <span class="math">GF(p^5)</span>  is represented as five coefficients  <span class="math">x_0</span>  to  <span class="math">x_4</span> , such that  <span class="math">x = x_0 + x_1z + x_2z^2 + x_3z^3 + x_4z^4</span> . Addition and subtraction are simply done coefficient-wise; thus, an addition in  <span class="math">GF(p^5)</span>  boils down to five add opcodes, for a cost of 5.</p>
+
+    <p class="text-gray-300"><strong>Multiplication.</strong> Multiplication in  <span class="math">GF(p^5)</span>  ( <span class="math">d \\leftarrow a + b</span> ) can be done in a straightforward way:</p>
+
+    <p class="text-gray-300"><span class="math">$d_0 \\leftarrow a_0b_0 + 3(a_1b_4 + a_2b_3 + a_3b_2 + a_4b_1)</span>$</p>
+
+    <p class="text-gray-300"><span class="math">$d_1 \\leftarrow a_0b_1 + a_1b_0 + 3(a_2b_4 + a_3b_3 + a_4b_2)</span>$</p>
+
+    <p class="text-gray-300"><span class="math">$d_2 \\leftarrow a_0b_2 + a_1b_1 + a_2b_0 + 3(a_3b_4 + a_4b_3)</span>$</p>
+
+    <p class="text-gray-300"><span class="math">$d_3 \\leftarrow a_0b_3 + a_1b_2 + a_2b_1 + a_3b_0 + 3a_4b_4</span>$</p>
+
+    <p class="text-gray-300"><span class="math">$d_4 \\leftarrow a_0b_4 + a_1b_3 + a_2b_2 + a_3b_1 + a_4b_0</span>$</p>
+
+    <p class="text-gray-300">The multiplications by 3 come from the reduction modulo the polynomial  <span class="math">z^5 - 3</span> . Any constant in GF(p) other than 3 would yield the same overall cost, except 0, 1 or -1, which would be cheaper; however, polynomials  <span class="math">z^5</span> ,  <span class="math">z^5 + 1</span>  and  <span class="math">z^5 - 1</span>  are not irreducible, and do not yield a proper field.</p>
+
+    <p class="text-gray-300">Overall multiplication cost is 49. Other techniques such as Karatsuba or Toom-Cook may reduce the number of multiplications, but at the cost of a higher number of additions and subtractions; in our compute model, these do not seem to provide overall cost reductions.</p>
+
+    <p class="text-gray-300">Squaring can be done with lower cost since, for instance, product  <span class="math">a_0b_1</span>  and  <span class="math">a_1b_0</span>  yield the same value when a = b. The cost of a squaring operation is then 34.</p>
+
+    <p class="text-gray-300"><strong>Inversion.</strong> Inversion in  <span class="math">GF(p^5)</span>  can be computed very efficiently thanks to a method first described by Itoh and Tsujii[11]. Define the integer  <span class="math">r = 1 + p + p^2 + p^3 + p^4</span> . The following holds:</p>
+
+    <p class="text-gray-300"><span class="math">$p^5 - 1 = (p - 1)r</span>$</p>
+
+    <p class="text-gray-300">Therefore, for any non-zero x in  <span class="math">GF(p^5)</span> , we have:</p>
+
+    <p class="text-gray-300"><span class="math">$x^{p^5-1} = 1 = (x^r)^{p-1}</span>$</p>
+
+    <p class="text-gray-300">Thus,  <span class="math">x^r</span>  is a root of the polynomial  <span class="math">X^{p-1} - 1</span> . Since the roots of that polynomial are exactly the non-zero elements of GF(p), this implies that  <span class="math">x^r \\in GF(p)</span>  for any x in  <span class="math">GF(p^5)</span> . We can thus write the inverse of x as:</p>
+
+    <p class="text-gray-300"><span class="math">$\\frac{1}{x} = \\frac{x^{r-1}}{x^r}</span>$</p>
+
+    <p class="text-gray-300">which can be computed as the product of  <span class="math">x^{r-1}</span>  (an element of  <span class="math">GF(p^5)</span> ) by the inverse of  <span class="math">x^r</span>  (an element of GF(p)).</p>
+
+    <p class="text-gray-300">Values  <span class="math">x^{r-1}</span>  and  <span class="math">x^r</span>  can furthermore be computed with appropriate use of the Frobenius operator. Define  <span class="math">\\phi_1(x) = x^p</span>  for any  <span class="math">x \\in GF(p^5)</span> ; this is a field automorphism, i.e.  <span class="math">\\phi_1(x+y) = \\phi_1(x) + \\phi_1(y)</span> , and  <span class="math">\\phi_1(xy) = \\phi_1(x)\\phi_1(y)</span>  for any x and y. Thus, if  <span class="math">x = \\sum_i x_i z^i</span> , then:</p>
+
+    <p class="text-gray-300"><span class="math">$\\phi_1(x) = \\sum_{i=0}^4 \\phi_1(x_i) z^{pi}</span>$</p>
+
+    <p class="text-gray-300"><span class="math">$= \\sum_{i=0}^4 x_i (3^{\\lfloor pi/5 \\rfloor}) z^{pi \\bmod 5}</span>$</p>
+
+    <p class="text-gray-300">which boils down to multiplying each coefficient by a precomputed constant, and possibly reordering them. In our case,  <span class="math">p=1 \\mod 5</span> , which means that  <span class="math">z^{pi \\mod 5}=z^i</span> , and there is no reordering; also, one of the five precomputed constants is  <span class="math">3^0=1</span> . The cost of the Frobenius operator is thus only 4 cycles. We similarly define  <span class="math">\\phi_2(x)=\\phi_1(\\phi_1(x))</span> , which is also computed in cost 4 (we will also call  <span class="math">\\phi_2</span>  a &quot;Frobenius operator&quot;).</p>
+
+    <p class="text-gray-300">With the Frobenius operator, we compute  <span class="math">x^{r-1}</span>  as:</p>
+
+    <p class="text-gray-300"><span class="math">$x^{r-1} = x^{p+p^2+p^3+p^4}</span>$</p>
+
+    <p class="text-gray-300">=  <span class="math">\\phi_1(x)\\phi_1(\\phi_1(x))\\phi_2(\\phi_1(x)\\phi_1(\\phi_1(x)))</span></p>
+
+    <p class="text-gray-300">which entails three Frobenius operators and two multiplications in  <span class="math">GF(p^5)</span> . Once  <span class="math">x^{r-1}</span>  is obtained,  <span class="math">x^r</span>  is computed by multiplying that value with x; since  <span class="math">x^r</span>  is known to be in GF(p), we only need to compute the first coefficient, with cost 10.</p>
+
+    <p class="text-gray-300">Inversion in GF(p) has cost 1 (this is a single div opcode); however, we have to add a small corrective action to avoid a division by zero, in case the input x was equal to zero: before inverting  <span class="math">y = x^r</span> , we compare it with zero (eq opcode), then add the Boolean result (a GF(p) element with value 0 or 1) to y. Thus, if x = 0, we end up inverting y' = 1 instead of y = 0, and the division opcode does not fail. This corrective action has cost 2.</p>
+
+    <p class="text-gray-300">Final multiplication of  <span class="math">x^{r-1}</span>  by the resulting  <span class="math">x^{-r}</span>  is done in five mul opcodes. The overall cost of inversion in  <span class="math">GF(p^5)</span>  is 128 cycles (it would be 126 if the div opcode tolerated a divisor equal to 0). Note that if x = 0, the inversion process described above does not fail; instead, it returns 0. This is a feature; it simplifies some operations later on.</p>
+
+    <p class="text-gray-300">General division is the combination of a multiplication and an inversion, with cost 177.</p>
+
+    <p class="text-gray-300"><strong>Legendre Symbol.</strong> We define the Legendre symbol of x as the value  <span class="math">x^{(p^5-1)/2}</span> ; it is equal to 0 if x = 0, to 1 if x is a non-zero quadratic residue, or -1 if x is not a square in  <span class="math">GF(p^5)</span> . Again using the value  <span class="math">r = 1 + p + p^2 + p^3 + p^4</span> , we find that:</p>
+
+    <p class="text-gray-300"><span class="math">$x^{(p^5-1)/2} = (x^r)^{(p-1)/2}</span>$</p>
+
+    <p class="text-gray-300">Thus, the Legendre symbol of  <span class="math">x \\in GF(p^5)</span>  is equal to the Legendre symbol of  <span class="math">x^r</span>  in GF(p). As in the case of inversion, the computation of  <span class="math">x^r</span>  is efficient. In GF(p), we note that (p-1)/2 = <span class="math">2^{63} - 2^{31}</span> , leading to the following process:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><span class="math">\\gamma \\leftarrow x^r</span>  (result is in GF(p))</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><span class="math">y_{31} \\leftarrow y^{2^{31}}</span>  (with 31 mul opcodes) 3.  <span class="math">y_{63} \\leftarrow y_{31}^{2^{32}}</span>  (with 32 mul opcodes) 4.  <span class="math">t \\leftarrow y_{63}/y_{31}</span>  (one div opcode)</li>
+    </ol></li>
+    </ul>
+
+    <p class="text-gray-300">The overall cost is 186.</p>
+
+    <p class="text-gray-300"><strong>Square Root.</strong> We can use, again, the Frobenius operator to speed up square roots, by noticing that, for  <span class="math">x \\neq 0</span>  in  <span class="math">GF(p^5)</span> :</p>
+
+    <p class="text-gray-300"><span class="math">$\\sqrt{x} = \\sqrt{\\frac{x^r}{x^{r-1}}}</span>$
+<span class="math">$= \\frac{\\sqrt{x^r}}{x^{(r-1)/2}}</span>$</p>
+
+    <p class="text-gray-300">since  <span class="math">r - 1 = p + p^2 + p^3 + p^4</span> , which is an even integer. We can compute  <span class="math">x^{(r-1)/2}</span>  as:</p>
+
+    <p class="text-gray-300"><span class="math">$\\begin{split} x^{(r-1)/2} &amp;= x^{p(1+p^2)(p+1)/2} \\\\ &amp;= \\phi_1(x^{(p+1)/2}\\phi_2(x^{(p+1)/2})) \\end{split}</span>$</p>
+
+    <p class="text-gray-300">We can write  <span class="math">x^{(p+1)/2} = x^{2^{63}+1}/x^{2^{31}}</span> , allowing the computation of that value with 63 squarings, one multiplication and one inversion in  <span class="math">GF(p^5)</span> . Once we obtained  <span class="math">x^{(p+1)/2}</span> , we use it to compute  <span class="math">x^{(r-1)/2}</span>  as shown above, with two Frobenius operators and one multiplication. We can furthermore derive  <span class="math">x^r</span>  from  <span class="math">x^{(r-1)/2}</span>  with a squaring (to get  <span class="math">x^{r-1}</span> ) then a multiplication by x; the latter only needs to compute the lowest coefficient, since  <span class="math">x^r \\in GF(p)</span> .</p>
+
+    <p class="text-gray-300">At that point, we have to compute the square root of  <span class="math">y = x^r</span>  in GF(p). Moduli with high 2-arity are known to be inconvenient for computing square roots. We use the following process, which really is the Tonelli-Shanks algorithm, specialized to our compute model in which data-dependent conditional jumps are forbidden, but multiplications are inexpensive:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Let n = 32 and  <span class="math">q = 2^{32} 1</span> , so that q is odd and  <span class="math">p = q2^n + 1</span> . Let q be a primitive  <span class="math">2^n</span> -th root of unity in GF(p) (we can use  <span class="math">g = 7^q \\mod p</span> , since 7 is a non-QR in GF(p)). We precompute values  <span class="math">g_i = g^{2^i}</span>  for i = 0 to n - 1.</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><span class="math">(u, v) \\leftarrow (y^{(q+1)/2}, y^q)</span></li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>For i = n 1 down to 1: (a)  <span class="math">w \\leftarrow v^{2^{i-1}}</span>  (with i-1 squarings)</li>
+    </ol></li>
+      <li><p class="text-gray-300">(b) If  <span class="math">w = -1 \\mod p</span> , then:  <span class="math">(u, v) \\leftarrow (ug_{n-i-1}, vg_{n-i})</span>  (the new (u, v) are always computed, but kept with select opcodes only if an eq opcode declares that the computed w is indeed equal to -1)</p></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>If v = 0 or 1, then y was indeed a square, and u contains one of its square roots. Otherwise, y was not a square, and thus x was not a square either; in that case, we arrange to set v to zero (e.g. with an extra select).</li>
+    </ol></li>
+    </ul>
+
+    <p class="text-gray-300">The algorithm above entails (n-1)(n-2)/2 = 450 squarings, and some other operations, for a total of 659 cycles for the square root in GF(p). Combined with the computations of  <span class="math">x^{(r-1)/2}</span>  and  <span class="math">x^r</span> , and finally putting together the values, we compute a square root in  <span class="math">GF(p^5)</span>  in a total of 3261 cycles. The routine returns two values, the square root itself, and a Boolean value reporting the success of the process; if the input value was not a square, the returned &quot;square root&quot; is zero, and the Boolean is zero.</p>
+
+    <p class="text-gray-300"><strong>Cost Summary.</strong> We obtain the following costs for in-VM operations in  <span class="math">GF(p^5)</span> :</p>
+
+    <div class="overflow-x-auto my-4">
+      <table class="min-w-full text-sm text-gray-300">
+        <thead>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">Operation</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">Cost (cycles)</th>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">addition</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">5</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">subtraction</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">5</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">multiplication</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">49</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">squaring</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">34</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">inversion</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">128</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">division</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">177</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Legendre symbol</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">186</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">square root</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">3261</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p class="text-gray-300">An important point here is that inversions in  <span class="math">GF(p^5)</span>  are quite inexpensive: the cost of an inversion is only about 2.57 times the cost of a multiplication. This is not the usual situation when dealing with elliptic curve implementations; it impacts the strategy we will use, in particular the point addition formulas.</p>
+
+      <h3 id="sec-3.3" class="text-xl font-semibold mt-8">3.3 Curve Formulas</h3>
+
+    <p class="text-gray-300">Since inversions in  <span class="math">GF(p^5)</span>  are quite efficient (their cost is lower than three times the cost of a multiplication in  <span class="math">GF(p^5)</span> ), the most efficient formulas for computing point additions and doublings are obtained by working with the short Weierstra&szlig; equation and affine coordinates. Moreover, <em>any</em> elliptic curve over  <span class="math">GF(p^5)</span>  can be expressed as a short Weierstra&szlig; curve with a suitable change of variable; thus, no curve type will be any better or worse than any other, efficiency-wise, for in-VM computations.</p>
+
+    <p class="text-gray-300"><strong>Change of Variable.</strong> A double-odd curve such as ecGFp5 has equation  <span class="math">y^2 = x(x^2 + ax + b)</span>  for two constants a and b (for ecGFp5, a = 2 and b = 263z). It can be converted to the short Weierstra&szlig; equation:</p>
+
+    <p class="text-gray-300"><span class="math">$Y^2 = X^3 + AX + B</span>$</p>
+
+    <p class="text-gray-300">with constants:</p>
+
+    <p class="text-gray-300"><span class="math">$A = (3b - a^2)/3</span>$
+<span class="math">$B = a(2a^2 - 9b)/27</span>$</p>
+
+    <p class="text-gray-300">using the following change of variable:</p>
+
+    <p class="text-gray-300"><span class="math">$(X, Y) = (x + \\frac{a}{3}, y)</span>$</p>
+
+    <p class="text-gray-300">This change of variable is very inexpensive: it suffices to add a single constant to the x coordinate. Moreover, that constant is in GF(p) for ecGFp5, leading to an addition in a single cycle in the VM.</p>
+
+    <p class="text-gray-300">EcGFp5, however, is not exactly the elliptic curve with equation  <span class="math">y^2 = x(x^2 + ax + b)</span> , but a subset thereof, consisting of (exactly) the points which are not the double of any other point. In order to perform computations on the short Weierstra&szlig; curve, we also need to map into the subgroup of points of n-torsion on the short Weierstra&szlig; curve, which entails adding the point N. This can be done while still on the original equation, since  <span class="math">(x, y) + N = (b/x, -by/x^2)</span> . Another method, which is even simpler, is to combine the addition of N with the decoding process. Given an encoded point w (nominally equal to y/x for the ecGFp5 element (x, y)), compute the following:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><span class="math">e \\leftarrow w^2 a</span></li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><span class="math">\\Delta \\leftarrow e^2 4l</span></li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><span class="math">(x_1, x_2) \\leftarrow ((e + \\sqrt{\\Delta})/2, (e \\sqrt{\\Delta})/2)</span>  (if  <span class="math">\\Delta</span>  is not a square, then either w = 0, in which case the point is N and should be decoded as the point-at-infinity in the short Weierstra&szlig; curve; or  <span class="math">w \\neq 0</span> , and there is no solution, w is not a validly encoded point)</li>
+    </ol></li>
+      <li>4. If  <span class="math">x_1</span>  is a quadratic residue, then set  <span class="math">x = x_1</span> ; otherwise, set  <span class="math">x = x_2</span></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Return (X, Y) = (x + a/3, -wx)</li>
+    </ol></li>
+    </ul>
+
+    <p class="text-gray-300">Step 4 is where processing diverges from normal decoding in double-odd curves, where we would have chosen the x value which is <em>not</em> a quadratic residue instead. This decoding process works because a given w = y/x value is shared by two points on the curve, P + N (which is in ecGFp5) and -P (which is in the subgroup of points of n-torsion); here, we simply use the latter, and take the negation into account by computing y = -wx instead of y = wx.</p>
+
+    <p class="text-gray-300">It shall be noted that if w=0, then the decoding above computes  <span class="math">\\Delta=a^2-4b</span> , which is not a quadratic residue. Moreover, in that case, the &quot;point-at-infinity&quot; should be returned, and that point does not have defined (X,Y) coordinates. In a practical implementation, a point in affine coordinates on the short Weierstra&szlig; curve really is a set of <em>three</em> values: the coordinates X and Y, which are in  <span class="math">GF(p^5)</span> , and a Boolean flag I which, when non-zero, indicates that the point is the point-at-infinity, and the values of X and Y should be ignored.</p>
+
+    <p class="text-gray-300"><strong>Point Addition.</strong> The sum of two points  <span class="math">(X_1, Y_1)</span>  and  <span class="math">(X_2, Y_2)</span>  is the point  <span class="math">(X_3, Y_3)</span>  with:</p>
+
+    <p class="text-gray-300"><span class="math">$\\lambda = \\frac{Y_2 - Y_1}{X_2 - X_1}</span>$</p>
+
+    <p class="text-gray-300"><span class="math">$X_3 = \\lambda^2 - X_1 - X_2</span>$</p>
+
+    <p class="text-gray-300"><span class="math">$Y_3 = \\lambda(X_1 - X_3) - Y_1</span>$</p>
+
+    <p class="text-gray-300">Famously, these formulas are not complete; if  <span class="math">X_1 = X_2</span>  then either  <span class="math">Y_1 = -Y_2</span> , in which case the sum is the point-at-infinity (sum of a point and its opposite); or  <span class="math">Y_1 = Y_2</span> , which means</p>
+
+    <p class="text-gray-300">that the point is added to itself, and  <span class="math">\\lambda</span>  must instead be computed as:</p>
+
+    <p class="text-gray-300"><span class="math">$\\lambda = \\frac{3X_1^2 + A}{2Y_1}</span>$</p>
+
+    <p class="text-gray-300">A complete routine that supports all cases looks like this:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Inputs are points  <span class="math">(X_1, Y_1)</span>  (with infinity flag  <span class="math">I_1</span> ) and  <span class="math">(X_2, Y_2)</span>  (with flag  <span class="math">I_2</span> ).</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Compare  <span class="math">X_1</span>  with  <span class="math">X_2</span> , yielding a Boolean  <span class="math">s_x</span>  with value 1 if they are equal, 0 otherwise. This entails five eq opcodes, and four and opcodes, for a cost of 9. Similarly, compare  <span class="math">Y_1</span>  with  <span class="math">Y_2</span> , yielding  <span class="math">s_y</span> .</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Set  <span class="math">\\lambda_0</span>  to  <span class="math">Y_2 Y_1</span>  if  <span class="math">s_x = 1</span> , or to  <span class="math">3X_1^2 + A</span>  if  <span class="math">s_x = 0</span>  (both values are computed, and select opcodes are used to keep the right one, depending on the value of  <span class="math">s_x</span> ).</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Set  <span class="math">\\lambda_1</span>  to  <span class="math">X_2 X_1</span>  if  <span class="math">s_x = 1</span> , or to  <span class="math">2Y_1</span>  if  <span class="math">s_x = 0</span> .</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><span class="math">\\lambda \\leftarrow \\lambda_0/\\lambda_1</span></li>
+    </ol></li>
+      <li><span class="math">6. \\ X_3 \\leftarrow \\lambda^2 X_1 X_2</span></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><span class="math">Y_3 \\leftarrow \\lambda(X_1 X_3) Y_1</span></li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><span class="math">I_3 \\leftarrow s_x</span>  and  <span class="math">s_y</span></li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>If  <span class="math">I_1 \\neq 0</span> , then replace  <span class="math">(X_3, Y_3, I_3)</span>  with  <span class="math">(X_2, Y_2, I_2)</span></li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>If  <span class="math">I_2 \\neq 0</span> , then replace  <span class="math">(X_3, Y_3, I_3)</span>  with  <span class="math">(X_1, Y_1, I_1)</span></li>
+    </ol></li>
+    </ul>
+
+    <p class="text-gray-300">This routine handles all edge cases (point doublings, point-at-infinity as input or output operand) with a fixed cost of 387 cycles in the VM. This cost is about 7.9 times the cost of a single multiplication: this is faster than the best know curve point adding formulas that do not involve any inversion.</p>
+
+    <p class="text-gray-300">Optimizations are possible in some cases:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>When it is <em>a priori</em> known that the addition is not an edge case, then we can avoid in particular the squaring involved in computing  <span class="math">\\lambda_0</span>  for a point doubling, and all the select opcodes, leading to a routine with cost 290.</li>
+      <li>For explicit point doublings, the select opcodes can also be skipped, since the double
+of a non-infinity n-torsion point cannot be the point-at-infinity; we can simply keep the\\ninfinity flag unchanged, and apply the doubling formulas on the coordinates. This leads
+a point doubling in 326 cycles.</li>
+    </ul>
+
+    <p class="text-gray-300"><strong>Point Multiplication.</strong> In the specific case of the multiplication of a point P by a scalar v, the following process can be used:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Reduce the scalar v modulo n, then add n to get a value k in the n to 2n 1 range.</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Split the scalar into chunks  <span class="math">\\lceil 321/w \\rceil</span>  of w bits, for a given window width w (experimentally, w=4 seems to be the best choice here). Each chunk  <span class="math">c_i</span>  yields a signed digit  <span class="math">d_i</span>  with the following:</li>
+    </ol>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>(a) Initialize a carry m to 0.</li>
+      <li>(b) For each chunk  <span class="math">c_i</span>  (in least-to-most significant order), add m to the value of  <span class="math">c_i</span> . If  <span class="math">m+c_i \\leq 2^{w-1}</span> , then set  <span class="math">d_i</span>  to that value, and set m to zero; otherwise, set  <span class="math">d_i</span>  to  <span class="math">m+c_i-2^w</span> , and set m to 1.</li>
+    </ul></li>
+    </ul>
+
+    <p class="text-gray-300">All digits are between  <span class="math">-2^{w-1}+1</span>  and  <span class="math">+2^{w-1}</span> ; moreover, with the chosen parameters, it can be shown that the top digit is necessarily greater than or equal to 1. Since the VM works with <em>unsigned</em> 32-bit integers (mapped to GF(p) elements), the sign and absolute value of each digit may be returned separately.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Fill an array W with points iP for i=1 to  <span class="math">2^{w-1}</span> . This is called the &quot;window&quot;. For an index value d between  <span class="math">-2^{w-1}</span>  and  <span class="math">+2^{w-1}</span> , the point dP can be recovered with a lookup process (detailed below).</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>For all digits  <span class="math">d_i</span> , starting with the second-to-top digit down to  <span class="math">d_0</span> :</li>
+    </ol>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>(a) Multiply Q by  <span class="math">2^w</span>  with w successive doublings.</li>
+      <li>(b) Lookup point  <span class="math">d_i P</span>  from the window, and add it to Q.</li>
+    </ul></li>
+    </ul>
+
+    <p class="text-gray-300">It can be shown that in this process, if input P was not the point-at-infinity, then for all digits except the last two ( <span class="math">d_1</span>  and  <span class="math">d_0</span> ), the addition of the looked-up point  <span class="math">d_iP</span>  to the current Q cannot be an edge case of the point addition formulas; thus, each of these additions can be the specialized routine with cost 290; only the last two iterations need to use the generic routine with cost 387.</p>
+
+    <p class="text-gray-300">All these operations, including the building of the window, can be performed assuming that the input P is not the point-at-infinity; it suffices to combine (with a Boolean OR) the initial flag  <span class="math">I_P</span>  with the current flag  <span class="math">I_Q</span>  to obtain a proper result even in case the input P is the point-at-infinity. Note that window building can then use the specialized point addition, and the infinity flag of each window element needs not be stored.</p>
+
+    <p class="text-gray-300">The window lookup for digit value <em>d</em> is done as follows:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Initialize variables X and Y to copies of  <span class="math">X_P</span>  and  <span class="math">Y_P</span> .</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>For indices i = 2 to  <span class="math">2^{w-1}</span> , replace X and Y with the coordinates of iP (from the window) if and only if |d| = i.</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>If d &lt; 0, then replace Y with -Y.</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Set the flag I to 1 if d = 0, or to 0 otherwise.</li>
+    </ol></li>
+    </ul>
+
+    <p class="text-gray-300">Lookup cost increases with window size, with an overhead of 11 cycles per extra point.</p>
+
+    <p class="text-gray-300">Overall cost of the point multiplication function, including the addition of n to v and the split into digits, and the building of the window, was measured to be 138482 cycles.</p>
+
+    <p class="text-gray-300"><strong>Key Pair and Signature Generation.</strong> A special case of point multiplication is when the point to multiply is the conventional generator point G. This is the main curve operation in public/private key pair generation, as well as signature generation. In that case:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>The window can be precomputed.</li>
+      <li>Since there is no cost for window building, a larger window may offer better performance, although lookup costs will dominate with large windows.</li>
+      <li>Several windows for precomputed multiples of G may be used conjointly, in order to reduce the number of loop iterations and doubles. For instance, with 8 windows for all  <span class="math">2^{40i}G</span>  (with i=0 to 7), 7/8th of the point doublings can be avoided, leading to a considerable speed-up.</li>
+    </ul>
+
+    <p class="text-gray-300">There are many possible trade-offs between window size, number of windows, and code size. When generating or verifying STARK proofs, the whole implementation can be conceptually unrolled, and large tables of constants used; other situations might call for more compact implementations.</p>
+
+    <p class="text-gray-300"><strong>Signature Verification.</strong> Verification of a Schnorr signature entails checking that dG + eQ = R for some scalars d and e (obtained from the signature itself, and some hashing), conventional generator G, public key Q, and the point R whose encoding is the first half of the signature. In general, there are many optimizations that can be applied on signature verification:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>The size of the two scalars can be about halved by using the Antipa <em>et al</em> method[1], usually with Lagrange's algorithm for lattice reduction[15].</li>
+      <li>Scalar representation as signed digits can use the w-NAF representation, in which most digits are zero and all the non-zero digits are odd, leading to fewer and faster window lookups.</li>
+      <li>Several verifications can be performed simultaneously with a randomized batch verification process, allowing important cost sharings.</li>
+    </ul>
+
+    <p class="text-gray-300">Unfortunately, most of these optimizations require conditional execution of some kind, depending on the involved data. This is usually not a problem (signature verification nominally happens only over public data), but in the VM compute model, conditional execution is quite inconvenient.</p>
+
+    <p class="text-gray-300">Computation of dP + eQ for two points P and Q, and two scalars d and e, can still use Straus's algorithm[18] (often known in cryptography as &quot;Shamir's trick&quot;) to mutualize point doublings, i.e. perform about 320 doublings in total, instead of 640 as would be obtained with two separate point multiplication operations.</p>
+
+    </section>
+
+    <section id="sec-4" class="mb-10">
+      <h2 class="text-2xl font-bold">4 Curve Parameters Selection</h2>
+
+    <p class="text-gray-300">As we saw in section 3.3, in-VM curve operations will preferably use a short Weierstra&szlig; equation and affine formulas. Any elliptic curve is amenable to such a representation; moreover, the specific values of the Weierstra&szlig; constants A and B have little to no incidence on in-VM performance: A is only used in an addition over  <span class="math">GF(p^5)</span>  as part of the doubling formulas, and B is not used at all in the formulas. Thus, the in-VM compute model does not imply any constraint on the curve equation type we will use. We are free to select a curve type that favours out-of-VM performance, as long as it provides the required security characteristics.</p>
+
+    <p class="text-gray-300">For proper security in arbitrary protocols, we need a prime-order group with a unique, canonical and verifiable encoding[5]. In practice, this restricts our choice to the following:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>A curve with a prime order. This requires using the generic short Weierstra&szlig; equation.
+Encoding output consists of the x coordinate, along with a single &quot;sign&quot; bit for y to designate which square root of y&sup2; is intended.</li>
+      <li>A double-odd curve[16], with order 2n for a prime n. An element of the prime order group is encoded as a single field element.</li>
+      <li>A Montgomery or twisted Edwards curve, of order 4n or 8n for a prime n, along with the Decaf/Ristretto encoding process[10,2].</li>
+    </ul>
+
+    <p class="text-gray-300">All three kinds offer division-less complete formulas for safe out-of-VM processing. The formulas for prime-order short Weierstra&szlig; curves[17] are somewhat slower than for the other two (12M for general addition, 8M+3S for doubling). Twisted Edwards curves have the fastest general addition formulas (8M), and point doubling with cost 4M+4S (an alternate choice</p>
+
+    <p class="text-gray-300">of representation called &quot;inverted coordinates&quot; offers addition in 9M+1S and doubling in 3M+4S). However, double-odd curves have better doubling formulas (2M+5S per-doubling overhead); the encoding/decoding process of double-odd curves is also somewhat simpler than that of Decaf/Ristretto, and allows for efficient validation that a point is decodable and canonical (with only a Legendre symbol). We will thus choose a double-odd curve.</p>
+
+    <p class="text-gray-300">There are several representations for double-odd curves; in general, it is recommended to use fractional (x, u) coordinates, for which complete formulas are known. A point is represented as a quadruplet (X:Z:U:T), which is such that x = X/Z and u = x/y = U/T. Point addition formulas on that representation entail some multiplications by the equation constants a and b, and also the constants  <span class="math">a = (4b - a^2)/(2b - a)</span>  and a = 2 implies that a = 2 and a = 2 which is convenient.</p>
+
+    <p class="text-gray-300">If a=2, which is an element of GF(p) (the base field), we must choose b outside of GF(p); otherwise, the curve over the base field would be a subgroup of the curve over  <span class="math">GF(p^5)</span> , and it would not be possible to obtain total curve order 2n for a prime n. To speed up multiplications by b, we will still want to use a constant b equal to  <span class="math">b_iz^i</span>  for some  <span class="math">i \\in [1; 4]</span> , and  <span class="math">b_i</span>  as small as possible as an integer (in absolute value). We thus use the following search process:</p>
+
+    <pre><code class="language-text">    c &larr; 1
+    For i = 1 to 4:
+
+            (a) If curve y&sup2; = x(x&sup2; + 2x + czi) has order 2n with n prime, then return b = czi.
+            (b) If curve y&sup2; = x(x&sup2; + 2x - czi) has order 2n with n prime, then return b = -czi.
+
+    c &larr; c + 1
+    Loop to step 2.
+</code></pre>
+
+    <p class="text-gray-300">As explained in [16], a curve of equation  <span class="math">y^2 = x(x^2 + ax + b)</span>  may be double-odd (i.e. order 2n for an odd integer n) only if neither b nor  <span class="math">a^2 - 4b</span>  is a quadratic residue; this gives a fast test that allows skipping most of the expensive point counting operations in the process described above.</p>
+
+    <p class="text-gray-300">Using the process above, the first usable curve is obtained for b=263z. This yields the curve whose parameters were given in section 1.</p>
+
+    <p class="text-gray-300">While the curve selection process is not known to induce any bias or select a curve with uncommon properties, we still checked that its embedding degree is large. For a curve defined over a finite field GF(q) and with a subgroup of prime order n (that does not divide q), the embedding degree is the smallest integer e&gt;0 such that n divides  <span class="math">q^e-1</span>  (or, said otherwise, e is the multiplicative order of q modulo n). If e is very small, then the Weil, Tate and similar pairings can be computed, reducing the discrete logarithm in the curve into the discrete logarithm over the multiplicative group of invertible elements in  <span class="math">GF(q^e)</span> . A randomly selected curve should have a very large embedding degree e (about the same size as n); a low embedding degree does not necessarily imply a weakness (except if e is so small that the discrete logarithm in  <span class="math">GF(q^e)</span>  can be computed more efficiently than in the curve itself), but it would hint at some unexpected internal structure. In the case of ecGFp5, we checked that e=(n-1)/5, i.e. a 317-bit integer, close to the size of n itself, as is expected of a randomly selected curve. To perform this check, notice that e is necessarily a divisor of n-1; thus, we can factor n-1 to try all values (n-1)/r for any prime r that divides n-1. The factorization of n-1 is:</p>
+
+    <pre><code class="language-text">n-1 = 2^5 \\cdot 5 \\cdot 163 \\cdot 769 \\cdot 1059871\\cdot 253243826720162431254857814100127\\cdot 198400523053184002814403536918162724916343842520561
+</code></pre>
+
+    </section>
+
+    <section id="sec-5" class="mb-10">
+      <h2 class="text-2xl font-bold">5 Out-of-VM Implementation</h2>
+
+    <p class="text-gray-300">EcGFp5 was designed to match the abilities of the target VM compute model, not the abilities of any specific concrete CPU such as modern x86 or ARM. Out-of-VM performance is thus expected to be lower than what is usually expected from fast elliptic curves with 128-bit security, for two reasons:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Operations in GF(p) have some overhead. The specific value of  <span class="math">p = 2^{64} 2^{32} + 1</span>  allows for some fast reduction techniques, but fast reduction is still more expensive than no reduction at all.</li>
+      <li>&minus;  <span class="math">GF(p^5)</span>  is a 320-bit field, 1.25 times larger than a 256-bit field. Point multiplication has a cost cubic in the size of the field (with commonly used field sizes); thus, as a very rough approximation, we should expect a cost factor  <span class="math">1.25^3 \\approx 1.95</span>  compared to a usual curve with 128-bit security.</li>
+    </ul>
+
+    <p class="text-gray-300">We implemented ecGFp5 in the Rust programming language. The implementation is constant-time and efficient; it is nonetheless fully portable (it uses only the core library; it includes no inline assembly, no architecture-specific intrinsics, and no unsafe code). We still achieve the following performance on an Intel i5-8259U &quot;Coffee Lake&quot; CPU (using Rust compiler version 1.57.0, with extra flags &quot;-C target-cpu=native&quot; to allow the compiler to use opcodes available on that CPU, in particular mulx):</p>
+
+    <div class="overflow-x-auto my-4">
+      <table class="min-w-full text-sm text-gray-300">
+        <thead>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">Operation</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">Cost (cycles)</th>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">GF(p) addition</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">4.02</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">GF(p) subtraction</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">3.02</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">GF(p) multiplication</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">10.18</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">GF(p) inversion</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">737.39</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">GF(p) Legendre symbol</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">714.20</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">GF(p) square root</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">5430.19</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"><span class="math">GF(p^5)</span> addition</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">8.80</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"><span class="math">GF(p^5)</span> subtraction</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">5.78</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"><span class="math">GF(p^5)</span> multiplication</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">94.03</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"><span class="math">GF(p^5)</span> squaring</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">68.63</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"><span class="math">GF(p^5)</span> inversion</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">1069.75</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"><span class="math">GF(p^5)</span> Legendre symbol</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">1042.20</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"><span class="math">GF(p^5)</span> square root</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">12410.38</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">ecGFp5 point addition</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">1328.50</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">ecGFp5 point doubling</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">985.37</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">ecGFp5 point doubling &times;5</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">3971.39</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">ecGFp5 point multiplication</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">363168.03</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">ecGFp5 generator multiplication</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">109516.20</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">ecGFp5 mul+add verification</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">336952.88</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p class="text-gray-300">In this table, an average per-operation time is reported for a long sequence of dependent operations: the output of each operation is used as part of the input to the next one. When some operations do not depend on each other, they may be run concurrently by the CPU to some extent; this is how, for instance, a subtraction in GF(p) costs 3 cycles, but a subtraction in  <span class="math">GF(p^5)</span>  can be done in less than 6 cycles instead of 15.</p>
+
+    <p class="text-gray-300">&quot;Point doubling  <span class="math">\\times</span> 5&quot; means five successive point doublings. The fractional (x, u) formulas on double-odd curves include optimizations for long sequences of successive doublings, for a cost of 2M+1S+j(2M+5S) for j doublings; this is why that sequence cost is only about four times the cost of a single doubling, instead of five times.</p>
+
+      <h3 id="sec-5.1" class="text-xl font-semibold mt-8">5.1 Field Operations</h3>
+
+    <p class="text-gray-300">There are several possible representations of integers modulo p. In our implementation, we chose to use <em>Montgomery representation</em>: an element  <span class="math">x \\in GF(p)</span>  is represented as  <span class="math">2^{64}x \\mod p</span> , normalized as an integer in the [0;p-1] range. This representation is coupled with <em>Montgomery multiplication</em>, which, given x and y in GF(p), computes  <span class="math">xy/2^{64} \\mod p</span> . Hence, the Montgomery multiplication of  <span class="math">2^{64}x</span>  and  <span class="math">2^{64}y</span>  yields  <span class="math">2^{64}xy</span> , which is the Montgomery representation of the product xy. The cornerstone of this support is the reduction function, which, given a 128-bit input x (lower than  <span class="math">2^{64}p = 2^{128} - 2^{96} + 2^{64}</span> ) returns  <span class="math">x/2^{64} \\mod p</span> . This reduction is implemented in Rust as follows:</p>
+
+    <pre><code class="language-text">const fn montyred(x: u128) -&gt; u64 {
+   let xl = x as u64;
+   let xh = (x &gt;&gt; 64) as u64;
+   let (a, e) = xl.overflowing_add(xl &lt;&lt; 32);
+   let b = a.wrapping_sub(a &gt;&gt; 32).wrapping_sub(e as u64);
+   let (r, c) = xh.overflowing_sub(b);
+   r.wrapping_sub(0u32.wrapping_sub(c as u32) as u64)
+}
+</code></pre>
+
+    <p class="text-gray-300">This reduction works as follows:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>The input x is split into two 32-bit words and one 64-bit word:  <span class="math">x = x_0 + 2^{32}x_1 + 2^{64}x_2</span>  with  <span class="math">x_0</span>  and  <span class="math">x_1</span>  being unsigned 32-bit integers, and  <span class="math">x_2</span>  being 64-bit. Note that the assumption on the range of the function input implies that  <span class="math">x_2 &lt; p</span> .</li>
+      <li>The third function line adds  <span class="math">2^{32}x_0</span>  to  <span class="math">2^{32}x_1 + x_0</span> , with a carry in e. We thus obtain:</li>
+    </ul>
+
+    <p class="text-gray-300"><span class="math">$a = -2^{64}e + 2^{32}(x_0 + x_1) + x_0</span>$</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>On the fourth line, we compute:</li>
+    </ul>
+
+    <p class="text-gray-300"><span class="math">$b = -2^{64}e + 2^{32}(x_0 + x_1) + x_0 + 2^{32}e - (x_0 + x_1) - e</span>$</p>
+
+    <p class="text-gray-300">=  <span class="math">2^{32}(x_0 + x_1) - x_1 - ep</span>
+=  <span class="math">2^{32}x_0 + (2^{32} - 1)x_1 - ep</span></p>
+
+    <p class="text-gray-300">If  <span class="math">x_0 + x_1 &lt; 2^{32}</span> , then e = 0 and this value is bounded as:</p>
+
+    <p class="text-gray-300"><span class="math">$0 \\le b = 2^{32}x_0 + (2^{32} - 1)x_1 = x_0 + (2^{32} - 1)(x_0 + x_1) \\le 2^{32} - 1 + (2^{32} - 1)^2 &lt; p</span>$</p>
+
+    <p class="text-gray-300">Otherwise, if  <span class="math">x_0 + x_1 \\ge 2^{32}</span> , then e = 1, and:</p>
+
+    <p class="text-gray-300"><span class="math">$0 = 2^{64} - (2^{32} - 1) - p \\le b = 2^{32}(x_0 + x_1) - x_1 - p \\le 2^{32}(2^{33} - 2) - 1 - p &lt; p</span>$</p>
+
+    <p class="text-gray-300">In both cases, the computed value indeed fits in the variable b without truncation, and we know that b &lt; p.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Since  <span class="math">1 = 2^{32} - 2^{64} \\mod p</span> , we know that:</li>
+    </ul>
+
+    <pre><code class="language-text">x_0 + 2^{32}x_1 = 2^{32}x_0 - 2^{64}x_0 + 2^{64}x_1 - 2^{96}x_1 \\mod p
+= 2^{64}x_0 - 2^{96}x_0 - 2^{64}x_0 + 2^{64}x_1 - 2^{96}x_1 \\mod p
+= -2^{64}(2^{32}(x_0 + x_1) - x_1) \\mod p
+= -2^{64}b \\mod p
+</code></pre>
+
+    <p class="text-gray-300">Therefore,  <span class="math">x/2^{64} = x_2 - b \\mod p</span> . At that point, we have both  <span class="math">x_2</span>  (in xh) and b (in b), and both are in the [0; p-1] range; thus, we only have to do a single subtraction, and potentially add back p if this subtraction yields a negative result. This is what is done in the last two lines of the function. Specifically, a subtraction is done with result in r and borrow flag in c. If the borrow is 1, then we subtract it from zero with a 32-bit wrapping operation, which then yields  <span class="math">2^{32} - 1 = -p \\mod 2^{64}</span> . We then subtract that value from r, which is equivalent to adding p (modulo  <span class="math">2^{64}</span> ). It is easily seen that if there were no borrow (c is zero), then the last line does not change the value of r. In both cases, the correctly reduced output value is computed.</p>
+
+    <p class="text-gray-300">Using Montgomery representation has the benefit of producing strictly normalized values in the [0; p-1] range, which allows fast subtractions and additions. Subtraction modulo p is implemented just like the last two lines of the reduction function, described above; it has an expected latency of 3 cycles, which is corroborated by the benchmarks.</p>
+
+    <p class="text-gray-300">Montgomery multiplication is a  <span class="math">64 \\times 64 \\rightarrow 128</span>  multiplication followed by Montgomery reduction. On recent Intel x86 CPUs, this multiplication uses the mulx opcode, which yields the low half of the result in 3 cycles (4 cycles for the upper half). Following operations involved in the Rust code above, we may expect that an optimal implementation will yield the result in a total of 10 cycles (assuming that all non-compute data movements are &quot;free&quot;, as well as the zero-extension of a 32-bit value to 64 bits); again, this is what we achieve in the benchmarks.</p>
+
+    <p class="text-gray-300">For multiplications and squarings in  <span class="math">G\\bar{F}(p^5)</span> , it is beneficial to mutualize Montgomery reductions. For instance, the computation of the low coefficient of a product is performed as follows:</p>
+
+    <pre><code class="language-text">fn mul_to_k0(&amp;self, rhs: &amp;Self) -&gt; GFp {
+   let pp0 = (self.0[0].0 as u128) * (rhs.0[0].0 as u128);
+   let pp1 = (self.0[1].0 as u128) * (rhs.0[4].0 as u128);
+   let pp2 = (self.0[2].0 as u128) * (rhs.0[3].0 as u128);
+   let pp3 = (self.0[3].0 as u128) * (rhs.0[2].0 as u128);
+   let pp4 = (self.0[4].0 as u128) * (rhs.0[1].0 as u128);
+   let zhi = (pp0 &gt;&gt; 64) + 3 * ((pp1 &gt;&gt; 64)
+</code></pre>
+
+    <p class="text-gray-300">We recognize the five products (for  <span class="math">a_0b_0</span> ,  <span class="math">a_1b_4</span> ,...), each yielding a 128-bit output. The full linear combination could be up to 132 bits in length, which exceeds what can be stored in a u128 variable. To keep to sizes for which Rust has portable types, and to avoid some contention on carry flags, we do the linear combination twice, on the low and high halves separately; the final expression which assembles zlo and zhi is a partial reduction (using the fact that  <span class="math">2^{64} = 2^{32} - 1 \\mod p</span> ) which outputs a value that fits on 100 bits, well in range of the Montgomery reduction function.</p>
+
+    <p class="text-gray-300">For inversions, Legendre symbols and square roots, methods described in section 3.2 still apply, but since divisions in GF(p) are much more expensive than multiplications (in out-of-VM architectures), inversions in  <span class="math">GF(p^5)</span>  are not as fast as inside the VM. We obtain an inversion in about 11.4 times the cost of a multiplication in  <span class="math">GF(p^5)</span> , which is very fast compared with the situation in prime fields, but still not fast enough to contemplate use of affine coordinates on the short Weierstra&szlig; curve.</p>
+
+      <h3 id="sec-5.2" class="text-xl font-semibold mt-8">5.2 Curve Operations</h3>
+
+    <p class="text-gray-300">Using fractional (x, u) coordinates, we obtain generic point addition in 10M, and generic point doubling in 4M+5S; however, some optimizations can be applied to sequences of doublings, making it worthwhile to organize operations such that doublings happen in such long sequences.</p>
+
+    <p class="text-gray-300">We use window optimizations, similar to in-VM operations (see section 3.3). Inversions in  <span class="math">GF(p^5)</span>  are fast enough to allow normalization of window points to affine coordinates; mixed addition (addition between a point in fractional (x, u) and a point in affine (x, u) coordinates) has cost 8M instead of 10M. Conversion of t points from fractional to affine coordinates involves inverting 2t field elements, which can be done in a single inversion and 3(2t-1) multiplications in  <span class="math">GF(p^5)</span>  (using Montgomery's trick of computing 1/u and 1/v as (1/uv)v and (1/uv)u, respectively, and applying it recursively). With a 5-bit window, 64 point additions are needed, and using affine points saves 128 multiplications in  <span class="math">GF(p^5)</span> , while the normalization involves one inversion and 93 extra multiplications, making the operation worthwhile. Moreover, using affine coordinates for window points makes these points smaller in RAM, which speeds up constant-time window lookups. It is expected that the optimal window size will be 4 or 5 bits, depending on the target architecture; on the test x86 system, 5-bit windows seem slightly better.</p>
+
+    <p class="text-gray-300">For the special case of multiplying the conventional generator, multiple windows can be used (in our implementation, eight windows are used, for G,  <span class="math">2^{40}G</span> ,  <span class="math">2^{80}G</span> ,...) and they are precomputed, thereby avoiding the cost of conversion to affine coordinates. This operation is used when generating a new key pair, and when producing a Schnorr signature.</p>
+
+    <p class="text-gray-300">For signature verification, we apply the Antipa et al optimization[1] with Lagrange's lattice reduction algorithm[15]; the latter algorithm is implemented in about 20400 cycles on average. Verification is nominally on public values, and thus needs not be constant-time; we use direct array accesses for lookups. However, we do <em>not</em> use w-NAF representation of scalars, because a regular addition schedule favours long sequences of sequential doublings, for which performance is better than isolated doublings.</p>
+
+    </section>
+
+    <section id="sec-6" class="mb-10">
+      <h2 class="text-2xl font-bold">6 Conclusion</h2>
+
+    <p class="text-gray-300">We presented an elliptic curve designed for a specific compute model. Although we use the Miden VM as a representative of that model, we expect this curve to be generally useful for other projects related to zero-knowledge proofs; curve design and implementation is also an interesting problem in its own right. As a general-purpose curve, ecGFp5 performance is not on par with the fastest standard curves (e.g. Curve25519), but is still decent enough: a single core on a laptop computer or a smartphone can generate or verify thousands of signatures per second.</p>
+
+    <p class="text-gray-300">We thank Bobbin Threadbare and Hamish Ivey-Law for providing the target context and useful discussions on optimized implementations in  <span class="math">GF(p^5)</span> , and Pierrick Gaudry for pointers and explanations on the fine details of curve attacks in extension fields. Paul Bottinelli, Marie-Sarah Lacharit&eacute;, Giacomo Pope and Javed Samuel reviewed this manuscript.</p>
+
+    </section>
+
+    <section id="references" class="mb-10">
+      <h2 class="text-2xl font-bold">References</h2>
+
+    <ul class="space-y-2 text-gray-400 text-sm list-none">
+      <li><p class="text-gray-300">1. A. Antipa, D. Brown, R. Gallant, R. Lambert, R. Struik and S. Vanstone, <em>Accelerated Verification of ECDSA signatures</em>, Selected Areas in Cryptography - SAC 2005, Lecture Notes in Computer Science, vol 3897, pp. 307-318, 2005.</p></li>
+      <li><p class="text-gray-300">2. T. Arcieri, I. Lovecruft and H. de Valence, <em>The Ristretto Group</em>, https://ristretto.group/</p></li>
+      <li><p class="text-gray-300">3. S. Arita, K. Matsuo, K. Nagao and M. Shimura, <em>A Weil Descent Attack against Elliptic Curve Cryptosystems over Quartic Extension Fields</em>, IEICE Transactions on Fundamentals of Electronics, Communications and Computer Sciences, vol. E89-A, issue. 5, 2006.</p></li>
+      <li><p class="text-gray-300">4. E. Ben-Sasson, I. Bentov, Y. Horesh and M. Riabzev, Scalable, transparent, and post-quantum secure computational integrity,</p>
+
+    <ul class="space-y-2 text-gray-400 text-sm list-none">
+      <li>https://eprint.iacr.org/2018/046</li>
+    </ul></li>
+      <li><p class="text-gray-300"> C. Cremers and D. Jackson, Prime, Order Please! Revisiting Small Subgroup and Invalid Curve Attacks on Protocols using Diffie-Hellman, IEEE 32nd Computer Security Foundations Symposium (CSF), 2019.</p></li>
+      <li><p class="text-gray-300">6. C. Diem, <em>The GHS attack in odd characteristic</em>, Journal of the Ramanujan Mathematical Society, vol. 18, issue 1, pp. 1-32, 2003.</p></li>
+      <li><p class="text-gray-300"> J.-C. Faug&egrave;re, P. Gianni, D. Lazard and T. Mora, Efficient Computation of Zero-dimensional Gr&ouml;bner Bases by Change of Ordering, Journal of Symbolic Computation, vol. 16, issue 4, pp. 329-344, 1993.</p></li>
+      <li><p class="text-gray-300">8. P. Gaudry, <em>Index calculus for abelian varieties of small dimension and the elliptic curve discrete logarithm problem</em>, Journal of Symbolic Computation, vol. 44, issue 12, pp. 1690-1702, 2009.</p></li>
+      <li><p class="text-gray-300">9. P. Gaudry, F. Hess and N. Smart, <em>Constructive and destructive facets of Weil descent on elliptic curves</em>, Journal of Cryptology, vol. 15, issue 1, pp. 19-46, 2002.</p></li>
+      <li><p class="text-gray-300">10. M. Hamburg, <em>Decaf: Eliminating cofactors through point compression</em>, Advances in Cryptology - CRYPTO 2015, Lecture Notes in Computer Science, vol. 9215, pp. 705-723, 2015.</p></li>
+      <li><p class="text-gray-300">11. T. Itoh and S. Tsujii, A Fast Algorithm for Computing Multiplicative Inverses in GF(2<sup>m</sup>) Using Normal Bases, Information and Computation, vol. 78, pp. 171-177, 1988.</p></li>
+      <li><p class="text-gray-300">12. A. Joux and V. Vitse, <em>Elliptic curve discrete logarithm problem over small degree extension fields. Application to the static Diffie-Hellman problem on</em>  <span class="math">\\mathbb{F}_q^5</span> , Journal of Cryptology, vol. 26, issue 1, pp. 119-143, 2013</p></li>
+      <li><p class="text-gray-300">13. Polygon Miden,</p></li>
+    </ul>
+
+    <p class="text-gray-300">https://github.com/maticnetwork/miden</p>
+
+    <p class="text-gray-300">14. Miden Assembly,</p>
+
+    <p class="text-gray-300">version 0.2, accessed on 2022-02-21,</p>
+
+    <p class="text-gray-300">https://hackmd.io/YDbjUVHTRn64F4LPelC-NA</p>
+
+    <p class="text-gray-300">15. T. Pornin, Optimized Lattice Basis Reduction In Dimension 2, and Fast Schnorr and EdDSA Signature Verification,</p>
+
+    <p class="text-gray-300">https://eprint.iacr.org/2020/454</p>
+
+    <ul class="space-y-2 text-gray-400 text-sm list-none">
+      <li>16. T. Pornin, <em>Double-Odd Elliptic Curves</em>, https://eprint.iacr.org/2020/1558</li>
+      <li>J. Renes, C. Costello and L. Batina, Complete addition formulas for prime order elliptic curves, Advances in Cryptology &ndash; Eurocrypt 2016, Lecture Notes in Computer Science, vol. 9665, pp. 403-428, 2016.</li>
+      <li>18. E. Straus, <em>Addition chains of vectors (problem 5125)</em>, American Mathematical Monthly, vol. 70, pp. 806-808, 1964.</li>
+    </ul>
+
+    </section>
+`;
+---
+
+<BaseLayout title="EcGFp5: a Specialized Elliptic Curve (2022/274)">
+  <article class="max-w-4xl mx-auto article-prose">
+    <nav class="mb-8">
+      <a href="/papers" class="text-blue-400 hover:text-blue-300">
+        &larr; Back to Papers
+      </a>
+    </nav>
+
+    <header class="mb-12">
+      <h1 class="text-3xl font-bold mb-4"
+        set:html={TITLE_HTML} />
+      <p class="text-gray-400 mb-2"
+        set:html={AUTHORS_HTML} />
+      <p class="text-gray-500 text-sm mb-4">
+        2022 &middot; eprint 2022/274
+      </p>
+      <div class="flex gap-4 text-sm">
+        <a
+          href={EPRINT_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          class="text-blue-400 hover:text-blue-300"
+        >
+          Paper (eprint) &rarr;
+        </a>
+      </div>
+      <PaperDisclaimer eprintUrl={EPRINT_URL} />
+      <p class="mt-1 text-xs text-gray-600">
+        Converted with: {CRAWLER} &middot; {CONVERTED_DATE}
+      </p>
+    </header>
+
+    <nav id="toc" class="mb-10 p-6 rounded-lg" style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06);">
+      <h2 class="text-lg font-bold mb-4">Table of Contents</h2>
+      <ol class="space-y-1 text-sm text-gray-300
+        list-decimal list-inside">
+        <li><a href="#sec-1" class="hover:text-white">EcGFp5 Definition</a></li>
+        <li><a href="#sec-2" class="hover:text-white">Choice of Field</a></li>
+        <li>
+          <a href="#sec-3" class="hover:text-white">In-VM Implementation</a>
+          <ol class="ml-6 mt-1 space-y-1 list-decimal
+            list-inside text-gray-400">
+            <li><a href="#sec-3.1" class="hover:text-white">VM Opcodes</a></li>
+            <li><a href="#sec-3.2" class="hover:text-white">Field Operations</a></li>
+            <li><a href="#sec-3.3" class="hover:text-white">Curve Formulas</a></li>
+          </ol>
+        </li>
+        <li><a href="#sec-4" class="hover:text-white">Curve Parameters Selection</a></li>
+        <li>
+          <a href="#sec-5" class="hover:text-white">Out-of-VM Implementation</a>
+          <ol class="ml-6 mt-1 space-y-1 list-decimal
+            list-inside text-gray-400">
+            <li><a href="#sec-5.1" class="hover:text-white">Field Operations</a></li>
+            <li><a href="#sec-5.2" class="hover:text-white">Curve Operations</a></li>
+          </ol>
+        </li>
+        <li><a href="#sec-6" class="hover:text-white">Conclusion</a></li>
+      </ol>
+      <p class="text-xs text-gray-500 mt-4 mb-1 font-semibold">
+        Additional
+      </p>
+      <ul class="space-y-1 text-sm text-gray-400
+        list-disc list-inside">
+        <li><a href="#acknowledgements" class="hover:text-white">Acknowledgements</a></li>
+        <li><a href="#references" class="hover:text-white">References</a></li>
+      </ul>
+    </nav>
+
+
+    <Fragment set:html={CONTENT} />
+
+    <PaperHistory slug="1-ecgfp5-definition-2022" />
+  </article>
+</BaseLayout>

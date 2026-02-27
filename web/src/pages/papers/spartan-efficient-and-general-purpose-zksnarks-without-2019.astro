@@ -1,0 +1,1481 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import PaperDisclaimer from '../../components/PaperDisclaimer.astro';
+import PaperHistory from '../../components/PaperHistory.astro';
+
+const EPRINT_URL = 'https://eprint.iacr.org/2019/550';
+const CRAWLER = 'marker';
+const CONVERTED_DATE = '2026-02-16';
+const TITLE_HTML = 'Spartan: Efficient and general-purpose zkSNARKs without trusted setup';
+const AUTHORS_HTML = 'Srinath Setty';
+
+const CONTENT = `    <section id="abstract" class="mb-10">
+      <h2 class="text-2xl font-bold">Abstract</h2>
+      <p class="text-gray-300">This paper introduces Spartan, a new family of zero-knowledge succinct non-interactive arguments of knowledge (zkSNARKs) for the rank-1 constraint satisfiability (R1CS), an NP-complete language that generalizes arithmetic circuit satisfiability. A distinctive feature of Spartan is that it offers the first zkSNARKs without trusted setup (i.e., transparent zkSNARKs) for NP where verifying a proof incurs sub-linear costs&mdash;without requiring uniformity in the NP statement&rsquo;s structure. Furthermore,
+Spartan offers zkSNARKs with a time-optimal prover, a property that has remained elusive for nearly all zkSNARKs in the literature.
+
+To achieve these results, we introduce new techniques that we compose with the sum-check protocol, a seminal interactive proof protocol: (1) computation commitments, a primitive to create a succinct commitment to a description of a computation; this technique is crucial for a verifier to achieve sub-linear costs after investing a one-time, public computation to preprocess a given NP statement; (2) SPARK, a cryptographic compiler to transform any existing extractable polynomial commitment scheme for multilinear polynomials to one that efficiently handles sparse multilinear polynomials; this technique is critical for achieving a time-optimal prover; and (3) a compact encoding of an R1CS instance as a low-degree polynomial. The end result is a public-coin succinct interactive argument of knowledge for NP (which can be viewed as a succinct variant of the sum-check protocol); we transform it into a zkSNARK using prior techniques. By applying SPARK to different commitment schemes, we obtain several zkSNARKs where the verifier&rsquo;s costs and the proof size range from $O(log^2{n})$ to $O(\\sqrt{n})$ depending on the underlying commitment scheme ($n$ denotes the size of the NP statement). These schemes do not require a trusted setup except for one that requires a universal trusted setup.
+
+We implement Spartan as a library in about 8,000 lines of Rust. We use the library to build a transparent zkSNARK in the random oracle model where security holds under the discrete logarithm assumption. We experimentally evaluate it and compare it with recent zkSNARKs for R1CS instance sizes up to $2^{20}$ constraints. Among transparent zkSNARKs, Spartan offers the fastest prover with speedups of $36$--$152\\times$ depending on the baseline, produces proofs that are shorter by $1.2$--$416\\times$, and incurs the lowest verification times with speedups of $3.6$--$1326\\times$. The only exception is proof sizes under Bulletproofs, but Bulletproofs incurs slower verification both asymptotically and concretely. When compared to the state-of-the-art zkSNARK with trusted setup, Spartan&rsquo;s prover is $2\\times$ faster for arbitrary R1CS instances and $16\\times$ faster for data-parallel workloads.
+
+Spartan&rsquo;s code is available from: https://github.com/Microsoft/Spartan.</p>
+      <p class="text-gray-300"><strong>Keywords:</strong> zkSNARKs &middot; transparent zkSNARKs &middot; SNARKs &middot; zero-knowledge &middot; succinct arguments</p>
+    </section>
+
+    <section id="sec-5" class="mb-10">
+      <h2 class="text-2xl font-bold">5 A family of NIZKs with succinct proofs for R1CS</h2>
+
+    <p class="text-gray-300">We first design an interactive argument with succinct communication costs and then compile it into a family of NIZKs in the random oracle model using prior transformations.</p>
+
+      <h3 id="sec-5.1" class="text-xl font-semibold mt-8">5.1 A new public-coin succinct interactive argument of knowledge</h3>
+
+    <p class="text-gray-300">The following theorem summarizes our result in this section.</p>
+
+    <p class="text-gray-300"><strong>Theorem 5.1.</strong> Given an extractable polynomial commitment scheme for multilinear polynomials, there exists a public-coin succinct interactive argument of knowledge where security holds under the assumptions needed for the polynomial commitment scheme and assuming  <span class="math">|\\mathbb{F}|</span>  is exponential in  <span class="math">\\lambda</span>  and the size parameter of RICS instance  <span class="math">n = O(\\lambda)</span> .</p>
+
+    <p class="text-gray-300">To prove the above theorem, we first provide a construction of a public-coin succinct interactive argument of knowledge, and then analyze its costs and security. The proof of Theorem 4.1 established that for  <span class="math">\\mathcal V</span>  to verify if an R1CS instance  <span class="math">\\mathbf x=(\\mathbb F,A,B,C,io,m,n)</span>  is satisfiable, it can check if  <span class="math">\\sum_{x\\in\\{0,1\\}^s}\\mathcal G_{io,\\tau}(x)=0</span> . By using the sum-check protocol, we can reduce the claim about the sum to  <span class="math">e_x\\stackrel{?}{=}\\mathcal G_{io,\\tau}(r_x)</span>  where  <span class="math">r_x\\in\\mathbb F^s</span> , so  <span class="math">\\mathcal V</span>  needs a mechanism to evaluate  <span class="math">\\mathcal G_{io,\\tau}(r_x)</span> &mdash;without incurring O(m) communication from  <span class="math">\\mathcal P</span>  to  <span class="math">\\mathcal V</span> . Recall that  <span class="math">G_{io,\\tau}(x)=\\widetilde F_{io}(x)\\cdot\\widetilde {\\rm eq}(\\tau,x)</span> . Thus, to evaluate  <span class="math">G_{io,\\tau}(r_x)</span> ,  <span class="math">\\mathcal V</span>  must evaluate  <span class="math">\\widetilde F_{io}(r_x)</span>  and  <span class="math">\\widetilde {\\it eq}(\\tau,r_x)</span> . The latter can be evaluated in  <span class="math">O(\\log m)</span>  time. Furthermore, recall:</p>
+
+    <p class="text-gray-300"><span class="math">$\\widetilde{F}_{io}(r_x) = \\left(\\sum_{y \\in \\{0,1\\}^s} \\widetilde{A}(r_x, y) \\cdot \\widetilde{Z}(y)\\right) \\cdot \\left(\\sum_{y \\in \\{0,1\\}^s} \\widetilde{B}(r_x, y) \\cdot \\widetilde{Z}(y)\\right) - \\sum_{y \\in \\{0,1\\}^s} \\widetilde{C}(r_x, y) \\cdot \\widetilde{Z}(y)</span>$</p>
+
+    <p class="text-gray-300">To evaluate  <span class="math">\\widetilde{F}_{io}(r_x)</span> ,  <span class="math">\\mathcal{V}</span>  needs to evaluate the following  <span class="math">\\forall y \\in \\{0,1\\}^s</span> :  <span class="math">\\widetilde{A}(r_x,y)</span> ,  <span class="math">\\widetilde{B}(r_x,y)</span> ,  <span class="math">\\widetilde{C}(r_x,y)</span> , and  <span class="math">\\widetilde{Z}(y)</span> . However, the evaluations of  <span class="math">\\widetilde{Z}(y)</span>  for all  <span class="math">y \\in \\{0,1\\}^s</span>  is the same as (io,1,w), so the communication from  <span class="math">\\mathcal{P}</span>  to  <span class="math">\\mathcal{V}</span>  is  <span class="math">\\geq O(|w|)</span> . We now address this issue.</p>
+
+    <p class="text-gray-300">Our solution is a combination of three protocols: the sum-check protocol, a randomized mini protocol, and a polynomial commitment scheme. Our first observation is that the structure of the individual terms in  <span class="math">F_{x,y}(\\cdot)</span>  evaluated at  <span class="math">r_x</span>  are in a form suitable for the application of a second instance of the sum-check protocol. Specifically, let  <span class="math">\\widetilde{F}_{io}(r_x) = \\overline{A}(r_x) \\cdot \\overline{B}(r_x) - \\overline{C}(r_x)</span> , where</p>
+
+    <p class="text-gray-300">$$\\overline{A}(r_x) = \\sum_{y \\in {0,1}^s} \\widetilde{A}(r_x, y) \\cdot \\widetilde{Z}(y)
+\\overline{B}(r_x) = \\sum_{y \\in {0,1}^s} \\widetilde{B}(r_x, y) \\cdot \\widetilde{Z}(y)
+\\overline{C}(r_x) = \\sum_{y \\in {0,1}^s} \\widetilde{C}(r_x, y) \\cdot \\widetilde{Z}(y)$$</p>
+
+    <p class="text-gray-300">This observation opens up the following solution: the prover can make three separate claims to V, say that <em>A</em>(<em>rx</em>) = <em>vA</em>, <em>B</em>(<em>rx</em>) = <em>vB</em>, and <em>C</em>(<em>rx</em>) = <em>vC</em>. Then, V can evaluate:</p>
+
+    <p class="text-gray-300"><span class="math">$\\mathcal{G}_{io,\\tau}(r_x) = (v_A \\cdot v_B - v_C) \\cdot \\widetilde{eq}(r_x, \\tau),</span>$</p>
+
+    <p class="text-gray-300">which in turn enables V to verify G<em>io</em>,<sup>&tau;</sup> (<em>rx</em>) ?= <em><sup>e</sup>x</em>. Of course, V must still verify three new claims from P: <em>A</em>(<em>rx</em>) ?= <em>vA</em>, <em>B</em>(<em>rx</em>) ?= <em>vB</em>, and <em>C</em>(<em>rx</em>) ?= <em>vC</em>. To do so, V and P can run three independent instances of the sum-check protocol to verify these claims. Instead, we use a prior idea <a href="#page-36-12">[45,</a> <a href="#page-38-10">103]</a> to combine three claims into a single claim:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>V samples <em>rA</em>,<em>rB</em>,<em>r<sup>C</sup></em> &isin;<em><sup>R</sup></em> F and computes <em>c</em> = <em>r<sup>A</sup></em> &middot; <em>v<sup>A</sup></em> + <em>r<sup>B</sup></em> &middot; <em>v<sup>B</sup></em> + <em>r<sup>C</sup></em> &middot; <em>vC</em>.</li>
+      <li>V uses the sum-check protocol with P to verify <em>rA</em>&middot;<em>A</em>(<em>rx</em>)+<em>rB</em>&middot;<em>B</em>(<em>rx</em>)+<em>rC</em>&middot;<em>C</em>(<em>rx</em>) ?= <em>c</em>. In more detail, let <em>L</em>(<em>rx</em>) = <em>r<sup>A</sup></em> &middot; <em>A</em>(<em>rx</em>) + <em>r<sup>B</sup></em> &middot; <em>B</em>(<em>rx</em>) + <em>r<sup>C</sup></em> &middot; <em>C</em>(<em>rx</em>).</li>
+    </ul>
+
+    <p class="text-gray-300"><span class="math">$L(r_x) = \\sum_{y \\in \\{0,1\\}^s} r_A \\cdot \\widetilde{A}(r_x, y) \\cdot \\widetilde{Z}(y) + r_B \\cdot \\widetilde{B}(r_x, y) \\cdot \\widetilde{Z}(y) + r_C \\cdot \\widetilde{C}(r_x, y) \\cdot \\widetilde{Z}(y)</span>$</p>
+
+    <p class="text-gray-300"><span class="math">$= \\sum_{y \\in \\{0,1\\}^s} M_{r_x}(y)</span>$</p>
+
+    <p class="text-gray-300"><em>Mr<sup>x</sup></em> (<em>y</em>) is an <em>s</em>-variate polynomial with degree at most 2 in each variable. In the terminology of the sum-check protocol, &micro; = <em>s</em>, &#8467; = 2, and <em>T</em> = <em>c</em>.</p>
+
+    <p class="text-gray-300"><strong>Lemma 5.1.</strong>
+<span class="math">$\\Pr_{r_A,r_B,r_C}\\{r_A \\cdot \\overline{A}(r_x) + r_B \\cdot \\overline{B}(r_x) + r_C \\cdot \\overline{C}(r_x) = c | \\overline{A}(r_x) \\neq v_A \\vee \\overline{B}(r_x) \\neq v_B \\vee \\overline{C}(r_x) \\neq v_C\\} \\leq 1/|\\mathbb{F}|, \\text{ where } c = r_A \\cdot v_A + r_y \\cdot v_B + r_C \\cdot v_C.</span>$</p>
+
+    <p class="text-gray-300"><em>Proof.</em> The LHS is a polynomial in <em>rA</em>,<em>rB</em>,<em>r<sup>C</sup></em> of total degree 1; the same holds for the RHS. So, the desired result follows from the Schwartz-Zippel lemma.</p>
+
+    <p class="text-gray-300">V is not out of the woods. At the end of the second instance of the sum-check protocol, V must evaluate <em>M<sup>r</sup><sup>x</sup></em> (<em>ry</em>) for <em>r<sup>y</sup></em> &isin; F <em>s</em> :</p>
+
+    <p class="text-gray-300"><span class="math">$M_{r_x}(r_y) = r_A \\cdot \\widetilde{A}(r_x, r_y) \\cdot \\widetilde{Z}(r_y) + r_B \\cdot \\widetilde{B}(r_x, r_y) \\cdot \\widetilde{Z}(r_y) + r_C \\cdot \\widetilde{C}(r_x, r_y) \\cdot \\widetilde{Z}(r_y)</span>$</p>
+
+    <p class="text-gray-300">=  <span class="math">(r_A \\cdot \\widetilde{A}(r_x, r_y) + r_B \\cdot \\widetilde{C}(r_x, r_y) + r_C \\cdot \\widetilde{C}(r_x, r_y)) \\cdot \\widetilde{Z}(r_y)</span></p>
+
+    <p class="text-gray-300">Observe that the only term in  <span class="math">M_{r_x}(r_y)</span>  that depends on the prover's witness is  <span class="math">\\widetilde{Z}(r_y)</span> . This is because all other terms in the above expression can be computed locally by  <span class="math">\\mathcal{V}</span>  using  <span class="math">\\mathbf{x} = (\\mathbb{F}, A, B, C, io, m, n)</span>  in O(n) time (Section 6 discusses how to reduce the cost of those evaluations to be sub-linear in n). Our second observation is that to evaluate  <span class="math">\\widetilde{Z}(r_y)</span>  without incurring O(|w|) communication from  <span class="math">\\mathcal{P}</span>  to  <span class="math">\\mathcal{V}</span> , we can employ an extractable polynomial commitment scheme for multilinear polynomials (&sect;2.4). A similar observation was made by Zhang et al. [108] in a different context.</p>
+
+    <p class="text-gray-300">In more detail,  <span class="math">\\mathcal{P}</span>  sends a commitment to  <span class="math">\\widetilde{w}(\\cdot)</span>  (i.e., a multilinear extension of its purported witness) to  <span class="math">\\mathcal{V}</span>  before the first instance of the sum-check protocol begins using an extractable polynomial commitment scheme for multilinear polynomials. To evaluate  <span class="math">\\widetilde{Z}(r_y)</span> ,  <span class="math">\\mathcal{V}</span>  does the following. WLOG, assume |w|=|io|+1. Thus, by the closed form expression of multilinear polynomial evaluations, we have:</p>
+
+    <p class="text-gray-300"><span class="math">$\\widetilde{Z}(r_y) = (1 - r_y[0]) \\cdot \\widetilde{w}(r_y[1..]) + r_y[0] \\cdot (io, 1)(r_y[1..]),</span>$</p>
+
+    <p class="text-gray-300">where  <span class="math">r_y[1..]</span>  refers to a slice of  <span class="math">r_y</span>  that excludes the first element.</p>
+
+    <p class="text-gray-300"><strong>Putting things together.</strong> We assume that there exists an extractable polynomial commitment scheme for multilinear polynomials PC = (Setup, Commit, Open, Eval).</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><span class="math">pp \\leftarrow \\text{Setup}(1^{\\lambda})</span> : Invoke  <span class="math">pp \\leftarrow \\text{PC.Setup}(1^{\\lambda}, \\log m)</span> ; output pp.</li>
+      <li><span class="math">b \\leftarrow \\langle \\mathcal{P}(w), \\mathcal{V}(r) \\rangle (\\mathbb{F}, A, B, C, io, m, n)</span> :    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><span class="math">\\mathcal{P}: (\\mathcal{C}, \\mathcal{S}) \\leftarrow \\mathsf{PC.Commit}(pp, \\widetilde{w})</span>  and send  <span class="math">\\mathcal{C}</span>  to  <span class="math">\\mathcal{V}</span> .</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><span class="math">V : \\tau \\in_{\\mathbb{R}} \\mathbb{F}^{\\log m}</span>  and send  <span class="math">\\tau</span>  to  <span class="math">\\mathcal{P}</span> .</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Let  <span class="math">T_1 = 0</span> ,  <span class="math">\\mu_1 = \\log m</span> ,  <span class="math">\\ell_1 = 3</span> .</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>V: Sample  <span class="math">r_x \\in_R \\mathbb{F}^{\\mu_1}</span></li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Sum-check#1.  <span class="math">e_x \\leftarrow \\langle \\mathcal{P}_{SC}(\\mathcal{G}_{io,\\tau}), \\mathcal{V}_{SC}(r_x) \\rangle (\\mu_1, \\ell_1, T_1)</span></li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><span class="math">\\mathcal{P}</span> : Compute  <span class="math">v_A = \\overline{A}(r_x), v_B = \\overline{B}(r_x), v_C = \\overline{C}(r_x)</span> ; send  <span class="math">(v_A, v_B, v_C)</span>  to  <span class="math">\\mathcal{V}</span> .</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>V: Abort with b = 0 if  <span class="math">e_x \\neq (v_A \\cdot v_B v_C) \\cdot \\widetilde{eq}(r_x, \\tau)</span> .</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>V: Sample  <span class="math">r_A, r_B, r_C \\in_R \\mathbb{F}</span>  and send  <span class="math">(r_A, r_B, r_C)</span>  to  <span class="math">\\mathcal{P}</span> .</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Let  <span class="math">T_2 = r_A \\cdot v_A + r_B \\cdot v_B + r_C \\cdot v_C</span> ,  <span class="math">\\mu_2 = \\log m</span> ,  <span class="math">\\ell_2 = 2</span> .</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>V: Sample  <span class="math">r_v \\in_R \\mathbb{F}^{\\mu_2}</span></li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Sum-check#2.  <span class="math">e_y \\leftarrow \\langle \\mathcal{P}_{SC}(M_{r_x}), \\mathcal{V}_{SC}(r_y) \\rangle (\\mu_2, \\ell_2, T_2)</span></li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><span class="math">\\mathcal{P}</span> :  <span class="math">v \\leftarrow \\widetilde{w}(r_v[1..])</span>  and send v to  <span class="math">\\mathcal{V}</span> .</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><span class="math">b_e \\leftarrow \\langle \\mathcal{P}_{\\mathsf{PC.Eval}}(\\widetilde{w}, \\mathcal{S}), \\mathcal{V}_{\\mathsf{PC.Eval}}(r) \\rangle (pp, \\mathcal{C}, r_y, v, \\mu_2)</span></li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>V: Abort with b = 0 if  <span class="math">b_e == 0</span> .</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><span class="math">V: v_Z \\leftarrow (1 r_y[0]) \\cdot \\widetilde{w}(r_y[1..]) + r_y[0] \\cdot (io, 1)(r_y[1..])</span></li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><span class="math">V: v_1 \\leftarrow \\widetilde{A}(r_x, r_y), v_2 \\leftarrow \\widetilde{B}(r_x, r_y), v_3 \\leftarrow \\widetilde{C}(r_x, r_y)</span></li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><span class="math">\\mathcal{V}</span> : Abort with b=0 if  <span class="math">e_v \\neq (r_A \\cdot v_1 + r_B \\cdot v_2 + r_C \\cdot v_3) \\cdot v_Z</span> .</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>V: Output b = 1.</li>
+    </ol></li>
+    </ul></li>
+    </ul>
+
+    <p class="text-gray-300">Choice of a polynomial commitment scheme. There exist many extractable polynomial commitment schemes for multilinear polynomials [87, 103, 107, 108] that suffice for our purposes. The particular choice impacts the costs of our protocol as well as assumptions, so we review prior commitment schemes' costs and assumptions. An additional choice here is the scheme of B&uuml;nz et al [39] instantiated with class groups, but it requires a modification for our setting where we represent multilinear polynomials using their evaluations over a Boolean hypercube (&sect;2.3,2.4).</p>
+
+    <p class="text-gray-300"></p>
+
+    <div class="overflow-x-auto my-4">
+      <table class="min-w-full text-sm text-gray-300">
+        <thead>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">prior scheme</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">setup</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left"><span class="math">\\mathcal{P}_{Eval}</span></th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">$ \\mathcal{C} $</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">communication</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left"><span class="math">\\mathcal{V}_{Eval}</span></th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">assumption</th>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Hyrax-PC [103]<br>vSQL-VPD [108]<br>Virgo-VPD [107]</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">public<br>private<br>public</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"><span class="math">O(\\Gamma)</span><br><span class="math">O(\\Gamma)</span><br><span class="math">O(\\Gamma \\log \\Gamma)</span></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"><span class="math">O(\\sqrt{\\Gamma})</span> <span class="math">O(1)</span> <span class="math">O(1)</span></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"><span class="math">O(\\log \\Gamma)</span><br><span class="math">O(\\log \\Gamma)</span><br><span class="math">O(\\log^2 \\Gamma)</span></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"><span class="math">O(\\sqrt{\\Gamma}) \\ O(\\log \\Gamma) \\ O(\\log^2 \\Gamma)</span></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">DLOG<br>q-PKE<br>CRHF</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p class="text-gray-300">FIGURE 4&mdash;A comparison of candidate extractable polynomial commitment schemes for multilinear polynomials. Here,  <span class="math">\\Gamma=2^{\\mu}</span>  where  <span class="math">\\mu</span>  is the number of variables in the multilinear polynomial. Hyrax-PC refers to the scheme of Wahby et al. [103], which also supports shorter commitments at the cost of increasing the verifier's time. vSQL-VPD refers to the zero-knowledge variant [109] of the scheme of Zhang et al. [108]. Virgo-VPD refers to the scheme of Zhang et al. [107]. The communication column refers to the amount of communication required in the interactive argument for PC.Eval.</p>
+
+    <p class="text-gray-300"><strong>Analysis of costs.</strong> Note that the polynomials over which the sum-check protocol is run in our interactive argument decompose into several multilinear polynomials (four in the first sum-check protocol and two in the second sum-check protocol), so by employing prior ideas [96, 101, 106] to implement a linear-time prover for the sum-check protocol, the costs of our interactive argument are as follows.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><span class="math">\\mathcal{P}</span>  incurs: (1) O(n) costs to participate in the sum-check instances; (2) the cost of PC.Commit and PC.Eval for a  <span class="math">\\log m</span> -variate multilinear polynomial  <span class="math">\\widetilde{w}(\\cdot)</span> .</li>
+      <li><span class="math">\\mathcal{V}</span>  incurs: (1)  <span class="math">O(\\log m)</span>  costs for the sum-check instances; (2) the cost of PC. Eval for a  <span class="math">\\log m</span> -variate multilinear polynomial; and (3) O(n) costs to evaluate  <span class="math">\\widetilde{A}(\\cdot)</span> ,  <span class="math">\\widetilde{B}(\\cdot)</span> ,  <span class="math">\\widetilde{C}(\\cdot)</span> .</li>
+      <li>The amount of communication is: (1)  <span class="math">O(\\log m)</span>  in the sum-check instances; (2) the size of the commitment to  <span class="math">\\widetilde{w}(\\cdot)</span>  and the communication in PC.Eval for  <span class="math">\\widetilde{w}(\\cdot)</span> .</li>
+    </ul>
+
+    <p class="text-gray-300"></p>
+
+    <div class="overflow-x-auto my-4">
+      <table class="min-w-full text-sm text-gray-300">
+        <thead>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">PC choice</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">setup</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">prover</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">communication</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">verifier</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">assumption</th>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Hyrax-PC [103]<br>vSQL-VPD [108]<br>Virgo-VPD [107]</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">public<br>private<br>public</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"><span class="math">O(n)</span> <span class="math">O(n)</span> <span class="math">O(n+m\\log m)</span></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"><span class="math">O(\\sqrt{m}) \\\\ O(\\log m) \\\\ O(\\log^2 m)</span></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"><span class="math">O(n + \\sqrt{m})</span><br><span class="math">O(n + \\log m)</span><br><span class="math">O(n + \\log^2 m)</span></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">DLOG<br>q-PKE<br>CRHF</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p class="text-gray-300">FIGURE 5&mdash;Costs of our public-coin succinct interactive argument of knowledge instantiated with different polynomial commitment schemes. The depicted costs are for an R1CS instance  <span class="math">x = (\\mathbb{F}, A, B, C, io, m, n)</span> .</p>
+
+    <p class="text-gray-300"><strong>Proof of Theorem 5.1.</strong> The desired completeness of our interactive argument of knowledge follows from the completeness of the sum-check protocol and of the underlying polynomial commitment scheme. Furthermore, in all the four candidate constructions for polynomial commitment schemes, the communication from  <span class="math">\\mathcal{P}</span>  to  <span class="math">\\mathcal{V}</span>  is sub-linear in m (Figure 4), which satisfies succinctness. Thus, we are left with proving witness-extended emulation, which we prove in Appendix A.</p>
+
+      <h3 id="sec-5.2" class="text-xl font-semibold mt-8">5.2 A family of NIZKs with succinct proofs for R1CS</h3>
+
+    <p class="text-gray-300">The interactive argument from the prior subsection is public coin, so we add zeroknowledge using prior techniques <a href="#page-35-16">[14,</a> <a href="#page-36-13">50]</a>. There are two compilers that are particularly efficient: (1) the one employed by Hyrax <a href="#page-38-10">[103]</a>, which relies on a zero-knowledge argument protocol for proving dot-product relationships and other relationships in zero-knowledge (e.g., products); and (2) the compiler employed by Libra <a href="#page-38-14">[106]</a> and Virgo <a href="#page-38-13">[107]</a>, which relies on an extractable polynomial commitment scheme. This transformation does not change asymptotics of P, V, or of the amount of communication (Figure <a href="#page-20-1">5)</a>. Section <a href="#page-30-0">8</a> describes the specific zero-knowledge compiler we implement.</p>
+
+    <p class="text-gray-300">Finally, since our protocol is public coin, it can be made non-interactive in the random oracle model using the Fiat-Shamir transform <a href="#page-36-14">[55]</a>, thereby obtaining a family of NIZKs with succinct proofs for R1CS.</p>
+
+    </section>
+
+    <section id="sec-6" class="mb-10">
+      <h2 class="text-2xl font-bold">6 Computation commitments: zkSNARKs for R1CS from NIZK</h2>
+
+    <p class="text-gray-300">The previous section constructed a family of NIZKs but not zkSNARKs. This is because the verifier incurs costs linear in the size of the R1CS instance to evaluate <em><sup>A</sup></em>e, <em><sup>B</sup></em>e,<em>C</em><sup>e</sup> at (<em>rx</em>,<em>ry</em>). We now discuss how to achieve sub-linear verification costs.</p>
+
+    <p class="text-gray-300">At first blush, this appears impossible: The verifier incurs <em>O</em>(<em>n</em>) costs to evaluate <em><sup>A</sup></em>e, <em><sup>B</sup></em>e,<em>C</em><sup>e</sup> at (<em>rx</em>,<em>ry</em>) (step 16,<a href="#page-17-0">&sect;5.1)</a>, which is time-optimal <a href="#page-38-2">[96,</a> <a href="#page-38-17">99]</a> if <sup>x</sup> has no structure (e.g., uniformity). We get around this impossibility by introducing a preprocessing step for V. In an offline phase, V with access to non-<em>io</em> portions of an R1CS instance x = (F , <em>A</em>, <em>B</em>,<em>C</em>, <em>io</em>, <em>m</em>, <em>n</em>) executes the following, where <em>ppcc</em> &larr; PC.Setup(1 &lambda; , 2 log <em>m</em>) and PC is an extractable polynomial commitment scheme for multilinear polynomials.</p>
+
+    <pre><code class="language-text">Encode(ppcc,(A, B, C)):
+</code></pre>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>(C<em>A</em>, <sup>S</sup><em>A</em>) <sup>&larr;</sup> PC.Commit(<em>ppcc</em>, <em><sup>A</sup></em>e)</li>
+      <li>(C<em>B</em>, <sup>S</sup><em>B</em>) <sup>&larr;</sup> PC.Commit(<em>ppcc</em>, <em><sup>B</sup></em>e)</li>
+      <li>(C<em>C</em>, <sup>S</sup><em>C</em>) <sup>&larr;</sup> PC.Commit(<em>ppcc</em>, <em><sup>C</sup></em>e)</li>
+      <li>Output (C<em>A</em>, C<em>B</em>, C<em>C</em>)</li>
+    </ul>
+
+    <p class="text-gray-300">V retains commitments output by Encode (which need not hide the underlying polynomials, so in practice S<em><sup>A</sup></em> = S<em><sup>B</sup></em> = S<em><sup>C</sup></em> = &perp;). The interactive argument proceeds as in the prior section except that at step 16, instead of <sup>V</sup> evaluating <em><sup>A</sup></em>e, <em><sup>B</sup></em>e,<em>C</em>e, we have:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><sup>P</sup> : <em><sup>v</sup></em><sup>1</sup> <sup>&larr;</sup> <em><sup>A</sup></em>e(<em>rx</em>,<em>ry</em>), <em><sup>v</sup></em><sup>2</sup> <sup>&larr;</sup> <em><sup>B</sup></em>e(<em>rx</em>,<em>ry</em>), <em><sup>v</sup></em><sup>3</sup> <sup>&larr;</sup> <em><sup>C</sup></em>e(<em>rx</em>,<em>ry</em>). Send (<em>v</em>1, <em><sup>v</sup></em>2, <em><sup>v</sup></em>3) to <sup>V</sup>.</li>
+      <li><em><sup>b</sup></em><sup>1</sup> &larr; &#10216;PPC.Eval(<em>A</em>e, <sup>&perp;</sup>), <sup>V</sup>PC.Eval(<em>r</em>)&#10217;(<em>ppcc</em>, <sup>C</sup><em>A</em>,(<em>rx</em>,<em>ry</em>), <em><sup>v</sup></em>1, 2 log <em><sup>m</sup></em>)</li>
+      <li><em><sup>b</sup></em><sup>2</sup> &larr; &#10216;PPC.Eval(<em>B</em>e, <sup>&perp;</sup>), <sup>V</sup>PC.Eval(<em>r</em>)&#10217;(<em>ppcc</em>, <sup>C</sup><em>B</em>,(<em>rx</em>,<em>ry</em>), <em><sup>v</sup></em>2, 2 log <em><sup>m</sup></em>)</li>
+      <li><em><sup>b</sup></em><sup>3</sup> &larr; &#10216;PPC.Eval(<em>C</em>e, <sup>&perp;</sup>), <sup>V</sup>PC.Eval(<em>r</em>)&#10217;(<em>ppcc</em>, <sup>C</sup><em>C</em>,(<em>rx</em>,<em>ry</em>), <em><sup>v</sup></em>3, 2 log <em><sup>m</sup></em>)</li>
+      <li>V: Abort with <em>b</em> = 0 if <em>b</em><sup>1</sup> = 0 &or; <em>b</em><sup>2</sup> = 0 &or; <em>b</em><sup>3</sup> = 0.</li>
+    </ul>
+
+    <p class="text-gray-300"><strong>Lemma 6.1.</strong> The interactive argument from Section 5.1 where step 16 is replaced with the above protocol is a public-coin succinct interactive argument of knowledge assuming PC is an extractable polynomial commitment scheme for multilinear polynomials.</p>
+
+    <p class="text-gray-300"><em>Proof.</em> The result follows from the knowledge soundness property satisfied by PC scheme used in the Encode algorithm.  <span class="math">\\Box</span></p>
+
+    <p class="text-gray-300">If  <span class="math">\\mathcal{V}</span> 's costs to verify the three evaluations and the added communication are sublinear in O(n), the modified interactive argument leads to a zkSNARK (if we add zero-knowledge and non-interactivity as before).</p>
+
+    <p class="text-gray-300">Unfortunately, existing polynomial commitment schemes do not satisfy the desired efficiency properties: (1) to participate in Eval for any of  <span class="math">\\widetilde{A}, \\widetilde{B}, \\widetilde{C}, \\mathcal{P}</span>  incurs at least quadratic costs i.e.,  <span class="math">O(m^2)</span> ; and (2) in some schemes (e.g., Hyrax-PC), the modified interactive argument does not offer improved asymptotics for the verifier.</p>
+
+    <p class="text-gray-300"><strong>Details.</strong> Recall that polynomials  <span class="math">\\widetilde{A}</span> ,  <span class="math">\\widetilde{B}</span> ,  <span class="math">\\widetilde{C}</span>  are are multilinear extensions of matrices A, B, C in an R1CS instance  <span class="math">\\mathbf{x} = (\\mathbb{F}, A, B, C, io, m, n)</span>  (&sect;4). Furthermore, these multilinear polynomials are defined over  <span class="math">\\mu = 2s</span>  variables, where  <span class="math">s = \\log m</span> . Thus, if we apply any existing polynomial commitment from prior subsection (Figure 4):  <span class="math">\\Gamma = 2^{\\mu} = 2^{2\\log m}</span> . Thus,  <span class="math">\\mathcal{P}_{\\text{Eval}}</span>  incurs at least  <span class="math">O(m^2)</span> , which is also quadratic in n since n = O(m). Furthermore, in schemes such as Hyrax-PC,  <span class="math">\\mathcal{V}_{\\text{Eval}}</span>  incurs O(n) costs. Neither is desirable for instantiating computation commitments (&sect;6), which aims to make  <span class="math">\\mathcal{V}</span> 's costs sub-linear in O(n) by delegating evaluations of  <span class="math">\\widetilde{A}</span> ,  <span class="math">\\widetilde{B}</span> ,  <span class="math">\\widetilde{C}</span>  at  <span class="math">(r_x, r_y)</span>  to  <span class="math">\\mathcal{P}</span> .</p>
+
+    <p class="text-gray-300">The next section describes a scheme that meets our efficiency requirements and leads to asymptotics noted in Figure 2.</p>
+
+    </section>
+
+    <section id="sec-7" class="mb-10">
+      <h2 class="text-2xl font-bold">7 The SPARK compiler</h2>
+
+    <p class="text-gray-300">This section describes SPARK, a new cryptographic compiler to transform an existing extractable polynomial commitment scheme for dense multilinear polynomials to one that can efficiently handle sparse multilinear polynomials.</p>
+
+    <p class="text-gray-300">Our core observation is that it is possible to build a polynomial commitment scheme that efficiently handles sparse multilinear polynomials by using a zkSNARK that achieves sub-linear verification costs for a restricted class of NP statements. Two attractive candidates here include: Hyrax [103] and the Spartan-based NIZK from Section 5.2 (both can achieve sub-linear verification costs for NP statements with uniform structure).</p>
+
+    <p class="text-gray-300">For ease of exposition, we focus on describing SPARK that applies to  <span class="math">2 \\log m</span> -variate sparse polynomials  <span class="math">\\widetilde{A}, \\widetilde{B}, \\widetilde{C}</span>  (where their dense representation is of size  <span class="math">\\leq n</span> ) from Section 5.1, but our result generalizes to other sparse multilinear polynomials.</p>
+
+      <h3 id="sec-7.1" class="text-xl font-semibold mt-8">7.1 SPARK-naive: A straw-man solution</h3>
+
+    <p class="text-gray-300">To present our solution, we describe a straw-man that helps introduce the necessary building blocks as well as articulate difficulties addressed by SPARK. We recall Hyrax [103], a zkSNARK that achieves sub-linear verification costs for uniform circuits, specifically data-parallel circuits. The prover's costs in Hyrax can be made linear in the circuit size using subsequent ideas [106]. Furthermore, the verifier's costs are  <span class="math">O(d \\log n + e)</span>  where d is the depth of the circuit and e is the cost to the verifier to participate in PC.Eval to evaluate a  <span class="math">\\log |w|</span> -variate multilinear polynomial where w is a witness to the circuit.</p>
+
+    <p class="text-gray-300">Details. Let <em>M</em> denote one of {<em>A</em>, <em>B</em>,<em>C</em>} and let <em>s</em> = log <em>m</em>, so &micro; = 2<em>s</em>. Recall the closed-form expression for multilinear polynomial evaluations at <em>r</em> &isin; F &micro;.</p>
+
+    <p class="text-gray-300">
+<span class="math">$\\widetilde{M}(r) = \\sum_{i \\in \\{0,1\\}^{\\mu} :: M(i) \\neq 0} M(i) \\cdot \\widetilde{\\operatorname{eq}}(i,r)</span>$
+(1)</p>
+
+    <p class="text-gray-300">The above sum has at most <em>n</em> terms since <em>M</em>(<em>i</em>) &#824;= 0 for at most <em>n</em> values of <em>i</em>. Also, each entry in the sum can be computed with <em>O</em>(&micro;) multiplications. Consider the following circuit to evaluate <em><sup>M</sup></em><sup>e</sup> (<em>r</em>).</p>
+
+    </section>
+
+    <section id="app-a" class="mb-10">
+      <h2 class="text-2xl font-bold">A <em>O</em>(log &micro;)-depth circuit with <em>O</em>(<em>n</em> &middot; &micro;) gates that:</h2>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Takes as witness the list of <em>n</em> tuples of the form (<em>i</em>, <em>M</em>(<em>i</em>)) :: <em>M</em>(<em>i</em>) &#824;= 0, where each <em>i</em> is represented with a vector of &micro; elements of F , so each entry in the list is &micro; + 1 elements of F (in other words, the witness is a log(<em>n</em> &middot; (&micro; + 1))-variate multilinear polynomial whose dense representation is the above list of tuples);</li>
+      <li>Takes as public input <em>r</em> &isin; F &micro; ;</li>
+      <li>Asserts that in each of the <em>n</em> tuples, the first &micro; elements are either 0 or 1.</li>
+      <li>Computes <em><sup>v</sup></em> <sup>&larr;</sup> <em><sup>M</sup></em><sup>e</sup> (<em>r</em>) using Equation <a href="#page-23-0">1;</a></li>
+      <li>Outputs <em>v</em></li>
+    </ul>
+
+    <p class="text-gray-300">Note that the above circuit is uniform: there are <em>n</em> identical copies of a sub-circuit, where each sub-circuit computes <em>O</em>(&micro;) multiplications; the outputs of these sub-circuits is fed into a binary tree of addition gates to compute the final sum. Furthermore, there is no sharing of witness elements across data-parallel units, so it truly data-parallel.</p>
+
+    <p class="text-gray-300">Construction. Given an extractable polynomial commitment scheme PC for multilinear polynomials, we build a scheme for sparse multilinear polynomials as follows.</p>
+
+    <h3 id="sec-misc-1" class="text-xl font-semibold mt-8">PCnaive:</h3>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><em>pp</em> &larr; Setup(1 &lambda; , &micro;, <em>n</em>): PC.Setup(1 &lambda; , log((&micro; + 1) &middot; <em>n</em>))</li>
+      <li>(C; <sup>S</sup>) <sup>&larr;</sup> Commit(<em>pp</em>; <em><sup>M</sup></em><sup>e</sup> ): PC.Commit(<em>pp</em>, <sup>D</sup>), where <sup>D</sup> is the unique log((<sup>&micro;</sup> <sup>+</sup> <sup>1</sup>) &middot; <em><sup>n</sup></em>) variate multilinear polynomial whose dense representation is the list of tuples (<em>i</em>, <em>M</em>(<em>i</em>)) :: <em>M</em>(<em>i</em>) &#824;= 0 and each entry is (&micro; + 1) elements of F .</li>
+      <li><em><sup>b</sup></em> <sup>&larr;</sup> Open(<em>pp</em>, <sup>C</sup>, <em><sup>M</sup></em><sup>e</sup> , <sup>S</sup>): PC.Open(<em>pp</em>, <sup>C</sup>, <sup>D</sup>, <sup>S</sup>), where <sup>D</sup> is defined as above.</li>
+      <li><em><sup>b</sup></em> <sup>&larr;</sup> Eval(<em>pp</em>, <sup>C</sup>,<em>r</em>, <em><sup>v</sup></em>, <sup>&micro;</sup>, <em><sup>n</sup></em>; <em><sup>M</sup></em><sup>e</sup> , <sup>S</sup>): <sup>P</sup> and <sup>V</sup> use Hyrax to verify the claim that <em><sup>M</sup></em><sup>e</sup> (<em>r</em>) = <em><sup>v</sup></em> using the circuit described above.</li>
+    </ul>
+
+    <p class="text-gray-300">Analysis of costs. Recall that computing <em><sup>M</sup></em><sup>e</sup> (<em>r</em>) for <em><sup>M</sup></em> &isin; {<em>A</em>, <em><sup>B</sup></em>,<em>C</em>} and <em><sup>r</sup></em> <sup>&isin;</sup> <sup>F</sup> <sup>&micro;</sup> takes <em>O</em>(<em>n</em>) costs. The principal downside of PCnaive is it imposes an asymptotic overhead over its underlying commitment scheme for dense multilinear polynomials.</p>
+
+    <p class="text-gray-300">For example, with Hyrax-PC as the underlying commitment scheme, the prover with PCnaive incurs <em>O</em>(<em>n</em> log <em>n</em>) costs to prove an evaluation of a committed sparse multilinear polynomial. This is because the prover must prove the satisfiability of a circuit of size  <span class="math">O(n \\cdot \\mu)</span>  as well as prove the evaluations of a constant number of  <span class="math">(\\log (n \\cdot (\\mu + 1)))</span> -variate multilinear polynomials. This slowdown is also significant in practice (&sect;8).</p>
+
+    <p class="text-gray-300"><strong>Lemma 7.1.</strong> <em>PC</em><sup>naive</sup> is a polynomial commitment scheme for multilinear polynomials with the costs noted above.</p>
+
+    <p class="text-gray-300"><em>Proof.</em> Completeness follows from the completeness of PC and Hyrax. Binding follows from the uniqueness of the dense representation of a sparse multilinear polynomial. Knowledge soundness follows from the witness-extended emulation offered by Hyrax and PC.Eval. The claimed prover's slowdown follows from the costs of Hyrax and PC applied to a constant number of  <span class="math">(\\log (n \\cdot (\\mu + 1)))</span> -variate multilinear polynomials.  <span class="math">\\Box</span></p>
+
+      <h3 id="sec-7.2" class="text-xl font-semibold mt-8">7.2 Eliminating asymptotic overheads by leveraging memory checking</h3>
+
+    <p class="text-gray-300">We now improve on the straw-man scheme by devising an O(n)-sized circuit for sparse polynomial evaluation. Naturally, the size of the witness to the circuit is also of size O(n). This allows SPARK to achieve a linear-time prover if the underlying polynomial commitment scheme offers linear-time costs for the prover [87, 103]. More generally, when transforming an existing polynomial commitment scheme that meets our requirements (&sect;2.4), SPARK does not add asymptotic overheads to the prover for proving the evaluations of committed sparse multilinear polynomials.</p>
+
+    <p class="text-gray-300">Observe that for  <span class="math">M \\in \\{A, B, C\\}</span> ,  <span class="math">M \\in \\mathbb{F}^{m \\times m}</span>  and any  <span class="math">r \\in \\mathbb{F}^{\\mu}</span> , we can rewrite the evaluation of  <span class="math">\\widetilde{M}(r)</span>  as follows. In our context  <span class="math">\\mu = 2 \\log m</span> , interpret r as a tuple  <span class="math">(r_x, r_y)</span>  where  <span class="math">r_x, r_y \\in \\mathbb{F}^s</span>  and  <span class="math">s = \\log m = \\mu/2</span> . Thus, we can rewrite Equation 1 as:</p>
+
+    <p class="text-gray-300"><span class="math">$\\widetilde{M}(r_x, r_y) = \\sum_{(i,j) \\in (\\{0,1\\}^s, \\{0,1\\}^s) :: M(i,j) \\neq 0} M(i,j) \\cdot \\widetilde{\\operatorname{eq}}(i, r_x) \\cdot \\widetilde{\\operatorname{eq}}(j, r_y)</span>$</p>
+
+    <p class="text-gray-300">In our context, the above sum still contains n terms. Also, computing each entry in the sum still requires  <span class="math">(\\mu + 1)</span>  multiplications over  <span class="math">\\mathbb{F}</span> . However, it is possible to compute a table of evaluations of  <span class="math">\\widetilde{\\text{eq}}(i, r_x)</span>  for all  <span class="math">i \\in \\{0, 1\\}^s</span>  in  <span class="math">O(2^s) = O(m)</span>  time. Similarly, it is possible to compute evaluations of  <span class="math">\\widetilde{\\text{eq}}(j, r_y)</span>  for all  <span class="math">j \\in \\{0, 1\\}^s</span>  in O(m) time.</p>
+
+    <p class="text-gray-300">Unfortunately, this observation is insufficient: even though these tables can be computed in O(m) time, the sum is taken over the list of  <span class="math">(i,j) \\in (\\{0,1\\}^s, \\{0,1\\}^s)</span>  where  <span class="math">M(i,j) \\neq 0</span>  and for an arbitrary 2s-variate sparse multilinear polynomial, such a list has no structure, so computing the sum requires n random accesses into two tables each with m entries. We could attempt to build a circuit that supports RAM operations. Unfortunately, existing techniques to encode RAM in circuits incur a logarithmic blowup or constants that in practice are larger than a logarithmic blowup.</p>
+
+    <p class="text-gray-300">For m RAM operations over a memory of size m,</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Pantry [38], using Merkle trees, trees [31, 83], offers a circuit of size  <span class="math">O(m \\log m)</span> .</li>
+      <li>Buffet [102], using permutation networks [18], offers a circuit of size  <span class="math">O(m \\log m)</span>  with constants smaller than the ones in Pantry.</li>
+      <li>vRAM [110] offers an O(m)-sized circuit with a constant of  <span class="math">\\log |\\mathbb{F}|</span>  (to encode consistency checks over a memory transcript), so, in practice, this does not improve</li>
+    </ul>
+
+    <p class="text-gray-300">on the straw-man. Other downsides: (1) it only supports 32-bit sized memory cells, whereas we need a memory over elements of  <span class="math">\\mathbb{F}</span> ; (2) nearly all of the circuit's non-deterministic witness must be committed by  <span class="math">\\mathcal{P}</span>  during circuit evaluation.</p>
+
+    <p class="text-gray-300">Our solution specializes and improves upon a recent implementation of offline memory checking techniques [31] in Spice [91], which builds circuits to encode operations on persistent storage with serializable transactions. The storage abstraction can be used as a memory abstraction where for m operations, the circuit is of size O(m), but the constants are worse than those of VRAM:  <span class="math">\\geq 1000</span>  (to encode an elliptic-curve based multiset collision-resistant hash function for each memory operation). We get around this issue by designing an offline memory checking primitive via a new randomized check that only uses public coins. Furthermore, unlike a vRAM-based solution, most of the non-deterministic witness needed by the circuit can be created by PC.Commit (i.e., by the Encode algorithm in the context of computation commitments).</p>
+
+      <h4 id="sec-7.2.1" class="text-lg font-semibold mt-6"><strong>7.2.1</strong> An O(n)-sized circuit for evaluating <span class="math">\\widetilde{M}</span></h4>
+
+    <p class="text-gray-300">We now describe an O(n)-sized circuit to compute an evaluation of  <span class="math">\\widetilde{M}</span> . We prove that the circuit indeed computes the correct evaluation of the sparse polynomial in lemma 7.5. In the description of the circuit, we assume hash functions H and H, which are defined below (Equations 2 and 3). Before we describe the circuit for polynomial evaluation, we specify an encoding of sparse polynomials that our circuit leverages.</p>
+
+    <p class="text-gray-300"><strong>Encoding sparse polynomials.</strong> Given a sparse polynomial  <span class="math">\\widetilde{M}</span>  (e.g.,  <span class="math">\\widetilde{M} \\in \\{\\widetilde{A}, \\widetilde{B}, \\widetilde{C}\\}</span> ), we encode it using three vectors of size n as follows. Since  <span class="math">\\widetilde{M}</span>  is represented by n tuples of the form (i,j,M(i,j)), where each tuple has 3 elements of  <span class="math">\\mathbb{F}</span>  such that  <span class="math">M(i,j) \\neq 0</span> . Note that this encoding differs from the encoding in the straw-man where each i and j were encoded using a vector of s elements of  <span class="math">\\{0,1\\} \\in \\mathbb{F}</span> . The encoding here essentially packs s bits in i (or j) into a single element of  <span class="math">\\mathbb{F}</span>  in the obvious way, which works because  <span class="math">s &lt; \\log |\\mathbb{F}|</span> . In some canonical order, let row, col, val be three vectors that encode the above n tuples such that for  <span class="math">k \\in [0, n-1]</span>  row(k) = i, col(k) = j, val(k) = M(i,j).</p>
+
+    <p class="text-gray-300">Encoding metadata for memory checking: &quot;Memory in the head&quot;. The circuit below takes as witness additional metadata about  <span class="math">\\widetilde{M}</span>  (besides row, col, val introduced above). This metadata accelerates memory checking during the evaluation of  <span class="math">\\widetilde{M}(r)</span> .</p>
+
+    <p class="text-gray-300">The metadata is in the form of six vectors:  <span class="math">read-ts_{row} \\in \\mathbb{F}^n</span> ,  <span class="math">write-ts_{row} \\in \\mathbb{F}^n</span> ,  <span class="math">audit-ts_{row} \\in \\mathbb{F}^m</span> ,  <span class="math">read-ts_{col} \\in \\mathbb{F}^n</span> ,  <span class="math">write-ts_{col} \\in \\mathbb{F}^n</span> , and  <span class="math">audit-ts_{col} \\in \\mathbb{F}^m</span> . We specify how these are computed below with pseudocode. Note that computing this metadata only needs the following parameters: memory size (which is determined by  <span class="math">2^s = m</span> ) and the sequence of addresses at which the memory is accessed (which are provided by row and col). In a nutshell,  <span class="math">read-ts_{row}</span>  and  <span class="math">write-ts_{row}</span>  denote the timestamps associated with read and write operations, and  <span class="math">audit-ts_{row}</span>  denotes the final timestamps of memory cells in the offline memory checking primitive [31, &sect;4.1] for the address sequence specified by row over a memory of size  <span class="math">m = O(2^s)</span> . Similarly,  <span class="math">read-ts_{col}</span> ,  <span class="math">write-ts_{col}</span> , and  <span class="math">audit-ts_{col} \\in \\mathbb{F}^m</span>  denote timestamps for the address sequence specified by col. They are computed as follows (vec! uses Rust notation).</p>
+
+    <h4 id="sec-misc-2" class="text-lg font-semibold mt-6">MemoryInTheHead(<em>m</em>, <em>n</em>, <em>addrs</em>):</h4>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><em>read</em>-<em>ts</em> &larr; <em>vec</em>![<em>n</em> ; 0]; <em>write</em>-<em>ts</em> &larr; <em>vec</em>![<em>n</em> ; 0]; <em>audit</em>-<em>ts</em> &larr; <em>vec</em>![<em>m</em> ; 0]; <em>ts</em> &larr; 0</li>
+      <li>for <em>i</em> in (0..<em>addrs</em>.<em>len</em>()):    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><em>addr</em> &larr; <em>addrs</em>[<em>i</em>]</li>
+      <li><em>r</em>-<em>ts</em> &larr; <em>audit</em>-<em>ts</em>[<em>i</em>]</li>
+      <li><em>ts</em> &larr; <em>max</em>(<em>ts</em>,<em>r</em>-<em>ts</em>) + 1</li>
+      <li><em>read</em>-<em>ts</em>[<em>i</em>] &larr; <em>r</em>-<em>ts</em></li>
+      <li><em>write</em>-<em>ts</em>[<em>i</em>] &larr; <em>ts</em></li>
+      <li><em>audit</em>-<em>ts</em>[<em>addr</em>] &larr; <em>ts</em></li>
+    </ul></li>
+      <li>return (<em>read</em>-<em>ts</em>, <em>write</em>-<em>ts</em>, <em>audit</em>-<em>ts</em>)</li>
+    </ul>
+
+    <p class="text-gray-300">Circuit description. The circuit below evaluates a sparse polynomial using the encoding and preprocessed metadata described above. It relies multiset hash functions, which we now define. Unlike ECC-based multiset hash functions in Spice <a href="#page-38-1">[91]</a>, we employ a public-coin hash function that verifies the desired multiset relationship. Specifically, we define two hash functions: (1) <em>h</em><sup>&gamma;</sup> : F <sup>3</sup> &rarr; F ; and (2) H<sup>&gamma;</sup> : F <sup>&lowast;</sup> &rarr; F , where F <sup>&lowast;</sup> denotes a multiset with elements from F and &gamma; &isin;<em><sup>R</sup></em> F .</p>
+
+    <p class="text-gray-300">
+<span class="math">$h_{\\gamma}(a, v, t) = a \\cdot \\gamma^2 + v \\cdot \\gamma + t \\tag{2}</span>$</p>
+
+    <p class="text-gray-300"><span class="math">$\\mathcal{H}_{\\gamma}(\\mathcal{M}) = \\Pi_{e \\in \\mathcal{M}}(e - \\gamma) \\tag{3}</span>$</p>
+
+    <p class="text-gray-300">:</p>
+
+    <p class="text-gray-300">Given (<em>A</em>, <em>V</em>, <em>T</em>) &isin; (F &#8467; , F &#8467; , F &#8467; ) for &#8467; &gt; 0, we define a map <em>H</em><sup>&gamma;</sup> : (F &#8467; , F &#8467; , F &#8467; ) &rarr; F &#8467;</p>
+
+    <p class="text-gray-300"><span class="math">$H_{\\gamma}(A, V, T) = [h_{\\gamma}(A[0], V[0], T[0]), \\dots, h_{\\gamma}(A[\\ell-1], V[\\ell-1], T[\\ell-1])]</span>$</p>
+
+    <p class="text-gray-300">We capture the soundness errors of these hash functions in lemma <a href="#page-27-1">7.2</a> and lemma <a href="#page-27-2">7.3.</a></p>
+
+    <h4 id="sec-misc-3" class="text-lg font-semibold mt-6">An <em>O</em>(<em>n</em>)-sized, <em>O</em>(log <em>n</em>)-depth circuit (<em>Circuit</em>eval-opt).</h4>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><p class="text-gray-300">Takes as witness the following lists (Hyrax can accept witness in separate lists).</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>a succinct description of <em><sup>M</sup></em><sup>e</sup> : three lists <em>row</em>, <em>col</em>, <em>val</em>, where each list has <em><sup>n</sup></em> entries.</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>two lists <em>erow</em>, <em>ecol</em>, where each list contains <em>n</em> elements of F .</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>six lists: <em>read</em>-<em>tsrow</em>,<em>read</em>-<em>tscol</em>,<em>write</em>-<em>tsrow</em>, <em>write</em>-<em>tscol</em>,<em>audit</em>-<em>tsrow</em>, and <em>audit</em>-<em>tscol</em>. The first four are of size <em>n</em> and the last two are of size <em>m</em>; each entry is an element of F .</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>two challenges &gamma;1, &gamma;<sup>2</sup> &isin; F .</li>
+    </ol></li>
+    </ul></li>
+      <li><p class="text-gray-300">Takes as public input <em>r</em> = (<em>rx</em>,<em>ry</em>) &isin; F &micro; ;</p></li>
+      <li><p class="text-gray-300">Output <em><sup>M</sup></em><sup>e</sup> (<em>r</em>) using <em><sup>v</sup></em> <sup>&larr;</sup> P<em><sup>n</sup></em>&minus;<sup>1</sup> <em>k</em>=0 <em>val</em>[<em>k</em>] &middot; <em>erow</em>[<em>k</em>] &middot; <em>ecol</em>[<em>k</em>].</p></li>
+      <li><p class="text-gray-300">Memory checking for <em>erow</em>:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><em>memrow</em> <sup>&larr;</sup> [eq<sup>e</sup> (0,<em>rx</em>), . . . , eq<sup>e</sup> (<em><sup>m</sup></em> <sup>&minus;</sup> 1,<em>rx</em>)] <sup>&isin;</sup> <sup>F</sup> <em>m</em></li>
+    </ul></li>
+      <li><p class="text-gray-300"><span class="math">Init_{row} \\leftarrow H_{\\gamma_1}([0,\\ldots,m-1],mem_{row},[0,\\ldots,0]) \\in \\mathbb{F}^m</span></p></li>
+      <li><p class="text-gray-300"><span class="math">RS_{row} \\leftarrow H_{\\gamma_1}(row, e_{row}, read\\text{-}ts_{row}) \\in \\mathbb{F}^n</span></p></li>
+      <li><p class="text-gray-300"><span class="math">WS_{row} \\leftarrow H_{\\gamma_1}(row, e_{row}, write\\text{-}ts_{row}) \\in \\mathbb{F}^n</span></p></li>
+      <li><p class="text-gray-300"><span class="math">Audit_{row} \\leftarrow H_{\\gamma_1}([0,\\ldots,m-1],mem_{row},audit-ts_{row}) \\in \\mathbb{F}^m</span></p></li>
+      <li><p class="text-gray-300">Assert  <span class="math">\\mathcal{H}_{\\gamma_2}(\\mathit{Init}_{\\mathit{row}}) \\cdot \\mathcal{H}_{\\gamma_2}(\\mathit{WS}_{\\mathit{row}}) = \\mathcal{H}_{\\gamma_2}(\\mathit{RS}_{\\mathit{row}}) \\cdot \\mathcal{H}_{\\gamma_2}(\\mathit{Audit}_{\\mathit{row}})</span></p></li>
+      <li><p class="text-gray-300">Memory checking for  <span class="math">e_{col}</span> :</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><span class="math">mem_{col} \\leftarrow [\\widetilde{eq}(0, r_y), \\dots, \\widetilde{eq}(m-1, r_y)] \\in \\mathbb{F}^m</span></li>
+      <li>Let  <span class="math">Init_{col} \\leftarrow H_{\\gamma_1}([0,\\ldots,m-1],mem_{col},[0,\\ldots,0]) \\in \\mathbb{F}^m</span></li>
+      <li>Let  <span class="math">RS_{col} \\leftarrow H_{\\gamma_1}(col, e_{col}, read\\text{-}ts_{col}) \\in \\mathbb{F}^n</span></li>
+      <li>Let  <span class="math">WS_{col} \\leftarrow H_{\\gamma_1}(col, e_{col}, write\\text{-}ts_{col}) \\in \\mathbb{F}^n</span></li>
+      <li>Let  <span class="math">Audit_{col} \\leftarrow H_{\\gamma_1}([0, \\dots, m-1], mem_{col}, audit-ts_{col}) \\in \\mathbb{F}^m</span></li>
+      <li>Assert  <span class="math">\\mathcal{H}_{\\gamma_2}(Init_{col}) \\cdot \\mathcal{H}_{\\gamma_2}(WS_{col}) = \\mathcal{H}_{\\gamma_2}(RS_{col}) \\cdot \\mathcal{H}_{\\gamma_2}(Audit_{col})</span></li>
+    </ul></li>
+    </ul>
+
+    <p class="text-gray-300"><strong>Lemma 7.2.</strong> For any two pairs  <span class="math">(a_1, v_1, t_1) \\in \\mathbb{F}^3</span>  and  <span class="math">(a_2, v_2, t_2) \\in \\mathbb{F}^3</span> ,  <span class="math">\\Pr_{\\gamma}\\{h_{\\gamma}(a_1, v_1, t_1) = h_{\\gamma}(a_2, v_2, t_2) | (a_1, v_1, t_1) \\neq (a_2, v_2, t_2)\\} \\le 3/|\\mathbb{F}|</span> .</p>
+
+    <p class="text-gray-300"><em>Proof.</em> This follows from the Schwartz-Zippel lemma.</p>
+
+    <p class="text-gray-300"><strong>Lemma 7.3.</strong> For any  <span class="math">\\ell &gt; 0</span> ,  <span class="math">(A_1, V_1, T_1) \\in (\\mathbb{F}^{\\ell}, \\mathbb{F}^{\\ell})</span>  and  <span class="math">(A_2, V_2, T_2) \\in (\\mathbb{F}^{\\ell}, \\mathbb{F}^{\\ell}, \\mathbb{F}^{\\ell})</span>   <span class="math">\\Pr_{\\gamma}\\{\\exists i :: H_{\\gamma}(A_1, V_1, T_1)[i] = H_{\\gamma}(A_2, V_2, T_2)[i] | (A_1, V_1, T_1) \\neq (A_2, V_2, T_2)\\} \\leq 3 \\cdot \\ell/|\\mathbb{F}|.</span></p>
+
+    <p class="text-gray-300"><em>Proof.</em> This follows from a standard union bound with the result of the lemma 7.2.  <span class="math">\\Box</span></p>
+
+    <p class="text-gray-300"><strong>Lemma 7.4.</strong> For any two multisets  <span class="math">\\mathcal{M}_1</span> ,  <span class="math">\\mathcal{M}_2</span>  of size  <span class="math">\\ell</span>  over  <span class="math">\\mathbb{F}</span> ,</p>
+
+    <p class="text-gray-300"><span class="math">$\\Pr_{\\gamma}\\{\\mathcal{H}_{\\gamma}(\\mathcal{M}_1)=\\mathcal{H}_{\\gamma}(\\mathcal{M}_2)|\\mathcal{M}_1\\neq\\mathcal{M}_2\\}\\leq \\ell/|\\mathbb{F}|</span>$</p>
+
+    <p class="text-gray-300"><em>Proof.</em> This follows from the Schwartz-Zippel lemma.</p>
+
+    <p class="text-gray-300"><strong>Lemma 7.5.</strong> Assuming that  <span class="math">|\\mathbb{F}|</span>  is exponential in  <span class="math">\\lambda</span>  and  <span class="math">n = O(\\lambda)</span> , for any  <span class="math">2 \\log m</span> -variate multilinear polynomial M whose dense representation is of size at most n and for any given  <span class="math">e_{row}, e_{col} \\in \\mathbb{F}^n</span> ,</p>
+
+    <p class="text-gray-300"><span class="math">$\\Pr_{\\gamma_1,\\gamma_2}\\{\\mathit{Circuit}_{\\mathit{eval-opt}}(w,(\\gamma_1,\\gamma_2),r)=v|\\widetilde{M}(r)\\neq v\\}\\leq \\mathtt{negl}(\\lambda),</span>$</p>
+
+    <p class="text-gray-300">where  <span class="math">w = (row, col, val, e_{row}, e_{col}, \\text{MemoryInTheHead}(m, n, row), \\text{MemoryInTheHead}(m, n, col))</span>  and (row, col, val) denotes the dense representation of  <span class="math">\\widetilde{M}</span> .</p>
+
+    <p class="text-gray-300"><em>Proof.</em> This follows from the soundness of the memory checking primitive [31] and the collision-resistance of the underlying hash functions used (lemmas 7.4 and 7.3).</p>
+
+      <h4 id="sec-7.2.2" class="text-lg font-semibold mt-6">7.2.2 Construction of a polynomial commitment scheme</h4>
+
+    <p class="text-gray-300">Given an extractable polynomial commitment scheme PC for multilinear polynomials, we build a scheme for sparse multilinear polynomials as follows.</p>
+
+    <p class="text-gray-300">Note that our focus is on designing a polynomial commitment scheme for efficiently realizing computation commitments (<a href="#page-21-0">&sect;6)</a>. For this purpose, the Spartan verifier runs the Commit algorithm (of the sparse polynomial commitment scheme) as part of the Encode algorithm, so unlike the general setup of polynomial commitments, the entity creating a commitment is the verifier itself (not an untrusted entity). As a result, the additional memory-checking metadata about the sparse polynomial as part of Commit is created by the verifier, so we do not need to verify that the timestamps are well-formed according to its specification in the MemoryInTheHead procedure as required by lemma <a href="#page-27-0">7.5.</a> This is only an optimization and not a limitation. In the general setting where Commit (of the sparse polynomial commitment scheme) is run by an untrusted entity, we can require it to additionally produce a proof that proves that timestamps are well-formed. In the description below, given our focus on computation commitments, we omit those proofs.</p>
+
+    <pre><code class="language-text">PCSPARK:
+  &bull; pp &larr; Setup(1
+                    &lambda;
+                      , &micro;, n): (PC.Setup(1
+                                            &lambda;
+                                             , &micro;)), PC.Setup(1
+                                                                 &lambda;
+                                                                  , log(n)))
+  &bull; (C; S) &larr; Commit(pp; Me ):
+        &bull; Let (ppm, ppn) &larr; pp
+        &bull; Let (row, col, val) denote the dense representation of Me as described in text.
+              &ndash; (Crow, Srow) &larr; PC.Commit(ppn,rowg)
+              &ndash; (Ccol, Scol) &larr; PC.Commit(ppn, col f)
+              &ndash; (Cval, Sval) &larr; PC.Commit(ppn, val f)
+        &bull; Let (read-tsrow, write-tsrow, audit-tsrow) &larr; MemoryInTheHead(2
+                                                                                  &micro;/2
+                                                                                     , n,row)
+              &ndash; (Cread-tsrow , Sread-tsrow ) &larr; PC.Commit(ppn,read^-tsrow)
+              &ndash; (Cwrite-tsrow , Swrite-tsrow ) &larr; PC.Commit(ppn, write^-tsrow)
+              &ndash; (Caudit-tsrow , Saudit-tsrow ) &larr; PC.Commit(ppm, audit ^-tsrow)
+        &bull; Let (read-tscol, write-tscol, audit-tscol) &larr; MemoryInTheHead(2
+                                                                                &micro;/2
+                                                                                    , n, col)
+              &ndash; (Cread-tscol , Sread-tscol) &larr; PC.Commit(ppn,read^-tscol)
+              &ndash; (Cwrite-tscol , Swrite-tscol) &larr; PC.Commit(ppn, write^-tscol)
+              &ndash; (Caudit-tscol , Saudit-tscol) &larr; PC.Commit(ppm, audit ^-tscol)
+        &bull; Let C &larr; (Crow, Ccol, Cval, Cread-tsrow , Cwrite-tsrow , Caudit-tsrow , Cread-tscol , Cwrite-tscol , Caudit-tscol)
+        &bull; Let S &larr; (Srow, Scol, Sval, Sread-tsrow , Swrite-tsrow , Saudit-tsrow , Sread-tscol , Swrite-tscol , Saudit-tscol)
+        &bull; Output (C, S)
+  &bull; b &larr; Open(pp, C, Me , S):
+        &bull; Let (ppm, ppn) &larr; pp.
+        &bull; Let row, col, val denote dense representation of Me as defined above.
+</code></pre>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Output PC.Open <span class="math">(pp_n, \\mathcal{C}.\\mathcal{C}_{row}, \\widetilde{row}, \\mathcal{S}.\\mathcal{S}_{row}) \\land \\text{PC.Open}(pp_n, \\mathcal{C}.\\mathcal{C}_{col}, \\widetilde{col}, \\mathcal{S}.\\mathcal{S}_{col}) \\land \\text{PC.Open}(pp_n, \\mathcal{C}, \\mathcal{C}_{val}, \\widetilde{val}, \\mathcal{S}.\\mathcal{S}_{val})</span></li>
+      <li><span class="math">b \\leftarrow \\text{Eval}(pp, \\mathcal{C}, r, v, \\mu, n; \\widetilde{M}, \\mathcal{S})</span> :    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Let  <span class="math">(pp_m, pp_n) \\leftarrow pp</span>  and let  <span class="math">(r_x, r_y) = r</span> , where  <span class="math">r_x, r_y \\in \\mathbb{F}^{\\mu/2}</span> .</li>
+      <li>Let row, col, val denote dense representation of  <span class="math">\\widetilde{M}</span>  as defined above.</li>
+      <li>P    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Compute  <span class="math">e_{row}</span>  and  <span class="math">e_{col}</span>  with 2n lookups over a table of size  <span class="math">m=2^{\\mu/2}</span> . That is,  <span class="math">e_{row}=[\\widetilde{eq}(row(0),r_x),\\ldots,\\widetilde{eq}(row(n-1),r_x)];</span>  let  <span class="math">e_{col}=[\\widetilde{eq}(col(0),r_y),\\ldots,\\widetilde{eq}(col(n-1),r_y)].</span></li>
+      <li><span class="math">(\\mathcal{C}_{e_{row}}, \\mathcal{S}_{e_{row}}) \\leftarrow \\mathsf{PC.Commit}(pp_n, \\widetilde{e_{row}}); \\text{ send } \\mathcal{C}_{e_{row}} \\text{ to } \\mathcal{V}.</span></li>
+      <li><span class="math">(\\mathcal{C}_{e_{col}}, \\mathcal{S}_{e_{col}}) \\leftarrow \\mathsf{PC.Commit}(pp_n, \\widetilde{e_{col}}); \\text{ send } \\mathcal{C}_{e_{col}} \\text{ to } \\mathcal{V}.</span></li>
+    </ul></li>
+      <li><span class="math">\\mathcal{V}: (\\gamma_1, \\gamma_2) \\in_{\\mathbb{R}} \\mathbb{F}^2</span> . Send  <span class="math">(\\gamma_1, \\gamma_2)</span>  to  <span class="math">\\mathcal{P}</span> .</li>
+      <li><span class="math">\\mathcal P</span>  and  <span class="math">\\mathcal V</span>  use Hyrax (with PC as the extractable polynomial commitment scheme) to verify the claim that  <span class="math">\\widetilde M(r)=v</span>  using  <span class="math">\\mathit{Circuit}_{\\mathrm{eval-opt}}.</span></li>
+    </ul></li>
+    </ul>
+
+    <p class="text-gray-300"><strong>Analysis of costs.</strong> <em>Circuit</em><sub>eval-opt</sub> is uniform because computing  <span class="math">\\mathcal{H}</span>  using a binary tree of multiplications [96] constitutes nearly all of the work in the above circuit. Figure 6 depicts the costs of PC<sup>SPARK</sup> with different choices for PC.</p>
+
+    <p class="text-gray-300"></p>
+
+    <div class="overflow-x-auto my-4">
+      <table class="min-w-full text-sm text-gray-300">
+        <thead>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">PC choice</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">setup</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left"><span class="math">\\mathcal{P}_{Eval}</span></th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">$ \\mathcal{C} $</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">communication</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left"><span class="math">\\mathcal{V}_{Eval}</span></th>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Hyrax-PC [103]<br>vSQL-VPD [108]<br>Virgo-VPD [107]</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">public<br>private*<br>public</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"><span class="math">O(n)</span> <span class="math">O(n)</span> <span class="math">O(n \\log n)</span></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"><span class="math">O(\\sqrt{n})</span> <span class="math">O(1)</span> <span class="math">O(1)</span></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"><span class="math">O(\\log^2 n)</span> <span class="math">O(\\log^2 n)</span> <span class="math">O(\\log^2 n)</span></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"><span class="math">O(\\sqrt{n})</span> <span class="math">O(\\log^2 n)</span> <span class="math">O(\\log^2 n)</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p class="text-gray-300">FIGURE 6&mdash;Costs of  <span class="math">PC^{SPARK}</span>  with different choices for PC. Here, n is number of entries in the dense representation of the multilinear polynomial.</p>
+
+    <p class="text-gray-300"><strong>Lemma 7.6.</strong> Assuming that PC<sup>SPARK</sup>. Commit is run by an honest entity, then PC<sup>SPARK</sup> is a polynomial commitment scheme for multilinear polynomials with the costs noted.</p>
+
+    <p class="text-gray-300"><em>Proof.</em> Completeness follows from the completeness of PC, Hyrax, and  <span class="math">Circuit_{eval-opt}</span> . Binding follows from the uniqueness of the dense representation of the sparse multilinear polynomial as (row, col, val). Knowledge soundness follows from the witness-extended emulation offered by Hyrax and PC, and from the negligible soundness error of  <span class="math">Circuit_{eval-opt}</span>  (lemma 7.5). Finally, the claimed costs follow from the cost model of Hyrax and of PC applied to a constant number of  <span class="math">O(\\log n)</span> -variate multilinear polynomials.</p>
+
+      <h4 id="sec-7.2.3" class="text-lg font-semibold mt-6">7.2.3 Optimizations</h4>
+
+    <p class="text-gray-300">We now describe many optimizations to SPARK to reduce constants.</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Instead of using Hyrax as a black box, we tailor it for <em>Circuit</em><sub>eval-opt</sub> using prior ideas [96]. This reduces overall costs significantly. We also do not need Hyrax's zero-knowledge compiler for computation commitments.</li>
+    </ol>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>For computation commitments, we build a single circuit that produces evaluations of  <span class="math">\\widetilde{A}</span> ,  <span class="math">\\widetilde{B}</span> ,  <span class="math">\\widetilde{C}</span>  at  <span class="math">(r_x, r_y)</span> . This enables reusing parts of the memory checking circuit (related to the state of the memory) across evaluations.</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>In our particular context, we can set  <span class="math">\\forall 0 \\leq i &lt; n</span> :  <span class="math">write-ts_{row}[i] = read-ts_{row}[i] + 1</span>  and  <span class="math">write-ts_{col}[i] = read-ts_{read}[i] + 1</span> . This is because unlike the traditional setting of offline memory checking, the read timestamps are not untrusted. This avoids having to commit to  <span class="math">write-ts_{row}</span>  and  <span class="math">write-ts_{col}</span> .</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>During PC<sup>SPARK</sup>. Eval, at the witness layer in Hyrax,  <span class="math">\\mathcal{V}</span>  needs to evaluate a number of multilinear polynomials at either  <span class="math">r_{row}, r_{col} \\in \\mathbb{F}^{\\log n}</span>  or  <span class="math">r_{mem} \\in \\mathbb{F}^{\\log m}</span> . We avoid having to commit to them by leveraging their succinct representations.</li>
+    </ol>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>V can compute  <span class="math">\\widetilde{mem}_{row}(r_{row})</span>  and  <span class="math">\\widetilde{mem}_{col}(r_{col})</span>  in  <span class="math">O(\\log m)</span>  as follows:</li>
+    </ul></li>
+    </ul>
+
+    <p class="text-gray-300"><span class="math">$\\widetilde{mem}_{row}(r_{row}) \\leftarrow \\widetilde{eq}(r_{row}, r_x)</span>$</p>
+
+    <p class="text-gray-300"><span class="math">$\\widetilde{mem}_{col}(r_{col}) \\leftarrow \\widetilde{eq}(r_{col}, r_{y})</span>$</p>
+
+    <p class="text-gray-300">This avoids  <span class="math">\\mathcal{P}</span>  having to commit to  <span class="math">\\widetilde{mem}_{row}</span>  and  <span class="math">\\widetilde{mem}_{col}</span> . It also avoids  <span class="math">\\mathcal{V}</span>  having to verify if the commitments correctly represent  <span class="math">\\widetilde{eq}(i, r_x)</span>  and  <span class="math">\\widetilde{eq}(i, r_y) \\ \\forall 0 \\le i &lt; m</span> , which in turn would require verifying the satisfiability of another circuit.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>We leverage the following facts: (1)  <span class="math">(0, 1, \\ldots, m-1)(r_{mem}) = \\sum_{i=0}^{\\log m} 2^i \\cdot r_{mem}[i];</span>  (2)  <span class="math">(0, 0, \\ldots, 0)(r_{mem}) = 0.</span></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>It is possible to combine k  <span class="math">\\mu</span> -variate multilinear polynomials into a single multilinear polynomial over  <span class="math">\\mu + \\log k</span>  variables. We employ this technique to reduce the number of committed multilinear polynomials from 23 to 3.</li>
+    </ol></li>
+    </ul>
+
+    </section>
+
+    <section id="sec-8" class="mb-10">
+      <h2 class="text-2xl font-bold">8 Implementation and optimizations</h2>
+
+    <p class="text-gray-300">We implement Spartan as a modular library in about 8,000 lines of Rust including optimizations listed throughout the paper as well as optimizations from prior work [96, 99, 101, 103, 106]. Our implementation is open source [5].</p>
+
+    <p class="text-gray-300">We find that the prover under SPARK outperforms the prover under SPARK-naive by  <span class="math">&gt;10\\times</span>  for R1CS instances with  <span class="math">2^{20}</span>  constraints. We also implement SPARK with and without our optimizations. At  <span class="math">2^{20}</span>  constraints, our optimizations reduce proof lengths from 3.1 MB to 142 KB, a improvement of over  <span class="math">20\\times</span> ; our optimizations also improve prover and verification times by about  <span class="math">10\\times</span> .</p>
+
+    <p class="text-gray-300">In the next section, we present results from SPARK instantiated with Hyrax-PC [103] i.e., we evaluate a zkSNARK whose security holds under the discrete logarithm problem. For curve arithmetic, we use curve25519-dalek [3], which offers an efficient implementation of a prime-order Ristretto group [4, 67] called ristretto255. The scalar arithmetic in the library is however slow since it represents the underlying scalar elements as byte strings for fast curve arithmetic. To cope with this, we optimize the underlying scalar arithmetic by  <span class="math">\\approx 10 \\times</span>  by adapting other code [35].</p>
+
+    <p class="text-gray-300">To add zero-knowledge, we employ the zero-knowledge transformation from Hyrax, with one simplification: Hyrax employs a zero-knowledge sum-check protocol built</p>
+
+    <p class="text-gray-300">atop a single invocation of the dot product proof protocol. In our implementation, we employ a separate dot-product proof protocol for each round of the sum-check protocol. This simplifies the implementation, and the proof of the zero-knowledge property is trivial. Fortunately, the overheads from the simplification as well as the additional cost of providing the zero-knowledge property are small (since Spartan only needs two sumcheck invocations whereas Hyrax invokes one per layer in a layered circuit). Additionally, as in Hyrax, the prover and the verifier employ protocols for zero-knowledge proof of product, zero-knowledge proof of equality, and zero-knowledge proof of knowledge to prove that the verifier's checks after each sum-check invocation pass&mdash;without the verifier having to receive the prover's messages in plaintext. To implement the Fiat-Shamir transform <a href="#page-36-14">[55]</a>, we use merlin <a href="#page-34-7">[2]</a>.</p>
+
+    </section>
+
+    <section id="sec-9" class="mb-10">
+      <h2 class="text-2xl font-bold">9 Experimental evaluation</h2>
+
+    <p class="text-gray-300">This section experimentally evaluates our implementation of Spartan and compares it with state-of-the-art zkSNARKs and proof-succinct NIZKs.</p>
+
+      <h3 id="sec-9.1" class="text-xl font-semibold mt-8">9.1 Metrics, methodology, and testbed</h3>
+
+    <p class="text-gray-300">Our principal evaluation metrics are: (1) P's costs to produce a proof; (2) V's costs to preprocess an R1CS instance; (3) V's costs to verify a proof; and (4) the size of a proof. We measure P's and V's costs using a real-time clock and the size of proofs in bytes by serializing proof data structures. For Spartan, we use cargo bench to run experiments, and for baselines, we use profilers provided with their code.</p>
+
+    <p class="text-gray-300">We experiment with Spartan and several baselines (listed below) using a Microsoft Surface Laptop 3 on a single CPU core of Intel Core i7-1065G7 with 16 GB RAM running Ubuntu 20.04 atop Windows 10. We report results from a single-threaded configuration since not all our baselines leverage multiple cores. As with prior work <a href="#page-35-13">[21]</a>, we vary the size of the R1CS instance by varying the number of constraints and variables <em>m</em> and maintain the ratio <em>n</em>/<em>m</em> to approximately 1. In all Spartan experiments |<em>io</em>| = 10.</p>
+
+    <p class="text-gray-300">Baselines. We compare Spartan with the following zkSNARKs and NIZKs.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Groth16 <a href="#page-37-11">[64]</a>, the most efficient zkSNARK with trusted setup based on GGPR <a href="#page-36-8">[58]</a>.</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Ligero <a href="#page-34-2">[6]</a>, a prior proof-succinct NIZK with a light-weight prover.</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Hyrax <a href="#page-38-10">[103]</a>, a prior transparent zkSNARK that achieves sub-linear verification costs for data-parallel computations.</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Aurora <a href="#page-35-13">[21]</a>, a prior proof-succinct NIZK.</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Fractal <a href="#page-36-17">[46]</a>, a recent transparent zkSNARK that instantiates computation commitments to achieve sub-linear verification costs.</li>
+    </ol></li>
+    </ul>
+
+    <p class="text-gray-300">Additional baselines. We provide a rough comparison with three SNARKs and one NIZK, and leave it to the future to experiment with them on the same hardware.</p>
+
+    <p class="text-gray-300">STARK <a href="#page-35-12">[15]</a> performs worse than Aurora <a href="#page-35-13">[21]</a> on all our performance metrics for arbitrary R1CS instances <a href="#page-35-12">[15,</a> &sect;11.2]. Virgo <a href="#page-38-13">[107]</a> is specialized to layered circuits over F<em><sup>p</sup></em> where <em>p</em> = 2 <sup>61</sup> &minus; 1, so it precludes computations such as cryptographic operations that operate over fields of size &asymp;2 <sup>256</sup> <a href="#page-34-8">[1,</a> <a href="#page-36-22">40,</a> <a href="#page-36-23">41,</a> <a href="#page-37-1">76,</a> <a href="#page-37-24">86,</a> <a href="#page-38-21">105]</a>. Switching to such a prime field increases Virgo's reported prover's costs by at least 17&times;, which is slower than Spartan. SuperSonic [39] estimates that a proof size of  <span class="math">\\approx 10 \\, \\text{KB}</span>  and a verification time of  <span class="math">\\approx 100 \\, \\text{ms}</span>  for a  <span class="math">2^{20}</span> -gate circuit, but they do not report the prover's costs; our benchmarks suggest they can be several orders of magnitude higher than Spartan<sub>DL</sub>.</p>
+
+    <p class="text-gray-300">Bulletproofs [42] is a NIZK with short proofs ( <span class="math">\\approx</span> 1.5 KB), but its concrete costs are orders of magnitude higher than Spartan and other schemes [106, Table 1]. For circuits with  <span class="math">2^{20}</span>  gates, we estimate that the prover takes  <span class="math">\\approx</span> 804 s and the verifier takes  <span class="math">\\approx</span> 31 s [42].</p>
+
+    <p class="text-gray-300"><strong>Methodology and parameters.</strong> For Spartan<sub>DL</sub>, we report results from two variants: SpartansNARK (which incurs sub-linear verification) and SpartanNIZK (which incurs linear-time verification). This is because several baselines offer only a linear-time verifier. Also, for data-parallel workloads, the NIZK variant depicts the performance that SpartansNARK can achieve for the prover and proof sizes since SpartansNARK can amortize the costs of computation commitments across data-parallel units.</p>
+
+    <p class="text-gray-300">For Groth16, we benchmark its implementation from libsnark with bn128 curve [79]. For Hyrax, we use its reference implementation with curve25519 [77]. To compare Spartan with Hyrax, we transform R1CS instances to depth-1 arithmetic circuits where the circuit evaluates constraints in the R1CS instance, and outputs a vector of zeros when all constraints are satisfied. For an arbitrary R1CS instance, this circuit has no structure, and hence Hyrax incurs linear-time verification costs.</p>
+
+    <p class="text-gray-300">For Ligero, Aurora, and Fractal, we use their implementations from libiop with a prime field of size  <span class="math">\\approx 2^{256}</span>  [78]. The implementations of Aurora and Fractal support two sets of parameters: proven and non-proven (also known as heuristic). The default choice in their code is the heuristic parameters, which rely on non-standard conjectures related to Reed-Solomon codes (e.g., in the FRI protocol) for soundness [15, Appendix B]. Concretely, the heuristic parameters use  <span class="math">\\approx 10\\times</span>  fewer query repetitions of FRI compared to the proven parameters. As expected, the heuristic versions achieve  <span class="math">\\approx 10\\times</span>  lower verification costs and proof sizes than the corresponding provable versions. Note that very recent work makes progress toward proving some of these heuristics [16].</p>
+
+      <h3 id="sec-9.2" class="text-xl font-semibold mt-8">9.2 Performance results</h3>
+
+    <p class="text-gray-300"><strong>Prover.</strong> Figure 7 depicts the prover's costs under Spartan and its baselines. Spartan outperforms all its baselines. When compared to the most closely related system, Spartansnark is  <span class="math">36 \\times</span>  faster than Fractal at  <span class="math">2^{18}</span>  constraints. When we compare Ligero, Aurora, and Hyrax with Spartannizk (since all of them are proof-succinct NiZKs and incur linear-time verification costs), Spartannizk is  <span class="math">24 \\times</span>  faster than Ligero,  <span class="math">152 \\times</span>  faster than Aurora, and  <span class="math">99 \\times</span>  faster than Hyrax at  <span class="math">2^{20}</span>  instance sizes. Finally, compared to Groth 16, Spartansnark is  <span class="math">2 \\times</span>  faster and Spartannizk is  <span class="math">16 \\times</span>  faster for  <span class="math">2^{20}</span>  constraints.</p>
+
+    <p class="text-gray-300"><strong>Proof sizes.</strong> Figure 8 depicts proof sizes under Spartan and its baselines. Although Spartansnark's proofs are asymptotically larger than Fractal (Figure 2), Spartansnark offers  <span class="math">\\approx 23 \\times</span>  shorter proofs at  <span class="math">2^{18}</span>  constraints. When we compare the proof-succinct NIZKs, Spartannizk offers proofs that are  <span class="math">1.2\\text{--}416 \\times</span>  shorter than its baselines. All transparent zkSNARKs produce orders of magnitude longer proofs than Groth16.</p>
+
+    <p class="text-gray-300"><strong>Verifier.</strong> Figure 9 depicts the verifier times under different schemes. Groth16 offers the fastest verifier, but it requires a trusted setup. Among schemes without trusted setup,</p>
+
+    <p class="text-gray-300"><sup>&amp;</sup>lt;sup&gt;6</sup>Unfortunately, we could not run Fractal at 2<sup>19</sup> or 2<sup>20</sup> constraints because it crashes by running out of memory.</p>
+
+    <p class="text-gray-300"></p>
+
+    <div class="overflow-x-auto my-4">
+      <table class="min-w-full text-sm text-gray-300">
+        <thead>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left"></th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">10<br>2</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">11<br>2</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">12<br>2</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">13<br>2</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">14<br>2</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">15<br>2</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">16<br>2</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">17<br>2</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">18<br>2</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">19<br>2</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">20<br>2</th>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Groth16</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0.17</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0.26</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0.46</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0.85</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">1.5</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">2.8</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">5.4</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">10.1</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">23.2</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">44.7</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">76.2</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Hyrax</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">1.2</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">1.7</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">2.8</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">4.1</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">7.2</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">13.9</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">22.5</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">44.6</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">90</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">181</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">447</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Ligero</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0.2</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0.3</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0.6</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">1.2</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">2.3</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">3.4</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">6.7</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">13.7</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">27.2</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">56.3</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">112</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Ligero-heuristic</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0.16</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0.3</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0.6</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">1.3</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">2.4</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">3.5</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">6.6</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">13</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">25</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">51.3</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">101</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Aurora</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0.7</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">1.2</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">2.5</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">4.6</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">9</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">17.3</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">36</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">69</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">140</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">282</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">688</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Aurora-heuristic</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0.4</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0.7</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">1.4</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">3.2</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">5.8</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">12.2</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">24.8</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">52.2</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">108</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">224</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">509</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Fractal</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">1</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">1.8</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">3.6</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">6.7</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">15</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">30</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">61</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">125</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">337</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">&ndash;</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">&ndash;</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Fractal-heuristic</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0.8</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">1.5</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">3</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">6.5</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">14</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">29</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">60</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">125</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">342</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">&ndash;</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">&ndash;</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">SpartanNIZK</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0.02</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0.03</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0.04</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0.06</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0.1</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0.17</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0.33</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0.57</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">1.1</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">2.14</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">4.5</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">SpartanSNARK</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0.07</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0.13</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0.21</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0.39</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0.79</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">1.3</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">2.6</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">4.9</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">9.2</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">18.5</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">36.3</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p class="text-gray-300">FIGURE 7&mdash;Prover's performance (in seconds) for varying R1CS instance sizes under different schemes.</p>
+
+    <p class="text-gray-300"></p>
+
+    <div class="overflow-x-auto my-4">
+      <table class="min-w-full text-sm text-gray-300">
+        <thead>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left"></th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">10<br>2</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">11<br>2</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">12<br>2</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">13<br>2</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">14<br>2</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">15<br>2</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">16<br>2</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">17<br>2</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">18<br>2</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">19<br>2</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">20<br>2</th>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Hyrax</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">13.7</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">15.7</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">16.8</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">19.9</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">21</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">26.3</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">27.5</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">37</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">38.2</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">56.4</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">57.5</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Ligero</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">546</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">628</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">1M</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">1.2M</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">2M</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">3M</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">5M</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">5M</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">10M</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">10M</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">20M</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Ligero-heuristic</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">559</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">620</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">1M</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">1.1M</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">2M</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">3M</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">5M</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">5M</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">10M</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">10M</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">20M</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Aurora</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">447</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">510</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">610</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">717</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">810</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">931</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">1M</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">1.1M</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">1.3M</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">1.5M</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">1.6M</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Aurora-heuristic</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">53</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">58</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">70</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">75</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">82</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">95</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">101</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">111</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">121</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">129</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">141</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Fractal</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">1.1M</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">1.2M</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">1.4M</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">1.5M</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">1.7M</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">1.8M</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">2M</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">2.1M</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">2.3M</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">&ndash;</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">&ndash;</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Fractal-heuristic</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">125</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">136</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">148</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">163</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">177</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">189</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">206</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">219</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">234</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">&ndash;</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">&ndash;</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">SpartanNIZK</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">9.3</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">10</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">11.7</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">12.5</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">15.2</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">16</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">20.7</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">21.5</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">30.3</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">31.1</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">48</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">SpartanSNARK</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">32</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">37</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">41.7</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">48</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">54</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">63</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">71.6</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">85</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">98</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">120</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">142</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p class="text-gray-300">FIGURE 8&mdash;Proof sizes in KBs for various zkSNARKs. Entries with &quot;M&quot; are in megabytes. The proof sizes under Groth16 <a href="#page-37-11">[64]</a> is 128 bytes for all instance sizes.</p>
+
+    <p class="text-gray-300">Spartan offers the fastest verifier. Specifically, SpartanSNARK's verifier is 3.6&times; faster than Fractal (at the largest instance size Fractal can run), and at 2 <sup>20</sup> constraints, it is 1326&times; faster than Aurora, 383&times; faster than Ligero, and 80&times; faster than Hyrax. This type of performance is expected because Aurora, Ligero, and Hyrax incur linear costs for the verifier whereas SpartanSNARK (and Fractal) incur sub-linear verification costs due to the use of computation commitments, which requires preprocessing the non-<em>io</em> component of an R1CS instance (we quantify the costs of that process below). Among proof-succinct NIZKs, SpartanNIZK is 22&times; faster than Hyrax, 363&times; faster than Aurora, and 105&times; faster than Ligero at 2<sup>20</sup> constraints.</p>
+
+    <p class="text-gray-300">Finally, note that SpartanSNARK beats SpartanNIZK for verification costs at &asymp;2 17 constraints since the former incurs <em>O</em>( &radic; <em>n</em>) costs whereas the latter incurs <em>O</em>(<em>n</em>) costs, where <em>n</em> is the size of the R1CS instance.</p>
+
+    <p class="text-gray-300">Encoder. Figure <a href="#page-34-10">10</a> depicts the cost to the verifier to preprocess an R1CS instance (without the <em>io</em> component) under SpartanSNARK, Fractal <a href="#page-36-17">[46]</a>, and Groth16 <a href="#page-37-11">[64]</a>. We do not depict other baselines because they do not require any preprocessing. SpartanSNARK's encoder is up to 52&times; faster than Fractal's encoder and about 4.7&times; faster than the trusted setup for Groth16 at the largest instance sizes.</p>
+
+    <p class="text-gray-300"></p>
+
+    <div class="overflow-x-auto my-4">
+      <table class="min-w-full text-sm text-gray-300">
+        <thead>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left"></th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">10<br>2</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">11<br>2</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">12<br>2</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">13<br>2</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">14<br>2</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">15<br>2</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">16<br>2</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">17<br>2</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">18<br>2</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">19<br>2</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">20<br>2</th>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Hyrax</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">206</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">231</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">253</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">257</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">331</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">473</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">594</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">926</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">1.6s</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">3.1s</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">8.1s</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Ligero</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">52</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">100</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">183</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">398</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">823</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">1.2s</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">2.2s</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">4.8s</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">9.5s</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">19s</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">38.5s</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Ligero-heuristic</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">53</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">99</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">176</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">446</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">822</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">1.2s</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">2.3s</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">4.3s</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">8.3s</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">16.6s</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">34.6s</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Aurora</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">221</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">351</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">694</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">1.1s</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">2.1s</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">4.1s</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">8.3s</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">14.7s</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">30s</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">56s</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">133s</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Aurora-heuristic</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">16</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">25</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">47</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">86</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">166</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">359</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">597</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">1.2s</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">2.4s</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">5.3s</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">10s</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Fractal</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">147</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">138</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">165</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">172</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">174</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">195</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">195</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">198</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">204</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">&ndash;</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">&ndash;</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Fractal-heuristic</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">11</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">8.5</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">10</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">13</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">14</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">16</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">14</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">15</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">16</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">&ndash;</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">&ndash;</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">SpartanNIZK</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">5</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">6</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">7.4</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">9.2</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">12.4</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">17.5</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">28</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">49</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">88.4</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">188.9</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">366</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">SpartanSNARK</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">9.6</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">11.4</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">13.9</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">16.4</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">21</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">25</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">34.3</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">42</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">55.9</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">70.8</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">100.3</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p class="text-gray-300">FIGURE 9&mdash;Verifier's performance (in ms) under different schemes. Entries with &quot;s&quot; are in seconds. The verifier under Groth16 <a href="#page-37-11">[64]</a> takes &asymp;2 ms at all instance sizes.</p>
+
+    <p class="text-gray-300"></p>
+
+    <div class="overflow-x-auto my-4">
+      <table class="min-w-full text-sm text-gray-300">
+        <thead>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left"></th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">10<br>2</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">11<br>2</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">12<br>2</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">13<br>2</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">14<br>2</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">15<br>2</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">16<br>2</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">17<br>2</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">18<br>2</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">19<br>2</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">20<br>2</th>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Groth16</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0.13</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0.23</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0.4</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0.75</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">1.5</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">2.8</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">5.3</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">10.9</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">21.4</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">48.4</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">71.9</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Fractal</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0.3</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0.6</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">1.3</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">2.6</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">6</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">12.7</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">26.8</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">56</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">120</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">389</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">&ndash;</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Fractal-heuristic</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0.3</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0.6</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">1.2</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">2.6</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">5.9</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">12.5</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">26.1</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">55</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">119</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">358</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">&ndash;</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">SpartanSNARK</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0.04</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0.06</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0.12</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0.19</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0.4</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0.7</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">1.4</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">2.2</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">4.5</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">7.4</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">15.1</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p class="text-gray-300">FIGURE 10&mdash;Encoder's performance (in seconds) for varying R1CS instance sizes under different schemes. For Groth16 <a href="#page-37-11">[64]</a>, we depict the cost of trusted setup, which preprocesses a given R1CS instance to generate parameters for the prover and the verifier. For Spartan and Fractal, the preprocessing is a public computation.</p>
+
+    </section>
+
+    <section id="acknowledgements" class="mb-10">
+      <h2 class="text-2xl font-bold">Acknowledgments</h2>
+
+    <p class="text-gray-300">Comments from Sebastian Angel, Melissa Chase, Hao Chen, Ben Fisch, Esha Ghosh, Abhiram Kothapalli, Satya Lokam, Bryan Parno, Ioanna Tzialla, Ramarathnam Venkatesan, and the CRYPTO 2020 reviewers helped improve this paper. Special thanks to Justin Thaler, Riad Wahby, and Michael Walfish for their detailed attention and thorough comments, which helped clarify several aspects of this work, and to Jonathan Lee for insightful discussions on various topics covered in this work. We thank Henry de Valence for help with curve25519-dalek.</p>
+
+    </section>
+
+    <section id="references" class="mb-10">
+      <h2 class="text-2xl font-bold">References</h2>
+
+    <ul class="space-y-2 text-gray-400 text-sm list-none">
+      <li><p class="text-gray-300">[1] Ethereum Roadmap. ZK-Rollups.</p>
+
+    <ul class="space-y-2 text-gray-400 text-sm list-none">
+      <li>https://docs.ethhub.<a href="https://docs.ethhub.io/ethereum-roadmap/layer-2-scaling/zk-rollups/" target="_blank" rel="noopener noreferrer">io/ethereum-roadmap/layer-2-scaling/zk-rollups/</a>.</li>
+    </ul></li>
+      <li><p class="text-gray-300">[2] Merlin: composable proof transcripts for public-coin arguments of knowledge. <a href="https://docs.rs/merlin/" target="_blank" rel="noopener noreferrer">https://docs</a>.rs/merlin/.</p></li>
+      <li><p class="text-gray-300">[3] A pure-Rust implementation of group operations on Ristretto and Curve25519. https://github.<a href="https://github.com/dalek-cryptography/curve25519-dalek" target="_blank" rel="noopener noreferrer">com/dalek-cryptography/curve25519-dalek</a>.</p></li>
+      <li><p class="text-gray-300">[4] The Ristretto group. <a href="https://ristretto.group/" target="_blank" rel="noopener noreferrer">https://ristretto</a>.group/.</p></li>
+      <li><p class="text-gray-300">[5] Spartan: High-speed zkSNARKs without trusted setup. https://github.<a href="https://github.com/Microsoft/Spartan" target="_blank" rel="noopener noreferrer">com/Microsoft/Spartan</a>.</p></li>
+      <li><p class="text-gray-300">[6] S. Ames, C. Hazay, Y. Ishai, and M. Venkitasubramaniam. Ligero: Lightweight sublinear arguments without a trusted setup. In <em>CCS</em>, 2017.</p></li>
+      <li><p class="text-gray-300">[7] A. Arasu, K. Eguro, R. Kaushik, D. Kossmann, P. Meng, V. Pandey, and R. Ramamurthy. Concerto: A high concurrency key-value store with integrity. In <em>SIGMOD</em>, 2017.</p></li>
+      <li><p class="text-gray-300">[8] S. Arora, C. Lund, R. Motwani, M. Sudan, and M. Szegedy. Proof verification and the hardness of approximation problems. <em>J. ACM</em>, 45(3), May 1998.</p></li>
+      <li><p class="text-gray-300">[9] S. Arora and S. Safra. Probabilistic checking of proofs: A new characterization of NP. <em>J. ACM</em>, 45(1):70&ndash;122, Jan. 1998.</p></li>
+      <li><p class="text-gray-300">[10] S. Arora and M. Sudan. Improved low-degree testing and its applications. <em>Combinatorica</em>, 23(3):365&ndash;426, 2003.</p></li>
+      <li><p class="text-gray-300">[11] L. Babai. Trading group theory for randomness. In <em>STOC</em>, pages 421&ndash;429, 1985.</p></li>
+      <li><p class="text-gray-300">[12] L. Babai, L. Fortnow, L. A. Levin, and M. Szegedy. Checking computations in polylogarithmic time. In <em>STOC</em>, 1991.</p></li>
+      <li><p class="text-gray-300">[13] L. Babai, L. Fortnow, and C. Lund. Non-deterministic exponential time has two-prover interactive protocols. <em>Computational Complexity</em>, 2(4), Dec. 1992.</p></li>
+      <li><p class="text-gray-300">[14] M. Ben-Or, O. Goldreich, S. Goldwasser, J. H&aring;stad, J. Kilian, S. Micali, and P. Rogaway. Everything provable is provable in zero-knowledge. In <em>CRYPTO</em>, pages 37&ndash;56, 1988.</p></li>
+      <li><p class="text-gray-300">[15] E. Ben-Sasson, I. Bentov, Y. Horesh, and M. Riabzev. Scalable, transparent, and post-quantum secure computational integrity. ePrint Report 2018/046, 2018.</p></li>
+      <li><p class="text-gray-300">[16] E. Ben-Sasson, D. Carmon, Y. Ishai, S. Kopparty, and S. Saraf. Proximity gaps for reed-solomon codes. Cryptology ePrint Archive, Report 2020/654, 2020.</p></li>
+      <li><p class="text-gray-300">[17] E. Ben-Sasson, A. Chiesa, C. Garman, M. Green, I. Miers, E. Tromer, and M. Virza. Zerocash: Decentralized anonymous payments from Bitcoin. In <em>S&amp;P</em>, 2014.</p></li>
+      <li><p class="text-gray-300">[18] E. Ben-Sasson, A. Chiesa, D. Genkin, and E. Tromer. Fast reductions from RAMs to delegatable succinct constraint satisfaction problems: Extended abstract. In <em>ITCS</em>, 2013.</p></li>
+      <li><p class="text-gray-300">[19] E. Ben-Sasson, A. Chiesa, D. Genkin, and E. Tromer. On the concrete efficiency of probabilistically-checkable proofs. In <em>STOC</em>, pages 585&ndash;594, 2013.</p></li>
+      <li><p class="text-gray-300">[20] E. Ben-Sasson, A. Chiesa, D. Genkin, E. Tromer, and M. Virza. SNARKs for C: Verifying program executions succinctly and in zero knowledge. In <em>CRYPTO</em>, Aug. 2013.</p></li>
+      <li><p class="text-gray-300">[21] E. Ben-Sasson, A. Chiesa, M. Riabzev, N. Spooner, M. Virza, and N. P. Ward. Aurora: Transparent succinct arguments for R1CS. In <em>EUROCRYPT</em>, 2019.</p></li>
+      <li><p class="text-gray-300">[22] E. Ben-Sasson, A. Chiesa, and N. Spooner. Interactive Oracle Proofs. In <em>TCC</em>, 2016.</p></li>
+      <li><p class="text-gray-300">[23] E. Ben-Sasson, A. Chiesa, E. Tromer, and M. Virza. Scalable zero knowledge via cycles of elliptic curves. In <em>CRYPTO</em>, 2014.</p></li>
+      <li><p class="text-gray-300">[24] E. Ben-Sasson, A. Chiesa, E. Tromer, and M. Virza. Succinct non-interactive zero knowledge for a von Neumann architecture. In <em>USENIX Security</em>, 2014.</p></li>
+      <li><p class="text-gray-300">[25] E. Ben-Sasson, O. Goldreich, P. Harsha, M. Sudan, and S. Vadhan. Short PCPs verifiable in polylogarithmic time. In <em>Computational Complexity</em>, 2005.</p></li>
+      <li><p class="text-gray-300">[26] E. Ben-Sasson and M. Sudan. Simple PCPs with poly-log rate and query complexity. In <em>STOC</em>, pages 266&ndash;275, 2005.</p></li>
+      <li><p class="text-gray-300">[27] E. Ben-Sasson and M. Sudan. Short PCPs with polylog query complexity. <em>SIAM J. Comput.</em>, 38(2):551&ndash;607, May 2008.</p></li>
+      <li><p class="text-gray-300">[28] N. Bitansky, R. Canetti, A. Chiesa, and E. Tromer. From extractable collision resistance to succinct non-interactive arguments of knowledge, and back again. In <em>ITCS</em>, 2012.</p></li>
+      <li><p class="text-gray-300">[29] N. Bitansky and A. Chiesa. Succinct arguments from multi-prover interactive proofs and their efficiency benefits. In <em>CRYPTO</em>, 2012.</p></li>
+      <li><p class="text-gray-300">[30] N. Bitansky, A. Chiesa, Y. Ishai, O. Paneth, and R. Ostrovsky. Succinct non-interactive arguments via linear interactive proofs. In <em>TCC</em>, 2013.</p></li>
+      <li><p class="text-gray-300">[31] M. Blum, W. Evans, P. Gemmell, S. Kannan, and M. Naor. Checking the correctness of memories. In <em>FOCS</em>, 1991.</p></li>
+      <li><p class="text-gray-300">[32] A. J. Blumberg, J. Thaler, V. Vu, and M. Walfish. Verifiable computation using multiple provers. ePrint Report 2014/846, 2014.</p></li>
+      <li><p class="text-gray-300">[33] D. Boneh, E. Boyle, H. Corrigan-Gibbs, N. Gilboa, and Y. Ishai. Zero-knowledge proofs on secret-shared data via fully linear PCPs. ePrint Report 2019/188, 2019.</p></li>
+      <li><p class="text-gray-300">[34] J. Bootle, A. Cerulli, P. Chaidos, J. Groth, and C. Petit. Efficient zero-knowledge arguments for arithmetic circuits in the discrete log setting. In <em>EUROCRYPT</em>, 2016.</p></li>
+      <li><p class="text-gray-300">[35] S. Bowe. A BLS12-381 implementation. https://github.<a href="https://github.com/zkcrypto/bls12_381" target="_blank" rel="noopener noreferrer">com/zkcrypto/bls12\\_381</a>.</p></li>
+      <li><p class="text-gray-300">[36] S. Bowe, A. Chiesa, M. Green, I. Miers, P. Mishra, and H. Wu. Zexe: Enabling</p></li>
+      <li><p class="text-gray-300">decentralized private computation. ePrint Report 2018/962, 2018.</p></li>
+      <li><p class="text-gray-300">[37] G. Brassard, D. Chaum, and C. Cr&eacute;peau. Minimum disclosure proofs of knowledge. <em>J. Comput. Syst. Sci.</em>, 37(2):156&ndash;189, Oct. 1988.</p></li>
+      <li><p class="text-gray-300">[38] B. Braun, A. J. Feldman, Z. Ren, S. Setty, A. J. Blumberg, and M. Walfish. Verifying computations with state. In <em>SOSP</em>, 2013.</p></li>
+      <li><p class="text-gray-300">[39] B. Bunz, B. Fisch, and A. Szepieniec. Transparent SNARKs from DARK compilers. ePrint Report 2019/1229, 2019.</p></li>
+      <li><p class="text-gray-300">[40] V. Buterin. On-chain scaling to potentially 500 tx/sec through mass tx validation. https://ethresear.<a href="https://ethresear.ch/t/on-chain-scaling-to-potentially-500-tx-sec-through-mass-tx-validation/3477" target="_blank" rel="noopener noreferrer">ch/t/on-chain-scaling-to-potentially-500-tx-sec</a><a href="https://ethresear.ch/t/on-chain-scaling-to-potentially-500-tx-sec-through-mass-tx-validation/3477" target="_blank" rel="noopener noreferrer">through-mass-tx-validation/3477</a>, Sept. 2018.</p></li>
+      <li><p class="text-gray-300">[41] V. Buterin. The dawn of hybrid layer 2 protocols. https://vitalik.<a href="https://vitalik.ca/general/2019/08/28/hybrid_layer_2.html" target="_blank" rel="noopener noreferrer">ca/general/2019/08/28/hybrid\\_layer\\_2</a>.html, Aug. 2019.</p></li>
+      <li><p class="text-gray-300">[42] B. B&uuml;nz, J. Bootle, D. Boneh, A. Poelstra, P. Wuille, and G. Maxwell. Bulletproofs: Short proofs for confidential transactions and more. In <em>S&amp;P</em>, 2018.</p></li>
+      <li><p class="text-gray-300">[43] M. Campanelli, D. Fiore, and A. Querol. LegoSNARK: modular design and composition of succinct zero-knowledge proofs. ePrint Report 2019/142, 2019.</p></li>
+      <li><p class="text-gray-300">[44] R. Canetti, B. Riva, and G. N. Rothblum. Two protocols for delegation of computation. In <em>ICITS</em>, pages 37&ndash;61, 2012.</p></li>
+      <li><p class="text-gray-300">[45] A. Chiesa, M. A. Forbes, and N. Spooner. A zero knowledge sumcheck and its applications. <em>CoRR</em>, abs/1704.02086, 2017.</p></li>
+      <li><p class="text-gray-300">[46] A. Chiesa, D. Ojha, and N. Spooner. Fractal: Post-quantum and transparent recursive proofs from holography. ePrint Report 2019/1076, 2019.</p></li>
+      <li><p class="text-gray-300">[47] D. Clarke, S. Devadas, M. V. Dijk, B. Gassend, G. Edward, and S. Mit. Incremental multiset hash functions and their application to memory integrity checking. In <em>ASIACRYPT</em>, 2003.</p></li>
+      <li><p class="text-gray-300">[48] G. Cormode, M. Mitzenmacher, and J. Thaler. Practical verified computation with streaming interactive proofs. In <em>ITCS</em>, 2012.</p></li>
+      <li><p class="text-gray-300">[49] C. Costello, C. Fournet, J. Howell, M. Kohlweiss, B. Kreuter, M. Naehrig, B. Parno, and S. Zahur. Geppetto: Versatile verifiable computation. In <em>S&amp;P</em>, May 2015.</p></li>
+      <li><p class="text-gray-300">[50] R. Cramer and I. Damg&aring;rd. Zero-knowledge proofs for finite field arithmetic, or: Can zero-knowledge be for free? In <em>CRYPTO</em>, pages 424&ndash;441, 1998.</p></li>
+      <li><p class="text-gray-300">[51] A. Delignat-Lavaud, C. Fournet, M. Kohlweiss, and B. Parno. Cinderella: Turning shabby X.509 certificates into elegant anonymous credentials with the magic of verifiable computation. In <em>S&amp;P</em>, 2016.</p></li>
+      <li><p class="text-gray-300">[52] I. Dinur. The PCP theorem by gap amplification. <em>J. ACM</em>, 54(3), June 2007.</p></li>
+      <li><p class="text-gray-300">[53] C. Dwork, M. Naor, G. N. Rothblum, and V. Vaikuntanathan. How efficient can memory checking be? In <em>TCC</em>, 2009.</p></li>
+      <li><p class="text-gray-300">[54] U. Feige, S. Goldwasser, L. Lov&aacute;sz, S. Safra, and M. Szegedy. Interactive proofs and the hardness of approximating cliques. <em>J. ACM</em>, 43(2):268&ndash;292, Mar. 1996.</p></li>
+      <li><p class="text-gray-300">[55] A. Fiat and A. Shamir. How to prove yourself: Practical solutions to identification and signature problems. In <em>CRYPTO</em>, pages 186&ndash;194, 1986.</p></li>
+      <li><p class="text-gray-300">[56] D. Fiore, C. Fournet, E. Ghosh, M. Kohlweiss, O. Ohrimenko, and B. Parno. Hash first, argue later: Adaptive verifiable computations on outsourced data. In <em>CCS</em>, 2016.</p></li>
+      <li><p class="text-gray-300">[57] R. Gennaro, C. Gentry, and B. Parno. Non-interactive verifiable computing: Outsourcing computation to untrusted workers. In <em>CRYPTO</em>, 2010.</p></li>
+      <li><p class="text-gray-300">[58] R. Gennaro, C. Gentry, B. Parno, and M. Raykova. Quadratic span programs and succinct NIZKs without PCPs. In <em>EUROCRYPT</em>, 2013.</p></li>
+      <li><p class="text-gray-300">[59] C. Gentry. <em>A fully homomorphic encryption scheme</em>. PhD thesis, Stanford University, 2009.</p></li>
+      <li><p class="text-gray-300">[60] C. Gentry and D. Wichs. Separating succinct non-interactive arguments from all falsifiable assumptions. In <em>STOC</em>, pages 99&ndash;108, 2011.</p></li>
+      <li><p class="text-gray-300">[61] S. Goldwasser, Y. T. Kalai, and G. N. Rothblum. Delegating computation: Interactive proofs for muggles. In <em>STOC</em>, 2008.</p></li>
+      <li><p class="text-gray-300">[62] S. Goldwasser, S. Micali, and C. Rackoff. The knowledge complexity of interactive proof-systems. In <em>STOC</em>, 1985.</p></li>
+      <li><p class="text-gray-300">[63] J. Groth. Short pairing-based non-interactive zero-knowledge arguments. In <em>ASIACRYPT</em>, 2010.</p></li>
+      <li><p class="text-gray-300">[64] J. Groth. On the size of pairing-based non-interactive arguments. In <em>EUROCRYPT</em>, 2016.</p></li>
+      <li><p class="text-gray-300">[65] J. Groth and Y. Ishai. Sub-linear zero-knowledge argument for correctness of a shuffle. In <em>EUROCRYPT</em>, 2008.</p></li>
+      <li><p class="text-gray-300">[66] J. Groth, M. Kohlweiss, M. Maller, S. Meiklejohn, and I. Miers. Updatable and universal common reference strings with applications to zk-SNARKs. In <em>CRYPTO</em>, 2018.</p></li>
+      <li><p class="text-gray-300">[67] M. Hamburg. Decaf: Eliminating cofactors through point compression. In <em>CRYPTO</em>, 2015.</p></li>
+      <li><p class="text-gray-300">[68] J. H&aring;stad. Some optimal inapproximability results. In <em>STOC</em>, pages 1&ndash;10, 1997.</p></li>
+      <li><p class="text-gray-300">[69] Y. Ishai, E. Kushilevitz, and R. Ostrovsky. Efficient arguments without short PCPs. In <em>Computational Complexity</em>, 2007.</p></li>
+      <li><p class="text-gray-300">[70] Y. Ishai, E. Kushilevitz, R. Ostrovsky, and A. Sahai. Zero-knowledge from secure multiparty computation. In <em>STOC</em>, pages 21&ndash;30, 2007.</p></li>
+      <li><p class="text-gray-300">[71] Y. T. Kalai. Delegating computation: A new perspective. A workshop at STOC 2017 on Probabilistically checkable and interactive proofs (PCP/IP): Between theory and practice, June 2017.</p></li>
+      <li><p class="text-gray-300">[72] A. Kate, G. M. Zaverucha, and I. Goldberg. Constant-size commitments to polynomials and their applications. In <em>ASIACRYPT</em>, pages 177&ndash;194, 2010.</p></li>
+      <li><p class="text-gray-300">[73] J. Kilian. A note on efficient zero-knowledge proofs and arguments (extended abstract). In <em>STOC</em>, 1992.</p></li>
+      <li><p class="text-gray-300">[74] A. Kosba, A. Miller, E. Shi, Z. Wen, and C. Papamanthou. Hawk: The blockchain model of cryptography and privacy-preserving smart contracts. In <em>S&amp;P</em>, 2016.</p></li>
+      <li><p class="text-gray-300">[75] A. Kosba, C. Papamanthou, and E. Shi. xJsnark: A framework for efficient verifiable computation. In <em>S&amp;P</em>, 2018.</p></li>
+      <li><p class="text-gray-300">[76] J. Lee, K. Nikitin, and S. Setty. Replicated state machines without replicated execution. In <em>S&amp;P</em>, 2020.</p></li>
+      <li><p class="text-gray-300">[77] libfennel. Hyrax reference implementation. https://github.<a href="https://github.com/hyraxZK/fennel" target="_blank" rel="noopener noreferrer">com/hyraxZK/fennel</a>.</p></li>
+      <li><p class="text-gray-300">[78] libiop. A C++ library for IOP-based zkSNARK. https://github.<a href="https://github.com/scipr-lab/libiop" target="_blank" rel="noopener noreferrer">com/scipr-lab/libiop</a>.</p></li>
+      <li><p class="text-gray-300">[79] libsnark. A C++ library for zkSNARK proofs. https://github.<a href="https://github.com/scipr-lab/libsnark" target="_blank" rel="noopener noreferrer">com/scipr-lab/libsnark</a>.</p></li>
+      <li><p class="text-gray-300">[80] H. Lipmaa. Progression-free sets and sublinear pairing-based non-interactive zero-knowledge arguments. In <em>TCC</em>, 2012.</p></li>
+      <li><p class="text-gray-300">[81] C. Lund, L. Fortnow, H. Karloff, and N. Nisan. Algebraic methods for interactive proof systems. In <em>FOCS</em>, Oct. 1990.</p></li>
+      <li><p class="text-gray-300">[82] M. Maller, S. Bowe, M. Kohlweiss, and S. Meiklejohn. Sonic: Zero-knowledge SNARKs from linear-size universal and updateable structured reference strings. ePrint Report 2019/099, 2019.</p></li>
+      <li><p class="text-gray-300">[83] R. C. Merkle. A digital signature based on a conventional encryption function. In <em>CRYPTO</em>, 1988.</p></li>
+      <li><p class="text-gray-300">[84] S. Micali. CS proofs. In <em>FOCS</em>, 1994.</p></li>
+      <li><p class="text-gray-300">[85] D. Moshkovitz and R. Raz. Sub-constant error low degree test of almost-linear size. <em>SIAM J. Comput.</em>, 38(1):140&ndash;180, 2008.</p></li>
+      <li><p class="text-gray-300">[86] A. Ozdemir, R. S. Wahby, and D. Boneh. Scaling verifiable computation using efficient set accumulators. Cryptology ePrint Archive, Report 2019/1494, 2019.</p></li>
+      <li><p class="text-gray-300">[87] C. Papamanthou, E. Shi, and R. Tamassia. Signatures of correct computation. In <em>TCC</em>,</p></li>
+      <li><ul class="space-y-2 text-gray-400 text-sm list-none">
+      <li></li>
+    </ul></li>
+      <li><p class="text-gray-300">[88] B. Parno, C. Gentry, J. Howell, and M. Raykova. Pinocchio: Nearly practical verifiable computation. In <em>S&amp;P</em>, May 2013.</p></li>
+      <li><p class="text-gray-300">[89] O. Reingold, G. N. Rothblum, and R. D. Rothblum. Constant-round interactive proofs for delegating computation. In <em>STOC</em>, pages 49&ndash;62, 2016.</p></li>
+      <li><p class="text-gray-300">[90] G. Rothblum. <em>Delegating Computation Reliably: Paradigms and Constructions</em>. PhD thesis, MIT, 2009.</p></li>
+      <li><p class="text-gray-300">[91] S. Setty, S. Angel, T. Gupta, and J. Lee. Proving the correct execution of concurrent services in zero-knowledge. In <em>OSDI</em>, Oct. 2018.</p></li>
+      <li><p class="text-gray-300">[92] S. Setty, A. J. Blumberg, and M. Walfish. Toward practical and unconditional verification of remote computations. In <em>HotOS</em>, May 2011.</p></li>
+      <li><p class="text-gray-300">[93] S. Setty, B. Braun, V. Vu, A. J. Blumberg, B. Parno, and M. Walfish. Resolving the conflict between generality and plausibility in verified computation. In <em>EuroSys</em>, Apr. 2013.</p></li>
+      <li><p class="text-gray-300">[94] S. Setty, R. McPherson, A. J. Blumberg, and M. Walfish. Making argument systems for outsourced computation practical (sometimes). In <em>NDSS</em>, Feb. 2012.</p></li>
+      <li><p class="text-gray-300">[95] S. Setty, V. Vu, N. Panpalia, B. Braun, A. J. Blumberg, and M. Walfish. Taking proof-based verified computation a few steps closer to practicality. In <em>USENIX Security</em>, Aug. 2012.</p></li>
+      <li><p class="text-gray-300">[96] J. Thaler. Time-optimal interactive proofs for circuit evaluation. In <em>CRYPTO</em>, 2013.</p></li>
+      <li><p class="text-gray-300">[97] J. Thaler. A state of the art MIP for circuit satisfiability (lecture 14, &quot;COSC 544 &ndash; probabilistic proof systems&quot;).</p>
+
+    <ul class="space-y-2 text-gray-400 text-sm list-none">
+      <li>http://people.cs.georgetown.<a href="http://people.cs.georgetown.edu/jthaler/SecondMIPLecture.pdf" target="_blank" rel="noopener noreferrer">edu/jthaler/SecondMIPLecture</a>.pdf, Oct. 2017.</li>
+    </ul></li>
+      <li><p class="text-gray-300">[98] J. Thaler, M. Roberts, M. Mitzenmacher, and H. Pfister. Verifiable computation with massively parallel interactive proofs. In <em>HotCloud</em>, 2012.</p></li>
+      <li><p class="text-gray-300">[99] V. Vu, S. Setty, A. J. Blumberg, and M. Walfish. A hybrid architecture for verifiable computation. In <em>S&amp;P</em>, 2013.</p></li>
+      <li><p class="text-gray-300">[100] R. S. Wahby, M. Howald, S. Garg, A. Shelat, and M. Walfish. Verifiable ASICs. In <em>S&amp;P</em>, 2016.</p></li>
+      <li><p class="text-gray-300">[101] R. S. Wahby, Y. Ji, A. J. Blumberg, A. Shelat, J. Thaler, M. Walfish, and T. Wies. Full accounting for verifiable outsourcing. In <em>CCS</em>, 2017.</p></li>
+      <li><p class="text-gray-300">[102] R. S. Wahby, S. Setty, Z. Ren, A. J. Blumberg, and M. Walfish. Efficient RAM and control flow in verifiable outsourced computation. In <em>NDSS</em>, 2015.</p></li>
+      <li><p class="text-gray-300">[103] R. S. Wahby, I. Tzialla, A. Shelat, J. Thaler, and M. Walfish. Doubly-efficient zkSNARKs without trusted setup. In <em>S&amp;P</em>, 2018.</p></li>
+      <li><p class="text-gray-300">[104] M. Walfish and A. J. Blumberg. Verifying computations without reexecuting them: From theoretical possibility to near practicality. <em>Commun. ACM</em>, 58(2), Jan. 2015.</p></li>
+      <li><p class="text-gray-300">[105] B. WhiteHat, A. Gluchowski, HarryR, Y. Fu, and P. Castonguay. Roll_up / roll_back snark side chain ~17000 tps. https://ethresear.<a href="https://ethresear.ch/t/roll-up-roll-back-snark-side-chain-17000-tps/3675" target="_blank" rel="noopener noreferrer">ch/t/roll-up-roll-back-snark</a><a href="https://ethresear.ch/t/roll-up-roll-back-snark-side-chain-17000-tps/3675" target="_blank" rel="noopener noreferrer">side-chain-17000-tps/3675</a>, Oct. 2018.</p></li>
+      <li><p class="text-gray-300">[106] T. Xie, J. Zhang, Y. Zhang, C. Papamanthou, and D. Song. Libra: Succinct zero-knowledge proofs with optimal prover computation. ePrint Report 2019/317, 2019.</p></li>
+      <li><p class="text-gray-300">[107] J. Zhang, T. Xie, Y. Zhang, and D. Song. Transparent polynomial delegation and its applications to zero knowledge proof. In <em>S&amp;P</em>, 2020.</p></li>
+      <li><p class="text-gray-300">[108] Y. Zhang, D. Genkin, J. Katz, D. Papadopoulos, and C. Papamanthou. vSQL: Verifying arbitrary SQL queries over dynamic outsourced databases. In <em>S&amp;P</em>, 2017.</p></li>
+      <li><p class="text-gray-300">[109] Y. Zhang, D. Genkin, J. Katz, D. Papadopoulos, and C. Papamanthou. A zero-knowledge version of vSQL. ePrint Report 2017/1146, 2017.</p></li>
+      <li><p class="text-gray-300">[110] Y. Zhang, D. Genkin, J. Katz, D. Papadopoulos, and C. Papamanthou. vRAM: Faster verifiable RAM with program-independent preprocessing. In <em>S&amp;P</em>, 2018.</p></li>
+    </ul>
+
+    </section>
+
+    <section id="app-a" class="mb-10">
+      <h2 class="text-2xl font-bold">A Proof of witness-extended emulation for the protocol in <a href="#page-17-0">&sect;5.1</a></h2>
+
+    <p class="text-gray-300">To simplify the proof, we define an information-theoretic protocol (which we denote as &#10216;P<em>IP</em>, V<em>IP</em>&#10217; and refer to it as <em>Spartan-core</em>) that is identical to the interactive argument in Section <a href="#page-17-0">5.1</a> except for the following:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>At step 1, instead of a commitment <sup>C</sup>, <sup>V</sup> receives <em><sup>w</sup></em><sup>e</sup> &prime; , which is a log <em>m</em>-variate multilinear polynomial, as an auxiliary input.</li>
+      <li>At steps 13 and 14, <sup>V</sup> simply evaluates <em><sup>v</sup></em> <sup>&larr;</sup> <em><sup>w</sup></em><sup>e</sup> &prime; (<em>rx</em>)</li>
+    </ul>
+
+    <p class="text-gray-300">Spartan-core is similar to the Gir++ doubly-efficient interactive proof, except that Spartan-core only invokes two instances of the sum-check protocol whereas Gir++ invokes <em>O</em>(<em>d</em>) sum-check instances for a depth-<em>d</em> circuit.</p>
+
+    <p class="text-gray-300">Lemma A.1. <em>For any non-satisfiable R1CS instance</em> x<em>, any PPT prover</em> P &lowast; <em>IP, and for all w</em>,<em>r</em> &isin; {0, 1} &lowast; <em>,</em> Pr{&#10216;P<sup>&lowast;</sup> <em>IP</em>(<em>w</em>), V<em>IP</em>(<em>r</em>)&#10217;(x) = 1} &le; (6 log <em>m</em> + 1)/|F |</p>
+
+    <p class="text-gray-300"><em>Proof.</em> If x is not satisfiable, then <em>Qio</em>(<em>t</em>) is not a zero-polynomial. By the Schwartz-Zippel lemma, <em>Qio</em>(<em>t</em>) = 0 for at most <em>d</em>/|F | values of <em>t</em> &isin; F <em>s</em> , where <em>d</em> is the degree of <em>Qio</em>. In our context, <em>d</em> = <em>s</em> = log <em>m</em>. There are two cases to consider.</p>
+
+    <p class="text-gray-300">First, if V chooses a &tau; &isin; F <em><sup>s</sup></em> where <em>Qio</em>(&tau; ) = 0, then the verifier in Spartan-Core may incorrectly output <em>b</em> = 1.</p>
+
+    <p class="text-gray-300">Second, If V chooses a &tau; &isin; F <em><sup>s</sup></em> where <em>Qio</em>(&tau; ) &#824;= 0, then a malicious prover begins with a false claim in the sum-check protocol. By the soundness of the sum-check protocol (<a href="#page-11-1">&sect;3</a> and a standard analysis of soundness error for a sequence of sum-checks <a href="#page-38-22">[90,</a> &sect;3.3.3]) and the soundness error of the random linear combination (lemma <a href="#page-18-0">5.1)</a>, the malicious prover succeeds with probability at most (&#8467;<sup>1</sup> &middot; &micro;<sup>1</sup> + &#8467;<sup>2</sup> &middot; &micro;<sup>2</sup> + 1)/|F |, where &micro;<sup>1</sup> = &micro;<sup>2</sup> = log <em>m</em>, &#8467;<sup>1</sup> = 3, &#8467;<sup>2</sup> = 2, and the probability is over V's randomness.</p>
+
+    <p class="text-gray-300">Applying a standard union bound establishes the desired result.</p>
+
+    <p class="text-gray-300">Theorem A.1. <em>Given an extractable polynomial commitment scheme for multilinear polynomials PC that satisfies witness-extended emulation for PC</em>.<em>Eval, the protocol in Section <a href="#page-17-0">5.1</a> has witness-extended emulation.</em></p>
+
+    <p class="text-gray-300"><em>Proof.</em> The proof is identical to Hyrax's except where their proof invokes properties of Gir++, we invoke properties of Spartan-core.</p>
+
+    </section>
+`;
+---
+
+<BaseLayout title="Spartan: Efficient and general-purpose zkSNARKs without trus... (2019/550)">
+  <article class="max-w-4xl mx-auto article-prose">
+    <nav class="mb-8">
+      <a href="/papers" class="text-blue-400 hover:text-blue-300">
+        &larr; Back to Papers
+      </a>
+    </nav>
+
+    <header class="mb-12">
+      <h1 class="text-3xl font-bold mb-4"
+        set:html={TITLE_HTML} />
+      <p class="text-gray-400 mb-2"
+        set:html={AUTHORS_HTML} />
+      <p class="text-gray-500 text-sm mb-4">
+        2019 &middot; eprint 2019/550
+      </p>
+      <div class="flex gap-4 text-sm">
+        <a
+          href={EPRINT_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          class="text-blue-400 hover:text-blue-300"
+        >
+          Paper (eprint) &rarr;
+        </a>
+      </div>
+      <PaperDisclaimer eprintUrl={EPRINT_URL} />
+      <p class="mt-1 text-xs text-gray-600">
+        Converted with: {CRAWLER} &middot; {CONVERTED_DATE}
+      </p>
+    </header>
+
+    <nav id="toc" class="mb-10 p-6 rounded-lg" style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06);">
+      <h2 class="text-lg font-bold mb-4">Table of Contents</h2>
+      <ol class="space-y-1 text-sm text-gray-300
+        list-decimal list-inside">
+        <li><a href="#abstract" class="hover:text-white">Abstract</a></li>
+        <li>
+          <a href="#sec-1" class="hover:text-white">Introduction</a>
+          <ol class="ml-6 mt-1 space-y-1 list-decimal
+            list-inside text-gray-400">
+            <li><a href="#sec-1.1" class="hover:text-white">Summary of contributions</a></li>
+            <li><a href="#sec-1.2" class="hover:text-white">Additional related work</a></li>
+          </ol>
+        </li>
+        <li>
+          <a href="#sec-2" class="hover:text-white">Preliminaries</a>
+          <ol class="ml-6 mt-1 space-y-1 list-decimal
+            list-inside text-gray-400">
+            <li><a href="#sec-2.1" class="hover:text-white">Problem instances in R1CS</a></li>
+            <li><a href="#sec-2.2" class="hover:text-white">Succinct interactive arguments of knowledge</a></li>
+            <li><a href="#sec-2.3" class="hover:text-white">Polynomials and low-degree extensions</a></li>
+            <li><a href="#sec-2.4" class="hover:text-white">A polynomial commitment scheme for multilinear polynomials</a></li>
+          </ol>
+        </li>
+        <li>
+          <a href="#sec-3" class="hover:text-white">The sum-check protocol: opportunities and challenges</a>
+          <ol class="ml-6 mt-1 space-y-1 list-decimal
+            list-inside text-gray-400">
+            <li><a href="#sec-3.1" class="hover:text-white">Challenges with using the sum-check protocol for succinct arguments</a></li>
+            <li><a href="#sec-3.2" class="hover:text-white">Prior solutions to solve the above problems (Spartan&#x27;s closely related works)</a></li>
+          </ol>
+        </li>
+        <li><a href="#sec-4" class="hover:text-white">An encoding of R1CS instances as low-degree polynomials</a></li>
+        <li>
+          <a href="#sec-5" class="hover:text-white">A family of NIZKs with succinct proofs for R1CS</a>
+          <ol class="ml-6 mt-1 space-y-1 list-decimal
+            list-inside text-gray-400">
+            <li><a href="#sec-5.1" class="hover:text-white">A new public-coin succinct interactive argument of knowledge</a></li>
+            <li><a href="#sec-5.2" class="hover:text-white">A family of NIZKs with succinct proofs for R1CS</a></li>
+          </ol>
+        </li>
+        <li><a href="#sec-6" class="hover:text-white">Computation commitments: zkSNARKs for R1CS from NIZK</a></li>
+        <li>
+          <a href="#sec-7" class="hover:text-white">The SPARK compiler</a>
+          <ol class="ml-6 mt-1 space-y-1 list-decimal
+            list-inside text-gray-400">
+            <li><a href="#sec-7.1" class="hover:text-white">SPARK-naive: A straw-man solution</a></li>
+            <li><a href="#sec-7.2" class="hover:text-white">Eliminating asymptotic overheads by leveraging memory checking</a></li>
+            <li><a href="#sec-7.2.1" class="hover:text-white">An O(n)-sized circuit for evaluating \widetilde&#123;M&#125;</a></li>
+            <li><a href="#sec-7.2.2" class="hover:text-white">Construction of a polynomial commitment scheme</a></li>
+            <li><a href="#sec-7.2.3" class="hover:text-white">Optimizations</a></li>
+          </ol>
+        </li>
+        <li><a href="#sec-8" class="hover:text-white">Implementation and optimizations</a></li>
+        <li>
+          <a href="#sec-9" class="hover:text-white">Experimental evaluation</a>
+          <ol class="ml-6 mt-1 space-y-1 list-decimal
+            list-inside text-gray-400">
+            <li><a href="#sec-9.1" class="hover:text-white">Metrics, methodology, and testbed</a></li>
+            <li><a href="#sec-9.2" class="hover:text-white">Performance results</a></li>
+          </ol>
+        </li>
+      </ol>
+      <p class="text-xs text-gray-500 mt-4 mb-1 font-semibold">
+        Appendices
+      </p>
+      <ol class="space-y-1 text-sm text-gray-400
+        list-[upper-alpha] list-inside">
+        <li><a href="#app-a" class="hover:text-white">Proof of witness-extended emulation for the protocol in &sect;5.1</a></li>
+      </ol>
+      <p class="text-xs text-gray-500 mt-4 mb-1 font-semibold">
+        Additional
+      </p>
+      <ul class="space-y-1 text-sm text-gray-400
+        list-disc list-inside">
+        <li><a href="#acknowledgements" class="hover:text-white">Acknowledgements</a></li>
+        <li><a href="#references" class="hover:text-white">References</a></li>
+      </ul>
+    </nav>
+
+
+    <Fragment set:html={CONTENT} />
+
+    <PaperHistory slug="spartan-efficient-and-general-purpose-zksnarks-without-2019" />
+  </article>
+</BaseLayout>

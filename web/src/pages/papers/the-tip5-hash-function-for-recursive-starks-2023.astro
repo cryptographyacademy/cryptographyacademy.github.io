@@ -1,0 +1,761 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import PaperDisclaimer from '../../components/PaperDisclaimer.astro';
+import PaperHistory from '../../components/PaperHistory.astro';
+
+const EPRINT_URL = 'https://eprint.iacr.org/2023/107';
+const CRAWLER = 'marker';
+const CONVERTED_DATE = '2026-02-16';
+const TITLE_HTML = 'The Tip5 Hash Function for Recursive STARKs';
+const AUTHORS_HTML = 'Alan Szepieniec, Alexander Lemmens, Jan Ferdinand Sauer, Bobbin Threadbare, Al-Kindi';
+
+const CONTENT = `    <section id="abstract" class="mb-10">
+      <h2 class="text-2xl font-bold">Abstract</h2>
+      <p class="text-gray-300">This paper specifies a new arithmetization-oriented hash function called Tip5. It uses the SHARK design strategy with low-degree power maps in combination with lookup tables, and is tailored to the field with $p=2^{64}-2^{32}+1$ elements.
+
+The context motivating this design is the recursive verification of STARKs. This context imposes particular design constraints, and therefore the hash function&#x27;s arithmetization is discussed at length.</p>
+      <p class="text-gray-300"><strong>Keywords:</strong> hash &middot; stark &middot; arithmetization-oriented &middot; zero-knowledge &middot; recursion</p>
+    </section>
+
+    <p class="text-gray-300">In the context of succinctly verifiable and zero-knowledge proof systems for arbitrary computation, standard hash functions such as SHA3 and Blake3 are disfavored due to their expensive arithmetizations. Specifically, the representation of these hash functions in terms of polynomials is sizeable, and induces a matching cost on the proof system that uses it. In this setting, arithmetizationoriented hash functions are preferred instead as these were designed with an efficient arithmetization in mind.</p>
+
+    <p class="text-gray-300">In the space of arithmetization-oriented hash functions, three design strategies stand out.</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>The Marvellous design strategy <a href="#page-20-0">[1]</a>, best known for its member Rescue-Prime <a href="#page-22-1">[25]</a>, introduced the idea of alternating S-box layers where even layers compute low-degree permutations in one direction and odd layers compute low-degree permutations in the opposite direction. As a result, a small number of rounds guarantees that the algebraic degree of the cipher is sufficiently high when attacked from any direction. Moreover, in the specific case of Rescue-Prime, two consecutive S-box layers can be folded together into one low-degree arithmetization. This folding technique yields essentially two rounds of the cipher for the price of one cycle in the arithmetic virtual machine. Since the publication of the Marvellous design strategy, there has been very little progress in cryptanalyzing Rescue and Rescue-Prime.</li>
+    </ol>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>The Hades design strategy [13], best known for its member Poseidon [12], introduces a distinction between full rounds and partial rounds. All rounds consist of a layer of S-boxes, a linear diffusion layer, and an injection of constants. What sets partial and full rounds apart is the number of S-boxes: in partial rounds this number is one, whereas in full rounds every state element is mapped by the S-box. The full rounds, located at the beginning and the end of the cipher, defend against statistical attacks. The large number of partial rounds in the middle defend against algebraic attacks by increasing the degree of polynomials describing the function.</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Reinforced Concrete [11] introduced the use of lookup tables in an otherwise arithmetization-oriented cipher. The lookup table can be evaluated efficiently on CPUs as well as proven efficiently in a zero-knowledge or succinctly verifiable proof system using Plookup [10] or techniques derived from there. Moreover, represented as polynomials over a finite field, non-trivial lookup tables have maximal degree. Therefore, the use of lookup tables provides a robust way to resist algebraic attacks including attacks relying on Gr&ouml;bner bases. The downside of this technique is that the lookup tables cannot be too large; that therefore the field elements must be decomposed into chunks which are then looked up; and that the prover must establish the correct decomposition and recomposition of these chunks. This process leads to an expensive arithmetization and does not generalize well to arbitrary fields.</li>
+    </ol></li>
+    </ul>
+
+    <p class="text-gray-300">This note proposes a new hash function. It uses the SHARK design strategy, on which Marvellous is based, of using full S-box layers interleaved with MDS matrices. The S-boxes come in two types. The first is built from a table lookup that computes the cube map in  <span class="math">\\mathbb{F}_{2^8+1}</span>  but offset by one. This function is fast to compute. In addition, its algebraic degree over  <span class="math">\\mathbb{F}_p</span>  is large, providing resistance against Gr&ouml;bner basis attacks. The second type is the regular forward  <span class="math">\\alpha</span> th power map found in Rescue and Poseidon, where  <span class="math">\\alpha</span>  is the smallest integer such that  <span class="math">\\gcd(\\alpha, p-1) = 1</span> . As this second type of S-boxes constitutes the majority in every S-box layer, they suffice to provide defense against statistical attacks through the wide-trail argument [8].</p>
+
+      <h3 id="sec-1.1" class="text-xl font-semibold mt-8">1.1 The Application: Recursive STARKs</h3>
+
+    <p class="text-gray-300">The hash function proposed here is designed not for a general purpose but specifically for integration into STARK [4] engines and specifically for the purpose of enabling the recursive proof of the correct execution of a STARK verifier. This application informs all design choices. The hash function may be used elsewhere, for instance in circuit-based SNARKs or MPC applications, but these alternative uses are not motivations for particular design choices.</p>
+
+    <p class="text-gray-300">For example: there are SNARKs that work for either model of computation, arithmetic circuits or state machines. Both types of SNARKs benefit from using arithmetization-oriented functions, but even so, a given function may be more supportive of the one or the other model. In particular, state machines work by applying a step function iteratively to a mutable state. The collection of these</p>
+
+    <p class="text-gray-300">states is called the trace and it is integral if it satisfies local constraints &ndash; namely, the step function was correctly computed between every consecutive pair. This step function is independent of the cycle. Hash functions defined in terms of different round functions are less conducive to this model of computation than hash functions with uniform round functions. <a href="#page-2-0">1</a></p>
+
+    <p class="text-gray-300">Another important consideration related to the chosen model of computation is the separation of the processor and the hasher into distinct functional units. Each functional unit has a different step function. Both units generate execution traces. Moreover, there is an argument that proves the correct relation between these two traces; it is not too dissimilar from a communication bus that allows the processor to send queries to the hash coprocessor and receive responses back. Asymptotically speaking, the prover's running time is dominated by computing NTTs (number theoretic transforms) on vectors whose length is proportional to the largest of all execution traces. For recursively proving the correct verification of a STARK proof, however, the workload in terms of computing hashes exceeds that of all other tasks combined. As a result, hash functions with short execution traces are preferable and can even be so at the expense of more registers.</p>
+
+    <p class="text-gray-300">The particular type of hashing that constitutes the bulk of the verifier's work is the verification of Merkle authentication paths. To this end, the hash function must support efficient two-to-one hashing. In the specific case of sponge-based hash functions, it is imperative that two-to-one hashing can be achieved with one absorbing step and one squeezing step &mdash; so that only one invocation of the permutation is needed. As a result, the sponge state must be sufficiently wide.</p>
+
+    <p class="text-gray-300">Based on these design constraints, we select Rescue-Prime <a href="#page-22-1">[25]</a> as the starting point even though Poseidon is about 4&times; faster on CPU in the given context <a href="#page-22-2">[27]</a>. Rescue-Prime's security against both algebraic and statistical attacks seems to grow with the state size, and so the relatively large minimum state width is compensated for with a relatively small number of (uniform) rounds.</p>
+
+      <h3 id="sec-1.2" class="text-xl font-semibold mt-8">1.2 What About Lookup Gates?</h3>
+
+    <p class="text-gray-300">While lookup tables were well-known and well-used in the construction of traditional ciphers, it was not until the advent of the Plookup technique <a href="#page-21-6">[9]</a> that the correct lookup could be proven in addition to executed. This technique presents an intriguing new tool in the arithmetization-oriented cipher designer's toolbox. Lookup tables are designed to break algebras; and so it should come as no surprise that there does not seem to be an efficient way to algebraically attack ciphers that use them. Moreover, lookup gates can typically be evaluated in only a handful of cycles on a modern CPU.</p>
+
+    <p class="text-gray-300">Despite Rescue's impeccable track record, algebraic attacks relying on Gr&uml;obner basis algorithms remain poorly understood. For most parameters, a Gr&uml;obner basis attack is the cheapest and so it is used to set the number of rounds. However,</p>
+
+    <p class="text-gray-300"><sup>1</sup> We make an exception for round-dependent round constants, which can either be stored in separate columns that could be precomputed, or arithmetized efficiently using the periodic interpolants of &sect; <a href="#page-13-0">4.5.</a></p>
+
+    <p class="text-gray-300">the inclusion of lookup gates promises to completely explode the complexity of a whole range of algebraic attacks including those involving Gr&uml;obner bases. As such, lookup gates can not only defend against as-yet-undiscovered attack strategies, but can also reduce the number of rounds needed for a target security level.</p>
+
+    <p class="text-gray-300">In theory, the NTT ought to be the prover's bottleneck because its complexity is asymptotically the largest. However, in practice, the prover's running time is dominated by the complexity of computing Merkle trees. Lookup gates promise to replace the computationally expensive alpha-inverse power maps used in Rescue by cheaper operations at no discernible cost to security. As a result, by switching to a hash function that has lookup gates rather than alpha-inverse power maps, the performance bottleneck may shift from building Merkle trees to NTT, where it ought to be.</p>
+
+    <p class="text-gray-300">The inclusion of lookup gates is not free. The lookup argument requires extra columns and constraints and the lookup table itself must be arithmetized as well. The key question raised by and studied in this article is therefore:</p>
+
+    <p class="text-gray-300">Does the performance improvement of a hash function with lookup gates compensate for its more complex arithmetization?</p>
+
+    <p class="text-gray-300">Jumping ahead, the answer is a definite &quot;yes&quot;. In the end, both factors affect the single metric of interest, which is the running time of the prover as it proves the correct execution of the verifier.</p>
+
+    <p class="text-gray-300">To support this claim, this article proposes a hash function making use of lookup gates in &sect; <a href="#page-4-0">2;</a> discusses implementation aspects related to fast CPUperformance in &sect; <a href="#page-6-0">3;</a> and presents arithmetization techniques of independent interest including a novel lookup argument in &sect; <a href="#page-8-0">4.</a></p>
+
+    <p class="text-gray-300">The quantum of qualification relativizing the above positive answer is the question of security. In order to make the comparison fair, both hash function candidates must offer comparable levels of security. The best we can do on this front is analyze the proposed hash function in the light of relevant attack strategies and argue that they all have an infeasible complexity. These attacks are discussed in &sect; <a href="#page-15-0">5.</a></p>
+
+    <p class="text-gray-300">Table 1: Summary of parameters.</p>
+
+    <div class="overflow-x-auto my-4">
+      <table class="min-w-full text-sm text-gray-300">
+        <thead>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">Parameter</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">Symbol</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">Value</th>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">field modulus</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">p</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">64 &minus;<br>32 + 1<br>2<br>2</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">number of rounds</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">N</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">5</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">state size</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">m</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">16</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">sponge rate</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">r</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">10</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">sponge capacity</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">c</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">6</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">digest length</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">d</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">5</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">power map exponent</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">&alpha;</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">7</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">number of split-and-lookups per round</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">s</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">4</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p class="text-gray-300">Tip5 is a sponge construction [5] instantiated with a permutation  <span class="math">f: \\mathbb{F}_p^m \\to \\mathbb{F}_p^m</span>  and a state of m=16 field elements. In every iteration of the absorbing phase, r=10 field elements are read from the input and replace the first r elements of the state. In every iteration of the squeezing phase, the first r=10 elements of the state are read and appended to the output. Between every absorbing or squeezing iteration, the function f is applied to the state. This description defines a function whose output has infinite length; the Tip5 hash function truncates this output to d=5 field elements.</p>
+
+    <p class="text-gray-300">    <img src="_page_4_Picture_3.jpeg" alt="" class="my-4 max-w-full" />
+</p>
+
+    <p class="text-gray-300">Fig. 1: Sponge construction with 3 absorbing iterations and 2 squeezing iterations. Following [5, &sect;4.3], this sponge construction absorbs by overwriting the rate part of the state, whereas absorbing is traditionally defined in terms of adding into it.</p>
+
+    <p class="text-gray-300">The permutation  <span class="math">f: \\mathbb{F}_p^m \\to \\mathbb{F}_p^m</span>  consists of N=5 rounds, which are each identical except for the independently uniformly pseudorandom round constants. Every round consists of 3 steps:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><strong>S-box layer.</strong> Every state element is mapped by an S-box. The first s=4 elements are mapped by  <span class="math">S: \\mathbb{F}_p \\to \\mathbb{F}_p</span>  and the other elements are mapped by  <span class="math">T: \\mathbb{F}_p \\to \\mathbb{F}_p</span> . Both types of S-boxes are permutations on  <span class="math">\\mathbb{F}_p</span> .</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Linear layer. The state vector is multiplied with a  <span class="math">m \\times m</span>  MDS matrix.</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Round constants. A designated round constant, sampled independently for every round and state element, is added to every state element.</li>
+    </ol></li>
+    </ul>
+
+      <h3 id="sec-2.2" class="text-xl font-semibold mt-8">2.2 S-Box Layer</h3>
+
+    <p class="text-gray-300">There are two types of S-boxes, S and T. The latter is the regular forward  <span class="math">\\alpha</span> th power map already used in Rescue-Prime:  <span class="math">T: x \\mapsto x^{\\alpha}</span> . For the field with  <span class="math">2^{64} - 2^{32} + 1</span>  elements,  <span class="math">\\alpha = 7</span>  since any smaller positive exponent does not define a permutation.</p>
+
+    <p class="text-gray-300">    <img src="_page_5_Figure_0.jpeg" alt="" class="my-4 max-w-full" />
+</p>
+
+    <p class="text-gray-300">Fig. 2: The Tip5 permutation. The  <span class="math">\\oplus</span>  indicates addition of constants, but the wires for the constants were omitted for space.</p>
+
+    <p class="text-gray-300">The former type of S-box, S, is more involved and may be called the <em>split</em>and-lookup map. It is defined as follows:</p>
+
+    <p class="text-gray-300"><span class="math">$S: \\mathbb{F}_p \\to \\mathbb{F}_p, x \\mapsto R^{-1} \\cdot \\rho \\circ L^8 \\circ \\sigma(R \\cdot x)</span>$</p>
+
+    <p class="text-gray-300">The components are:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>-R is the field element congruent to  <span class="math">2^{64}</span>  modulo p. Multiplication with R maps x from the canonical representation of field elements to Montgomery form. This map is applied in anticipation of efficient implementations, where field elements are represented in Montgomery form to begin with.</li>
+      <li><span class="math">\\sigma: \\mathbb{F}_p \\to \\mathbb{F}_p^8, x \\mapsto (a,b,c,d,e,f,g,h)</span>  where all outputs are at most 8 bits wide and  <span class="math">x=a+2^8\\cdot b+2^{16}\\cdot c+2^{24}\\cdot d+2^{32}\\cdot e+2^{40}\\cdot f+2^{48}\\cdot g+2^{56}\\cdot h</span> . In essence,  <span class="math">\\sigma</span>  decomposes a field element's canonical representation into bytes. and  <span class="math">\\sigma(R \\cdot x)</span>  decomposes the Montgomery representation of x into bytes.</li>
+      <li><span class="math">-L: \\mathbb{F}_p \\to \\mathbb{F}_p</span>  is defined only for field elements that are at most 8 bits wide. Identifying this subset of  <span class="math">\\mathbb{F}_p</span>  with  <span class="math">\\mathbb{F}_{2^8+1}</span> , the lookup table L computes  <span class="math">L: \\mathbb{F}_{2^8+1} \\to \\mathbb{F}_{2^8+1}, x \\mapsto (x+1)^3 - 1.</span>  <span class="math">-\\rho: \\mathbb{F}_p^8 \\to \\mathbb{F}_p \\text{ computes the inverse of } \\sigma.</span></li>
+    </ul>
+
+    <p class="text-gray-300">The inverse of this S-box is  <span class="math">x \\mapsto R \\cdot \\rho \\circ (L^{-1})^8 \\circ \\sigma(R^{-1} \\cdot x)</span> .</p>
+
+    <p class="text-gray-300">Note that L has three fixed points, 0.255 and  <span class="math">256 \\equiv -1 \\mod 257</span> . Since 256 is the only point not representable in 8 bits, it follows that L is a permutation on  <span class="math">\\{0,\\ldots,255\\}</span>  as well as on  <span class="math">\\mathbb{F}_{257}</span> .</p>
+
+    <p class="text-gray-300">The first two fixed points ensure that  <span class="math">\\rho \\circ L^8 \\circ \\sigma</span> , seen as a map from and to 64bit integers, sends  <span class="math">0xffffffff000000000 \\equiv -1 \\mod p</span>  to 0xffffffff000000000; sends integers greater than p-1 to integers greater than p-1; and sends integers less than p-1 to integers less than p-1. It follows that S is a permutation on  <span class="math">\\mathbb{F}_p</span> .</p>
+
+      <h3 id="sec-2.3" class="text-xl font-semibold mt-8">2.3 Linear Layer</h3>
+
+    <p class="text-gray-300">In the linear step, the state vector  <span class="math">\\mathbf{x} \\in \\mathbb{F}_p^m</span>  is sent to  <span class="math">M\\mathbf{x}</span>  where  <span class="math">M \\in \\mathbb{F}_p^{16 \\times 16}</span>  is a circulant MDS matrix chosen to admit a fast matrix-vector product calculation (see &sect; 3.2). M is defined by the first column  <span class="math">M_{[:,0]}^{\\mathsf{T}} =</span></p>
+
+    <pre><code class="language-text">[61402, 1108, 28750, 33823, 7454, 43244, 53865, 12034, 56951, 27521, 41351, 40901, 12021, 59689, 26798, 17845] .
+</code></pre>
+
+    <p class="text-gray-300">These numbers were derived from the SHA-256 hash of the ASCII string &quot;Tip5&quot; by dividing the digest into 16-bit chunks.</p>
+
+      <h3 id="sec-2.4" class="text-xl font-semibold mt-8">2.4 Round Constants</h3>
+
+    <p class="text-gray-300">The constants are determined by concatenating the byte i (for the i th constant, starting from zero) to the ASCII string &quot;Tip5&quot;, hashing the string of 5 bytes using Blake3, taking the first 16 bytes of the digest, interpreting them as an integer in least-significant-byte-first order, reducing the integer modulo p, and multiplying the resulting field element by  <span class="math">R^{-1}</span>  which is the inverse of  <span class="math">2^{64}</span>  modulo p. This process is repeated mN times to get as many round constants. The (mi+j) th constant is used for the j th state element in the i th round.</p>
+
+    <p class="text-gray-300">The hash function comes in two modes of operation, depending on whether the input is fixed-length or variable-length.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>When the input is fixed length (and in this case the length is always exactly r = 10), all capacity elements are initialized to 1. There is no need to pad the input. There is only one absorption.</li>
+      <li>When the input is variable-length, it is padded by appending a 1 followed by the minimal number of 0's necessary to make the padded input length a multiple of r. The capacity is initialized to all zeros and the input is absorbed over multiple iterations.</li>
+    </ul>
+
+      <h3 id="sec-3.1" class="text-xl font-semibold mt-8">3.1 Montgomery Representation</h3>
+
+    <p class="text-gray-300">A field element  <span class="math">a \\in \\mathbb{F}_p</span>  is represented as the integer  <span class="math">\\bar{a} \\in \\{0, \\dots, p-1\\}</span>  congruent to  <span class="math">a \\cdot R</span>  modulo p, where  <span class="math">R = 2^{64}</span> . The benefit of this representation is a faster multiplication algorithm: the product c = ab is calculated by first calculating the integer product  <span class="math">\\bar{a} \\cdot \\bar{b}</span>  and following this up with <em>Montgomery reduction</em>, which sends  <span class="math">\\bar{a} \\cdot \\bar{b}</span>  to  <span class="math">\\bar{c}</span> . We refer to Pornin's explanation [19] for a concise but comprehensive overview of Montgomery representation of elements in this field.</p>
+
+    <p class="text-gray-300">The split-and-lookup S-box anticipates the use of Montgomery representation. Specifically, the S-box</p>
+
+    <p class="text-gray-300"><span class="math">$S: \\mathbb{F}_p \\to \\mathbb{F}_p, x \\mapsto R^{-1} \\cdot \\rho \\circ L^8 \\circ \\sigma(R \\cdot x)</span>$</p>
+
+    <p class="text-gray-300">becomes</p>
+
+    <p class="text-gray-300"><span class="math">$S&#x27;: \\mathbb{F}_p \\to \\mathbb{F}_p, x \\mapsto \\rho&#x27; \\circ L^8 \\circ \\sigma&#x27;(x)</span>$</p>
+
+    <p class="text-gray-300">where  <span class="math">\\sigma&#x27;</span>  decomposes the integer  <span class="math">\\bar{a}</span>  into raw bytes, and  <span class="math">\\rho&#x27;</span>  recomposes the raw bytes accordingly.</p>
+
+    <p class="text-gray-300">In the linear step, the state vector  <span class="math">\\mathbf{x}</span>  is sent to  <span class="math">M\\mathbf{x}</span>  where M is the circulant MDS matrix. All the entries in this matrix are small positive integers. The purpose of this design choice is to delay modular reduction. Specifically, the matrix-vector multiplication is computed over the integers twice, once for the high 32 bits of the input vector, and once for the low 32 bits. Afterwards, the two output vectors are added over the integers (with the appropriate shift) before being reduced modulo p.</p>
+
+    <p class="text-gray-300">Another salient property of the MDS matrix is the fact that it is circulant. Using the well-known NTT-based multiplication trick, the matrix-vector product for a circulant matrix can be computed in only  <span class="math">O(m \\log m)</span>  operations via</p>
+
+    <p class="text-gray-300"><span class="math">$M\\mathbf{x} = \\mathsf{NTT}^{-1}(\\mathsf{NTT}(M_{[:,0]}) \\circ \\mathsf{NTT}(\\mathbf{x})),</span>$</p>
+
+    <p class="text-gray-300">where o denotes the Hadamard (element-wise) product.</p>
+
+    <p class="text-gray-300">The reason why the NTT-based multiplication trick works is because there is an isomorphism between circulant matrices and elements of the quotient ring  <span class="math">R_p = \\mathbb{F}_p[X]/\\langle X^m-1 \\rangle</span> . The elements of this ring are uniquely determined by their reduced representative modulo  <span class="math">X^m-1</span> , or by their list of reduced representative modulo any list of polynomials whose product is  <span class="math">X^m-1</span> . The irreducible factors of  <span class="math">X^m-1</span>  are  <span class="math">X-\\xi^i</span> , where  <span class="math">\\xi</span>  is a primitive mth root of unity; and by reducing a polynomial modulo these factors we get its evaluation in  <span class="math">\\xi^i</span> . The NTT is precisely the transformation that sends a polynomial to its list of evaluations in  <span class="math">\\xi^i</span> .</p>
+
+    <p class="text-gray-300">However, while the field  <span class="math">\\mathbb{F}_p</span>  does have an mth root of unity, the ring of integers does not. To deal with this difficulty, we use an alternative factorization of  <span class="math">X^m-1</span> . In the first step we split the polynomial product modulo  <span class="math">X^m-1</span>  into two polynomial products, modulo  <span class="math">X^{m/2}-1</span>  and  <span class="math">X^{m/2}+1</span>  respectively. The first product can be computed recursively. The second product is split again into polynomial products modulo  <span class="math">X^{m/4}+\\xi^4</span>  and  <span class="math">X^{m/4}-\\xi^4</span>  respectively, where  <span class="math">\\xi^4</span>  is a square root of -1. The coefficients are represented as complex numbers, <em>i.e.</em>, with a real part and an imaginary part. As a result of this representation, computing the product modulo  <span class="math">X^{m/4}+\\xi^4</span>  gives the matching result modulo  <span class="math">X^{m/4}-\\xi^4</span>  for free through complex conjugation. The polynomial product before reduction is computed with Karatsuba's method [17].</p>
+
+      <h3 id="sec-3.3" class="text-xl font-semibold mt-8">3.3 CPU Performance</h3>
+
+    <p class="text-gray-300">These benchmarks were obtained on an Intel&reg; Core<sup>&trade;</sup> i7-10750H CPU @ 2.60GHz. On this machine, Tip5 is  <span class="math">21.37 \\times</span>  faster than Rescue-Prime Optimized and  <span class="math">8.16 \\times</span>  faster than Poseidon. The implementation is available at [22].</p>
+
+    <p class="text-gray-300"><sup>&amp;</sup>lt;sup&gt;2</sup> This technique was first proposed in Plonky2 [29] by Jacqueline Nabaglo.</p>
+
+    <p class="text-gray-300">Table 2: CPU performance comparison</p>
+
+    <div class="overflow-x-auto my-4">
+      <table class="min-w-full text-sm text-gray-300">
+        <thead>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">Hash Function</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">Time [&micro;s]</th>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Rescue-Prime</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">18.186</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Rescue-Prime Optimized</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">14.357</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Poseidon</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">6.940</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Tip5</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0.851</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p class="text-gray-300">Arithmetization refers to the task of finding representations of computations in terms of lists of finite field elements satisfying low-degree multivariate polynomial constraints, as well as to the concrete representation that this task results in. There are various representations, reflecting the various models of computation.</p>
+
+    <p class="text-gray-300">This section describes standalone arithmetization techniques for the AET/AIR computational representation, which is what underlies the STARK proof system. When composed in the right way, these techniques result in an arithmetization for Tip5. For an in-depth exposition of the details of this representation and the pipeline for generating and verifying a STARK proof from it, we refer to the &quot;Anatomy of a STARK&quot; <a href="#page-22-6">[23]</a> and &quot;BrainSTARK&quot; <a href="#page-22-7">[24]</a> tutorials. We use the terminology from these sources.</p>
+
+    <p class="text-gray-300">In the next sections we present a novel lookup argument in the AIR/AET model. It is a special case of subset arguments because it establishes that the rows of one table called the client are a subset of the rows of another, called the server. More specifically, by selecting only those columns labeled &quot;input&quot; or &quot;output&quot; any subset argument including the one presented here can be used to establish that the input and output pairs appearing in the client satisfy the relation between inputs and outputs defined by the server. The outputs can be thought of as having been looked up in the server's lookup table.</p>
+
+    <p class="text-gray-300">B&acute;ezout Argument Using random weights a, b from the verifier, the input and output columns are compressed into one random linear combination. It then suffices to show that the set of random linear combinations used by the client is a subset of the random linear combinations appearing in the server.</p>
+
+    <p class="text-gray-300">Let {comboi}<sup>i</sup> denote the set of input-output pairs, each compressed into a random linear combination using a and b, that are looked up at least once. The client and server both define a product polynomial whose factors are those random linear combinations offsetting X:</p>
+
+    <p class="text-gray-300"><span class="math">$\\operatorname{rpc}(X) = \\prod_i (X - \\operatorname{combo}_i)^{m_i}</span>$</p>
+
+    <p class="text-gray-300"><span class="math">$\\operatorname{rps}(X) = \\prod_i (X - \\operatorname{combo}_i)</span>$</p>
+
+    <p class="text-gray-300">The difference between these two polynomials is the multiplicities m<sup>i</sup> of their roots, which is 1 for the server and possibly greater than 1 for the client. The letters &quot;rp&quot; suggest that the evaluation of these polynomials in &alpha; can be computed by running product columns, once &alpha; is known. But merely comparing the values rpc(&alpha;) and rps(&alpha;) does not suffice to establish the subset relation because the multiplicities of the roots are different.</p>
+
+    <p class="text-gray-300">The following B&acute;ezout relation argument eliminates these multiplicities, enabling a test for subset relationship by probing a polynomial identity in the random point &alpha;.</p>
+
+    <p class="text-gray-300">In addition to a running product, the client defines a formal derivative. Let fdc(X) denote this polynomial:</p>
+
+    <p class="text-gray-300"><span class="math">$\\mathtt{fdc}(X) = \\sum_i m_i (X - \\mathtt{combo}_i)^{m_i - 1} \\prod_{j \\neq i} (X - \\mathtt{combo}_j)^{m_j} = \\frac{\\mathsf{d}}{\\mathsf{d}X} \\mathtt{rpc}(X)</span>$</p>
+
+    <p class="text-gray-300">Likewise, the server defines a formal derivative as well, except this one is weighted by multiplicity:</p>
+
+    <p class="text-gray-300"><span class="math">$\\mathtt{mwfds}(X) = \\sum_i m_i \\prod_{j \\neq i} (X - \\mathtt{combo}_j)</span>$</p>
+
+    <p class="text-gray-300">On the side of the client, the running product and its formal derivative satisfy the following B&acute;ezout relation: rpc(X)&middot;x(X)+fdc(X)&middot;y(X) = g(X), where g(X) is the greatest common divisor and x(X) and y(X) are B&acute;ezout coefficient polynomials. Then rpc(X)/g(X) is the square-free polynomial with the same roots as rpc(X), and thus equal to rps(X) of the server. Moreover, a similar relationship holds for the formal derivatives: fdc(X)/g(X) = mwfds(X). By eliminating g(X) we get the identity of polynomials rpc(X)&middot; mwfds(X) = fdc(X)&middot; rps(X). The objective is to test this identity in the random point &alpha;.</p>
+
+    <p class="text-gray-300">The cheating prover who uses an input-output pair in the client that is not present in the server must use a polynomial rpc(X) with at least one root that rps(X) does not share. As a result, the polynomial identity is not satisfied because this root occurs in the left hand side with multiplicity one greater than in the right hand side. By the Schwarz-Zippel lemma, the probability that the identity holds in the random point &alpha; is at most (1+m/2)<sup>T</sup> |Fp| , where T is the height of the table.</p>
+
+    <p class="text-gray-300">Optimization with Logarithmic Derivatives The above intuition gives rise to an AET and an AIR for checking it. Indeed, the values rpc(&alpha;), fdc(&alpha;), rps(&alpha;), and mwfds(&alpha;) can all be computed via running accumulator columns. However, it turns out there is an optimization that reduces the number of columns at the expense of one batch-inversion for the prover. This optimization is inspired by Hab&uml;ock's lookup argument <a href="#page-21-9">[14]</a> but ultimately that argument is tailored to Multilinear IOPs. The present optimization can be seen as lifting that technique to the AET/AIR setting, albeit derived differently.</p>
+
+    <p class="text-gray-300">The logarithmic derivative of a polynomial f(X) is defined as <sup>f</sup> (X) f(X) . It is so named because the logarithmic derivative of the product of two polynomials is the sum of their logarithmic derivatives:</p>
+
+    <p class="text-gray-300"><span class="math">$\\frac{1}{f(X)g(X)} \\cdot \\frac{\\mathrm{d}(f(X)g(X))}{\\mathrm{d}X} = \\frac{f&#x27;(X)g(X)}{f(X)g(X)} + \\frac{f(X)g&#x27;(X)}{f(X)g(X)} = \\frac{f&#x27;(X)}{f(X)} + \\frac{g&#x27;(X)}{g(X)}</span>$</p>
+
+    <p class="text-gray-300">Observe that the polynomial identity</p>
+
+    <p class="text-gray-300"><span class="math">\${\\tt rpc}(X) \\cdot {\\tt mwfds}(X) = {\\tt fdc}(X) \\cdot {\\tt rps}(X)</span>$</p>
+
+    <p class="text-gray-300">can be re-written in terms of logarithmic derivatives:</p>
+
+    <p class="text-gray-300"><span class="math">$\\frac{\\mathtt{fdc}(X)}{\\mathtt{rpc}(X)} = \\frac{\\mathtt{mwfds}(X)}{\\mathtt{rps}(X)} = \\sum_i \\frac{m_i}{X - \\mathtt{combo}_i}</span>$</p>
+
+    <p class="text-gray-300">.</p>
+
+    <p class="text-gray-300">On the side of the server, two columns are needed to probe this identity in the random point &alpha;.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>base column mul contains the multiplicity with which the given row is queried;</li>
+      <li>the running product rps and multiplicity-weighted formal derivative mwfds are merged into the single extension column sum, which contains the running sum of mul/(&alpha; &minus; combo).</li>
+    </ul>
+
+    <p class="text-gray-300">On the side of the client only one extension column is needed. Specifically, the running product rpc and formal derivative fdc are merged into a single column, the logarithmic derivative ldc. To update ldc, recall that the standard running product column rpc is defined to accumulate one factor in every row. Moreover, ldc is defined to contain the logarithmic derivative of rpc in every row, so we can use the eponymous property to populate it. Specifically, the wouldhave-been running product update rule rpc<sup>&lowast;</sup> = rpc &middot; (&alpha; &minus; combo<sup>&lowast;</sup> ) becomes ldc<sup>&lowast;</sup> = ldc + 1/(&alpha; &minus; combo<sup>&lowast;</sup> ), where the asterisk <sup>&lowast;</sup> indicates the respective element from the next row.</p>
+
+    <p class="text-gray-300">The update rules sum<sup>&lowast;</sup> = sum + mul<sup>&lowast;</sup>/(&alpha; &minus; combo<sup>&lowast;</sup> ) and ldc<sup>&lowast;</sup> = ldc + 1/(&alpha; &minus; combo<sup>&lowast;</sup> ) can be converted to AIR constraints of low degree by multiplying left and right hand sides by (&alpha; &minus; combo<sup>&lowast;</sup> ).</p>
+
+      <h3 id="sec-4.2" class="text-xl font-semibold mt-8">4.2 Cascade Construction</h3>
+
+    <p class="text-gray-300">The cascade construction arithmetizes a lookup gate composed of two lookups of half the width in terms of the arithmetizations of those components. It introduces a new table, called the cascade table. While the construction does complicate the arithmetization, the tradeoff can be worth it when the narrow lookup table gives rise to a more performant arithmetization than the wide one.</p>
+
+    <p class="text-gray-300">The cascade table is the server authenticating 2n-bit wide input-output pairs to the external client. Internally, every input or output element is represented as two limbs of n bits. To authenticate the n-bit wide input-output pairs, the cascade table is the client of an n-bit wide lookup argument with an external server.</p>
+
+    <p class="text-gray-300">A cascade table consists of 5 base columns and 3 extension column. The extension columns are defined relative to challenges a, b, c, d, &beta;, &gamma;. The Latin letters denote weights used to compress columns, and the Greek letters denote indeterminates.</p>
+
+    <p class="text-gray-300">The base columns are</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>lkinhi and lkinlo, the high and low limbs of the lookup input;</li>
+      <li>lkouthi and lkoutlo, the high and low limbs of the lookup output;</li>
+      <li>mul, the multiplicity with which the given row is being queried by the external client.</li>
+    </ul>
+
+    <div class="overflow-x-auto my-4">
+      <table class="min-w-full text-sm text-gray-300">
+        <thead>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">Table 3: A lookup argument using a cascade table. In the example, the values alo<br>and</th>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">xhi<br>are equal. Consequently, blo<br>and yhi<br>are equal as well.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="overflow-x-auto my-4">
+      <table class="min-w-full text-sm text-gray-300">
+        <thead>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">client &minus;&rarr;<br>some table</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left"></th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">&larr;&minus; server &amp; client &minus;&rarr;<br>cascade table</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left"></th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left"></th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left"></th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">&larr;&minus; server<br>lookup table</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left"></th>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">instruction register</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">lkinhi lkinlo lkouthi lkoutlo mul</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">in out mul</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">lookup<br>foo<br>lookup<br>bar</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">x<br>y<br>a<br>b</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">xhi<br>ahi</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">xlo<br>alo</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">yhi<br>bhi</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">ylo<br>blo</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">1<br>1</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">xhi<br>yhi<br>2<br>xlo<br>ylo<br>1<br>ahi<br>bhi<br>1</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p class="text-gray-300">The extension columns are</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>sum, which contains the running sum of inverses;</li>
+      <li>ldhi and ldlo, the running logarithmic derivatives of the high and low input-output pairs.</li>
+    </ul>
+
+    <p class="text-gray-300">The AIR constraints can be inferred from section &sect; <a href="#page-8-1">4.1</a> covering the lookup argument. Note that when the cascade table is wearing the server hat, the random linear combinations are given by</p>
+
+    <p class="text-gray-300"><span class="math">$\\mathtt{combo} = 2^w \\cdot a \\cdot \\mathtt{lkinhi} + a \\cdot \\mathtt{lkinlo} + 2^w \\cdot b \\cdot \\mathtt{lkouthi} + b \\cdot \\mathtt{lkoutlo},</span>$</p>
+
+    <p class="text-gray-300">where w is the width (in bits) of each limb. When the cascade table is wearing the client hat, the random linear combinations are given by</p>
+
+    <p class="text-gray-300"><span class="math">$\\mathtt{combo} = c \\cdot \\mathtt{lkinhi} + d \\cdot \\mathtt{lkouthi}</span>$</p>
+
+    <p class="text-gray-300">and</p>
+
+    <h3 id="sec-misc-1" class="text-xl font-semibold mt-8">combo = c &middot; lkinlo + d &middot; lkoutlo.</h3>
+
+    <p class="text-gray-300">To see why the construction is sound, suppose a malicious prover attempts to prove that a pair (lkin<sup>&lowast;</sup> , lkout<sup>&lowast;</sup> ) belongs to the wide lookup relation when it does not. Then either the cascade table contains a corresponding row(lkinhi, lkinlo, lkouthi, lkoutlo, mul), i.e., such that lkin<sup>&lowast;</sup> = 2<sup>w</sup> &middot; lkinhi + lkinlo and lkout<sup>&lowast;</sup> = 2<sup>w</sup> &middot; lkouthi + lkoutlo and mul &#824;= 0; or the cascade table does not contain such a corresponding row. The latter case implies a failure of the client-cascade lookup argument. The probability of this event is bounded by the soundness error of the lookup argument. The former case implies one of two propositions:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>The server table contains a row (lkinhi, lkouthi, mul) with mul &#824;= 0.</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>The server table contains a row (lkinlo, lkoutlo, mul) with mul &#824;= 0.</li>
+    </ol></li>
+    </ul>
+
+    <p class="text-gray-300">The propositions cannot both be true because that would imply that (lkin<sup>&lowast;</sup> , lkout<sup>&lowast;</sup> ) does satisfy the wide lookup map relation. Therefore, one or both of these propositions must be false, implying at least one violation of the cascadeserver subset argument. Once again, the probability of this event is bounded by the soundness error of the lookup argument.</p>
+
+    <p class="text-gray-300">It is possible to arrange multiple cascade tables in sequence. This enables the decomposition of very large composite lookup maps into tiny components. The tradeoff is that the number of rows can increase by up to a factor two for every cascade level. However, as the tables get narrower they start becoming saturated faster. For instance, an 8-bit wide lookup table can only hold 256 rows.</p>
+
+    <p class="text-gray-300">Reducing the arithmetization of a large composite lookup map to that of a small primitive lookup map only makes sense if the small lookup map admits an efficient arithmetization. Indeed, if the lookup map is not too wide &mdash; say, a handful of bits &mdash; then the following technique applies.</p>
+
+    <p class="text-gray-300">Let n be the number of bits in the input. The verifier locally evaluates a polynomial of degree 2<sup>n</sup> &minus; 1 to obtain a single scalar value that authenticates the entire lookup table. This scalar is a parameter in the AIR that verifies the correct computation of this polynomial row-by-row.</p>
+
+    <p class="text-gray-300">Specifically, let c, d, &delta; be challenges supplied by the verifier. The lookup table consists of three columns. Base columns lkin and lkout contain all possible input-output pairs. Extension column re contains a running evaluation.</p>
+
+    <p class="text-gray-300">The AIR constraints constrain re to computing a running evaluation of the polynomial whose coefficients are given by c &middot; lkin + d &middot; lkout. Specifically, let <sup>&lowast;</sup> denote the corresponding element from the next row. Then there are three AIR constraints involving re:</p>
+
+    <p class="text-gray-300">&ndash; Initial constraint. The running evaluation column has accumulated the update determined by the first row: c &middot; lkin + d &middot; lkout &minus; re.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Transition constraint. The running evaluation column accumulates the update determined by the next row:  <span class="math">\\delta \\cdot \\text{re} + c \\cdot \\text{lkin}^* + d \\cdot \\text{lkout}^* \\text{re}^*</span> .</li>
+      <li>Terminal constraint. The value of the running evaluation column in the last row matches with the value of f(X) at  <span class="math">\\delta</span> :  <span class="math">f(\\delta)</span>  re.</li>
+    </ul>
+
+    <p class="text-gray-300">The polynomial f(X) is evaluated by the verifier locally. The coefficient of  <span class="math">X^{(2^n-1-i)}</span>  in f(X) is  <span class="math">c \\cdot lkin_i + d \\cdot lkout_i</span> , where  <span class="math">(lkin_i, lkout_i)</span>  is the <em>i</em>th input output pair. Since the degree of f(X) is  <span class="math">2^n - 1</span> , this evaluation is fast if n is small.</p>
+
+    <p class="text-gray-300">This lookup table crucially relies on the fact that all rows are present, even those rows that are not being looked up. In contrast, rows in cascade tables only need to be present if they are being looked up at some point.</p>
+
+      <h3 id="sec-4.4" class="text-xl font-semibold mt-8">4.4 Periodic Constraints</h3>
+
+    <p class="text-gray-300">A periodic constraint is one that applies in every row congruent to x modulo y. Its implementation requires a periodic zerofier. We describe here a technique for building this primitive.</p>
+
+    <p class="text-gray-300">Let  <span class="math">H = \\langle \\omega \\rangle</span>  be the subgroup and  <span class="math">(\\omega^i)_i</span>  the sequence of order and length N over which the trace is interpolated, and suppose y|N. The zerofier for a subgroup of order k is  <span class="math">X^k-1</span> , since it evaluates to zero in every element of the subgroup and is the smallest-degree monic polynomial that does so. Therefore,  <span class="math">Z(X) = X^{N/y} - 1</span>  is a zerofier for the order N/y subgroup of H. It evaluates to zero on every point  <span class="math">\\omega^i</span>  of the sequence where i is congruent to 0 modulo y. The coset zerofier  <span class="math">(X \\cdot \\omega^{-x})^{N/y} - 1</span>  evaluates to 0 in points  <span class="math">\\omega^i</span>  of the sequence where  <span class="math">i \\equiv x \\mod y</span> . The product of such coset zerofiers is a zerofier for an arbitrary set of congruence classes modulo y.</p>
+
+    <p class="text-gray-300">A periodic constraint is simply a constraint whose corresponding zero fier is not zero on the whole interpolation group H but on a subgroup of it or coset thereof. The constraint is active in those points where the zero fier evaluates to zero, and inactive elsewhere.</p>
+
+      <h3 id="sec-4.5" class="text-xl font-semibold mt-8">4.5 Periodic Interpolants</h3>
+
+    <p class="text-gray-300">A periodic interpolant is a polynomial that repeats a sequence of values  <span class="math">(v_0, \\ldots, v_{k-1})</span>  of length k when evaluated on the powers of a generator  <span class="math">\\omega</span> . An AIR constraint that integrates such an interpolant is individualized to the row, or more specifically, to the row's index's congruence class modulo k. It can be used to prove that the correct round constants were added into the state in each row. To the best of our knowledge this technique was first described in Buterin's STARK tutorial [7].</p>
+
+    <p class="text-gray-300">Let N be the padded trace length, suppose k|N, and let  <span class="math">\\omega</span>  generate the subgroup over which the trace is interpolated. Then the polynomial  <span class="math">g(X) = X^{N/k}</span>  sends  <span class="math">\\omega^i</span>  to  <span class="math">\\zeta^i</span>  where  <span class="math">\\zeta</span>  is a kth root of unity. Let f(X) be the interpolant through  <span class="math">(v_0, \\ldots, v_{k-1})</span>  on the powers of  <span class="math">\\zeta</span> . Then  <span class="math">f \\circ g</span>  is the periodic interpolant through  <span class="math">(v_0, \\ldots, v_{k-1})</span>  on the powers of  <span class="math">\\omega</span> .</p>
+
+      <h3 id="sec-4.6" class="text-xl font-semibold mt-8">4.6 Correct Decomposition of Elements Modulo p</h3>
+
+    <p class="text-gray-300">The lookup argument can establish that (a, b, c, d) all have at most 16 bits. However, it does not suffice to establish that a + 2<sup>16</sup> &middot; b + 2<sup>32</sup> &middot; c + 2<sup>48</sup> &middot; d &lt; p. To prove this, an additional constraint is needed, namely (1 &minus; (c + 2<sup>16</sup> &middot; d &minus; 2 <sup>32</sup> + 1) &middot; e) &middot; (a + 2<sup>16</sup> &middot; b) = 0. In this expression, e is the inverse-or-zero of (c + 2<sup>16</sup> &middot; d &minus; 2 <sup>32</sup> + 1), which is to say, either e = (c + 2<sup>16</sup> &middot; d &minus; 2 <sup>32</sup> + 1) = 0 or e &middot; (c + 2<sup>16</sup> &middot; d &minus; 2 <sup>32</sup> + 1) = 1. To see why the constraint works, observe that for valid field elements, c + 2<sup>16</sup> &middot; d = 2<sup>32</sup> &minus; 1 &rArr; a + 2<sup>16</sup> &middot; b = 0. Indeed, the left factor evaluates to 1 only when c + 2<sup>16</sup> &middot; d = 2<sup>32</sup> &minus; 1, and in this case the right factor must evaluate to zero.</p>
+
+    <p class="text-gray-300">We present here only a high-level overview of the arithmetization of Tip5. In particular, we omit discussion of constraints in favor of the columns of the various tables and their effect on prover complexity. The effect on prover complexity due to constraints scales linearly with the number of columns and is concretely negligible. Moreover, the constraints can be inferred from the above descriptions. For a complete specification, we refer to the document &quot;Triton Improvement Proposal 0005&quot; <a href="#page-22-8">[26]</a>.</p>
+
+    <p class="text-gray-300">There are three tables: the Hash Table which evaluates the Tip5 permutation every 8 rows, the Cascade Table which translates 16-bit wide lookups into 8-bit wide lookups, and the Lookup Table which contains all possible 8-bit lookup pairs. There is a lookup argument between the Hash Table and the Cascade Table, and another between the Cascade Table and the Lookup Table. The Lookup Table uses the narrow lookup arithmetization technique described above. All tables have one column indicating whether rows are padding rows.</p>
+
+    <p class="text-gray-300">The Hash Table has 49 base columns and 16 extension columns, subdivided as follows:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>one padding indicator pad;</li>
+      <li>12 regular sponge state elements st[4] through st[15];</li>
+      <li>the remaining 4 sponge state elements are represented as 16-bit wide chunks for easy lookup and in input-output pairs: lkin[0] through lkin[15] and lkout[0] through lkout[15];</li>
+      <li>one extension column for every input-output pair that is to be looked up: ldc[0] through ldc[15].</li>
+      <li>4 inverse-or-zero columns ioz[0] through ioz[3] to establish that the four 16-bit limbs that are being looked up, represent a correct decomposition of some field element modulo p.</li>
+    </ul>
+
+    <p class="text-gray-300">The round count N = 5 requires periodic zerofiers and periodic interpolants. Certain consistency or transition constraints are activated only on rows congruent to j modulo 8, for various j.</p>
+
+    <p class="text-gray-300">The Cascade Table has exactly those columns described in &sect; <a href="#page-10-0">4.2</a> in addition to one padding indicator pad. The total number of columns is therefore 6 base columns and 3 extension columns.</p>
+
+    <p class="text-gray-300">The Lookup Table has 4 base columns and 2 extension columns:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>pad is the padding indicator;</li>
+      <li>lkin and lkout contain the input and the output of the input-output pairs, respectively;</li>
+      <li>mul contains the multiplicity with which they are queried;</li>
+      <li>sum contains the running sum of inverses for the lookup argument;</li>
+      <li>re contains the running evaluation to establish the correct list of inputoutput pairs.</li>
+    </ul>
+
+    <p class="text-gray-300">In total, the entire arithmetization of the Tip5 hash function requires 59 base columns and 21 extension columns. This number omits the columns needed for cross-table relations between the Hash Table and other tables, but these columns are also necessary if a different hash function not requiring lookup arguments is used instead, such as Rescue-Prime.</p>
+
+    <p class="text-gray-300">Statistical attacks exploit the far-from-random likelihood of propagation of specially crafted patterns of values through various components of the cipher. In linear cryptanalysis <a href="#page-22-9">[18]</a> the pattern in question is an affine relation between the wires connecting a subcircuit to the rest. In differential cryptanalysis <a href="#page-21-11">[6]</a> the pattern in question is a known difference in the values taken by a wire across two invocations of the cipher.</p>
+
+    <p class="text-gray-300">While the split-and-lookup S-boxes contribute somewhat to resistance against linear and differential cryptanalysis, the hash function's resistance against these lines of attack is most easily argued from the &alpha;th power maps alone. Specifically, these S-boxes have strong linear and differential properties and their combination with the MDS matrix enables a straightforward derivation of bounds on the probability of propagation of linear and differential patterns following the wide trail argument <a href="#page-21-4">[8]</a>.</p>
+
+    <p class="text-gray-300">The maximum expected probability of a non-trivial linear pattern (a, b, c) being satisfied across an &alpha;th power S-box is</p>
+
+    <p class="text-gray-300"><span class="math">$\\max_{a,b,c} \\Pr\\left[a \\cdot x + b \\cdot x^{\\alpha} + c = 0\\right] = \\frac{\\alpha}{p} .</span>$</p>
+
+    <p class="text-gray-300">The MDS matrix guarantees that in every consecutive pair of rounds, at least m + 1 S-boxes are linearly active. But in every consecutive pair of rounds, there are only 2s split-and-lookup maps, so at least m + 1 &minus; 2s &alpha;th power S-box must be linearly active. The probability that a linear pattern is satisfied across two rounds is therefore at most &alpha; p <sup>m</sup>+1&minus;2<sup>s</sup> &asymp; 2 &minus;551 .</p>
+
+      <h3 id="sec-5.3" class="text-xl font-semibold mt-8">5.3 Differential Cryptanalysis</h3>
+
+    <p class="text-gray-300">The maximum expected probability that a non-trivial differential pattern  <span class="math">\\Delta x \\mapsto \\Delta y</span>  holds across an  <span class="math">\\alpha</span> th power S-box is</p>
+
+    <p class="text-gray-300"><span class="math">$\\max_{\\Delta x, \\Delta y} \\Pr\\left[ (x + \\Delta x)^{\\alpha} - x^{\\alpha} = \\Delta y \\right] = \\frac{\\alpha - 1}{p} .</span>$</p>
+
+    <p class="text-gray-300">Once again, the MDS matrix guarantees that in every consecutive pair of rounds, at least m+1-2s  <span class="math">\\alpha</span> th power S-boxes are differentially active. The probability of a differential pattern being satisfied across two rounds is therefore  <span class="math">\\left(\\frac{\\alpha-1}{p}\\right)^{m+1-2s} \\approx 2^{-552}</span> .</p>
+
+    <p class="text-gray-300">Note that this small probability also rules out a boomerang attack [28,16], which relies on the presence of two complementary differential patterns, jointly spanning the whole cipher, and at least one of which must span at least two rounds.</p>
+
+    <p class="text-gray-300">Algebraic attacks leverage polynomial arithmetic to attack primitives. These are particularly relevant for arithmetization-oriented ciphers because they are designed to admit a succinct description in terms of polynomials.</p>
+
+    <p class="text-gray-300">The CICO problem [5, &sect;8.2.4] provides an algebraic description of preimage search on sponge-based hash functions. In the context of Tip5, the initial S-box can be ignored. As the remaining components of the first round are linear, the net effect is that the attacker gets one round for free.</p>
+
+      <h3 id="sec-5.5" class="text-xl font-semibold mt-8">5.5 Univariate</h3>
+
+    <p class="text-gray-300">Every function to and from a finite field can be represented by a polynomial. When the polynomial corresponding to a block cipher or hash function has a sufficiently low degree, algorithms for univariate polynomial arithmetic such as interpolation or computing GCDs may suffice to break the primitive. In the case of hash functions, polynomial factorization to find the roots gives rise to a preimage attack [21].</p>
+
+    <p class="text-gray-300">This root-finding attack is infeasible when applied to Tip5 for two reasons. First, the degree of every output coordinate in terms of any indeterminate input is on the order of  <span class="math">p \\approx 2^{64}</span>  due to the inclusion of the split-and-lookup gates, which do not have a low-degree polynomial representation. Second, the output of the hash function consists of 5 field elements, and so the natural field for univariate attack strategies is not  <span class="math">\\mathbb{F}_p</span>  but  <span class="math">\\mathbb{F}_{p^5}</span> . But since the MDS matrix is  <span class="math">\\mathbb{F}_p</span> -linear and not  <span class="math">\\mathbb{F}_{p^5}</span> -linear, the resulting polynomial's degree is on the order of  <span class="math">p^5 \\approx 2^{320}</span> .</p>
+
+      <h3 id="sec-5.6" class="text-xl font-semibold mt-8">5.6 Straightforward Gr&ouml;bner Basis</h3>
+
+    <p class="text-gray-300">There are m(N+1) wires in total, but after dropping the initial S-boxes of the first round, N variables appear in only N equations and linearly so, and so they can be eliminated. Moreover d variables are given by the digest, so there are mN-d variables in total. There are as many equations. Their degrees are</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>p-1 (or close to p-1) if it describes a split-and-lookup map;</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><span class="math">\\alpha</span>  if it describes a forward  <span class="math">\\alpha</span> -th power map.</li>
+    </ol></li>
+    </ul>
+
+    <p class="text-gray-300">The Macaulay bound exceeds p. Therefore it pays to add the field equation  <span class="math">x^p - x</span>  for every variable x. This addition has the effect of restricting the degree to p-1 in every variable.</p>
+
+    <p class="text-gray-300">The Macaulay matrix at this degree has  <span class="math">\\binom{p-1+mN-d}{mN-d}</span>  columns and as many rows. Assuming that the matrix is dense, finding a kernel vector using sparse linear algebra methods takes this number <em>squared</em> operations. For one round and setting the other parameters as above, this square is approximately equal to  <span class="math">2^{1236}</span> .</p>
+
+      <h3 id="sec-5.7" class="text-xl font-semibold mt-8">5.7 Split S-box</h3>
+
+    <p class="text-gray-300">The above analysis assigns two variables to every split-and-lookup gate: one for the input, and one for the output. A natural alternative is to encode the splitting into bytes and their recombination into field elements as polynomial equations, giving rise to eight (one for each L-map) variables for each split-and-lookup gate. The polynomial equations for splitting field elements and recombining bytes mirror their AIR counterparts. However, the lookup arguments do not have analogues in polynomial equations. Instead, every L-map generates a polynomial equation of degree 256.</p>
+
+    <p class="text-gray-300">With this representation of the split-and-lookup S-boxes there are mN-d+7Ns variables, not counting those that were introduced to simulate inequalities. Conversely, there are as many equations, not counting the inequalities. Of these equations, 8Ns have degree 256.</p>
+
+    <p class="text-gray-300">In order to derive an estimate of the complexity of solving this system of polynomial equations, we simplify the analysis with unverified assumptions. First, we assume (optimistically from the point of view of the attacker) that the polynomial system's concrete degree of regularity is 256, matching with the highest degree of the starting polynomials. Second, we assume (pessimistically from the point of view of the attacker) that the Macaulay matrix at this degree is dense.</p>
+
+    <p class="text-gray-300">The Macaulay matrix at degree 256 has  <span class="math">\\binom{256+mN-d+7Ns}{mN-d+7Ns}</span>  columns. Finding a kernel vector using sparse linear algebra methods takes this number <em>squared</em> operations, or roughly  <span class="math">2^{324}</span>  field operations to attack one round.</p>
+
+      <h3 id="sec-5.8" class="text-xl font-semibold mt-8">5.8 Linear Approximation</h3>
+
+    <p class="text-gray-300">An alternative to representing the split-and-lookup gates exactly is to replace them with their best linear approximations in the polynomial model of the primitive. The resulting solution represents a successful attack (<em>i.e.</em>, a second preimage) if it happens to coincide with the variety of the <em>exact</em> system of polynomials, i.e., the one without approximations. By modeling the solution found via polynomial system solving as a random element from the approximate variety, it is possible to estimate the probability that it lives also in the exact variety. Specifically: we count the number of approximated maps and the number of points they agree with their targets in.</p>
+
+    <p class="text-gray-300">One linear approximation to the split-and-lookup map agrees in 240 points, corresponding to the 2 fixed points of L, repeated 8 times, except for 16 values that can't be reached because they correspond to 64-bit integers greater than p. Inside 1 round there are s split-and-lookup maps and the probability that they all send one of these agreeable points to their correct destination is 240 p s . For the given parameters this probability is less than 2&minus;<sup>224</sup> in one round. In other words, if we were to attack a single round with this technique, the produced solution would be correct (i.e., a valid (second) preimage) with this probability.</p>
+
+    <p class="text-gray-300">Barring cancellations of approximation errors, and assuming that the state vectors are independent and uniform before they enter into a round, the probability of correct approximation drops exponentially in the number of rounds, by about 240 p s &asymp; 2 <sup>&minus;</sup><sup>224</sup> per round.</p>
+
+      <h3 id="sec-5.9" class="text-xl font-semibold mt-8">5.9 Fixing</h3>
+
+    <p class="text-gray-300">Another technique to leverage Gr&uml;obner basis techniques consists of fixing the values on the wires into and out of the split-and-lookup S-boxes at random. The standard polynomial model of the cipher, i.e., without fixing wires, consists of a polynomial system with high degree polynomials but r &minus; d = 5 degrees of freedom. Fixing the wires reduces the polynomials' degrees but at the expense of reducing the number of degrees of freedom by s degrees for each round covered by the attack. Attacking a single round (in addition to the ignored initial S-box layer) is feasible as the system of equations retains 1 degree of freedom. But for the whole cipher (still ignoring the initial S-box layer) the system of equations has r &minus;d&minus;(N &minus;1)s = &minus;11 degrees of &quot;freedom&quot;. A random system of equations with this degree of over-determinedness can be expected to have a solution with probability on the order of p <sup>&minus;</sup><sup>11</sup> &asymp; 2 &minus;704 .</p>
+
+    <p class="text-gray-300">Bariant et al. <a href="#page-21-13">[3]</a> introduce a clever technique enabling the algebraic attacker to bypass one or two rounds at the start of the cipher. It crucially relies on the fact that the nonlinear components in the skipped rounds can be represented as monomials. It does not apply to Tip5 because the split-and-lookup S-boxes are not monomials. To see this, observe that counterexamples (a, b) exist such that S(a)S(b) &#824;= S(ab), for instance a = b = 16.</p>
+
+      <h3 id="sec-5.11" class="text-xl font-semibold mt-8">5.11 Cryptanalysis Summary</h3>
+
+    <p class="text-gray-300"><a href="#page-19-0">Table 4</a> summarizes the minimum number of rounds after which the cipher is secure against various attacks. We consider only attacks with reasonable success probability (i.e., approximately one) and feasible complexity (i.e., less than 2<sup>192</sup> , corresponding to a classical brute force collision search with optimistic memory).</p>
+
+    <p class="text-gray-300">Table 4: Summary of Necessary Round Count by Attack</p>
+
+    <div class="overflow-x-auto my-4">
+      <table class="min-w-full text-sm text-gray-300">
+        <thead>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">attack</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left"># rounds</th>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">statistical</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">linear cryptanalysis &sect; 5.2<br>differential cryptanalysis &sect; 5.3<br>boomerang &sect; 5.3</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">2<br>2<br>3</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">algebraic</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">univariate &sect; 5.5<br>straightforward Gr&uml;obner basis &sect; 5.6<br>split S-box &sect; 5.7<br>linear approximation &sect; 5.8<br>fixing wire values &sect; 5.9</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">2<br>2<br>2<br>2<br>3</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p class="text-gray-300">While the attack that fixes wire values performs the best on paper, the attack with the split representation of the S-box ranks second. Moreover, the latter's complexity analysis relies on the unverified pessimistic (from the attacker's point of view) assumption on the density of the Macaulay matrix. With these observations in mind, the round count N = 5 was set to provide a roughly 50% security margin.</p>
+
+    <p class="text-gray-300">We set out to investigate whether switching from Rescue-Prime to Tip5 would yield a net performance improvement. We close with an answer to this question.</p>
+
+    <p class="text-gray-300">For programs of reasonable size we find that 80% of proof generation time is spent hashing. Most of the remaining time is spent computing NTTs. Of the hashing steps, 90% of the time is spent hashing single rows of the low-degree extended trace table into leafs; the rest is spent building Merkle trees out of these leafs.</p>
+
+    <p class="text-gray-300">The arithmetization does not change the number of rows, so the 21.37&times; speedup of <a href="#page-8-2">Table 2</a> applies directly to the Merkle tree steps. The other two steps, hashing rows and computing NTTs depends on the new number of columns.</p>
+
+    <p class="text-gray-300">For Rescue-Prime and Rescue-Prime Optimized there are 16 columns for storing the sponge state. While there are more round constants per round in Rescue-Prime and Rescue-Prime Optimized than in Tip5, in the particular case of Rescue-Prime Optimized these round constants do not increase the number of columns because their correct addition can be enforced via periodic interpolants. So the total number of columns for Rescue-Prime Optimized is 16. This number compares to Tip5's 59 base columns and 21 extension columns. In the context of Triton VM <a href="#page-21-14">[15]</a>, the extension columns take values from Fp<sup>3</sup> , so this total is equivalent to 59 + 3 &middot; 21 = 122 base columns.</p>
+
+    <p class="text-gray-300">The VM has 168 base-column equivalents not related to hashing. So swapping out Rescue-Prime for Tip5 makes the column count go from 168 + 16 = 184 to 168 + 122 = 290. In other words, there are 1.58&times; more columns.</p>
+
+    <p class="text-gray-300">In terms of the NTT step: there are 1.58&times; more NTTs to compute, but they all have the same length. So this step will take 1.58&times; as much time.</p>
+
+    <p class="text-gray-300">In terms of hashing the rows, the rows are 1.58&times; longer, but the hash function is 21.37 times faster. So this task will take 1.58/21.37 = 0.074&times; as much time.</p>
+
+    <p class="text-gray-300">Putting the three steps together we find a new running time of 0.2 &middot; 1.58 + 0.8 &middot; (0.9 &middot; 0.074 + 0.1/21.37) = 0.373 times the old running time. Equivalently, switching to Tip5 yields a 2.68&times; speedup.</p>
+
+    <p class="text-gray-300">While this comparison already favors Tip5, it relies on several assumptions that are biased in favor of Rescue-Prime. Specifically:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Of the time not spent hashing, only about 18% is spent on NTTs, not 20%, and only some of the difference scales with the number of columns.</li>
+      <li>Due to compiler optimizations, running an NTT on a vector of Fp<sup>3</sup> elements is slightly more than 2&times; slower than an NTT on a vector of F<sup>p</sup> elements, rather than 3&times;.</li>
+      <li>The degree of the AIR is 7 in both cases. However, there is a natural tradeoff to reduce the prover time by shrinking the AIR degree at the expense of extra columns. Rescue-Prime has 16 columns that would need to be expanded into multiple columns each in order to reduce the AIR degree, whereas Tip5 only has 12 such columns.</li>
+      <li>Rescue-Prime (not Optimized) has 8 rounds; since the first and last states must be represented, this means that the trace for one invocation of Rescue-Prime does not fit in 8 rows. Using 9 rows requires introducing an extra column (not to mention high-degree AIR constraints) for keeping track of the round number. The alternative is to use periodic constraints or periodic interpolants, but this bumps the number of rows per hash invocation to the next power of 2, which 16 in this case.</li>
+    </ul>
+
+    <p class="text-gray-300">Acknowledgements. Some of the ideas that this article expands on, were first raised in the course of the Rescue-Prime Optimization project <a href="#page-21-15">[2]</a>. We also thank Robin Salen for feedback and corrections.</p>
+
+    <p class="text-gray-300">1. Aly, A., Ashur, T., Ben-Sasson, E., Dhooghe, S., Szepieniec, A.: Design of symmetric-key primitives for advanced cryptographic protocols. IACR Trans. Symmetric Cryptol. 2020(3), 1&ndash;45 (2020), <a href="https://doi.org/10.13154/tosc.v2020.i3.1-45" target="_blank" rel="noopener noreferrer">https://doi.org/10.13154/tosc.v2020.</a> <a href="https://doi.org/10.13154/tosc.v2020.i3.1-45" target="_blank" rel="noopener noreferrer">i3.1-45</a></p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><p class="text-gray-300">2. Ashur, T., Kindi, A., Meier, W., Szepieniec, A., Threadbare, B.: Rescue-prime optimized. IACR Cryptol. ePrint Arch. p. 1577 (2022), <a href="https://eprint.iacr.org/2022/1577" target="_blank" rel="noopener noreferrer">https://eprint.iacr.</a> <a href="https://eprint.iacr.org/2022/1577" target="_blank" rel="noopener noreferrer">org/2022/1577</a></p></li>
+      <li><p class="text-gray-300">3. Bariant, A., Bouvier, C., Leurent, G., Perrin, L.: Algebraic attacks against some arithmetization-oriented primitives. IACR Trans. Symmetric Cryptol. 2022(3), 73&ndash;101 (2022). <a href="https://doi.org/10.46586/tosc.v2022.i3.73-101" target="_blank" rel="noopener noreferrer">https://doi.org/10.46586/tosc.v2022.i3.73-101,</a> <a href="https://doi.org/10.46586/tosc.v2022.i3.73-101" target="_blank" rel="noopener noreferrer">https://doi.org/</a> <a href="https://doi.org/10.46586/tosc.v2022.i3.73-101" target="_blank" rel="noopener noreferrer">10.46586/tosc.v2022.i3.73-101</a></p></li>
+      <li><p class="text-gray-300">4. Ben-Sasson, E., Bentov, I., Horesh, Y., Riabzev, M.: Scalable zero knowledge with no trusted setup. In: CRYPTO 2019Part III. Lecture Notes in Computer Science, vol. 11694, pp. 701&ndash;732. Springer (2019), <a href="https://doi.org/10.1007/978-3-030-26954-8_23" target="_blank" rel="noopener noreferrer">https://doi.org/10.1007/</a> <a href="https://doi.org/10.1007/978-3-030-26954-8_23" target="_blank" rel="noopener noreferrer">978-3-030-26954-8\\_23</a></p></li>
+      <li><p class="text-gray-300">5. Bertoni, G., Daemen, J., Peeters, M., Assche, G.V.: Cryptographic sponge functions (2012), <a href="https://keccak.team/files/CSF-0.1.pdf" target="_blank" rel="noopener noreferrer">https://keccak.team/files/CSF-0.1.pdf</a></p></li>
+      <li><p class="text-gray-300">6. Biham, E., Shamir, A.: Differential cryptanalysis of des-like cryptosystems. In: Menezes, A., Vanstone, S.A. (eds.) CRYPTO '90. Lecture Notes in Computer Science, vol. 537, pp. 2&ndash;21. Springer (1990). <a href="https://doi.org/10.1007/3-540-38424-3_1" target="_blank" rel="noopener noreferrer">https://doi.org/10.1007/3-540-38424-3</a> 1, <a href="https://doi.org/10.1007/3-540-38424-3_1" target="_blank" rel="noopener noreferrer">https://doi.org/10.1007/3-540-38424-3\\_1</a></p></li>
+      <li><p class="text-gray-300">7. Buterin, V.: Part 3, <a href="https://vitalik.ca/general/2018/07/21/starks_part_3.html" target="_blank" rel="noopener noreferrer">https://vitalik.ca/general/2018/07/21/starks\\_part\\_3.</a> <a href="https://vitalik.ca/general/2018/07/21/starks_part_3.html" target="_blank" rel="noopener noreferrer">html</a></p></li>
+      <li><p class="text-gray-300">8. Daemen, J., Rijmen, V.: The Design of Rijndael - The Advanced Encryption Standard (AES), Second Edition. Information Security and Cryptography, Springer (2020), <a href="https://doi.org/10.1007/978-3-662-60769-5" target="_blank" rel="noopener noreferrer">https://doi.org/10.1007/978-3-662-60769-5</a></p></li>
+      <li><p class="text-gray-300">9. Gabizon, A., Williamson, Z.J.: plookup: A simplified polynomial protocol for lookup tables. IACR Cryptol. ePrint Arch. p. 315 (2020), <a href="https://eprint.iacr.org/2020/315" target="_blank" rel="noopener noreferrer">https://eprint.iacr.</a> <a href="https://eprint.iacr.org/2020/315" target="_blank" rel="noopener noreferrer">org/2020/315</a></p></li>
+      <li><p class="text-gray-300">10. Gabizon, A., Williamson, Z.J., Ciobotaru, O.: PLONK: permutations over lagrange-bases for oecumenical noninteractive arguments of knowledge. IACR Cryptol. ePrint Arch. p. 953 (2019), <a href="https://eprint.iacr.org/2019/953" target="_blank" rel="noopener noreferrer">https://eprint.iacr.org/2019/953</a></p></li>
+      <li><p class="text-gray-300">11. Grassi, L., Khovratovich, D., L&uml;uftenegger, R., Rechberger, C., Schofnegger, M., Walch, R.: Reinforced concrete: A fast hash function for verifiable computation. In: ACM CCS. pp. 1323&ndash;1335. ACM (2022), <a href="https://doi.org/10.1145/3548606.3560686" target="_blank" rel="noopener noreferrer">https://doi.org/10.1145/3548606.</a> <a href="https://doi.org/10.1145/3548606.3560686" target="_blank" rel="noopener noreferrer">3560686</a></p></li>
+      <li><p class="text-gray-300">12. Grassi, L., Khovratovich, D., Rechberger, C., Roy, A., Schofnegger, M.: Poseidon: A new hash function for zero-knowledge proof systems. In: USENIX Security 2021. pp. 519&ndash;535. USENIX Association (2021), <a href="https://www.usenix.org/conference/usenixsecurity21/presentation/grassi" target="_blank" rel="noopener noreferrer">https://www.usenix.org/conference/</a> <a href="https://www.usenix.org/conference/usenixsecurity21/presentation/grassi" target="_blank" rel="noopener noreferrer">usenixsecurity21/presentation/grassi</a></p></li>
+      <li><p class="text-gray-300">13. Grassi, L., L&uml;uftenegger, R., Rechberger, C., Rotaru, D., Schofnegger, M.: On a generalization of substitution-permutation networks: The HADES design strategy. In: EUROCRYPT 2020, Part II. Lecture Notes in Computer Science, vol. 12106, pp. 674&ndash;704. Springer (2020), <a href="https://doi.org/10.1007/978-3-030-45724-2_23" target="_blank" rel="noopener noreferrer">https://doi.org/10.1007/978-3-030-45724-2\\_23</a></p></li>
+      <li><p class="text-gray-300">14. Hab&uml;ock, U.: Multivariate lookups based on logarithmic derivatives. IACR Cryptol. ePrint Arch. p. 1530 (2022), <a href="https://eprint.iacr.org/2022/1530" target="_blank" rel="noopener noreferrer">https://eprint.iacr.org/2022/1530</a></p></li>
+      <li><p class="text-gray-300">15. jan-ferdinand, sshine, Sword-Smith, aszepieniec, einar-triton, AlexanderLemmens, Ulrik-dk, contrun: Triton VM, <a href="https://triton-vm.org/" target="_blank" rel="noopener noreferrer">https://triton-vm.org/</a></p></li>
+      <li><p class="text-gray-300">16. Joux, A., Peyrin, T.: Hash functions and the (amplified) boomerang attack. In: Menezes, A. (ed.) CRYOPTO 2007. Lecture Notes in Computer Science, vol. 4622, pp. 244&ndash;263. Springer (2007). <a href="https://doi.org/10.1007/978-3-540-74143-5_14" target="_blank" rel="noopener noreferrer">https://doi.org/10.1007/978-3-540-74143-</a> 5 <a href="https://doi.org/10.1007/978-3-540-74143-5_14" target="_blank" rel="noopener noreferrer">14,</a> <a href="https://doi.org/10.1007/978-3-540-74143-5_14" target="_blank" rel="noopener noreferrer">https://doi.org/10.1007/978-3-540-74143-5\\_14</a></p></li>
+      <li><p class="text-gray-300">17. Karatsuba, A.A., Ofman, Y.: Multiplication of many-digital numbers by automatic computers (1962)</p></li>
+      <li><p class="text-gray-300">18. Matsui, M., Yamagishi, A.: A new method for known plaintext attack of FEAL cipher. In: Rueppel, R.A. (ed.) EUROCRYPT '92. Lecture Notes in Computer Science, vol. 658, pp. 81&ndash;91. Springer (1992). <a href="https://doi.org/10.1007/3-540-47555-9_7" target="_blank" rel="noopener noreferrer">https://doi.org/10.1007/3-540-47555-</a> 9 <a href="https://doi.org/10.1007/3-540-47555-9_7" target="_blank" rel="noopener noreferrer">7,</a> <a href="https://doi.org/10.1007/3-540-47555-9_7" target="_blank" rel="noopener noreferrer">https://doi.org/10.1007/3-540-47555-9\\_7</a></p></li>
+      <li><p class="text-gray-300">19. Pornin, T.: Ecgfp5: a specialized elliptic curve. IACR Cryptol. ePrint Arch. p. 274 (2022), <a href="https://eprint.iacr.org/2022/274" target="_blank" rel="noopener noreferrer">https://eprint.iacr.org/2022/274</a></p></li>
+      <li><p class="text-gray-300">20. Rijmen, V., Daemen, J., Preneel, B., Bosselaers, A., Win, E.D.: The cipher SHARK. In: Fast Software Encryption, Third International Workshop, 1996, Proceedings. LNCS, vol. 1039, pp. 99&ndash;111. Springer (1996), <a href="https://doi.org/10.1007/3-540-60865-6_47" target="_blank" rel="noopener noreferrer">https://doi.org/10.</a> <a href="https://doi.org/10.1007/3-540-60865-6_47" target="_blank" rel="noopener noreferrer">1007/3-540-60865-6\\_47</a></p></li>
+      <li><p class="text-gray-300">21. Roy, A., Andreeva, E., Sauer, J.F.: Interpolation cryptanalysis of unbalanced feistel networks with low degree round functions. In: Dunkelman, O., Jr., M.J.J., O'Flynn, C. (eds.) SAC 2020. Lecture Notes in Computer Science, vol. 12804, pp. 273&ndash;300. Springer (2020). <a href="https://doi.org/10.1007/978-3-030-81652-0_11" target="_blank" rel="noopener noreferrer">https://doi.org/10.1007/978-3-030-81652-0</a> 11, <a href="https://doi.org/10.1007/978-3-030-81652-0_11" target="_blank" rel="noopener noreferrer">https:</a> <a href="https://doi.org/10.1007/978-3-030-81652-0_11" target="_blank" rel="noopener noreferrer">//doi.org/10.1007/978-3-030-81652-0\\_11</a></p></li>
+      <li><p class="text-gray-300">22. Sword-Smith, sshine, jan-ferdinand, einar-triton, aszepieniec, munksgaard, Ulrik-dk, int-e, einar-io: twenty-first, <a href="https://github.com/Neptune-Crypto/twenty-first" target="_blank" rel="noopener noreferrer">https://github.com/Neptune-Crypto/</a> <a href="https://github.com/Neptune-Crypto/twenty-first" target="_blank" rel="noopener noreferrer">twenty-first</a></p></li>
+      <li><p class="text-gray-300">23. Szepieniec, A.: Anatomy of a STARK, <a href="https://aszepieniec.github.io/stark-anatomy/" target="_blank" rel="noopener noreferrer">https://aszepieniec.github.io/</a> <a href="https://aszepieniec.github.io/stark-anatomy/" target="_blank" rel="noopener noreferrer">stark-anatomy/</a></p></li>
+      <li><p class="text-gray-300">24. Szepieniec, A.: BrainSTARK, <a href="https://aszepieniec.github.io/stark-brainfuck/" target="_blank" rel="noopener noreferrer">https://aszepieniec.github.io/</a> <a href="https://aszepieniec.github.io/stark-brainfuck/" target="_blank" rel="noopener noreferrer">stark-brainfuck/</a></p></li>
+      <li><p class="text-gray-300">25. Szepieniec, A., Ashur, T., Dhooghe, S.: Rescue-prime: a standard specification (sok). IACR Cryptol. ePrint Arch. p. 1143 (2020), <a href="https://eprint.iacr.org/2020/1143" target="_blank" rel="noopener noreferrer">https://eprint.iacr.org/</a> <a href="https://eprint.iacr.org/2020/1143" target="_blank" rel="noopener noreferrer">2020/1143</a></p></li>
+      <li><p class="text-gray-300">26. Szepieniec, A., Lemmens, A., Sauer, F.: Tip-0005 (2023), <a href="https://github.com/TritonVM/triton-vm/blob/asz/tip5/tips/tip-0005/tip-0005.md" target="_blank" rel="noopener noreferrer">https://github.com/</a> <a href="https://github.com/TritonVM/triton-vm/blob/asz/tip5/tips/tip-0005/tip-0005.md" target="_blank" rel="noopener noreferrer">TritonVM/triton-vm/blob/asz/tip5/tips/tip-0005/tip-0005.md</a></p></li>
+      <li><p class="text-gray-300">27. Threadbare, B.: Miden vm hash functions, <a href="https://github.com/0xPolygonMiden/crypto/tree/main/benches#comparison" target="_blank" rel="noopener noreferrer">https://github.com/0xPolygonMiden/</a> <a href="https://github.com/0xPolygonMiden/crypto/tree/main/benches#comparison" target="_blank" rel="noopener noreferrer">crypto/tree/main/benches#comparison</a></p></li>
+      <li><p class="text-gray-300">28. Wagner, D.A.: The boomerang attack. In: Knudsen, L.R. (ed.) FSE 1999. Lecture Notes in Computer Science, vol. 1636, pp. 156&ndash;170. Springer (1999). <a href="https://doi.org/10.1007/3-540-48519-8_12" target="_blank" rel="noopener noreferrer">https://doi.org/10.1007/3-540-48519-8</a> 12, <a href="https://doi.org/10.1007/3-540-48519-8_12" target="_blank" rel="noopener noreferrer">https://doi.org/10.1007/</a> <a href="https://doi.org/10.1007/3-540-48519-8_12" target="_blank" rel="noopener noreferrer">3-540-48519-8\\_12</a></p></li>
+      <li><p class="text-gray-300">29. wborgeaug, dlubarov, npwardberkeley, typ3c4t, nbgl, Nashtare, unzvfu, Sladuca, BGluth, bhgomes LindaGuiga, MatthiasGoergens, hratoanina, dependabot[bot] therealyingtong, 0x0ece, bingcicle, honeywest, 4l0n50, jimpo, qope, recmo: Plonky2, <a href="https://github.com/mir-protocol/plonky2" target="_blank" rel="noopener noreferrer">https://github.com/mir-protocol/plonky2</a></p></li>
+    </ul>
+
+`;
+---
+
+<BaseLayout title="The Tip5 Hash Function for Recursive STARKs (2023/107)">
+  <article class="max-w-4xl mx-auto article-prose">
+    <nav class="mb-8">
+      <a href="/papers" class="text-blue-400 hover:text-blue-300">
+        &larr; Back to Papers
+      </a>
+    </nav>
+
+    <header class="mb-12">
+      <h1 class="text-3xl font-bold mb-4"
+        set:html={TITLE_HTML} />
+      <p class="text-gray-400 mb-2"
+        set:html={AUTHORS_HTML} />
+      <p class="text-gray-500 text-sm mb-4">
+        2023 &middot; eprint 2023/107
+      </p>
+      <div class="flex gap-4 text-sm">
+        <a
+          href={EPRINT_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          class="text-blue-400 hover:text-blue-300"
+        >
+          Paper (eprint) &rarr;
+        </a>
+      </div>
+      <PaperDisclaimer eprintUrl={EPRINT_URL} />
+      <p class="mt-1 text-xs text-gray-600">
+        Converted with: {CRAWLER} &middot; {CONVERTED_DATE}
+      </p>
+    </header>
+
+    <nav id="toc" class="mb-10 p-6 rounded-lg" style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06);">
+      <h2 class="text-lg font-bold mb-4">Table of Contents</h2>
+      <ol class="space-y-1 text-sm text-gray-300
+        list-decimal list-inside">
+        <li>
+          <a href="#sec-1" class="hover:text-white">Introduction</a>
+          <ol class="ml-6 mt-1 space-y-1 list-decimal
+            list-inside text-gray-400">
+            <li><a href="#sec-1.1" class="hover:text-white">The Application: Recursive STARKs</a></li>
+            <li><a href="#sec-1.2" class="hover:text-white">What About Lookup Gates?</a></li>
+          </ol>
+        </li>
+        <li>
+          <a href="#sec-2" class="hover:text-white">Specification</a>
+          <ol class="ml-6 mt-1 space-y-1 list-decimal
+            list-inside text-gray-400">
+            <li><a href="#sec-2.1" class="hover:text-white">High-Level Overview</a></li>
+            <li><a href="#sec-2.2" class="hover:text-white">S-Box Layer</a></li>
+            <li><a href="#sec-2.3" class="hover:text-white">Linear Layer</a></li>
+            <li><a href="#sec-2.4" class="hover:text-white">Round Constants</a></li>
+            <li><a href="#sec-2.5" class="hover:text-white">Fixed-Length versus Variable-Length</a></li>
+          </ol>
+        </li>
+        <li>
+          <a href="#sec-3" class="hover:text-white">Implementation Aspects</a>
+          <ol class="ml-6 mt-1 space-y-1 list-decimal
+            list-inside text-gray-400">
+            <li><a href="#sec-3.1" class="hover:text-white">Montgomery Representation</a></li>
+            <li><a href="#sec-3.2" class="hover:text-white">MDS Matrix Multiplication</a></li>
+            <li><a href="#sec-3.3" class="hover:text-white">CPU Performance</a></li>
+          </ol>
+        </li>
+        <li>
+          <a href="#sec-4" class="hover:text-white">Arithmetization</a>
+          <ol class="ml-6 mt-1 space-y-1 list-decimal
+            list-inside text-gray-400">
+            <li><a href="#sec-4.1" class="hover:text-white">Lookup Argument</a></li>
+            <li><a href="#sec-4.2" class="hover:text-white">Cascade Construction</a></li>
+            <li><a href="#sec-4.3" class="hover:text-white">Narrow Lookup Tables</a></li>
+            <li><a href="#sec-4.4" class="hover:text-white">Periodic Constraints</a></li>
+            <li><a href="#sec-4.5" class="hover:text-white">Periodic Interpolants</a></li>
+            <li><a href="#sec-4.6" class="hover:text-white">Correct Decomposition of Elements Modulo p</a></li>
+            <li><a href="#sec-4.7" class="hover:text-white">Arithmetization of Tip5</a></li>
+          </ol>
+        </li>
+        <li>
+          <a href="#sec-5" class="hover:text-white">Security Analysis</a>
+          <ol class="ml-6 mt-1 space-y-1 list-decimal
+            list-inside text-gray-400">
+            <li><a href="#sec-5.1" class="hover:text-white">Statistical Attacks</a></li>
+            <li><a href="#sec-5.2" class="hover:text-white">Linear Cryptanalysis</a></li>
+            <li><a href="#sec-5.3" class="hover:text-white">Differential Cryptanalysis</a></li>
+            <li><a href="#sec-5.4" class="hover:text-white">Algebraic Attacks</a></li>
+            <li><a href="#sec-5.5" class="hover:text-white">Univariate</a></li>
+            <li><a href="#sec-5.6" class="hover:text-white">Straightforward Gr&ouml;bner Basis</a></li>
+            <li><a href="#sec-5.7" class="hover:text-white">Split S-box</a></li>
+            <li><a href="#sec-5.8" class="hover:text-white">Linear Approximation</a></li>
+            <li><a href="#sec-5.9" class="hover:text-white">Fixing</a></li>
+            <li><a href="#sec-5.10" class="hover:text-white">Skip Two Rounds</a></li>
+            <li><a href="#sec-5.11" class="hover:text-white">Cryptanalysis Summary</a></li>
+          </ol>
+        </li>
+        <li><a href="#sec-6" class="hover:text-white">Conclusion</a></li>
+      </ol>
+      <p class="text-xs text-gray-500 mt-4 mb-1 font-semibold">
+        Additional
+      </p>
+      <ul class="space-y-1 text-sm text-gray-400
+        list-disc list-inside">
+        <li><a href="#references" class="hover:text-white">References</a></li>
+      </ul>
+    </nav>
+
+
+    <Fragment set:html={CONTENT} />
+
+    <PaperHistory slug="the-tip5-hash-function-for-recursive-starks-2023" />
+  </article>
+</BaseLayout>

@@ -1,0 +1,1041 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import PaperDisclaimer from '../../components/PaperDisclaimer.astro';
+import PaperHistory from '../../components/PaperHistory.astro';
+
+const EPRINT_URL = 'https://eprint.iacr.org/2017/1050';
+const CRAWLER = 'marker';
+const CONVERTED_DATE = '2026-02-16';
+const TITLE_HTML = 'Scalable Multi-party Computation for zk-SNARK Parameters in the Random Beacon Model';
+const AUTHORS_HTML = 'Sean Bowe, Ariel Gabizon, Ian Miers';
+
+const CONTENT = `    <section id="abstract" class="mb-10">
+      <h2 class="text-2xl font-bold">Abstract</h2>
+      <p class="text-gray-300">Zero-knowledge succinct non-interactive arguments of knowledge (zk-SNARKs) have emerged as a valuable tool for verifiable computation and privacy preserving protocols. Currently practical schemes require a common reference string (CRS) to be constructed in a one-time setup for each statement. Ben-Sasson, Chiesa, Green, Tromer and Virza devised a multi-party protocol to securely compute such a CRS, and an adaptation of this protocol was used to construct the CRS for the Zcash cryptocurrency. The scalability of these protocols is obstructed by the need for a &quot;precommitment round&quot; which forces participants to be defined in advance and requires them to secure their secret randomness throughout the duration of the protocol.
+
+Our primary contribution is a more scalable multi-party computation (MPC) protocol, secure in the random beacon model, which omits the precommitment round. We show that security holds even if an adversary has limited influence on the beacon. Next, we apply our main result to obtain a two-round protocol for computing an extended version of the CRS of Groth&#x27;s SNARK. We show that knowledge soundness is maintained in the generic group model when using this CRS.
+
+We also contribute a more secure pairing-friendly elliptic curve construction and implementation, tuned for use in zk-SNARKs, in light of recent optimizations to the Number Field Sieve algorithm which reduced the security estimates of existing pairing-friendly curves used in zk-SNARK applications.</p>
+      <p class="text-gray-300"><strong>Keywords:</strong> SNARKs &middot; zero-knowledge &middot; multi-party computation</p>
+    </section>
+
+    <section id="sec-1" class="mb-10">
+      <h2 class="text-2xl font-bold">1 Introduction</h2>
+
+    <p class="text-gray-300">Zero-knowledge succinct non-interactive arguments of knowledge (zk-SNARKs) [12, 15, 24, 2729, 32, 33, 35, 36] have seen increased usage both in the literature and the real world, ranging from publicly veriable computation, to deployed usage for anonymous payment systems such as Zerocash [11] and Zcash [3] and smart contract systems such as Ethereum.<sup>1</sup></p>
+
+    <p class="text-gray-300">Despite the power of zk-SNARKs, challenges stand in the way of their widespread use. Most signicantly, these schemes are secure in the common reference string (CRS) model, which assumes a trusted setup of parameters used for constructing and verifying proofs. The generation of this CRS is a major challenge, given that corruption or subversion of the parameters means the proof systems are no longer sound i.e. proofs can be forged. The existence of trusted setup parties is often assumed in academic work; in practice these parties are hard to nd, even harder to get a large and diverse group to agree on, and potentially untrustworthy in the face of the tangible monetary gains that arise in real world deployment.</p>
+
+    <p class="text-gray-300">The current approach for deployed systems is for the CRS to be generated via a multi-party computation protocol [9,16] built from scratch for the task of computing a CRS. These protocols guarantee soundnessi.e. that proofs cannot be forged when at least one participant is honest, and guarantee zero-knowledge even if none of the participants are honest. [22] However, these protocols fundamentally cannot scale beyond a handful of participants, and can even be too expensive to perform for just one or two participants in some</p>
+
+    <p class="text-gray-300"><sup>1</sup>As of the Byzantium hard fork in mid October 2017, Ethereum now supports zk-SNARK verication [38]</p>
+
+    <p class="text-gray-300">settings. This is not an engineering and optimization issue. Fundamentally, it is a cryptographic issue: because of restrictions required to deal with adaptive attackers, participants in the current MPC schemes must commit to their share of the parameters up front and maintain availability and security throughout the entire duration of the protocoleven after the majority of their individual computation is completed. If a single participant abort, the entire protocol must restartand so care must be taken to exclude attackers who could trivially disrupt the generation process.</p>
+
+    <p class="text-gray-300">The net result of these cryptographic limitations is that the participants must be carefully preselected in advance, in extremely limited number, and they must remain online throughout the entire duration of the protocol. This not only increases the surface area of attacks, but also raises practical problems as participants are required to maintain custody of the hardware for the duration of the protocol. Even with only six participants, this process took 2 days [37].</p>
+
+    <p class="text-gray-300">While MPC moves the setting for zk-SNARKs away from trust me with a single trusted party, it arguably doesn't go far enough given the stakes: for example, corrupting the zk-SNARK CRS in Zcash could allow an attacker to counterfeit millions of dollars of the currency. In these circumstances, assuming one of a hundred or a thousand people is honest would be far more compelling then assuming one of six or ten. Even if thousands of participants were possible, the fact that they need to be selected before the protocol starts is both a logistic challenge and itself a trust issue: who picks the people and who decides when enough have been picked? For zk-SNARKs to be used in many of their most compelling applications, we need a protocol that can be practically ran in the real world, that scales to hundreds or thousands of participants, and does not require pre-organization or selection. This paper presents an ecient and implemented protocol which does exactly that.</p>
+
+    <p class="text-gray-300">The appeal of zk-SNARKs zk-SNARKs give publicly veriable constant size zero-knowledge proofs of correct computation. Proofs are extremely small (between 160 [27] and 288 [36] bytes depending on implementation even for very large programs) and take less than 10ms to verify.In contrast, the best approaches that do not require trusted setup have proof sizes measured in the tens to hundreds of kilobytes [4] or even megabytes [10] and verication times on the order of hundreds of milliseconds to seconds [4, 10]. This makes zk-SNARKs a uniquely powerful tool in settings where computations needs to be veried quickly many times and space is at a premium.</p>
+
+    <p class="text-gray-300">zk-SNARKs have a variety of uses ranging from traditional cryptographic applications including veri able outsourced computation [36] and the construction of cryptographic primitives [26], to applications for blockchains, cryptocurrencies, and so called smart contracts. Forgery of proofs via a subverted setup process is problematic in any of these settings. But as we will see later, the risks of subversion are particularly high for blockchain applications.</p>
+
+    <p class="text-gray-300">zk-SNARKs for blockchains zk-SNARKs fulll the promise of prove once, verify everywhere for (nearly) free. This has garnered them considerable interest [3,14,19,31,38] for use in blockchains and related technology because each of the thousands of peers maintaining a blockchain must receive, validate, and permanently and publicly store every transaction, raising serious scalability and privacy issues. Not only can zk-SNARKs drastically improve the eciency and cost of maintaining the blockchain itself [14, 19], they can be used to build sophisticated systems on top of a blockchain [?, 20, 31] and to resolve the major privacy and condentiality issues associated with many blockchain based applications [3, 20, 31].</p>
+
+    <p class="text-gray-300">Crowd-scale parameter generation for high-value applications The MPC protocol produces an honest CRS if at least one of the participants is honest. To ensure the CRS is honest, we want to include as many participants as possible. The need for this scales with the consequences of proof forgery and the incentives for subverting the CRS generation process. With millions or billions of dollars at stake in systems which assume most actors are adversarial, trusting one of a few people to be honest is not satisfying.</p>
+
+    <p class="text-gray-300">Blockchains oer the potential for a large number of interesting applications even beyond currency, ranging from decentralized le storage, to identity and anonymous credentials. Many of these applications are speculative both in the sense that their success is unproven and, far more relevantly here, that people think they will be incredibly lucrative. The value of forging proofs in a blockchain is of course itself speculative. But even the potential for billions of dollars of gains will both motivate attacks against the CRS generation process and stimulate skepticism as to the trustworthiness of the participants.</p>
+
+    <p class="text-gray-300">Moreover, systems worth billions of dollars currently use zk-SNARKs. Zcash, which uses zk-SNARKs for private transactions, has nearly $1 Billion worth of currency which could be stolen with forged proofs. Ethereum, with a market cap of roughly $40 Billion, just added much anticipated support for zk-SNARKs [38] in smart contracts. Moreover, Ethereum's current proposal for scaling uses succinct proofs [19] and a failure there would no doubt be very costly.<sup>2</sup></p>
+
+    <p class="text-gray-300">Random Beacons Our protocol makes use of a random beacon. Although we do not detail the precise construction in this paper, we also cannot simply assume one exists or we would be no better o than assuming a CRS. A random beacon produces publicly available and veriable random values at xed intervals. Moreover, our protocol even allows for the adversary to tamper with a small number of bits of the beacon. The beacon itself can be a delayed hash function [18] (e.g. 2 <sup>40</sup> iterations of SHA256 [1] ) evaluated on some high entropy and publicly available data. Possible sources of data include but are not limited to: the closing value of the stock market on a certain date, the output of a selected set of national lotteries, or the value of a block at a particular height in one or more blockchains. E.g. the hash of the 50,000th Bitcoin block (which as of this writing is some 22 days in the future).</p>
+
+    <p class="text-gray-300">Random Beacons vs. Random Oracles We stress for clarity, that the dierence between random beacons and the much more well-known random oracles, is that their values are not available until certain time slots. That means we can assume a given random beacon value is independent of values output by an adversary in previous time slots. (Or in the case of the adversary having inuence on the beacon, beacon values have lots of entropy conditioned on previous values output by the adversary.)</p>
+
+    <p class="text-gray-300">This is completely dierent from a random oracle value, that can have entropy zero conditioned on adversary messages (e.g. if the adversary simply queries and outputs that RO value).</p>
+
+      <h3 id="sec-1.1" class="text-xl font-semibold mt-8">1.1 Our results</h3>
+
+    <p class="text-gray-300">In this paper, we design, implement, and evaluate a scalable open participation multiparty computation protocol for generating zk-SNARK parameters. We aim to make zk-SNARKs suitable for wide-scale usage by providing a new zk-SNARKs scheme and MPC system for CRS generation suitable for real world usage. We oer three contributions:</p>
+
+    <p class="text-gray-300">Player-exchangeable MPC Our primary contribution is a new kind of multi-party computation protocol, a player-exchangeable MPC (px-MPC) and an ecient and implemented px-MPC protocol for CRS generation.<sup>3</sup></p>
+
+    <p class="text-gray-300">A px-MPC is described by a sequence of messages players are supposed to send; however, importantly, there is no restriction on the identity of the sender of each message. In particular, although we will discuss multi-phase protocols where in each phase all players participate in a round-robin process, there is no need to assume the same players participate in dierent phases. Since there is no private state between messages, players may be swapped out or removed after every message.</p>
+
+    <p class="text-gray-300">Player exchangeability avoids the issues of pre-selection of participants, the need to select reliable participants who do not abort, and the need for participants to maintain custody of sensitive hardware for extended periods of time. The only requirement is that at least one of the participants in each phase honestly follows the protocol and does not collude with other players. As a result, the protocol can scale to a practically</p>
+
+    <p class="text-gray-300"><sup>2</sup>The authors explore the use of a variety of non-interactive compact proofs precisely because of the setup issues with zk-SNARKs</p>
+
+    <p class="text-gray-300"><sup>3</sup>This is related to Micali's notion of player replaceable byzantine agreement protocols [25]. The distinction here is that the player does actually have a secret. In Algorand, a player can be compromised immediately after announcing their move and the system is secure because nothing is lost since the only issue is the correctness of the players move. Here, this is only the case after a player deletes there secret data. While this can be done instantaneously, there still is a secret that must be discarded.</p>
+
+    <p class="text-gray-300">unbounded<sup>4</sup> number of participants and do so dynamically during protocol execution. I.e. the protocol is online and open.</p>
+
+    <p class="text-gray-300">The key to this new approach is the use of random beacons to support a proof of security which places fewer restrictions on the protocol. We prove security even if an adversary has limited inuence on this beacon.</p>
+
+    <p class="text-gray-300">zk-SNARKs with an ecient and amortized px-MPC CRS generation process To realize this scheme in practice, we must pick a specic zk-SNARK and provide a protocol for generating its CRS. Groth's zk-SNARK [27] is the current state of the art protocol, using only 3 group elements for the proof and 3 pairings for verication. We prove the security of Groth's zk-SNARK with an extended CRS which allows for a two phase px-MPC protocol. More signicantly, the rst phase is agnostic to the statement<sup>5</sup> , and so can be performed once for all statements up to some large (but bounded) size. The second phase is statement-specic, but signicantly cheaper and requires each player to a far smaller amount of work. This allows the bulk of the cost of setup to amortized over many circuits</p>
+
+    <p class="text-gray-300">MMORPG, a built system for zk-SNARK parameter generation and BLS12-381, a new secure curve for zk-SNARKs As a nal contribution, we oer MMORPG, a built system for massively multiparty open reusable parameter generation for our modied version of of Groth's zk-SNARK. We evaluate its performance and show that for a circuit size up to 2 <sup>21</sup> multiplication gates, participants in the rst round must receive a 1.2GB le, perform a computation that lasts about 13 minutes on a desktop machine, and produce a 600MB le. The second round is statement-specic, but signicantly cheaper. This allows the bulk of the cost of setup to amortized over many circuits.</p>
+
+    <p class="text-gray-300">In order to implement our protocol we must pick an elliptic curve to use. Existing zk-SNARK implementations, such as those used in Zcash and Ethereum, use a pairing-friendly elliptic curve designed to be ecient for zk-SNARKs [13] which originally targeted the 128-bit security level. However, recent optimizations to the Number Field Sieve algorithm [30] have degraded this security, and so we adopt a new pairing-friendly elliptic curve called BLS12-381 which targets 128-bit security with minimal performance impact. We provide a stable implementation of this new elliptic curve, written in Rust, with competitive performance, well-dened serialization, and cross-platform support.</p>
+
+      <h3 id="sec-1.2" class="text-xl font-semibold mt-8">1.2 Outline</h3>
+
+    <p class="text-gray-300">This paper is structured as follows. In section 2 we give an overview of our approach. In section 3 we give cryptographic preliminaries, notation, and supporting lemmas. In section 4 we detail our MPC protocol. In section 5 we detail a proof of security. In section 6 we instantiate our protocol using Groth's zk-SNARK|. Finally, in section 9 we evaluate our implementation.</p>
+
+    <p class="text-gray-300">Our goal is to build a practical protocol between n players and an untrusted coordinator that:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Gives a zk-SNARK CRS where proofs cannot be forged if at least one of the n players is honest.</li>
+      <li>Places no limits on n, the number of participants</li>
+      <li>Does not require players to be selected in advance</li>
+      <li>Does not require players to pre-commit to their random coins and therefore keep them secure throughout the protocol.</li>
+    </ul>
+
+    <p class="text-gray-300"><sup>4</sup>Formally, as seen in Theorem 5.1, the number of participants can be any polynomial in the security parameter &lambda;, when assuming ecient attacks on our curve have success probability negl(&lambda;).</p>
+
+    <p class="text-gray-300"><sup>5</sup>Up to statement size.</p>
+
+    <p class="text-gray-300">The key to achieving these goals is removing the pre-commitment phase used in previous protocols [9,16]. To do this, we design our protocol around the use of a random beacon, a source of public randomness that is not available before a fixed time. To illustrate our approach, we now show how to construct a protocol for a toy CRS and detail the challenges that arise, why a commitment was necessary for previous work, and how we remove it.</p>
+
+    <p class="text-gray-300">A toy CRS For exposition, we consider a CRS that consists only of the elements  <span class="math">s \\cdot g_1</span> , and  <span class="math">\\alpha P(s) \\cdot g_1</span>  where  <span class="math">g_1</span>  is a generator of a group  <span class="math">\\mathbb{G}_1</span>  of order p; s and  <span class="math">\\alpha</span>  are uniform elements in  <span class="math">\\mathbb{F}_p^*</span> ; and P is the degree one polynomial P(x) := 3x + 5 over  <span class="math">\\mathbb{F}_p</span> . To illustrate the main ideas, we only analyze a two party case where the first party, Alice, is honest and the second, Bob, is malicious. At the end of the protocol, neither Alice nor Bob should know s or  <span class="math">\\alpha</span> .</p>
+
+    <p class="text-gray-300">A 2 phase protocol The protocol consists of 2 round-robin phases. In phase one, each participant communicates with the other to compute  <span class="math">s \\cdot g_1</span> . In between phase 1 and 2, the untrusted coordinator computes  <span class="math">P(s) \\cdot g_1</span> . Finally, in phase 2, a (potentially distinct) set of participants compute  <span class="math">\\alpha P(s) \\cdot g_1</span> . In each phase, participants send one message and receive one message.</p>
+
+    <p class="text-gray-300"><strong>Phase 1</strong> In phase one, Alice and Bob need to compute  <span class="math">s \\cdot g_1</span>  for a uniform  <span class="math">s \\in \\mathbb{F}_p^*</span>  unknown to either of them.</p>
+
+    <p class="text-gray-300">A natural protocol proceeds as follows: Alice chooses a uniform  <span class="math">s_1 \\in \\mathbb{F}_p^*</span> , and sends  <span class="math">M = s_1 \\cdot g_1</span>  to Bob. Now, Bob is requested to multiply M by a uniform  <span class="math">s_2 \\in \\mathbb{F}_p^*</span> . The protocol output is defined as  <span class="math">s_2 \\cdot M = s_1 s_2 \\cdot g_1</span> .</p>
+
+    <p class="text-gray-300">The problem is that as Bob is malicious he can adaptively choose a value  <span class="math">s_2 \\in \\mathbb{F}_p^*</span>  based on Alice's message, to manipulate the final output value  <span class="math">s_1s_2 \\cdot g_1</span> . For this reason, in [9,16] a precommitment phase is added, where both Alice and Bob commit to their values  <span class="math">s_1, s_2</span> . In the next phase, Alice and Bob will run the natural protocol, but add a proof that they are using the values  <span class="math">s_1, s_2</span>  they committed to (the proofs will not expose the values  <span class="math">s_1, s_2</span> ). This prevents Bob from choosing  <span class="math">s_2</span>  adaptively. However, the precommitment phase has the above mentioned drawbacks:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Most obviously, it adds a round to the protocol.</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>The participating players need to be defined in advance.</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>The players need to choose their secret elements in advance and protect them for a while (at least until broadcasting their messages in all subsequent phases).</li>
+    </ol></li>
+    </ul>
+
+    <p class="text-gray-300">The main observation in this paper, is that assuming a public source of randomness that no player has control over, i.e. a <em>random beacon</em>, we can omit the precommitment phase and still prevent adaptive attacks. Moreover, we can do so even when the attacker has some control over the random beacon.</p>
+
+    <p class="text-gray-300">With the random beacon, a simplified version of our protocol, when again, the first party is honest, and second malicious, will proceed as follows.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Alice chooses random  <span class="math">s_1 \\in \\mathbb{F}_p^*</span>  and broadcasts  <span class="math">M = s_1 \\cdot g_1</span> .</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Bob chooses (somehow) a value  <span class="math">s_2 \\in \\mathbb{F}_p^*</span>  and broadcasts  <span class="math">M&#x27; = s_1 s_2 \\cdot g_1</span> .</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>The coordinator invokes the random beacon is to obtain a uniform  <span class="math">s_3 \\in \\mathbb{F}_p^*</span> , and the protocol output is defined as  <span class="math">s_3 \\cdot M&#x27; = s_1 s_2 s_3 \\cdot g_1</span> .</li>
+    </ol></li>
+    </ul>
+
+    <p class="text-gray-300">Note that the protocol output is  <span class="math">s \\cdot g_1</span>  for uniform  <span class="math">s \\in \\mathbb{F}_p^*</span>  regardless of Bob's choice of  <span class="math">s_2</span> . You may ask, why not skip both players and just output  <span class="math">s_3 \\cdot g_1</span>  with  <span class="math">s_3 \\in \\mathbb{F}_p^*</span>  being the beacon's output? The point is that it is important no player, or more generally, no group of colluding players that precludes at least one player, will know s. This means we cannot use the <em>public</em> random beacon to select the secret s, we can only use it to randomize the choice of s. You might also ask why we need not trust the coordinator. The answer is simple, given the public random beacon value s, the coordinator behaves in a deterministic and verifiable manner which can be checked by simply repeating their computation.</p>
+
+    <p class="text-gray-300"><strong>Phase 2</strong> Note that, after Phase 1,  <span class="math">P(s) \\cdot g_1</span>  is a linear combination</p>
+
+    <p class="text-gray-300"><span class="math">$P(s) \\cdot g_1 = 3 \\cdot (s \\cdot g_1) + 5 \\cdot g_1</span>$</p>
+
+    <p class="text-gray-300">of the public values  <span class="math">s \\cdot g_1, g_1</span> . Thus, the coordinator can efficiently compute  <span class="math">P(s) \\cdot g_1</span> .</p>
+
+    <p class="text-gray-300">Phase 2 can now proceed analogously to phase 1: Alice chooses a random  <span class="math">\\alpha_1 \\in \\mathbb{F}_p^*</span>  and broadcasts  <span class="math">M = \\alpha_1 P(s) \\cdot g_1</span> . Bob and the coordinator proceed as they did in Phase 1. We end up with a value  <span class="math">\\alpha P(s) \\cdot g_1</span> ; where  <span class="math">\\alpha_2</span>  is chosen by Bob and  <span class="math">\\alpha_3</span>  is chosen by the random beacon.</p>
+
+    <p class="text-gray-300">Finally, we stress that in the proof it is enough to assume the random beacon has low co-entropy; thus the protocol works in the case where the adversary has limited influence on the beacon.</p>
+
+    <p class="text-gray-300">We refer to Theorem 5.1 for precise details.</p>
+
+    </section>
+
+    <section id="sec-3" class="mb-10">
+      <h2 class="text-2xl font-bold">3 Preliminaries</h2>
+
+      <h3 id="sec-3.1" class="text-xl font-semibold mt-8">3.1 Notation</h3>
+
+    <p class="text-gray-300">We will be working over bilinear groups  <span class="math">\\mathbb{G}_1</span> ,  <span class="math">\\mathbb{G}_2</span> , and  <span class="math">\\mathbb{G}_T</span>  each of prime order p, together with respective generators  <span class="math">g_1, g_2</span>  and  <span class="math">g_T</span> . These groups are equipped with a non-degenerate bilinear pairing  <span class="math">e: \\mathbb{G}_1 \\times \\mathbb{G}_2 \\to \\mathbb{G}_T</span> , with  <span class="math">e(g_1, g_2) = g_T</span> . We write  <span class="math">\\mathbb{G}_1</span>  and  <span class="math">\\mathbb{G}_2</span>  additively, and  <span class="math">\\mathbb{G}_T</span>  multiplicatively. For  <span class="math">a \\in \\mathbb{F}_p</span> , we denote  <span class="math">[a]_1 := a \\cdot g_1, [a]_2 := a \\cdot g_2</span> . We use the notation  <span class="math">\\mathbf{G} := \\mathbb{G}_1 \\times \\mathbb{G}_2</span>  and  <span class="math">\\mathbf{g} := (g_1, g_2)</span> . Given an element  <span class="math">h \\in \\mathbf{G}</span> , we denote by  <span class="math">h_1(h_2)</span>  the  <span class="math">\\mathbb{G}_1(\\mathbb{G}_2)</span>  element of h. We denote by  <span class="math">\\mathbb{G}_1^*, \\mathbb{G}_2^*</span>  the non-zero elements of  <span class="math">\\mathbb{G}_1, \\mathbb{G}_2</span>  and denote  <span class="math">\\mathbf{G}^* := \\mathbb{G}_1^* \\times \\mathbb{G}_2^*</span> .</p>
+
+    <p class="text-gray-300">We assume that we have a generator  <span class="math">\\mathcal{G}</span>  that takes a parameter  <span class="math">\\lambda</span>  and returns the three groups above having prime order p at least super polynomial in  <span class="math">\\lambda</span> , together with uniformly chosen generators  <span class="math">g_1 \\in \\mathbb{G}_1^*, g_2 \\in \\mathbb{G}_2^*</span> . We assume group operations in  <span class="math">\\mathbb{G}_1</span>  and  <span class="math">\\mathbb{G}_2</span> , and the map e can be computed in time  <span class="math">\\operatorname{poly}(\\lambda)</span> . When we say an event has probability  <span class="math">\\gamma</span> , when mean it has probability  <span class="math">\\gamma</span>  over the randomness of  <span class="math">\\mathcal{G}</span> , in addition to any other randomness explicitly present in the description of the event.</p>
+
+    <p class="text-gray-300">When we say a party  <span class="math">\\mathcal{A}</span>  is <em>efficient</em>, we mean it is a non-uniform sequence of circuits, indexed by  <span class="math">\\lambda</span> , of size  <span class="math">\\operatorname{poly}(\\lambda)</span> . When we say  <span class="math">\\mathcal{A}</span>  is an efficient oracle circuit we mean it is efficient in the above sense, and during its execution may make  <span class="math">\\operatorname{poly}(\\lambda)</span>  queries to an oracle  <span class="math">\\mathcal{R}</span> , taking as input strings of arbitrary length and outputting elements of  <span class="math">\\mathbb{G}_2^*</span> .</p>
+
+    <p class="text-gray-300">We assume such parties  <span class="math">\\mathcal{A}</span>  all have access to the same oracle  <span class="math">\\mathcal{R}</span>  during the protocol, whose outputs are uniform independent elements of  <span class="math">\\mathbb{G}_2^*</span> .</p>
+
+    <p class="text-gray-300">For  <span class="math">a \\in \\mathbb{F}_p</span>  and  <span class="math">C \\in \\mathbf{G}</span> , we denote by  <span class="math">a \\cdot C</span>  the coordinate-wise scalar multiplication of C by a; that is,  <span class="math">a \\cdot C := (a \\cdot C_1, a \\cdot C_2) \\in \\mathbf{G}</span> . We also allow coordinate-wise operations of vectors of the same length. For example, for  <span class="math">a \\in \\mathbb{F}_p^t</span>  and  <span class="math">\\mathbf{x} \\in \\mathbb{G}_1^t</span> ,  <span class="math">a \\cdot \\mathbf{x} := (a_1 \\cdot \\mathbf{x}_1, \\dots, a_t \\cdot \\mathbf{x}_t)</span> .</p>
+
+    <p class="text-gray-300">We think of acc and rej as true and false. Hence when we say &quot;check that f(x)&quot; for a function f and input x, we mean check that f(x) = acc.</p>
+
+    <p class="text-gray-300">We use the acronym e.w.p. to mean &quot;except with probability&quot;; i.e., e.w.p.  <span class="math">\\gamma</span>  means &quot;with probability at least  <span class="math">1 - \\gamma</span> &quot;.</p>
+
+    <p class="text-gray-300">We assume a synchronous setting where we have positive integer &quot;slots&quot; of time; we assert that in slot J, parties know what messages were sent (and by whom) in slots  <span class="math">1, \\ldots, J-1</span> .</p>
+
+      <h3 id="sec-3.2" class="text-xl font-semibold mt-8">3.2 Random beacons</h3>
+
+    <p class="text-gray-300">We assume we have at our disposal a &quot;random beacon&quot; RB that outputs elements in  <span class="math">\\mathbb{F}_p^*</span> . We think of RB as a function receiving a time slot J, and positive integer k; and outputting k elements  <span class="math">a_1, \\ldots, a_k \\in \\mathbb{F}_p^*</span> . It will be convenient to assume RB is defined only for a subset of values J as its first input. We say RB is resistant to A, if for any positive integers J and k for which RB is defined: for any random variable X generated by A before time J - i.e. using calls to RB(J', k') for J' &lt; J, and calls to the oracle  <span class="math">\\mathcal{R}</span>  in case A is an oracle circuit and messages H of honest players following a protocol A is designed to participate in; the distribution of RB(J, k) is uniform in  <span class="math">(\\mathbb{F}_p^*)^k</span>  and independent of  <span class="math">(\\operatorname{rand}_A, X)</span> , where  <span class="math">\\operatorname{rand}_A</span>  is A's randomness.</p>
+
+    <p class="text-gray-300">We now generalize this definition to model adversaries that have limited influence on the value of the beacon. We say RB is u-co-resistant to  <span class="math">\\mathcal{A}</span> , if for any positive integers J and k: for any random variable X generated by  <span class="math">\\mathcal{A}</span>  before time J as described above, the distribution of  <span class="math">\\mathsf{RB}(J,k)</span>  conditioned on any fixing of  <span class="math">(\\mathsf{rand}_{\\mathcal{A}}, X)</span>  has co-min-entropy at most u (i.e. min-entropy at least  <span class="math">k \\cdot \\log |\\mathbb{F}_n^*| - u</span> ).</p>
+
+    <p class="text-gray-300">Our protocols are always of a round-robin nature, where player  <span class="math">P_i</span>  sends a single message in each phase following player  <span class="math">P_{i-1}</span> , and RB is invoked at the end of each phase at the time slot after  <span class="math">P_N</span> 's message. Thus, we implicitly assume the protocol defines that the time slot for  <span class="math">P_i</span>  to send his phase  <span class="math">\\ell</span>  message is  <span class="math">J = (\\ell - 1) \\cdot (N + 1) + i</span> . In this context, it will be convenient to assume RB(J, k) is defined if and only if J is a multiple of N + 1.</p>
+
+      <h3 id="sec-3.3" class="text-xl font-semibold mt-8">3.3 Input domains</h3>
+
+    <p class="text-gray-300">We assume implicitly in all method descriptions that if an input is not in the prescribed range the method outputs rej. This means that in an implementation of the protocol a method expecting input in  <span class="math">\\mathbb{G}_2^*</span>  (for example) checks that the received input is indeed in this range and output rej otherwise.</p>
+
+      <h3 id="sec-3.4" class="text-xl font-semibold mt-8">3.4 Player-exchangeable protocols and adaptive adversaries</h3>
+
+    <p class="text-gray-300">We assume there are N players  <span class="math">P_1, \\ldots, P_N</span>  in each phase of the protocol. Though we use this notation for each phase, we do not assume it is the same player  <span class="math">P_i</span>  in each phase, nor that the identity of the player, or equivalently, their behavior in the protocol, was determined before the time slot where they send their message. In particular, it is possible  <span class="math">P_i</span>  simply aborts adding nothing to the transcript.</p>
+
+    <p class="text-gray-300">When we discuss an adversary  <span class="math">\\mathcal{A}</span>  controlling K players in the protocol, for  <span class="math">1 \\leq K \\leq N</span> , we mean that  <span class="math">\\mathcal{A}</span>  can adaptively choose a different subset of K players to control in each phase. That is, in time slot  <span class="math">(\\ell-1)\\cdot(N+1)+i</span>  they can choose whether to control  <span class="math">P_i</span>  in phase  <span class="math">\\ell</span>  if they have not chosen K players so far in phase  <span class="math">\\ell</span> .</p>
+
+    <p class="text-gray-300">We denote by  <span class="math">\\mathsf{transcript}_{\\ell,i}</span>  the transcript of the protocol up to the point where player i sent his message in phase  <span class="math">\\ell</span> .</p>
+
+      <h3 id="sec-3.5" class="text-xl font-semibold mt-8">3.5 Preliminary claims</h3>
+
+    <p class="text-gray-300">The following claim is not hard to show.</p>
+
+    <p class="text-gray-300">Claim 3.1. Let A, B be two random variables such that for any fixing a of A, B|A=a has co-min-entropy at most u. Let P be a predicate with range  <span class="math">\\{acc, rej\\}</span> . Let B' be a random variable independent of A that is uniform on the range of B. Then</p>
+
+    <p class="text-gray-300"><span class="math">$\\Pr(P(A, B&#x27;) = \\mathsf{acc}) \\ge 2^{-u} \\cdot \\Pr(P(A, B) = \\mathsf{acc}).</span>$</p>
+
+      <h3 id="sec-3.6" class="text-xl font-semibold mt-8">3.6 Auxiliary methods</h3>
+
+    <p class="text-gray-300">We define some methods to check whether certain ratios between elements hold, using the pairing function e. The following definition and claim are from [16].</p>
+
+    <p class="text-gray-300">Claim 3.2. Given  <span class="math">A, B \\in \\mathbb{G}_1^*</span>  and  <span class="math">C, D \\in \\mathbb{G}_2^*</span> , SameRatio((A, B), (C, D)) = acc if and only if there exists  <span class="math">s \\in \\mathbb{F}_p^*</span>  such that  <span class="math">B = s \\cdot A</span>  and  <span class="math">D = s \\cdot C</span> .</p>
+
+    <p class="text-gray-300"><strong>Algorithm 1</strong> Determine if  <span class="math">x \\in \\mathbb{F}_p^*</span>  exists such that  <span class="math">B = A \\cdot x</span> , and  <span class="math">D = C \\cdot x</span> .</p>
+
+    <pre><code class="language-text">Require: A, B \\in \\mathbb{G}_1 and C, D \\in \\mathbb{G}_2 and none of A, B, C, D are the identity.
+
+1: function SameRatio((A, B), (C, D))
+
+2: if e(A, D) = e(B, C) then
+
+3: return acc
+
+4: else
+
+5: return rej
+
+6: end if
+
+7: end function
+</code></pre>
+
+    <p class="text-gray-300"><strong>Algorithm 2</strong> Check whether the ratio between A and B is the  <span class="math">s \\in \\mathbb{F}_p^*</span>  that is encoded in C</p>
+
+    <pre><code class="language-text">Require: A, B \\in \\mathbb{G}_1^2 or A, B \\in \\mathbb{G}^2. C \\in \\mathbb{G}_2^* or C \\in (\\mathbb{G}_2^*)^2.
+ 1: function Consistent(A, B, C)
+         if C \\in (\\mathbb{G}_2^*)^2 then
+ 2:
+              r \\leftarrow \\mathsf{SameRatio}((A_1, B_1), (C_1, C_2))
+ 3:
+ 4:
+         else
+              r \\leftarrow \\mathsf{SameRatio}((A_1, B_1), (g_2, C))
+ 5:
+         end if
+ 6:
+ 7:
+         if A, B \\in \\mathbb{G}_1 then
+              return r
+ 8:
+ 9:
+              return r AND SameRatio((A_1, B_1), (A_2, B_2))
+10:
+         end if
+11:
+12: end function
+</code></pre>
+
+    <p class="text-gray-300">We later use the suggestive notation consistent (A - B; C) for the above function with inputs A, B, C. We further overload the notation consistent (a - b; c) in the case  <span class="math">c \\in \\mathbf{G}</span> , to mean consistent  <span class="math">(a - b; c_2)</span> .</p>
+
+      <h3 id="sec-3.7" class="text-xl font-semibold mt-8">3.7 Proofs of Knowledge</h3>
+
+    <p class="text-gray-300">We will use a discrete log proof of knowledge scheme based on the Knowledge of Exponent assumption.</p>
+
+    <p class="text-gray-300"><strong>Definition 3.3</strong> (Knowledge of Exponent Assumption (KEA)). For any efficient  <span class="math">\\mathcal{A}</span>  there exists an efficient deterministic  <span class="math">\\chi</span>  such that the following holds. Consider the following experiment.  <span class="math">\\mathcal{A}</span>  is given an arbitrary &quot;auxiliary information string&quot; z, together with a uniformly chosen  <span class="math">r \\in \\mathbb{G}_2^*</span> , that is independent of z. He then generates  <span class="math">x \\in \\mathbb{G}_1^*</span>  and  <span class="math">y \\in \\mathbb{G}_2^*</span> .  <span class="math">\\chi</span> , given the same inputs r and z and the internal randomness of  <span class="math">\\mathcal{A}</span> , outputs  <span class="math">\\alpha \\in \\mathbb{F}_p^*</span> . The probability that both</p>
+
+    <pre><code class="language-text">1. \\mathcal{A} &quot;succeeded&quot;, i.e., SameRatio((g_1,x),(r,y)), 2. \\chi &quot;failed&quot;, i.e., x \\neq [\\alpha]_1, is \\operatorname{negl}(\\lambda).
+</code></pre>
+
+    <p class="text-gray-300"><strong>Remark 3.4.</strong> Let's see that the assumption is the standard KEA assumption, besides the partition of the elements to  <span class="math">\\mathbb{G}_1</span>  and  <span class="math">\\mathbb{G}_2</span> : Suppose that  <span class="math">r = [\\gamma]_2</span>  and  <span class="math">x = [\\alpha]_1</span> . Then  <span class="math">\\mathsf{SameRatio}((g_1, x), (r, y))</span>  implies  <span class="math">y = [\\alpha \\cdot \\gamma]_2</span> . Thus (x, y) is a pair of 'ratio'  <span class="math">\\gamma</span> , generated from the given pair  <span class="math">(g_1, r)</span>  also of ratio  <span class="math">\\gamma</span> ; and the KEA states to create such a pair we must know the ratio with the original pair, namely  <span class="math">\\alpha</span> .</p>
+
+    <p class="text-gray-300">Note that KEA is usually phrased for groups written in multiplicative notation, thus a better name here might have been &quot;Knowledge of Coefficient Assumption&quot;.</p>
+
+    <h4 id="sec-misc-1" class="text-lg font-semibold mt-6"><strong>Algorithm 3</strong> Construct a proof of knowledge of <span class="math">\\alpha</span></h4>
+
+    <pre><code class="language-text">Require: \\alpha \\in \\mathbb{F}_p^*
+
+1: function POK(\\alpha, string v)
+
+2: r \\leftarrow \\mathcal{R}([\\alpha]_1, v) \\in \\mathbb{G}_2^*
+
+3: return ([\\alpha]_1, \\alpha \\cdot r)
+
+4: end function
+</code></pre>
+
+    <h3 id="sec-misc-2" class="text-xl font-semibold mt-8"><strong>Algorithm 4</strong> Verify a proof of knowledge of <span class="math">\\alpha</span></h3>
+
+    <pre><code class="language-text">Require: a \\in \\mathbb{G}_1^*, b \\in \\mathbb{G}_2^*
+
+1: function CheckPok(a, string v,b)
+
+2: r \\leftarrow \\mathcal{R}(a,v) \\in \\mathbb{G}_2^*
+
+3: return SameRatio((g_1,a),(r,b))
+
+4: end function
+</code></pre>
+
+    <p class="text-gray-300">Claim 3.5. Under the KEA assumption, for any efficient oracle circuit  <span class="math">\\mathcal{A}</span> , there exists an efficient  <span class="math">\\chi</span>  such that the following holds. Fix any string z that was generated without queries to  <span class="math">\\mathcal{R}</span> . Given z and random oracle replies  <span class="math">r_1, \\ldots, r_\\ell</span> ,  <span class="math">\\mathcal{A}</span>  produces  <span class="math">a \\in \\mathbb{G}_1, y \\in \\mathbb{G}_2</span>  and a string v; and  <span class="math">\\chi</span> , given the same inputs together with the internal randomess used by  <span class="math">\\mathcal{A}</span> , produces  <span class="math">\\alpha \\in \\mathbb{F}_p^*</span> . The probability that both</p>
+
+    <pre><code class="language-text">1. \\mathcal{A} &quot;succeeds&quot;, i.e., CheckPOK(a,v,y)=acc, 2. \\chi &quot;failed&quot;, i.e., a\\neq [\\alpha]_1,
+</code></pre>
+
+    <p class="text-gray-300">Proof. Fix  <span class="math">\\mathcal{A}</span>  and z such that given z and oracle access to  <span class="math">\\mathcal{R}</span> ,  <span class="math">\\mathcal{A}</span>  produces a pair  <span class="math">a \\in \\mathbb{G}_1, y \\in \\mathbb{G}_2</span>  and string v. Let  <span class="math">\\ell = \\operatorname{poly}(\\lambda)</span>  be the number of oracle calls  <span class="math">\\mathcal{A}</span>  makes to  <span class="math">\\mathcal{R}</span> . We can think of  <span class="math">\\mathcal{A}</span>  as a deterministic function of z, the sequence  <span class="math">\\mathbf{r} = r_1, \\ldots, r_\\ell</span>  of replies from  <span class="math">\\mathcal{R}</span> , and its internal randomness  <span class="math">\\operatorname{rand}_{\\mathcal{A}}</span> . For  <span class="math">i \\in [\\ell]</span> , we construct  <span class="math">\\mathcal{A}_i</span> , that given z and  <span class="math">r \\in \\mathbb{G}_2</span>  does the following. It invokes  <span class="math">\\mathcal{A}</span>  on  <span class="math">(z, \\mathbf{r}, \\operatorname{rand}_{\\mathcal{A}})</span> , where  <span class="math">r_j</span>  is chosen uniformly for  <span class="math">j \\neq i</span> , and  <span class="math">r_i = r</span> ; and  <span class="math">\\operatorname{rand}_{\\mathcal{A}}</span>  is chosen uniformly. Let  <span class="math">(a, v, y) := \\mathcal{A}(z, \\mathbf{r}, \\operatorname{rand}_{\\mathcal{A}})</span>  and let  <span class="math">q_1, \\ldots, q_\\ell</span>  be its sequence of queries to  <span class="math">\\mathcal{R}</span> . Let  <span class="math">D_i</span>  be the set of  <span class="math">(\\mathbf{r}, \\operatorname{rand}_{\\mathcal{A}})</span>  such that  <span class="math">q_i = (a, v)</span>  and i is the first such index. If  <span class="math">(\\mathbf{r}, \\operatorname{rand}_{\\mathcal{A}}) \\notin D_i</span> ,  <span class="math">\\mathcal{A}_i</span>  aborts. Otherwise,  <span class="math">\\mathcal{A}_i</span>  outputs (a, y). By the KEA, there exists an efficient  <span class="math">\\chi_i</span>  such that the probability over uniform  <span class="math">\\mathbf{r}, \\operatorname{rand}_{\\mathcal{A}}</span>  that both</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>SameRatio( <span class="math">(g_1, a), (r, y)</span> ),</li>
+    </ol>
+
+    <p class="text-gray-300">is  <span class="math">\\operatorname{negl}(\\lambda)</span> .</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><span class="math">\\chi_i</span>  given  <span class="math">z, \\mathbf{r}, \\mathsf{rand}_{\\mathcal{A}}</span>  didn't output  <span class="math">\\alpha</span>  such that  <span class="math">a = [\\alpha]_1</span> ,</li>
+    </ol>
+
+    <p class="text-gray-300">is  <span class="math">\\operatorname{negl}(\\lambda)</span> . We can think of  <span class="math">\\mathcal{A}_i</span>  as a deterministic function  <span class="math">\\mathcal{A}_i(z, \\mathbf{r}, \\operatorname{rand}_{\\mathcal{A}})</span> , that takes  <span class="math">r_i</span>  as its input r and  <span class="math">r_1, \\ldots, r_{i-1}, r_{i+1}, \\ldots, r_{\\ell}</span>  as its randomness for answering the calls to  <span class="math">\\mathcal{R}</span>  for  <span class="math">j \\neq i</span> . We can think of  <span class="math">\\chi_i</span>  as a function  <span class="math">\\chi_i(z, \\mathbf{r}, \\operatorname{rand}_{\\mathcal{A}})</span>  in the same way.</p>
+
+    <p class="text-gray-300">Now we construct an efficient  <span class="math">\\chi</span>  as follows.  <span class="math">\\chi</span>  determines the sequence  <span class="math">q_1, \\ldots, q_\\ell</span>  of queries to  <span class="math">\\mathcal{R}</span>  made by  <span class="math">\\mathcal{A}(z, \\mathbf{r}, \\mathsf{rand}_{\\mathcal{A}})</span>  and its output (a, v, y). Suppose that  <span class="math">(\\mathbf{r}, \\mathsf{rand}_{\\mathcal{A}}) \\in D_i</span>  for some  <span class="math">i \\in [\\ell]</span> , then  <span class="math">\\chi</span>  returns  <span class="math">\\alpha := \\chi_i(z, \\mathbf{r}, \\mathsf{rand}_{\\mathcal{A}})</span> ; otherwise  <span class="math">\\chi</span>  aborts. Now suppose that  <span class="math">(\\mathbf{r}, \\mathsf{rand}_{\\mathcal{A}}) \\in D_i</span>  and &quot; <span class="math">\\mathcal{A}</span>  beats  <span class="math">\\chi</span> &quot;. That is,</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><span class="math">\\mathsf{CheckPOK}(a, v, y) = \\mathsf{acc}.</span></li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><span class="math">\\chi(z, v, \\mathbf{r}, \\operatorname{rand}_{\\mathcal{A}}) = \\alpha \\text{ where } a \\neq [\\alpha]_1.</span></li>
+    </ol></li>
+    </ul>
+
+    <p class="text-gray-300">We have  <span class="math">\\mathcal{R}(a,z) = r_i</span> , and  <span class="math">\\chi_i(z,\\mathbf{r},\\mathsf{rand}_{\\mathcal{A}}) = \\chi(z,\\mathbf{r},\\mathsf{rand}_{\\mathcal{A}})</span> . Hence,</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>SameRatio <span class="math">((g_1, r_i), (a, y))</span> .</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><span class="math">\\chi_i(z, \\mathbf{r}, \\mathsf{rand}_{\\mathcal{A}}) = \\alpha \\text{ where } a \\neq [\\alpha]_1</span> .</li>
+    </ol></li>
+    </ul>
+
+    <p class="text-gray-300">But this can only happen for a  <span class="math">\\operatorname{negl}(\\lambda)</span>  fraction of  <span class="math">(\\mathbf{r}, \\operatorname{rand}_{\\mathcal{A}})</span> . Also, if  <span class="math">(\\mathbf{r}, \\operatorname{rand}_{\\mathcal{A}}) \\notin D_i</span>  for any  <span class="math">i \\in [\\ell]</span> , the value of  <span class="math">\\mathcal{R}(a, v)</span>  is yet unknown and uniformly distributed and thus the probability that  <span class="math">\\operatorname{CheckPOK}(a, v, y)</span>  is  <span class="math">\\operatorname{negl}(\\lambda)</span> .</p>
+
+    <p class="text-gray-300">A union bound over  <span class="math">i \\in [\\ell]</span>  now gives the claim.</p>
+
+    </section>
+
+    <section id="sec-4" class="mb-10">
+      <h2 class="text-2xl font-bold">4 Multi-party Computation for Parameter Generation</h2>
+
+    <p class="text-gray-300">We now describe our protocol.</p>
+
+      <h3 id="sec-4.1" class="text-xl font-semibold mt-8">4.1 The circuit structure</h3>
+
+    <p class="text-gray-300">We assume we have an arithmetic circuit  <span class="math">\\mathbf{C}</span>  over  <span class="math">\\mathbb{F}_p</span>  with the following structure, which while it may seem ad-hoc, allows us to simplify the protocol design of [9] and is satisfied for a circuit computing the extended CRS of [27] described in Section 6.</p>
+
+    <p class="text-gray-300">The circuit consists of alternate multiply/divide layers  <span class="math">C_1, \\ldots, C_d</span> , and linear combination layers  <span class="math">L_1, \\ldots, L_d</span> . We call d the depth of the circuit.<sup>6</sup> (A layer can have depth larger than one in the regular sense.) The circuit inputs  <span class="math">\\mathbf{x}</span>  are partitioned into disjoint sets  <span class="math">\\mathbf{x}^1, \\ldots, \\mathbf{x}^d</span>  corresponding to the layers. Specifically, we think of  <span class="math">\\mathbf{x}^\\ell</span>  as the inputs of the multiply/divide layer  <span class="math">C_\\ell</span> , and at times use the notation  <span class="math">x \\in C_\\ell</span>  to mean  <span class="math">x \\in \\mathbf{x}^\\ell</span> . We think of  <span class="math">\\mathbf{x}</span>  and  <span class="math">\\mathbf{x}^\\ell</span>  as enumerated sets, and use them as input vectors to functions. A multiply/divide layer C satisfies the following:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>All gate outputs in C are outputs of the circuit.</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><span class="math">C = C_{\\ell}</span>  has an input gate for each of its inputs  <span class="math">x \\in \\mathbf{x}^{\\ell}</span> . When another gate wishes to use one of these inputs, it uses a wire from the corresponding input gate (i.e. there are no &quot;direct&quot; input wires). In particular, every input is part of the circuit output.</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>All gates in C, besides the input gates, are division and mutiplication gates of fan-in two. The left input is a gate from C or previous layers; and the right input is an input gate belonging to C. In case of a division gate, the right input is always the denominator.</li>
+    </ol></li>
+    </ul>
+
+    <p class="text-gray-300">A linear combination layer L consists of linear combination gates of unbounded fan in, whose inputs are gates from L or previous layers.</p>
+
+      <h3 id="sec-4.2" class="text-xl font-semibold mt-8">4.2 The protocol coordinator</h3>
+
+    <p class="text-gray-300">In addition to messages of the players, the protocol description includes messages that are to be sent by the <em>protocol coordinator</em>. These messages are a deterministic function of the protocol description and the transcript up to that point. In practice, it can be helpful to have a computationally strong party fill this role. However, there is no need to trust this party, and anyone can later verify that the protocol coordinator's messages in the protocol transcript are correct. In particular, the role of the protocol verifier will include, in addition to the steps explicitly described, to compute the protocol coordinator's messages independently and check they are correct.</p>
+
+      <h3 id="sec-4.3" class="text-xl font-semibold mt-8">4.3 The MPC</h3>
+
+    <p class="text-gray-300">The goal of the protocol is to compute  <span class="math">\\mathbf{C}(\\mathbf{x}) \\cdot \\mathbf{g}</span>  for uniformly chosen  <span class="math">\\mathbf{x} \\in (\\mathbb{F}_p^*)^t</span> , where t is the number of  <span class="math">\\mathbf{C}</span> 's inputs. More specifically, we will have  <span class="math">\\mathbf{x} = \\mathbf{x}_1 \\cdots \\mathbf{x}_N \\cdot \\mathbf{x}&#x27;</span>  (recall this product is defined coordinate-wise), where  <span class="math">\\mathbf{x}_i \\in (\\mathbb{F}_p^*)^t</span>  is the input of  <span class="math">P_i</span> , and  <span class="math">\\mathbf{x}</span> ' is a random beacon output.</p>
+
+    <p class="text-gray-300"><sup>&amp;</sup>lt;sup&gt;6</sup>This notion is similar to S-depth in [9], though we have not determined the precise relation.</p>
+
+    <p class="text-gray-300"><sup>&amp;</sup>lt;sup&gt;7</sup>In fact, we can allow the right input to be any gate that is 'purely' from C; meaning that the directed tree of gates leading to the right input only contains gates from C. But for the Groth circuit [27] which is our main usecase, we can assume the right input is an actual input from the same layer.</p>
+
+    <p class="text-gray-300">Denote the layers of  <span class="math">\\mathbf{C}</span>  by  <span class="math">C_1, L_1, \\ldots, C_d, L_d</span> . The protocol consists of d phases corresponding to the layers.</p>
+
+      <h3 id="sec-4.4" class="text-xl font-semibold mt-8">4.4 The phase structure</h3>
+
+    <p class="text-gray-300">We fix a layer  <span class="math">\\ell \\in [1..d]</span>  and denote  <span class="math">C = C_{\\ell}, L = L_{\\ell}</span> . We assume that for all gates g in previous layers -  <span class="math">C_1, L_1, \\ldots, C_{\\ell-1}, L_{\\ell-1}</span> , we have already computed an output value  <span class="math">[g] \\in G</span> .</p>
+
+    <p class="text-gray-300">Note that the output of every gate  <span class="math">g \\in C</span> , is a Laurent monomial (i.e. ratio of two monomials) in C's inputs, possibly multiplied by an output of some gate g' from a previous layer. Denote this monomial  <span class="math">M_g</span> , and the output from the previous layer by  <span class="math">g_{src}</span> ; if no such output exists let  <span class="math">g_{src} := g</span> .</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>For  <span class="math">j \\in [N]</span> , Player j does the following.</li>
+    </ol>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>(a) For each input x used in C, output  <span class="math">[x_j]_1</span> , and  <span class="math">y_{x,j} := \\mathsf{POK}(x_j, v)</span> , where  <span class="math">v = \\mathsf{transcript}_{\\ell,j-1}</span>  is the protocol transcript before the current player.</li>
+      <li>(b) For each gate  <span class="math">g \\in C</span> :    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>If j = 1, output  <span class="math">[g]^1 := M_g(\\mathbf{x}_1^{\\ell}) \\cdot g_{src}</span> .</li>
+      <li>Otherwise, when j &gt; 1, output  <span class="math">[g]^{\\mathbf{j}} := M_{g}(\\mathbf{x}_{i}^{\\ell}) \\cdot [g]^{\\mathbf{j}-1}</span> .</li>
+    </ul></li>
+    </ul></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Let J-1 be the time slot on which  <span class="math">P_N</span>  was supposed to broadcast in this phase. The protocol coordinator computes and outputs  <span class="math">\\mathbf{x}&#x27;^{\\ell} := \\mathsf{RB}(J, t_{\\ell})</span> , and  <span class="math">[\\mathsf{g}] := M_{\\mathsf{g}}(\\mathbf{x}&#x27;^{\\ell}) \\cdot [\\mathsf{g}]^{\\mathbf{N}}</span>  for each  <span class="math">\\mathsf{g} \\in C</span> .</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Finally, the protocol coordinator computes and outputs, in the same time slot, the values [g] for all gates g in the linear combination layer  <span class="math">L = L_{\\ell}</span> .</li>
+    </ol></li>
+    </ul>
+
+    <h4 id="sec-misc-3" class="text-lg font-semibold mt-6">Verification:</h4>
+
+    <p class="text-gray-300">For each  <span class="math">j \\in N</span> , the protocol verifier does the following</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>For each input  <span class="math">x \\in C</span> , let  <span class="math">r_{x,j} = \\mathcal{R}([x_j]_1</span> , transcript <span class="math">_{\\ell,j-1}</span> ) check that  <span class="math">\\mathsf{CheckPOK}([x_j]_1</span> , transcript <span class="math">_{\\ell,j-1}, y_{x,j}</span> ); and  <span class="math">\\mathsf{consistent}([x]^{\\mathbf{j-1}} [x]^{\\mathbf{j}}; (r_{x,j}, y_{x,j}))</span> .</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Let  <span class="math">g_L</span>  and  <span class="math">g_R</span>  be the inputs of g.</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>If  <span class="math">g_L \\in C</span>  then</li>
+    </ol>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><span class="math">\\bullet</span>  If g is a multiplication gate check that  <span class="math">consistent([g_L]^{\\bf j}-[g]^{\\bf j};[g_R]^{\\bf j})</span></li>
+      <li><span class="math">\\bullet</span>  If g is a division gate check that  <span class="math">\\mathsf{consistent}([g]^{\\mathbf{j}} [g_L]^{\\mathbf{j}}; [g_R]^{\\mathbf{j}})</span></li>
+    </ul></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>If  <span class="math">g_L</span>  is from a previous layer, then</li>
+    </ol>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><span class="math">\\bullet</span>  If g is a multiplication gate check that  <span class="math">consistent([g_L] [g]^{\\mathbf{j}}; [g_R]^{\\mathbf{j}})</span></li>
+      <li><span class="math">\\bullet</span>  If g is a division gate check that  <span class="math">consistent([g]^{\\mathbf{j}}-[g_L]\\,;[g_R]^{\\mathbf{j}})</span></li>
+    </ul></li>
+    </ul>
+
+    <p class="text-gray-300">We denote by  <span class="math">\\mathbf{C}_S</span>  a random variable equal to the encoded output of the circuit  <span class="math">\\mathbf{C}</span>  with uniformly chosen input. That is,  <span class="math">\\mathbf{C}_S := [\\mathbf{C}(s)]</span>  for uniform  <span class="math">s \\in (\\mathbb{F}_p^*)^t</span> .</p>
+
+    <p class="text-gray-300">Let  <span class="math">\\mathcal{A}</span>  be an adversary that controls a subset of N-1 players in each phase as described in Section 3.4. We denote by  <span class="math">\\mathbf{C}_{\\mathcal{A}}</span>  the circuit output generated by  <span class="math">\\mathcal{A}</span>  participating in the protocol together with an honest player in each phase. We think of  <span class="math">\\mathcal{A}</span>  as outputting a string  <span class="math">\\mathbf{z}</span>  after the end of the protocol.  <span class="math">\\mathbf{C}_{\\mathcal{A}}</span>  and  <span class="math">\\mathbf{z}</span>  are</p>
+
+    <p class="text-gray-300">random variables that are a function of  <span class="math">\\mathcal{A}</span> 's randomness  <span class="math">\\mathsf{rand}_{\\mathcal{A}}</span> , the honest player's inputs - which consist of uniformly distributed independent elements of  <span class="math">\\mathbb{F}_p^*</span> , the random oracle  <span class="math">\\mathcal{R}</span> 's outputs - which are uniformly distributed elements of  <span class="math">\\mathbb{G}_2</span> ; and the random beacon's outputs  <span class="math">\\mathsf{rand}_{\\mathsf{beacon}}</span>  (which are elements of  <span class="math">\\mathbb{F}_p^*</span> , over which  <span class="math">\\mathcal{A}</span>  may have some limited influence).</p>
+
+    <p class="text-gray-300">For a predicate P with range {acc, rej}, we define</p>
+
+    <p class="text-gray-300"><span class="math">$adv_{\\mathcal{A},P} := Pr(P(\\mathbf{C}_{\\mathcal{A}}, \\mathsf{z}) = \\mathsf{acc}).</span>$</p>
+
+    <p class="text-gray-300">Note that  <span class="math">adv_{\\mathcal{A},P}</span>  depends on RB and the amount of influence  <span class="math">\\mathcal{A}</span>  has on RB. We think of RB as fixed and thus don't use it as an extra parameter.</p>
+
+    <p class="text-gray-300"><strong>Theorem 5.1.</strong> Fix any efficient oracle circuit A and u &gt; 0. Fix a number of players N with  <span class="math">N(\\lambda) = \\text{poly}(\\lambda)</span> . There exists an efficient B such that if RB is u-co-resistant to A, then for every predicate P</p>
+
+    <p class="text-gray-300"><span class="math">$\\Pr(P(\\mathbf{C}_S, \\mathcal{B}(\\mathbf{C}_S)) = \\mathsf{acc}) \\ge 2^{-ud} \\cdot \\mathsf{adv}_{\\mathcal{A}, P} - \\mathsf{negl}(\\lambda).</span>$</p>
+
+    <p class="text-gray-300">Suppose P is a predicate that runs a zk-SNARK verifier with some fixed public input, using its first input as the zk-SNARK parameters, and the second as the proof; take a constant d and  <span class="math">u = O(\\log \\lambda)</span> . The theorem implies that if  <span class="math">\\mathcal{A}</span>  cannot construct a correct proof with non-negligible probability for independently generated parameters, it cannot do so for parameters generated in the protocol in which it participated.</p>
+
+    <p class="text-gray-300">Proof. Denote by H the set of inputs of the honest player in each phase. Denote by  <span class="math">\\operatorname{rand}_{\\mathsf{beacon}}</span>  the replies of the random beacon to the protocol coordinator at the end of each phase. Denote by  <span class="math">\\operatorname{rand}_{\\mathsf{oracle}}</span>  the replies of the random oracle to the honest player (when computing  <span class="math">\\mathsf{POK}(x,z)</span>  for  <span class="math">x \\in H</span> ) and to  <span class="math">\\mathcal{A}</span> 's queries. The circuit output  <span class="math">\\mathbf{C}_{\\mathcal{A}}</span>  and the string  <span class="math">\\mathsf{z}</span>   <span class="math">\\mathcal{A}</span>  outputs after the protocol can be viewed as a function of  <span class="math">\\mathsf{x} = (\\mathsf{rand}_{\\mathcal{A}}, H, \\mathsf{rand}_{\\mathsf{oracle}}, \\mathsf{rand}_{\\mathsf{beacon}})</span> . Call this function F; i.e.  <span class="math">F(\\mathsf{x}) = (\\mathbf{C}_{\\mathcal{A}}(\\mathsf{x}), \\mathsf{z}(\\mathsf{x}))</span> . Let  <span class="math">\\mathcal{X}</span>  be the set of such  <span class="math">\\mathsf{x}</span> 's. We have d calls to RB- one at the end of each phase corresponding to the string  <span class="math">\\mathsf{rand}_{\\mathsf{beacon}} = \\mathsf{rand}_{\\mathsf{beacon}1}, \\ldots, \\mathsf{rand}_{\\mathsf{beacon}d}</span> . As RB is u-co-resistant to  <span class="math">\\mathcal{A}</span> , we know that during the protocol  <span class="math">\\mathsf{rand}_{\\mathsf{beacon}\\ell-1}</span> . In particular,</p>
+
+    <p class="text-gray-300"><span class="math">$adv_{\\mathcal{A},P} = Pr(P(\\mathbf{C}_{\\mathcal{A}}(A,B), \\mathsf{z}(A,B)) = \\mathsf{acc}).</span>$</p>
+
+    <p class="text-gray-300">for a uniformly distributed A on the possible values of  <span class="math">(rand_A, H, rand_{oracle})</span> , and a random variable B having co-min-entropy at most ud conditioned on any fixing of A, describing the value of  <span class="math">rand_{beacon}</span> . It now follows from Claim 3.1 that</p>
+
+    <p class="text-gray-300"><span class="math">$\\Pr_{\\mathsf{x} \\leftarrow \\mathcal{X}}(P(\\mathbf{C}_{\\mathcal{A}}(\\mathsf{x}), \\mathsf{z}(\\mathsf{x})) = \\mathsf{acc}) \\ge 2^{-ud} \\cdot \\mathsf{adv}_{\\mathcal{A}, P}.</span>$</p>
+
+    <p class="text-gray-300">(where  <span class="math">x \\leftarrow \\mathcal{X}</span>  refers to a uniform choice of x.)</p>
+
+    <p class="text-gray-300">Given  <span class="math">\\mathcal{A}</span>  we construct  <span class="math">\\mathcal{B}</span>  with the following property.  <span class="math">\\mathcal{B}</span>  receives  <span class="math">[\\mathbf{C}(s)]</span>  which is an output value of the random variable  <span class="math">\\mathbf{C}_S</span> . Given  <span class="math">[\\mathbf{C}(s)]</span>  it produces an output  <span class="math">\\mathbf{z}(\\mathsf{x})</span> , for  <span class="math">\\mathsf{x}</span>  such that</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>x is uniform in  <span class="math">\\mathcal{X}</span>  (over the randomness of  <span class="math">s \\in (\\mathbb{F}_p^*)^t</span>  and the randomness of  <span class="math">\\mathcal{B}</span> ).</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>The values x for which  <span class="math">\\mathcal{B}</span>  does not produce an output z(x) with  <span class="math">\\mathbf{C}_{\\mathcal{A}}(x) = [\\mathbf{C}(s)]</span>  have density  <span class="math">\\operatorname{negl}(\\lambda)</span> .</li>
+    </ol></li>
+    </ul>
+
+    <p class="text-gray-300">It follows that</p>
+
+    <p class="text-gray-300"><span class="math">$\\begin{split} \\Pr(P(\\mathbf{C}_S, \\mathcal{B}(\\mathbf{C}_S)) &amp;= \\mathsf{acc}) \\geq \\\\ \\Pr_{\\mathsf{x} \\leftarrow \\mathcal{X}}(P(\\mathbf{C}_{\\mathcal{A}}(\\mathsf{x}), z(\\mathsf{x})) &amp;= \\mathsf{acc}) - \\mathsf{negl}(\\lambda) \\geq \\\\ 2^{-ud} \\cdot \\mathsf{adv}_{\\mathcal{A}, P} &amp;- \\mathsf{negl}(\\lambda). \\end{split}</span>$</p>
+
+    <p class="text-gray-300">We proceed to describe  <span class="math">\\mathcal{B}</span>  and show that its output is as claimed.</p>
+
+    <p class="text-gray-300">We have  <span class="math">[\\mathbf{C}(s)] = \\{[\\mathbf{g}(s)]\\}_{\\mathbf{g} \\in M_{\\mathbf{C}}}</span> , where  <span class="math">M_{\\mathbf{C}}</span>  is the set of all gates in all multiply/divide layers of  <span class="math">\\mathbf{C}</span> .  <span class="math">\\mathcal{B}</span>  runs the protocol with  <span class="math">\\mathcal{A}</span>  as follows. We think of  <span class="math">\\mathcal{B}</span>  as running an internal oracle circuit  <span class="math">\\mathcal{B}^*</span>  that makes queries to  <span class="math">\\mathcal{R}</span> . When  <span class="math">\\mathcal{B}^*</span>  makes a new query to  <span class="math">\\mathcal{R}</span> ,  <span class="math">\\mathcal{B}</span>  answers uniformly in  <span class="math">\\mathbb{G}_2^*</span> , and otherwise it answers consistently with the previous answer. If  <span class="math">\\mathcal{B}^*</span>  aborts in the description below,  <span class="math">\\mathcal{B}</span>  outputs  <span class="math">\\mathbf{z}(\\mathbf{x}&#x27;)</span>  for some fixed arbitrary string  <span class="math">\\mathbf{x}&#x27;</span> .</p>
+
+    <p class="text-gray-300"><span class="math">\\mathcal{B}^*</span>  in turn runs  <span class="math">\\mathcal{A}</span>  as follows.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><span class="math">\\mathcal{B}^*</span>  intializes an empty table T of &quot;exceptions&quot; to responses of  <span class="math">\\mathcal{R}</span> .</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Whenever  <span class="math">\\mathcal{A}</span>  makes a query q to  <span class="math">\\mathcal{R}</span> ,  <span class="math">\\mathcal{B}^*</span>  checks if the reply  <span class="math">\\mathcal{R}(q)</span>  is present in T; if so it answers according to that, otherwise according to  <span class="math">\\mathcal{R}</span> . It answers queries to RB as specified below.</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>For each  <span class="math">\\ell \\in [1..d]</span> , it emulates the  <span class="math">\\ell</span> 'th phase as follows.</li>
+    </ol>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>(a) Let j be the index of the honest player in phase  <span class="math">\\ell</span> .<sup>8</sup> Let  <span class="math">C := C_{\\ell}</span> . Recall that  <span class="math">\\mathbf{x}^{\\ell}</span>  denotes the inputs belonging to C.  <span class="math">\\mathcal{B}^*</span>  begins by executing the phase up to player  <span class="math">P_{j-1}</span>  by invoking  <span class="math">\\mathcal{A}</span>  on the transcript from previous phases.</li>
+    </ul></li>
+    </ul>
+
+    <p class="text-gray-300">For each  <span class="math">1 \\leq j&#x27; &lt; j</span>  such that  <span class="math">P&#x27;_j</span>  aborted or wrote an invalid message that the protocol verifier rejected,  <span class="math">\\mathcal{B}</span>  sets  <span class="math">\\mathbf{x}^{\\ell}_{j&#x27;} = (1, \\dots, 1) \\in (\\mathbb{F}_p^*)^{t_{\\ell}}</span> . Otherwise, for each  <span class="math">x \\in \\mathbf{x}^{\\ell}_{j&#x27;}</span> ,  <span class="math">P_{j&#x27;}</span>  has output  <span class="math">[x]_1</span>  and  <span class="math">y \\in \\mathbb{G}_2</span>  with  <span class="math">\\mathsf{CheckPOK}([x]_1, \\mathsf{transcript}_{\\ell,j&#x27;-1}, y)</span> . Let  <span class="math">\\chi</span>  be the extractor obtained from Claim 3.5 when taking there  <span class="math">\\mathcal{A}</span>  to be a variant of  <span class="math">\\mathcal{B}^*</span>  that uses the same random string and runs identically to  <span class="math">\\mathcal{B}^*</span>  but stops when reaching this point and outputs  <span class="math">[x]_1</span> ,  <span class="math">\\mathsf{transcript}_{\\ell,j-1}, y</span> ; and taking  <span class="math">z = [\\mathbf{C}(s)]</span> .  <span class="math">\\mathcal{B}^*</span>  computes  <span class="math">x^* = \\chi(z, \\mathbf{r}, \\mathsf{rand}_{\\mathcal{B}^*})</span>  where  <span class="math">\\mathbf{r}</span>  is the sequence of replies to  <span class="math">\\mathcal{B}^*</span>  from  <span class="math">\\mathcal{R}</span>  up to the point of outputting  <span class="math">[x]_1</span> , y. If  <span class="math">\\chi</span> 's output  <span class="math">x^*</span>  is not equal to x,  <span class="math">\\mathcal{B}^*</span>  aborts. (This can be checked by checking if  <span class="math">[x^*]_1 = [x]_1</span> .)</p>
+
+    <p class="text-gray-300">(b) If  <span class="math">\\mathcal{B}^*</span>  has not aborted it has obtained  <span class="math">\\mathbf{x}_1^{\\ell}, \\dots, \\mathbf{x}_{j-1}^{\\ell}</span> .  <span class="math">\\mathcal{B}^*</span>  now chooses uniform  <span class="math">b \\in (\\mathbb{F}_p^*)^{t_{\\ell}}</span> , and defines</p>
+
+    <p class="text-gray-300"><span class="math">$\\mathbf{x}_j^{\\ell} := \\frac{bs^{\\ell}}{\\mathbf{x}_1^{\\ell} \\cdots \\mathbf{x}_{j-1}^{\\ell}}.</span>$</p>
+
+    <p class="text-gray-300">Note that as  <span class="math">\\mathcal{B}^*</span>  doesn't know s it can't compute  <span class="math">\\mathbf{x}_j^{\\ell}</span> . However, it has  <span class="math">[s^{\\ell}]</span>  as part of  <span class="math">[\\mathbf{C}(s)]</span> , where  <span class="math">s^{\\ell}</span>  is the restriction of s to the inputs  <span class="math">\\mathbf{x}^{\\ell}</span>  of C. Thus it can compute</p>
+
+    <p class="text-gray-300"><span class="math">$\\begin{bmatrix} \\mathbf{x}_j^\\ell \\end{bmatrix} = \\frac{b \\cdot \\begin{bmatrix} s^\\ell \\end{bmatrix}}{\\mathbf{x}_1^\\ell \\cdots \\mathbf{x}_{j-1}^\\ell}</span>$</p>
+
+    <p class="text-gray-300">Note that  <span class="math">\\mathbf{x}_1^{\\ell} \\cdots \\mathbf{x}_j^{\\ell} = bs^{\\ell}</span> . So, for each  <span class="math">\\mathbf{g} \\in C</span> ,  <span class="math">\\mathcal{B}^*</span>  can compute and broadcast  <span class="math">[\\mathbf{g}]^{\\mathbf{j}} = M_{\\mathbf{g}}(\\mathbf{x}_1^{\\ell} \\cdots \\mathbf{x}_j^{\\ell}) \\cdot \\mathbf{g}_{\\mathsf{src}} = M_{\\mathbf{g}}(b)M_{\\mathbf{g}}(s^{\\ell}) \\cdot \\mathbf{g}_{\\mathsf{src}} = M_{\\mathbf{g}}(b) \\cdot [\\mathbf{g}(s)]</span> . Where  <span class="math">([\\mathbf{g}(s)] \\text{ is given as part of } [\\mathbf{C}(s)].)</span>  Thus,  <span class="math">\\mathcal{B}^*</span>  can correctly play the role of  <span class="math">P_j</span>  with this value of  <span class="math">\\mathbf{x}_j^{\\ell}</span>  in Step 1b of Section 4.4 and produces a valid message.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>(c) What is left is generating  <span class="math">\\mathsf{POK}([x]_1,\\mathsf{transcript}_{\\ell,j-1})</span>  for  <span class="math">x \\in \\mathbf{x}_j^\\ell</span>  as in step 1 of Section 4.4. If  <span class="math">\\mathcal{R}([x]_1,\\mathsf{transcript}_{\\ell,j-1})</span>  has been queried by  <span class="math">\\mathcal{A}</span>  it aborts. Otherwise,  <span class="math">\\mathcal{B}^*</span>  chooses random  <span class="math">r \\in \\mathbb{F}_p^*</span>  and adds the query  <span class="math">(([x]_1,\\mathsf{transcript}_{\\ell,j-1}),[r]_2)</span>  to the exceptions table T. It outputs  <span class="math">y:=r\\cdot [x]_2</span> . Note that if we had  <span class="math">\\mathcal{R}([x]_1,\\mathsf{transcript}_{\\ell,j-1})=[r]_2)</span>  then we would have  <span class="math">\\mathsf{CheckPOK}([x]_1,\\mathsf{transcript}_{\\ell,j-1},y)</span> ; so from  <span class="math">\\mathcal{A}</span> 's point of view this is a correct message given H and  <span class="math">\\mathsf{rand}_{\\mathsf{oracle}}</span> .</li>
+      <li>(d) Now  <span class="math">\\mathcal{B}^*</span>  uses  <span class="math">\\mathcal{A}</span>  to run the parts of  <span class="math">P_{j+1}, \\ldots, P_N</span>  in phase  <span class="math">\\ell</span> . Again, for any  <span class="math">j+1 \\leq j&#x27; \\leq N</span>  such that  <span class="math">P_{j&#x27;}</span>  did not output a valid message,  <span class="math">\\mathbf{x}_{j&#x27;}^{\\ell}</span>  is set to the vector  <span class="math">(1, \\ldots, 1)</span> .</li>
+    </ul>
+
+    <p class="text-gray-300"><sup>&amp;</sup>lt;sup&gt;8</sup>Note that j may only be determined by  <span class="math">\\mathcal{A}</span>  after the message of  <span class="math">P_{j-1}</span> , but the description of  <span class="math">\\mathcal{B}^*</span>  in this step doesn't require knowing j before, and  <span class="math">\\mathcal{B}^*</span>  can just execute  <span class="math">\\mathcal{A}</span>  until reaching a player j that  <span class="math">\\mathcal{A}</span>  doesn't choose to control.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>(e) Similary to before, for any  <span class="math">j+1 \\leq j&#x27; \\leq N</span>  such that  <span class="math">P_{j&#x27;}</span>  did broadcast a valid message, for each  <span class="math">x \\in \\mathbf{x}_{j&#x27;}^{\\ell}</span>   <span class="math">P_{j&#x27;}</span>  has output  <span class="math">[x]_1</span>  and  <span class="math">y \\in \\mathbb{G}_2</span>  with  <span class="math">\\mathsf{CheckPOK}([x]_1,\\mathsf{transcript}_{\\ell,j&#x27;-1},y)</span> . Let  <span class="math">\\chi</span>  be the extractor obtained from Claim 3.5 when taking there  <span class="math">\\mathcal{A}</span>  to be a variant of  <span class="math">\\mathcal{B}^*</span>  that runs up to this point and outputs  <span class="math">[x]_1, y</span> ; and taking  <span class="math">z = [\\mathbf{C}(s)]</span> .  <span class="math">\\mathcal{B}^*</span>  computes  <span class="math">x^* = \\chi(z, \\mathbf{r}, \\mathsf{rand}_{\\mathcal{A}}) = x</span>  where  <span class="math">\\mathbf{r}</span>  is the sequence of replies to  <span class="math">\\mathcal{B}^*</span>  from  <span class="math">\\mathcal{R}</span>  up to the point of outputting  <span class="math">[x]_1, y</span> . If  <span class="math">\\chi</span> 's output is not equal to x,  <span class="math">\\mathcal{B}</span>  aborts.</li>
+      <li>(f) If  <span class="math">\\mathcal{B}^*</span>  has not aborted it has obtained  <span class="math">\\mathbf{x}_{j+1}^\\ell, \\dots, \\mathbf{x}_N^\\ell</span> . It defines  <span class="math">\\mathbf{x}&#x27;^\\ell := \\frac{1}{b \\cdot \\mathbf{x}_{j+1}^\\ell \\cdots \\mathbf{x}_N^\\ell}</span> ; and outputs  <span class="math">\\mathbf{x}&#x27;^\\ell</span>  as the beacon output  <span class="math">\\mathsf{RB}(J, t_\\ell)</span> . Note that if we have reached this point without aborting we have  <span class="math">\\mathbf{x}_1^\\ell \\cdots \\mathbf{x}_N^\\ell \\cdot \\mathbf{x}&#x27;^\\ell = s^\\ell</span> .</li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Finally  <span class="math">\\mathcal{B}^*</span>  outputs  <span class="math">\\mathcal{A}</span> 's output z at the end of the protocol.</li>
+    </ol></li>
+    </ul>
+
+    <p class="text-gray-300">We proceed to prove the first property - we need to show that the elements  <span class="math">(rand_A, H, rand_{beacon}, rand_{oracle})</span>  used in the protocol are uniform and independent of each other.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><span class="math">\\bullet</span>  rand<sub>A</sub>-  <span class="math">\\mathcal{B}^*</span>  runs  <span class="math">\\mathcal{A}</span>  with a uniform choice of its random coins, so rand<sub>A</sub> is uniformly distributed.</li>
+      <li><span class="math">\\operatorname{rand}_{\\operatorname{oracle}}</span>   <span class="math">\\mathcal{B}</span>  choses the outputs of  <span class="math">\\mathcal{R}</span>  uniformly and independent of any other event. The other elements of  <span class="math">\\operatorname{rand}_{\\operatorname{oracle}}</span>  are the elements  <span class="math">[r]_2</span>  chosen in step 3c which are uniform in  <span class="math">\\mathbb{G}_2^*</span>  and independent of any other variable here.</li>
+      <li>H- the honest input  <span class="math">\\mathbf{x}_j^\\ell</span>  of each layer  <span class="math">C_\\ell</span>  is chosen as  <span class="math">\\frac{b \\cdot s^\\ell}{a}</span>  where a is the product of inputs in the same layer by the players controlled by  <span class="math">\\mathcal{A}</span>  participating before the honest player. b and  <span class="math">s^\\ell</span>  are both uniform in  <span class="math">(\\mathbb{F}_p^*)^{t_\\ell}</span> ; and independent from each other, a and the same variables from other layers. Hence H is uniform and independent from previous variables.</li>
+      <li>rand<sub>beacon</sub>- the part of rand<sub>beacon</sub> from layer  <span class="math">C = C_{\\ell}</span>  is of the form  <span class="math">\\frac{1}{a \\cdot b}</span> , where a contains inputs of the players controlled by  <span class="math">\\mathcal{A}</span>  following the honest player. The only other place b appears in is in  <span class="math">\\mathbf{x}_{j}^{\\ell}</span> . But even fixing  <span class="math">\\mathbf{x}_{j}^{\\ell}</span>  leaves b, and hence the part of rand<sub>beacon</sub> from phase  <span class="math">\\ell</span> , uniform.</li>
+    </ul>
+
+    <p class="text-gray-300">To prove the second property we note we note that the values x for which the protocol output as described will not be  <span class="math">[\\mathbf{C}(s)]</span>  are those that cause an abort in steps 3a,3e or 3c. An abort in steps 3a,3e happens for a  <span class="math">\\operatorname{negl}(\\lambda)</span>  fraction of  <span class="math">\\mathbf{x} \\in \\mathcal{X}</span>  according to Claim 3.5; aborting in step 3c happens only when  <span class="math">\\mathcal{A}</span>  chose in advance to query  <span class="math">\\mathcal{R}</span>  in a later uniformly chosen input in a domain of size at least  <span class="math">|\\mathbb{G}_2^*|</span> , and thus happens only for a  <span class="math">\\operatorname{negl}(\\lambda)</span>  fraction of  <span class="math">\\mathbf{x} \\in \\mathcal{X}</span> .</p>
+
+    <p class="text-gray-300">In this section we assume familiarity with Quadratic Artihmetic Programs [23] and the work of Groth [27]. As in [27] we first describe the Non-Interactive Linear Proof (NILP) from which the zk-SNARK is built.</p>
+
+    <p class="text-gray-300">The extended Groth CRS: Let  <span class="math">\\{u_i, v_i, w_i\\}_{i \\in [0..m]} \\cup \\{t\\}</span>  be the polynomials of a degree n QAP over  <span class="math">\\mathbb{F}_p</span> , where t is the degree n target polynomial of the QAP and the other polynomials have degree smaller than n. Suppose that  <span class="math">1, \\ldots, \\ell &lt; m</span>  are the indices of the public input.</p>
+
+    <p class="text-gray-300">For  <span class="math">\\alpha, \\beta, \\delta, x \\in \\mathbb{F}_p^*</span> ,  <span class="math">Groth(\\alpha, \\beta, \\delta, x)</span>  is defined as the set of elements:</p>
+
+    <p class="text-gray-300"><span class="math">$\\beta, \\delta, \\{x^{i}\\}_{i \\in [0..2n-2]}, \\{\\alpha x^{i}\\}_{i \\in [0..n-1]}, \\{\\beta x^{i}\\}_{i \\in [1..n-1]}, \\{x^{i} \\cdot t(x)/\\delta\\}_{i \\in [0..n-2]}, \\{\\frac{\\beta u_{i}(x) + \\alpha v_{i}(x) + w_{i}(x)}{\\delta}\\}_{i \\in [\\ell+1..m]}.</span>$</p>
+
+    <p class="text-gray-300">The additional elements, compared to [27] are  <span class="math">\\{x^i\\}_{i\\in[n..2n-2]}, \\{\\alpha x^i\\}_{i\\in[1..n-1]}, \\{\\beta x^i\\}_{i\\in[1..n-1]}</span> . On the other hand the elements</p>
+
+    <p class="text-gray-300"><span class="math">$\\left\\{\\frac{\\beta u_i(x) + \\alpha v_i(x) + w_i(x)}{\\gamma}\\right\\}_{i \\in [0..\\ell]}, \\gamma</span>$</p>
+
+    <p class="text-gray-300">that appear in the CRS of [27] have disappeared here; they were needed there to enable the verifer to compute</p>
+
+    <p class="text-gray-300"><span class="math">$\\sum_{i=0}^{\\ell} a_i (\\beta u_i(x) + \\alpha v_i(x) + w_i(x));</span>$</p>
+
+    <p class="text-gray-300">which can be computed as a linear combination of above CRS with our added elements.</p>
+
+    <p class="text-gray-300">We claim that Groth can be computed by a depth two circuit according to the definition of depth in Section 4.1:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><span class="math">C_1</span> : The layer inputs are  <span class="math">\\mathbf{x}^1 = \\{x, \\alpha, \\beta\\}</span> . The layer computes  <span class="math">\\{x^i\\}_{i \\in [0...2n-2]}, \\{\\alpha x^i\\}_{i \\in [0...n-1]}, \\{\\beta x^i\\}_{i \\in [0...n-1]}</span>  which are all products of inputs in  <span class="math">\\mathbf{x}^1</span> .</li>
+      <li><span class="math">L_1</span> : We compute  <span class="math">\\{x^i \\cdot t(x)\\}_{i \\in [0...n-2]}</span>  that are linear combinations of  <span class="math">\\{x^i\\}_{i \\in [0..2n-2]}</span>  since t has degree n. We also compute  <span class="math">\\{\\beta u_i(x) + \\alpha v_i(x) + w_i(x)\\}_{i \\in [0...m]}</span> , which are linear combinations of elements from the first layer.</li>
+      <li><span class="math">C_2</span> : The layer input is  <span class="math">\\mathbf{x}^2 = \\{\\delta\\}</span> . Compute  <span class="math">\\delta</span> ,  <span class="math">\\left\\{\\frac{\\beta u_i(x) + \\alpha v_i(x) + w_i(x)}{\\delta}\\right\\}_{i \\in [\\ell+1..m]}</span> ,  <span class="math">\\left\\{x^i t(x) / \\delta\\right\\}_{i \\in [0..n-2]}</span></li>
+    </ul>
+
+    <p class="text-gray-300"><strong>Groth prover and verifier:</strong> Fix public input  <span class="math">a_1, \\ldots, a_\\ell</span> . The prover chooses random  <span class="math">r, s \\in \\mathbb{F}_p</span>  and computes from the CRS and her witness  <span class="math">a_{\\ell+1}, \\ldots, a_m</span> ; the elements</p>
+
+    <p class="text-gray-300"><span class="math">$A = \\alpha + \\sum_{i=0}^{m} a_i u_i(x) + r\\delta, B = \\beta + \\sum_{i=0}^{m} b_i v_i(x) + s\\delta</span>$</p>
+
+    <p class="text-gray-300"><span class="math">C = \\frac{\\sum_{i=\\ell+1}^{m} a_i(\\beta u_i(x) + \\alpha v_i(x) + w_i(x)) + h(x)t(x)}{\\delta} + As + Br - rs\\delta.</span>  The verifier, given A, B, C, checks that:</p>
+
+    <p class="text-gray-300"><span class="math">$A \\cdot B = \\alpha \\cdot \\beta + \\sum_{i=0}^{\\ell} a_i(\\beta u_i(x) + \\alpha v_i(x) + w_i(x)) + C \\cdot \\delta.</span>$</p>
+
+    <p class="text-gray-300"><strong>Proving knowledge soundness</strong> From [27] it is enough to prove that we can extract a witness for the QAP given A, B, C that are linear combinations of the CRS elements such that the verification equation holds as a polynomial identity. That is, we assume we are given</p>
+
+    <p class="text-gray-300"><span class="math">$A = A_{\\alpha}(x)\\alpha + A_{\\beta}(x)\\beta + A_{\\delta}\\delta + A(x)</span>$</p>
+
+    <p class="text-gray-300"><span class="math">$+\\sum_{i=\\ell+1}^{m} \\frac{A_i \\cdot (\\beta u_i(x) + \\alpha v_i(x) + w_i(x))}{\\delta} + A_h(x) \\frac{t(x)}{\\delta}</span>$</p>
+
+    <p class="text-gray-300">where  <span class="math">A_{\\alpha}</span> ,  <span class="math">A_{\\beta}</span>  are known polynomials of degree at most n-1, A is a polynomial of degree at most 2n-2,  <span class="math">A_h</span>  is of degree at most n-2 and  <span class="math">A_i</span> ,  <span class="math">\\{A_i\\}_{i\\in[\\ell+1..m]}</span> ,  <span class="math">A_{\\delta}</span>  are known field elements. B and C are defined similarly. And we assume for these given polynomials and constants that</p>
+
+    <p class="text-gray-300"><span class="math">$A \\cdot B \\equiv \\alpha \\cdot \\beta + \\sum_{i=0}^{\\ell} a_i (\\beta u_i(x) + \\alpha v_i(x) + w_i(x)) + C \\cdot \\delta</span>$</p>
+
+    <p class="text-gray-300">as rational functions in  <span class="math">x, \\alpha, \\beta, \\delta</span> . Let us denote by  <span class="math">C^*</span>  the right hand of the equation for a given C; i.e,</p>
+
+    <p class="text-gray-300"><span class="math">$C^* := \\alpha \\cdot \\beta + \\sum_{i=0}^{\\ell} a_i (\\beta u_i(x) + \\alpha v_i(x) + w_i(x)) + C \\cdot \\delta</span>$</p>
+
+    <p class="text-gray-300">and denote the &quot;part without C in  <span class="math">C^*</span> &quot; by  <span class="math">C_0</span> ; i.e</p>
+
+    <p class="text-gray-300"><span class="math">$C_0 := \\alpha \\cdot \\beta + \\sum_{i=0}^{\\ell} a_i (\\beta u_i(x) + \\alpha v_i(x) + w_i(x))</span>$</p>
+
+    <p class="text-gray-300">Thus, we are assuming here that  <span class="math">A \\cdot B \\equiv C^* \\equiv C_0 + C \\cdot \\delta</span>  as rational functions in  <span class="math">\\alpha, \\beta, \\delta, x</span> .</p>
+
+    <p class="text-gray-300">When we discuss monomials from now on we mean the quotient of two monomials in  <span class="math">\\alpha, \\beta, \\delta, x</span>  that have no common factors; e.g.  <span class="math">\\frac{\\alpha}{\\delta}</span> . For a monomial M let us use the notation  <span class="math">M \\in A</span>  to mean M has a non-zero coefficient in A; i.e., when writing A as (the unique) linear combination of monomials in  <span class="math">\\alpha, \\beta, \\delta, x, M</span>  appears with non-zero coefficient. Use the same notation for  <span class="math">B, C, A \\cdot B, C_0, C^*</span> .</p>
+
+    <p class="text-gray-300">When we say a monomial is in the CRS, we mean it is present with non-zero coefficient in one of the elements of the CRS  <span class="math">groth(\\alpha, \\beta, \\delta, x)</span>  when writing that element as a combination of monomials.</p>
+
+    <p class="text-gray-300">Our focus is to show the new monomials we have added to the CRS -  <span class="math">\\{x^i\\}_{i \\in [n..2n-2]}</span> ,  <span class="math">\\{\\alpha x^i\\}_{i \\in [1..n-1]}</span> ,  <span class="math">\\{\\beta x^i\\}_{i \\in [1..n-1]}</span>  are not used in A, B, C; this will imply correctness using [27], as there it is proven that given A, B, C that are linear combinations of the original CRS elements for which verification holds, a witness can be extracted.</p>
+
+    <p class="text-gray-300">As  <span class="math">\\alpha\\beta \\in A \\cdot B</span>  we must have  <span class="math">\\alpha \\in A, \\beta \\in B</span>  - or  <span class="math">\\beta \\in A, \\alpha \\in B</span> . Assume the first option w.l.g. Assume that  <span class="math">\\beta x^i \\in A</span>  for some  <span class="math">i \\geq 0</span> , and let i be maximal such that this holds. Let  <span class="math">j \\geq 0</span>  be maximal such that  <span class="math">\\beta x^j \\in B</span> . Let k := i + j.</p>
+
+    <p class="text-gray-300">Then  <span class="math">\\beta^2 x^k \\in A \\cdot B \\equiv C^*</span> . This means that either  <span class="math">\\beta^2 x^k / \\delta \\in C</span>  - but the monomial doesn't exist in the CRS for any integer k; or that  <span class="math">\\beta^2 x^k \\in C_0</span>  which is false. Thus no such i exists.</p>
+
+    <p class="text-gray-300">An analogous argument shows  <span class="math">\\alpha x^i \\notin B</span>  for any integer i.</p>
+
+    <p class="text-gray-300">Now let  <span class="math">i \\geq 0</span>  be maximal such that  <span class="math">\\alpha x^i \\in A</span> , and  <span class="math">j \\geq 0</span>  be maximal such that  <span class="math">\\beta x^j \\in B</span> . Then  <span class="math">\\alpha \\beta x^{i+j} \\in A \\cdot B</span>  and so  <span class="math">\\alpha \\beta x^{i+j} \\in C^*</span> . Since  <span class="math">\\alpha \\beta x^k / \\delta</span>  is not in the CRS for any k, and  <span class="math">\\alpha \\beta x^k \\in C_0</span>  only for k = 0, we have i + j = 0 and so i, j = 0.</p>
+
+    <p class="text-gray-300">Now assume  <span class="math">\\alpha x^i \\in C</span>  - then  <span class="math">\\alpha x^i \\delta \\in A \\cdot B</span>  which means  <span class="math">\\alpha x^i</span>  is in A or B; and we have seen this is possible only for i=0. Same holds when  <span class="math">\\beta x^i \\in C</span> . In summary, we have shown the new terms  <span class="math">\\{\\alpha x^i, \\beta x^i\\}_{i \\in [1..n-1]}</span>  do not appear in the proof.</p>
+
+    <p class="text-gray-300">Now, let i be maximal such that  <span class="math">x^i \\in A</span> . Then  <span class="math">\\beta x^i \\in C^*</span> , which means either</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><span class="math">\\beta x^i/\\delta \\in C</span> , which can only hold for  <span class="math">i \\leq n-1</span>  as such monomials only appear potentially in the CRS elements  <span class="math">\\left\\{\\frac{\\beta u_i(x) + \\alpha v_i(x) + w_i(x)}{\\delta}\\right\\}_{i \\in [\\ell+1..m]}</span>  all involving at most an n-1'th power of x. Or</li>
+      <li><span class="math">\\beta x^i \\in C_0</span>  which only holds potentially for  <span class="math">i \\leq n-1</span>  as part of the element  <span class="math">\\sum_{i=0}^{\\ell} a_i(\\beta u_i(x) + \\alpha v_i(x) + w_i(x))</span>  of  <span class="math">C_0</span> .</li>
+    </ul>
+
+    <p class="text-gray-300">Similarly, let j be maximal such that  <span class="math">x^j \\in B</span> . Then  <span class="math">\\alpha x^j \\in C^*</span>  which means either  <span class="math">\\alpha x^i/\\delta \\in C</span>  or  <span class="math">\\alpha x^i \\in C_0</span> , both of which can only hold for  <span class="math">i \\leq n-1</span> .</p>
+
+    <p class="text-gray-300">If  <span class="math">x^i \\in C</span>  it implies  <span class="math">x^i \\delta \\in A \\cdot B</span> , which means  <span class="math">x^i \\in A</span>  or  <span class="math">x^i \\in B</span> , and thus i &lt; n. Therefore, the new terms  <span class="math">\\{x^i\\}_{i \\in [n...2n-1]}</span>  are not used in the proof.</p>
+
+    <p class="text-gray-300">We now instantiate the protocol of Section 4 to get a protocol for computing the CRS of the zk-SNARK corresponding to that of the NILP described in Section 6.</p>
+
+    <p class="text-gray-300">The output will have the form</p>
+
+    <p class="text-gray-300"><span class="math">$\\begin{split} &amp; \\left\\{ \\left[ x^{i} \\right] \\right\\}_{i \\in [0..n-1]}, \\left\\{ \\left[ x^{i} \\right]_{1} \\right\\}_{i \\in [n..2n-2]}, \\left\\{ \\left[ \\alpha x^{i} \\right]_{1} \\right\\}_{i \\in [0..n-1]}, \\\\ &amp; \\left[ \\beta \\right], \\left\\{ \\left[ \\beta x^{i} \\right]_{1} \\right\\}_{i \\in [1..n-1]}, \\left\\{ \\left[ x^{i} \\cdot t(x) / \\delta \\right]_{1} \\right\\}_{i \\in [0..n-2]}, \\\\ &amp; \\left\\{ \\left[ \\frac{\\beta u_{i}(x) + \\alpha v_{i}(x) + w_{i}(x)}{\\delta} \\right]_{1} \\right\\}_{i \\in [\\ell+1..m]} \\end{split}</span>$</p>
+
+    <p class="text-gray-300">Notice that some outputs are given only in  <span class="math">\\mathbb{G}_1</span> , whereas the protocol description in Section 4 gave all outputs in both groups. It's straightforward to see that if this is the case only for outputs later used as inputs only for other outputs given only in  <span class="math">\\mathbb{G}_1</span>  as well, the security proof goes through the same way.</p>
+
+    <p class="text-gray-300">In the protocol below, if M is an output in  <span class="math">\\mathbb{G}_1, \\mathbb{G}_2</span>  or  <span class="math">\\mathbf{G}</span>  that we want to compute, and  <span class="math">j \\in [N]</span> , we will denote by  <span class="math">[M]^{\\mathbf{j}}</span> , the &quot;partial M&quot; after players  <span class="math">P_1, \\ldots, P_j</span>  have contributed their shares.  <span class="math">[M]^{\\mathbf{0}}</span>  will be set to some initial value as part of the protocol description. We assume  <span class="math">\\mathbf{g}</span>  is publicly known.</p>
+
+      <h3 id="sec-7.1" class="text-xl font-semibold mt-8">7.1 Round 1: 'Powers of <span class="math">\\tau</span> '</h3>
+
+    <p class="text-gray-300">We need to compute</p>
+
+    <p class="text-gray-300"><span class="math">$\\mathbf{M}_{1} = \\left\\{ \\begin{array}{l} \\left\\{ \\begin{bmatrix} x^{i} \\end{bmatrix} \\right\\}_{i \\in [0..n-1]}, \\left\\{ \\begin{bmatrix} x^{i} \\end{bmatrix}_{1} \\right\\}_{i \\in [n..2n-2]}, \\\\ \\left\\{ \\begin{bmatrix} \\alpha x^{i} \\end{bmatrix}_{1} \\right\\}_{i \\in [0..n-1]}, [\\beta], [\\delta] \\left\\{ \\begin{bmatrix} \\beta x^{i} \\end{bmatrix}_{1} \\right\\}_{i \\in [1..n-1]} \\end{array} \\right\\}</span>$</p>
+
+    <p class="text-gray-300"><strong>Initialization:</strong> We initialize the values</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><p class="text-gray-300"><span class="math">$[x^i]^{\\mathbf{0}} := \\mathbf{g}, i \\in [1..n-1].</span>$</p></li>
+      <li><p class="text-gray-300"><span class="math">$[x^i]^{\\mathbf{0}} := g_1, i \\in [n..2n - 2].</span>$</p></li>
+      <li><p class="text-gray-300"><span class="math">$\\left[\\alpha x^i\\right]^{\\mathbf{0}} := g_1, i \\in [0..n-1].</span>$</p></li>
+      <li><p class="text-gray-300"><span class="math">$[\\beta]^0 := \\mathbf{g}</span>$</p></li>
+      <li></li>
+      <li><p class="text-gray-300"><span class="math">$[\\beta x^i]^{\\mathbf{0}} := g_1, i \\in [1..n-1].</span>$</p></li>
+    </ol>
+
+    <p class="text-gray-300">Computation: For  <span class="math">j \\in [N]</span> ,  <span class="math">P_j</span>  outputs:</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><span class="math">$[\\alpha_j]_1, [\\beta_j]_1, [x_j]_1</span>$</li>
+    </ol>
+
+    <p class="text-gray-300"><span class="math">$2. \\ y_{\\alpha,j} := \\mathsf{POK}(\\alpha_j,\\mathsf{transcript}_{1,j-1})</span>$</p>
+
+    <p class="text-gray-300"><span class="math">$3. \\ y_{\\beta,j} := \\mathsf{POK}(\\beta_j, \\mathsf{transcript}_{1,j-1})</span>$</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><p class="text-gray-300"><span class="math">$y_{x,j} := \\mathsf{POK}(x_j, \\mathsf{transcript}_{1,j-1})</span>$</p></li>
+      <li><p class="text-gray-300">For each
+<span class="math">$i \\in [1..2n-2], [x^i]^{\\mathbf{j}} := x_j^i \\cdot [x^i]^{\\mathbf{j}-1}</span>$</p></li>
+      <li><p class="text-gray-300">For each
+<span class="math">$i \\in [0..n-1]</span>$
+,  <span class="math">[\\alpha x^i]^{\\mathbf{j}} := \\alpha_j x_j^i \\cdot [\\alpha x^i]^{\\mathbf{j}-1}</span></p></li>
+      <li><p class="text-gray-300">For each
+<span class="math">$i \\in [0..n-1], [\\beta x^i]^{\\mathbf{j}} := \\beta_j x_j^i \\cdot [\\beta x^i]^{\\mathbf{j}-1}</span>$</p></li>
+    </ol>
+
+    <p class="text-gray-300">Let J-1 be the time-slot where  <span class="math">P_N</span>  sends their message. Let  <span class="math">(x&#x27;, \\alpha&#x27;, \\beta&#x27;) := \\mathsf{RB}(J,3)</span> . We define</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><p class="text-gray-300"><span class="math">$[x^i] := x&#x27;^i \\cdot [x^i]^{\\mathbf{N}}, i \\in [1..2n - 2].</span>$</p></li>
+      <li><p class="text-gray-300"><span class="math">$\\left[\\alpha x^{i}\\right] := \\alpha&#x27; x&#x27;^{i} \\cdot \\left[\\alpha x^{i}\\right]^{\\mathbf{N}}, i \\in [0..n-1].</span>$</p></li>
+      <li><p class="text-gray-300"><span class="math">$[\\beta x^i] := \\beta&#x27; x&#x27;^i \\cdot [\\beta x^i]^{\\mathbf{N}}, i \\in [0..n-1].</span>$</p></li>
+    </ol>
+
+    <p class="text-gray-300"><strong>Verification:</strong> The protocol verifier computes for each  <span class="math">j \\in [N]</span>   <span class="math">r_{\\alpha,j} := \\mathcal{R}([\\alpha_j]_1, \\mathsf{transcript}_{1,j-1}), r_{\\beta,j} := \\mathcal{R}([\\beta_j]_1, \\mathsf{transcript}_{1,j-1}), r_{x,j} := \\mathcal{R}([x_j]_1, \\mathsf{transcript}_{1,j-1}), \\text{ and checks for each } j \\in [N] \\text{ that}</span></p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>CheckPOK( <span class="math">[\\alpha_j]_1</span> , transcript<sub>1,j-1</sub>,  <span class="math">y_{\\alpha,j}</span> ),</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><span class="math">\\mathsf{CheckPOK}([\\beta_j]_1,\\mathsf{transcript}_{1,j-1},y_{\\beta,j}),</span></li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>CheckPOK( <span class="math">[x_i]_1</span> , transcript<sub>1,i-1</sub>,  <span class="math">y_{x,j}</span> ),</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>consistent( <span class="math">[\\alpha]^{\\mathbf{j-1}} [\\alpha]^{\\mathbf{j}}</span> ;  <span class="math">(r_{\\alpha,j}, y_{\\alpha,j})</span> ),</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>consistent( <span class="math">[\\beta]^{\\mathbf{j-1}} [\\beta]^{\\mathbf{j}}; (r_{\\beta,j}, y_{\\beta,j})</span> ),</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>consistent( <span class="math">[x]^{\\mathbf{j-1}} [x]^{\\mathbf{j}}; (r_{x,j}, y_{x,j})</span> ),</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>For each  <span class="math">i \\in [1..2n-2]</span> , consistent( <span class="math">[x^{i-1}]^{j} [x^{i}]^{j}</span> ;  <span class="math">[x]^{j}</span> ),</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>For each  <span class="math">i \\in [1..n-1]</span> , consistent( <span class="math">[x^i]_1^{\\mathbf{j}} [\\alpha x^i]_{\\mathbf{j}}^{\\mathbf{j}}</span> ;  <span class="math">[\\alpha]_{\\mathbf{j}}^{\\mathbf{j}}</span> ),</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>For each  <span class="math">i \\in [1..n-1]</span> , consistent( <span class="math">[x^i]^{\\mathbf{j}}_{1} [\\beta x^i]^{\\mathbf{j}}</span> ;  <span class="math">[\\beta]^{\\mathbf{j}}</span> ).</li>
+    </ol></li>
+    </ul>
+
+      <h3 id="sec-7.2" class="text-xl font-semibold mt-8">7.2 Linear combinations between phases</h3>
+
+    <p class="text-gray-300">For  <span class="math">i \\in [0..n-2]</span> , we compute as linear combinations of  <span class="math">\\left\\{\\left[x^i\\right]_1\\right\\}_{i \\in [0..2n-2]}</span>  the element</p>
+
+    <p class="text-gray-300"><span class="math">$H_i&#x27; := [t(x)x^i]_1</span>$
+.</p>
+
+    <p class="text-gray-300">Let  <span class="math">\\omega \\in \\mathbb{F}_p</span>  be a primitive root of unity of order  <span class="math">n=2^t</span> ; n is typically the first power of two larger or equal to the circuit size.</p>
+
+    <p class="text-gray-300">For  <span class="math">i \\in [1..n]</span> , we define  <span class="math">L_i</span>  to be the i'th Lagrange polynomial over the points  <span class="math">\\{\\omega^i\\}_{i \\in [1..n]}</span> . That is,  <span class="math">L_i</span>  is the unique polynomial of degree smaller than n, such that  <span class="math">L_i(\\omega^i) = 1</span>  and  <span class="math">L_i(\\omega^j) = 0</span> , for  <span class="math">j \\in [1..n] \\setminus \\{i\\}</span> . For  <span class="math">x \\in \\mathbb{F}_p^*</span> , we denote by  <span class="math">LAG_x \\in \\mathbf{G}^n</span>  the vector</p>
+
+    <p class="text-gray-300"><span class="math">$LAG_x := ([L_i(x)])_{i \\in [1..n]}.</span>$</p>
+
+    <p class="text-gray-300">LAG<sub>x</sub> can be computed in an FFT using  <span class="math">O(n \\log n)</span>  group operations from  <span class="math">\\left\\{ \\begin{bmatrix} x^i \\end{bmatrix} \\right\\}_{i \\in [0..n-1]}</span> , as decribed in Section 3.3 of [16]. Similarly, since the FFT is linear, using exactly the same operations, but only on the  <span class="math">\\mathbb{G}_1</span>  coordinate and starting from  <span class="math">\\left\\{ \\begin{bmatrix} \\alpha x^i \\end{bmatrix}_1 \\right\\}_{i \\in [0..n-1]}</span>  and  <span class="math">\\left\\{ \\begin{bmatrix} \\beta x^i \\end{bmatrix}_1 \\right\\}_{i \\in [0..n-1]}</span> , we obtain  <span class="math">(\\alpha \\cdot \\text{LAG}_x)_1</span>  and  <span class="math">(\\beta \\cdot \\text{LAG}_x)_1</span> .</p>
+
+    <p class="text-gray-300">Now, as the QAP polynomials  <span class="math">\\{u_i, v_i, w_i\\}_{i \\in [0..m]}</span>  are typically each a linear combination of at most three different  <span class="math">L_i</span> , we can now compute using O(m) group operations the elements  <span class="math">\\{[\\beta u_i(x)]_1\\}_{i \\in [0..m]}</span> ,  <span class="math">\\{[\\alpha v_i(x)]_1\\}_{i \\in [0..m]}</span>  and  <span class="math">\\{[w_i(x)]_1\\}_{i \\in [0..m]}</span> .</p>
+
+    <p class="text-gray-300">Finally, we compute as linear combinations, for  <span class="math">i \\in [\\ell + 1..m]</span> , the element</p>
+
+    <p class="text-gray-300"><span class="math">$K_i&#x27; := \\left[\\beta u_i(x) + \\alpha v_i(x) + w_i(x)\\right]_1.</span>$</p>
+
+    <p class="text-gray-300">We also output, as linear combinations of LAG<sub>x</sub> the elements  <span class="math">\\{[u_i(x)]_1\\}_{i\\in[0..m]}</span>  and  <span class="math">\\{[v_i(x)]_2\\}_{i\\in[0..m]}</span>  (To allow faster prover computation. It's not hard to see that adding linear combinations of CRS elements does not alter the security).</p>
+
+    <p class="text-gray-300"><sup>&amp;</sup>lt;sup&gt;9</sup>This is the case in the reduction of arithmetic circuits to QAPs; in general the cost of this step is O(a) operations where a is the total number of non-zero coefficients in one of the QAP polynomials.</p>
+
+    <p class="text-gray-300">    <img src="_page_18_Figure_0.jpeg" alt="" class="my-4 max-w-full" />
+</p>
+
+    <p class="text-gray-300">Figure 7.1: Performance of MMORPG protocol phases. Averages taken over 5 iteration. Costs for phase 1 and 2 given for both prove and verification time. Individual participants need not run the verification function. Proving times take less than 16 minutes for all circuit sizes. Verification takes less then 55 minutes. We stress that verification is not run by individual users, it is done by the coordinator and anyone who wishes to verify the transcript of the protocol after completion.</p>
+
+      <h3 id="sec-7.3" class="text-xl font-semibold mt-8">7.3 Round two</h3>
+
+    <p class="text-gray-300">For  <span class="math">i \\in [\\ell + 1..m]</span> , denote</p>
+
+    <p class="text-gray-300"><span class="math">$K_i := \\frac{\\beta u_i(x) + \\alpha v_i(x) + w_i(x)}{\\delta}.</span>$</p>
+
+    <p class="text-gray-300">For  <span class="math">i \\in [0..n-2]</span> , denote</p>
+
+    <p class="text-gray-300"><span class="math">$H_i := \\frac{t(x)x^i}{\\delta}.</span>$</p>
+
+    <p class="text-gray-300">We need to compute</p>
+
+    <p class="text-gray-300"><span class="math">$M_2 = \\left\\{ [\\delta], \\{ [K_i]_1 \\}_{i \\in [\\ell+1..m]}, \\{ [H_i]_1 \\}_{i \\in [0..n-2]} \\right\\}.</span>$</p>
+
+    <p class="text-gray-300">Initialization: We initialize</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><p class="text-gray-300"><span class="math">$[K_i]^{\\mathbf{0}} := K&#x27;_i, i \\in [\\ell + 1..m].</span>$</p></li>
+      <li><p class="text-gray-300"><span class="math">$[H_i]^{\\mathbf{0}} := H&#x27;_i, i \\in [\\ell + 1..m].</span>$</p></li>
+      <li><p class="text-gray-300"><span class="math">$[\\delta]^0 := \\mathbf{g}</span>$</p></li>
+      <li></li>
+    </ol>
+
+    <p class="text-gray-300">Computation: For  <span class="math">j \\in [N]</span> ,  <span class="math">P_j</span>  outputs</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><p class="text-gray-300"><span class="math">$\\left[\\delta_j\\right]_1</span>$</p></li>
+      <li></li>
+    </ol>
+
+    <p class="text-gray-300"><span class="math">$2. \\ y_{\\delta,j} := \\mathsf{POK}(\\delta_j,\\mathsf{transcript}_{2,j-1}).</span>$</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><p class="text-gray-300"><span class="math">$[\\delta]^{\\mathbf{j}} := [\\delta]^{\\mathbf{j}-1}/\\delta_j</span>$</p></li>
+      <li></li>
+      <li><p class="text-gray-300">For each
+<span class="math">$i \\in [\\ell + 1..m], [K_i]^{\\mathbf{j}} := ([K_i]^{\\mathbf{j}-1})/\\delta_j</span>$</p></li>
+      <li></li>
+      <li><p class="text-gray-300">For each
+<span class="math">$i \\in [0..n-2], [H_i]^{\\mathbf{j}} := ([H_i]^{\\mathbf{j}-1})/\\delta_i</span>$</p></li>
+      <li></li>
+    </ol>
+
+    <p class="text-gray-300">In the end, we dene Let J &minus; 1 be the time-slot where P<sup>N</sup> sends their message. Let &delta; 0 := RB(J, 1). We dene</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>[&delta;] := [&delta;] <sup>N</sup>/&delta;<sup>0</sup> .</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>[K<sup>i</sup> 1 := [K<sup>i</sup> <sup>N</sup>/&delta;<sup>0</sup> .</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>[H<sup>i</sup> 1 := [H<sup>i</sup> <sup>N</sup>/&delta;<sup>0</sup> .</li>
+    </ol></li>
+    </ul>
+
+    <p class="text-gray-300">Verication: The protocol verier computes for each j &isin; [N]</p>
+
+    <p class="text-gray-300"><span class="math">$r_{\\delta,j} := \\mathcal{R}([\\delta_j]_1 \\,, \\mathsf{transcript}_{2,j-1}),</span>$</p>
+
+    <p class="text-gray-300">and for each j &isin; [N] checks that</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>CheckPOK([&delta;<sup>j</sup> ] 1 ,transcript2,j&minus;<sup>1</sup> , y&delta;,j ).</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>For j &isin; [N], consistent([&delta;] <sup>j</sup>&minus;<sup>1</sup> &minus; [&delta;] j ; (r&delta;,j , y&delta;,j )).</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>For each i &isin; [\` + 1..m], j &isin; [N], consistent([K<sup>i</sup> <sup>j</sup> &minus; [K<sup>i</sup> j&minus;1 ; [&delta;<sup>j</sup> ]).</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>For each i &isin; [0..n &minus; 2], j &isin; [N], consistent([H<sup>i</sup> <sup>j</sup> &minus; [H<sup>i</sup> j&minus;1 ; [&delta;<sup>j</sup> ]).</li>
+    </ol></li>
+    </ul>
+
+    </section>
+
+    <section id="sec-8" class="mb-10">
+      <h2 class="text-2xl font-bold">8 BLS12-381</h2>
+
+    <p class="text-gray-300">The most common pairing-friendly elliptic curve construction used in zk-SNARK software is a Barreto-Naehrig [8] (BN) construction with a 254-bit base eld and group order, as designed in [13]. That construction equipts F<sup>p</sup> with a large 2 <sup>n</sup> root of unity for ecient polynomial evaluation. Although the construction originally targeted the 128-bit security level, recent optimizations to the Number Field Sieve algorithm [30] have reduced its concrete security.</p>
+
+    <p class="text-gray-300">Subsequent analysis [34] recommended that BN curves and Barreto-Lynn-Scott (BLS) curves [7] with embedding degree k = 12 have approximately 384-bit base elds in order to target 128-bit security. BN curves are thus not ideal for our purposes, as these larger base elds are accompanied by similarly larger group orders, which substantially increases the cost of multi-exponentiation and fast-fourier transforms and harms the usability of protocols that use F<sup>p</sup> to encode keying material. BLS12 curves with 384-bit base elds, in contrast, give rise to 256-bit group orders, making them ideal for use with zk-SNARKs. In more conservative contexts, the larger constructions proposed in [6] are recommended.</p>
+
+    <p class="text-gray-300">BLS curves with k = 12 are parameterized by an integer x. The existing BN curve has 2 <sup>28</sup>|p&minus;1 to ensure a 2 <sup>28</sup> root of unity is available. We target the same by ensuring that 2 <sup>14</sup>|x. We target prime p of less than 2 <sup>255</sup> in order to accomodate ecient approximation algorithms and reductions. We desire ecient extension eld towers and twisting isomorphisms, following recommendations from [5]. In addition, we desire x of small Hamming weight for optimal pairing eciency.</p>
+
+    <p class="text-gray-300">The largest construction with smallest Hamming weight that meets our requirements is x = &minus;2 <sup>63</sup> &minus; 2 <sup>62</sup> &minus; 2 <sup>60</sup> &minus; 2 <sup>57</sup> &minus; 2 <sup>48</sup> &minus; 2 <sup>16</sup>, which we name BLS12-381. This curve exists within a subfamily of curves, as in [21], which have immediately determined curve parameters. We provide an implementation of this curve in Rust. [2]</p>
+
+    <p class="text-gray-300">In this section, we evaluate our implementation of MMORPG. Our implementation of both MMORPG and the pairing library is in Rust. All benchmarks for phase 1 and 2 were done on a Intel(R) Core(TM) i7-3770S CPU @ 3.10GHz with 32GB of RAM running Arch Linux.</p>
+
+    <p class="text-gray-300">Because the performance of our protocol is independent of the number of participants, our experimental setup is exceedingly simple. We need only measure the performance of a single user in each phase.</p>
+
+    <p class="text-gray-300">The statements proven by a zk-SNARKs are represented by an arithmetic circuit. The size of the circuit, in terms of multiplication gates, corresponds to the complexity of the statement that is proven. Our experimental setup consists of running MMORPG for three dierent circuit sizes 2 10 ,2 17 ,2 <sup>21</sup>. gates and measuring runtime and bandwidth. 2 <sup>21</sup> is the size of the largest circuit publicly generated using [16] and corresponds to approximately 60 SHA256 invocations. 2 <sup>17</sup> corresponds to the size of the proposal for the next generation of zcash [17] and 2 <sup>10</sup> is a very small circuit. Performance numbers are given in g. 7.1. Bandwidth numbers for each phase and selected circuit sizes are given in table 1.</p>
+
+    <p class="text-gray-300">Table 1: Bandwidth used in each phase</p>
+
+    <div class="overflow-x-auto my-4">
+      <table class="min-w-full text-sm text-gray-300">
+        <thead>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left"></th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">protocol phase</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left"></th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left"></th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left"></th>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">phase 1</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">phase 2</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">circuit size</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">down</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">up</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">down</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">up</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">2^11</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0.59 MB</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0.29 MB</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0.19 MB</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0.09 MB</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">2^12</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">75.5 MB</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">37.75 MB</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">25.17 MB</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">12.58 MB</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">2^15</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">1.13 GB</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0.56 GB</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0.37 GB</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0.19 GB</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p class="text-gray-300">For completeness we also prole the interphase computation by the coordinator. This step is costly. We stress that this computation does not involve secret data and need only be done one once. In practice a large AWS EC2 instance would be rented for this computation.</p>
+
+    <p class="text-gray-300">These results show that the protocol is practical. A user need only spend 15 minutes doing a computation and after that need no longer participate. This means participation requires low investment and does not require the user to maintain a heightened state of security for hours or days. Moreover, it is a X improvement on the per user computation time of the real world execution of [16]. We stress that this is not a result of moving to the new curve, since that curve has a higher computational complexity and would, for identical implementations,be slower than the BN128 used in [16]. Instead it is the result of both avoiding the need for pre-commitment phase and resulting idle time and of protocol and software optimizations that improve the actual computation time.</p>
+
+    <p class="text-gray-300">We thank Paulo Barreto for helpful feedback about the BLS12-381 elliptic curve. We thank Daniel Benarroch, Daira Hopwood and Antoine Rondelet for helpful comments. We thank the anonymous reviewers of S&amp;P 2018 for their comments.</p>
+
+    </section>
+
+    <section id="references" class="mb-10">
+      <h2 class="text-2xl font-bold">References</h2>
+
+    <ul class="space-y-2 text-gray-400 text-sm list-none">
+      <li><p class="text-gray-300">[1] Joseph bonneau personal communcation.</p></li>
+      <li><p class="text-gray-300">[2] Pairing library. url=https://github.com/ebfull/pairing.</p></li>
+      <li><p class="text-gray-300">[3] Zcash. url=hhttps://z.cash.</p></li>
+      <li><p class="text-gray-300">[4] Scott Ames, Carmit Hazay, Yuval Ishai, and Muthuramakrishnan Venkitasubramaniam. Ligero: Lightweight sublinear arguments without a trusted setup. In Proceedings of the 2017 ACM SIGSAC</p></li>
+      <li><p class="text-gray-300">Conference on Computer and Communications Security, CCS 2017, Dallas, TX, USA, October 30 November 03, 2017, pages 20872104, 2017.</p></li>
+      <li><p class="text-gray-300">[5] Diego F. Aranha, Laura Fuentes-Castaneda, Edward Knapp, Alfred Menezes, and Francisco Rodriguez-Henriquez. Implementing pairings at the 192-bit security level. Cryptology ePrint Archive, Report 2012/232, 2012. http://eprint.iacr.org/2012/232.</p></li>
+      <li><p class="text-gray-300">[6] Razvan Barbulescu and Sylvain Duquesne. Updating key size estimations for pairings. Cryptology ePrint Archive, Report 2017/334, 2017. http://eprint.iacr.org/2017/334.</p></li>
+      <li><p class="text-gray-300">[7] Paulo S. L. M. Barreto, Ben Lynn, and Michael Scott. Constructing elliptic curves with prescribed embedding degrees. Cryptology ePrint Archive, Report 2002/088, 2002. http://eprint.iacr.org/ 2002/088.</p></li>
+      <li><p class="text-gray-300">[8] Paulo S. L. M. Barreto and Michael Naehrig. Pairing-friendly elliptic curves of prime order. Cryptology ePrint Archive, Report 2005/133, 2005. http://eprint.iacr.org/2005/133.</p></li>
+      <li><p class="text-gray-300">[9] E. Ben-Sasson, A. Chiesa, M. Green, E. Tromer, and M. Virza. Secure sampling of public parameters for succinct zero knowledge proofs. In 2015 IEEE Symposium on Security and Privacy, SP 2015, San Jose, CA, USA, May 17-21, 2015, pages 287304, 2015.</p></li>
+      <li><p class="text-gray-300">[10] Eli Ben-Sasson, Iddo Bentov, Alessandro Chiesa, Ariel Gabizon, Daniel Genkin, Matan Hamilis, Evgenya Pergament, Michael Riabzev, Mark Silberstein, Eran Tromer, and Madars Virza. Computational integrity with a public random string from quasi-linear pcps. In Advances in Cryptology - EUROCRYPT 2017 - 36th Annual International Conference on the Theory and Applications of Cryptographic Techniques, Paris, France, April 30 - May 4, 2017, Proceedings, Part III, pages 551579, 2017.</p></li>
+      <li><p class="text-gray-300">[11] Eli Ben-Sasson, Alessandro Chiesa, Christina Garman, Matthew Green, Ian Miers, Eran Tromer, and Madars Virza. Zerocash: Decentralized anonymous payments from bitcoin. In 2014 IEEE Symposium on Security and Privacy, SP 2014, Berkeley, CA, USA, May 18-21, 2014, pages 459474, 2014.</p></li>
+      <li><p class="text-gray-300">[12] Eli Ben-Sasson, Alessandro Chiesa, Daniel Genkin, Eran Tromer, and Madars Virza. SNARKs for C: verifying program executions succinctly and in zero knowledge. In Proceedings of the 33rd Annual International Cryptology Conference, CRYPTO '13, pages 90108, 2013.</p></li>
+      <li><p class="text-gray-300">[13] Eli Ben-Sasson, Alessandro Chiesa, Daniel Genkin, Eran Tromer, and Madars Virza. Snarks for c: Verifying program executions succinctly and in zero knowledge. Cryptology ePrint Archive, Report 2013/507, 2013. http://eprint.iacr.org/2013/507.</p></li>
+      <li><p class="text-gray-300">[14] Bryan Bishop. Review of bitcoin scaling proposals. In Scaling Bitcoin Workshop Phase, volume 1, 2015.</p></li>
+      <li><p class="text-gray-300">[15] Nir Bitansky, Alessandro Chiesa, Yuval Ishai, Rafail Ostrovsky, and Omer Paneth. Succinct noninteractive arguments via linear interactive proofs. In Proceedings of the 10th Theory of Cryptography Conference, TCC '13, pages 315333, 2013.</p></li>
+      <li><p class="text-gray-300">[16] S. Bowe, A. Gabizon, and M. D. Green. A multi-party protocol for constructing the public parameters of the pinocchio zk-snark. IACR Cryptology ePrint Archive, 2017:602, 2017.</p></li>
+      <li><p class="text-gray-300">[17] Sean Bowe. Cultivating sapling: Faster zk-snarks. https://z.cash/blog/ cultivating-sapling-faster-zksnarks.html, September 2017.</p></li>
+      <li><p class="text-gray-300">[18] Benedikt Bunz, Steven Goldfeder, and Joseph Bonneau. Proofs-of-delay and randomness beacons in ethereum. In S&amp;B '17: Proceedings of the 1st IEEE Security &amp; Privacy on the Blockchain Workshop, April 2017.</p></li>
+      <li><p class="text-gray-300">[19] Vitalik Buterin and Joseph Poon. Plasma: Scalable autonomous smart contracts. http://plasma.io/ plasma.pdf, August 2017.</p></li>
+      <li><p class="text-gray-300">[20] Alessandro Chiesa, Matthew Green, Jingcheng Liu, Peihan Miao, Ian Miers, and Pratyush Mishra. Decentralized anonymous micropayments. In Advances in Cryptology - EUROCRYPT 2017 - 36th Annual International Conference on the Theory and Applications of Cryptographic Techniques, Paris, France, April 30 - May 4, 2017, Proceedings, Part II, pages 609642, 2017.</p></li>
+      <li><p class="text-gray-300">[21] Craig Costello, Kristin Lauter, and Michael Naehrig. Attractive subfamilies of bls curves for implementing high-security pairings. Cryptology ePrint Archive, Report 2011/465, 2011. http://eprint.iacr. org/2011/465.</p></li>
+      <li><p class="text-gray-300">[22] Georg Fuchsbauer. Subversion-zero-knowledge snarks. Cryptology ePrint Archive, Report 2017/587, 2017. http://eprint.iacr.org/2017/587.</p></li>
+      <li><p class="text-gray-300">[23] R. Gennaro, C. Gentry, B. Parno, and M. Raykova. Quadratic span programs and succinct nizks without pcps. In Advances in Cryptology - EUROCRYPT 2013, 32nd Annual International Conference on the Theory and Applications of Cryptographic Techniques, Athens, Greece, May 26-30, 2013. Proceedings, pages 626645, 2013.</p></li>
+      <li><p class="text-gray-300">[24] Rosario Gennaro, Craig Gentry, Bryan Parno, and Mariana Raykova. Quadratic span programs and succinct NIZKs without PCPs. In Proceedings of the 32nd Annual International Conference on Theory and Application of Cryptographic Techniques, EUROCRYPT '13, pages 626645, 2013.</p></li>
+      <li><p class="text-gray-300">[25] Yossi Gilad, Rotem Hemo, Silvio Micali, Georgios Vlachos, and Nickolai Zeldovich. Algorand: Scaling byzantine agreements for cryptocurrencies. In Proceedings of the 26th Symposium on Operating Systems Principles, Shanghai, China, October 28-31, 2017, pages 5168, 2017.</p></li>
+      <li><p class="text-gray-300">[26] Sha Goldwasser, Yael Kalai, Raluca Ada Popa, Vinod Vaikuntanathan, , and Nickolai Zeldovich. How to run turing machines on encrypted data. Cryptology ePrint Archive, Report 2013/229, 2013. https://eprint.iacr.org/2013/229.</p></li>
+      <li><p class="text-gray-300">[27] J. Groth. On the size of pairing-based non-interactive arguments. In Advances in Cryptology EURO-CRYPT 2016 - 35th Annual International Conference on the Theory and Applications of Cryptographic Techniques, Vienna, Austria, May 8-12, 2016, Proceedings, Part II, pages 305326, 2016.</p></li>
+      <li><p class="text-gray-300">[28] Jens Groth. Short pairing-based non-interactive zero-knowledge arguments. In Proceedings of the 16th International Conference on the Theory and Application of Cryptology and Information Security, ASI-ACRYPT '10, pages 321340, 2010.</p></li>
+      <li><p class="text-gray-300">[29] Joe Kilian. A note on ecient zero-knowledge proofs and arguments (extended abstract). In Proceedings of the 24th Annual ACM Symposium on Theory of Computing, May 4-6, 1992, Victoria, British Columbia, Canada, pages 723732, 1992.</p></li>
+      <li><p class="text-gray-300">[30] Taechan Kim and Razvan Barbulescu. Extended tower number eld sieve: A new complexity for the medium prime case. Cryptology ePrint Archive, Report 2015/1027, 2015. http://eprint.iacr.org/ 2015/1027.</p></li>
+      <li><p class="text-gray-300">[31] Ahmed Kosba, Andrew Miller, Elaine Shi, Zikai Wen, and Charalampos Papamanthou. Hawk: The blockchain model of cryptography and privacy-preserving smart contracts. In Security and Privacy (SP), 2016 IEEE Symposium on, pages 839858. IEEE, 2016.</p></li>
+      <li><p class="text-gray-300">[32] Helger Lipmaa. Progression-free sets and sublinear pairing-based non-interactive zero-knowledge arguments. In Proceedings of the 9th Theory of Cryptography Conference on Theory of Cryptography, TCC '12, pages 169189, 2012.</p></li>
+      <li><p class="text-gray-300">[33] Helger Lipmaa. Succinct non-interactive zero knowledge arguments from span programs and linear errorcorrecting codes. In Proceedings of the 19th International Conference on the Theory and Application of Cryptology and Information Security, ASIACRYPT '13, pages 4160, 2013.</p></li>
+      <li><p class="text-gray-300">[34] Alfred Menezes, Palash Sarkar, and Shashank Singh. Challenges with assessing the impact of nfs advances on the security of pairing-based cryptography. Cryptology ePrint Archive, Report 2016/1102, 2016. http://eprint.iacr.org/2016/1102.</p></li>
+      <li><p class="text-gray-300">[35] Silvio Micali. Computationally sound proofs. SIAM J. Comput., 30(4):12531298, 2000.</p></li>
+      <li><p class="text-gray-300">[36] Bryan Parno, Craig Gentry, Jon Howell, and Mariana Raykova. Pinocchio: nearly practical veriable computation. In Proceedings of the 34th IEEE Symposium on Security and Privacy, Oakland '13, pages 238252, 2013.</p></li>
+      <li><p class="text-gray-300">[37] Morgen E. Peck. The crazy security behind the birth of zcash, the inside story. https://spectrum. ieee.org/tech-talk/computing/networks/the-crazy-security-behind-the-birth-of-zcash, December 2016.</p></li>
+      <li><p class="text-gray-300">[38] Ethereum Team. Byzantium hf announcement. https://blog.ethereum.org/2017/10/12/ byzantium-hf-announcement/, October 2017.</p></li>
+    </ul>
+
+    </section>
+`;
+---
+
+<BaseLayout title="Scalable Multi-party Computation for zk-SNARK Parameters in ... (2017/1050)">
+  <article class="max-w-4xl mx-auto article-prose">
+    <nav class="mb-8">
+      <a href="/papers" class="text-blue-400 hover:text-blue-300">
+        &larr; Back to Papers
+      </a>
+    </nav>
+
+    <header class="mb-12">
+      <h1 class="text-3xl font-bold mb-4"
+        set:html={TITLE_HTML} />
+      <p class="text-gray-400 mb-2"
+        set:html={AUTHORS_HTML} />
+      <p class="text-gray-500 text-sm mb-4">
+        2017 &middot; eprint 2017/1050
+      </p>
+      <div class="flex gap-4 text-sm">
+        <a
+          href={EPRINT_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          class="text-blue-400 hover:text-blue-300"
+        >
+          Paper (eprint) &rarr;
+        </a>
+      </div>
+      <PaperDisclaimer eprintUrl={EPRINT_URL} />
+      <p class="mt-1 text-xs text-gray-600">
+        Converted with: {CRAWLER} &middot; {CONVERTED_DATE}
+      </p>
+    </header>
+
+    <nav id="toc" class="mb-10 p-6 rounded-lg" style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06);">
+      <h2 class="text-lg font-bold mb-4">Table of Contents</h2>
+      <ol class="space-y-1 text-sm text-gray-300
+        list-decimal list-inside">
+        <li><a href="#abstract" class="hover:text-white">Abstract</a></li>
+        <li>
+          <a href="#sec-1" class="hover:text-white">Introduction</a>
+          <ol class="ml-6 mt-1 space-y-1 list-decimal
+            list-inside text-gray-400">
+            <li><a href="#sec-1.1" class="hover:text-white">Our results</a></li>
+            <li><a href="#sec-1.2" class="hover:text-white">Outline</a></li>
+          </ol>
+        </li>
+        <li><a href="#sec-2" class="hover:text-white">Overview of our approach</a></li>
+        <li>
+          <a href="#sec-3" class="hover:text-white">Preliminaries</a>
+          <ol class="ml-6 mt-1 space-y-1 list-decimal
+            list-inside text-gray-400">
+            <li><a href="#sec-3.1" class="hover:text-white">Notation</a></li>
+            <li><a href="#sec-3.2" class="hover:text-white">Random beacons</a></li>
+            <li><a href="#sec-3.3" class="hover:text-white">Input domains</a></li>
+            <li><a href="#sec-3.4" class="hover:text-white">Player-exchangeable protocols and adaptive adversaries</a></li>
+            <li><a href="#sec-3.5" class="hover:text-white">Preliminary claims</a></li>
+            <li><a href="#sec-3.6" class="hover:text-white">Auxiliary methods</a></li>
+            <li><a href="#sec-3.7" class="hover:text-white">Proofs of Knowledge</a></li>
+          </ol>
+        </li>
+        <li>
+          <a href="#sec-4" class="hover:text-white">Multi-party Computation for Parameter Generation</a>
+          <ol class="ml-6 mt-1 space-y-1 list-decimal
+            list-inside text-gray-400">
+            <li><a href="#sec-4.1" class="hover:text-white">The circuit structure</a></li>
+            <li><a href="#sec-4.2" class="hover:text-white">The protocol coordinator</a></li>
+            <li><a href="#sec-4.3" class="hover:text-white">The MPC</a></li>
+            <li><a href="#sec-4.4" class="hover:text-white">The phase structure</a></li>
+          </ol>
+        </li>
+        <li><a href="#sec-5" class="hover:text-white">Security Proof</a></li>
+        <li><a href="#sec-6" class="hover:text-white">Reducing the Depth of Groth&#x27;s CRS</a></li>
+        <li>
+          <a href="#sec-7" class="hover:text-white">Multi-party Computation for Groth&#x27;s zk-SNARK</a>
+          <ol class="ml-6 mt-1 space-y-1 list-decimal
+            list-inside text-gray-400">
+            <li><a href="#sec-7.1" class="hover:text-white">Round 1: &#x27;Powers of \tau&#x27;</a></li>
+            <li><a href="#sec-7.2" class="hover:text-white">Linear combinations between phases</a></li>
+            <li><a href="#sec-7.3" class="hover:text-white">Round two</a></li>
+          </ol>
+        </li>
+        <li><a href="#sec-8" class="hover:text-white">BLS12-381</a></li>
+        <li><a href="#sec-9" class="hover:text-white">Implementation and Experiments</a></li>
+      </ol>
+      <p class="text-xs text-gray-500 mt-4 mb-1 font-semibold">
+        Additional
+      </p>
+      <ul class="space-y-1 text-sm text-gray-400
+        list-disc list-inside">
+        <li><a href="#acknowledgements" class="hover:text-white">Acknowledgements</a></li>
+        <li><a href="#references" class="hover:text-white">References</a></li>
+      </ul>
+    </nav>
+
+
+    <Fragment set:html={CONTENT} />
+
+    <PaperHistory slug="scalable-multi-party-computation-for-zk-snark-parameters-in-2017" />
+  </article>
+</BaseLayout>

@@ -1,0 +1,718 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import PaperDisclaimer from '../../components/PaperDisclaimer.astro';
+import PaperHistory from '../../components/PaperHistory.astro';
+
+const EPRINT_URL = 'https://eprint.iacr.org/2024/633';
+const CRAWLER = 'marker';
+const CONVERTED_DATE = '2026-02-16';
+const TITLE_HTML = 'Vision Mark-32: ZK-Friendly Hash Function Over Binary Tower Fields';
+const AUTHORS_HTML = 'Tomer Ashur, Mohammad Mahzoun, Jim Posen, Danilo &Scaron;ija&#269;i&#263;';
+
+const CONTENT = `    <section id="abstract" class="mb-10">
+      <h2 class="text-2xl font-bold">Abstract</h2>
+      <p class="text-gray-300">Zero-knowledge proof systems are widely used in different applications on the Internet. Among zero-knowledge proof systems, SNARKs are a popular choice because of their fast verification time and small proof size. The efficiency of zero-knowledge systems is crucial for usability, resulting in the development of so-called arithmetization-oriented ciphers.  In this work, we introduce Vision Mark-32, a modified instance of Vision defined over binary tower fields, with an optimized number of rounds and an efficient MDS matrix.  We implement a fully-pipelined Vision Mark-32 permutation on Alveo U55C FPGA accelerator card and argue an order of magnitude better hardware efficiency compared to the popular Poseidon hash. Our fully-pipelined Vision Mark-32 implementation runs at 250 MHz and uses 398 kLUT and 104 kFF.
+Lastly, we delineate how to implement each step efficiently in hardware.</p>
+      <p class="text-gray-300"><strong>Keywords:</strong> Vision &middot; SNARKs &middot; Arithmetization-oriented hash &middot; Zero-Knowledge &middot; FPGA &middot; Hardware</p>
+    </section>
+
+    <p class="text-gray-300">In this section, we introduce necessary definitions and theoretical background required to follow the paper.</p>
+
+      <h3 id="sec-2.1" class="text-xl font-semibold mt-8">2.1 Vision</h3>
+
+    <p class="text-gray-300">Vision [2] is a keyed permutation based on the Marvelous design strategy. Vision operates over  <span class="math">\\mathbb{F}_{2^n}</span>  and each round consists of two steps that differ only in the linearized affine polynomial. We denote the input state of the i<sup>th</sup> round by  <span class="math">S_i = (s_{i,0}, \\ldots, s_{i,m-1})</span>  where  <span class="math">s_{i,j} \\in \\mathbb{F}_{2^n}</span> . Each step in one round of Vision consists of three operations on the state:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Inverse function:  <span class="math">\\pi(s_{i,j}) = s_{i,j}^{-1}</span> .</li>
+      <li>Linearized affine polynomial:  <span class="math">B(s_{i,j}) = \\sum_{k=0}^{n-1} \\beta_j s_{i,j}^{2^k} + \\beta_n</span> .</li>
+      <li>MDS matrix:  <span class="math">L(S_i) = \\mathcal{M} \\cdot S_i</span> .</li>
+    </ul>
+
+    <p class="text-gray-300">The only difference between the two steps is the linearized affine polynomial. The linearized affine polynomial of the second step has the form:</p>
+
+    <p class="text-gray-300"><span class="math">$B(x) = \\beta_0 x + \\beta_1 x^2 + \\beta_2 x^4 + \\beta_3,</span>$</p>
+
+    <p class="text-gray-300">which is a sparse polynomial. The linearized affine polynomial of the first step is  <span class="math">B^{-1}</span> , which is dense with a high degree. The round function of Vision is depicted in Figure 1.</p>
+
+      <h3 id="sec-2.2" class="text-xl font-semibold mt-8">2.2 Weil Descent</h3>
+
+    <p class="text-gray-300">Let q be a power of a prime number, n be a positive integer, and  <span class="math">\\mathcal{P} \\subseteq \\mathbb{F}_{q^n}[x]</span> . Let  <span class="math">\\{\\alpha_0,\\ldots,\\alpha_{n-1}\\}</span>  be a basis of  <span class="math">\\mathbb{F}_{q^n}/\\mathbb{F}_q</span> , then  <span class="math">X=\\sum_{i=0}^{n-1}\\alpha_ix_i</span> . Let  <span class="math">p\\in\\mathbb{F}_{q^n}[x]</span> , define  <span class="math">[p]_i\\in\\mathbb{F}_q[x_1,\\ldots,x_n]</span>  by:</p>
+
+    <p class="text-gray-300"><span class="math">$p(X) = p(\\sum_{i=0}^{n-1} \\alpha_i x_i) \\equiv \\sum_{i=0}^{n-1} \\alpha_i [p]_i \\mod (x_0^q - x_0, \\dots, x_{n-1}^q - x_{n-1}),</span>$</p>
+
+    <p class="text-gray-300">where  <span class="math">deg([p]_i) &lt; q</span>  for all  <span class="math">0 \\le i &lt; n</span> . The system</p>
+
+    <p class="text-gray-300"><span class="math">$\\mathcal{P}&#x27; = \\{ [p]_i : p \\in \\mathcal{P}, \\ 0 \\le i &lt; n \\} \\cup \\{ x_i^q - x_i : 0 \\le i &lt; n \\}</span>$</p>
+
+    <p class="text-gray-300">is called Weil descent system of  <span class="math">\\mathcal{P}</span> , and solutions of  <span class="math">\\mathcal{P}</span>  in  <span class="math">\\mathbb{F}_{q^n}</span>  are same as the solutions of  <span class="math">\\mathcal{P}&#x27;</span>  in  <span class="math">\\mathbb{F}_q</span> .</p>
+
+      <h3 id="sec-2.3" class="text-xl font-semibold mt-8">2.3 Fake Weil Descent</h3>
+
+    <p class="text-gray-300">Fake Weil descent system is introduced in [35] and is a powerful tool to study the hardness of solving polynomial systems. We use fake Weil descent systems to improve the efficiency of computing affine linearized polynomials. Let  <span class="math">e &lt; q^n</span>  be a positive integer,  <span class="math">x^e \\in \\mathbb{F}_{q^n}[x]</span> , then  <span class="math">x^e</span>  can be written as:</p>
+
+    <p class="text-gray-300"><span class="math">$\\overline{x^e} = \\prod_{i=0}^{n-1} x_i^{e_i&#x27;} \\in \\mathbb{F}_{q^n}[x_1, \\dots, x_n],</span>$</p>
+
+    <p class="text-gray-300">in base q. Using the same approach, polynomials in  <span class="math">\\mathbb{F}_{q^n}[x]</span>  can be written as polynomials in  <span class="math">\\mathbb{F}_{q^n}[x_0,\\ldots,x_{n-1}]</span> . Let  <span class="math">\\mathcal{P}\\subseteq\\mathbb{F}_{q^n}[x]</span> ,  <span class="math">\\mathcal{P}&#x27;\\subseteq\\mathbb{F}_q[x_0,\\ldots,x_{n-1}]</span>  the Weil descent system of  <span class="math">\\mathcal{P}</span> , and  <span class="math">\\mathcal{P}^f\\subseteq\\mathbb{F}_{q^n}[x_0,\\ldots,x_{n-1}]</span>  the fake Weil descent system of  <span class="math">\\mathcal{P}</span> . Then, the solutions of  <span class="math">\\mathcal{P}^f</span>  over  <span class="math">\\mathbb{F}_{q^n}</span>  is the same as the solutions of  <span class="math">\\mathcal{P}&#x27;</span>  over  <span class="math">\\mathbb{F}_q</span>  up to an isomorphism [35]. We use fake Weil descent to convert polynomial systems over  <span class="math">\\mathbb{F}_{2^n}</span>  to polynomial systems over  <span class="math">\\mathbb{F}_{2^n}</span>  to a system of polynomials over  <span class="math">\\mathbb{F}_{2^n}</span>  to a system of polynomials over  <span class="math">\\mathbb{F}_2</span>  is described in Code Listing  <span class="math">1^1</span> .</p>
+
+    <p class="text-gray-300">Code Listing 1: Sage code for computing the fake Weil descent system of a monomial.</p>
+
+    <pre><code class="language-text">F. &lt;a&gt; = GF(2^n)
+R = PolynomialRing(F, n, names=&#x27;X&#x27;)
+X = R.gens()
+f = sum(X[i]*a^i for i in range(n))
+I = R.ideal([g^p - g for g in X])
+P = sum(vector(b)*m.reduce(I) for b,m in f^t)
+</code></pre>
+
+    <p class="text-gray-300">The tower of field extensions introduced in [46], and further discussed in [18, 24, 13] is a recursive construction of fields extensions where each field extension is constructed by using an irreducible polynomial and the previous field extension. More precisely, let  <span class="math">\\mathcal{T}_0 = \\mathbb{F}_{2^m}</span> , then the binary tower is defined as:</p>
+
+    <p class="text-gray-300"><span class="math">$\\mathcal{T}_1 = \\mathcal{T}_0[x_0]/F_1(x_0)</span>$</p>
+
+    <p class="text-gray-300"><span class="math">$\\vdots</span>$</p>
+
+    <p class="text-gray-300"><span class="math">$\\mathcal{T}_n = \\mathcal{T}_{n-1}[x_{n-1}]/F_n(x_{n-1}),</span>$</p>
+
+    <p class="text-gray-300">where  <span class="math">F_i(x_{i-1})</span>  is an irreducible polynomial of degree 2 in  <span class="math">\\mathcal{T}_{n-1}</span>  and  <span class="math">\\mathcal{T}_n</span>  is the finite field  <span class="math">\\mathcal{F}_{2^{m^{2n}}}</span> . In the design of Vision Mark-32,  <span class="math">\\mathcal{T}_0 = \\mathbb{F}_2</span> , and  <span class="math">F_i(x_{i-1}) = x_{i-1}^2 + x_{i-1} \\cdot x_{i-2} + 1</span>  which was shown to be irreducible in [46]. The recursive construction of extension fields obtains the following binary field tower:</p>
+
+    <p class="text-gray-300"><span class="math">$\\mathcal{T}_0 \\subset \\mathcal{T}_1 \\subset \\ldots \\subset \\mathcal{T}_n</span>$</p>
+
+    <p class="text-gray-300"><sup>&amp;</sup>lt;sup&gt;1</sup>Code is taken from Sage online forum.</p>
+
+    <p class="text-gray-300">    <img src="_page_4_Figure_1.jpeg" alt="" class="my-4 max-w-full" />
+</p>
+
+    <p class="text-gray-300"><strong>Figure 2:</strong> Recursive construction of binary towers.</p>
+
+    <p class="text-gray-300">where T<em><sup>n</sup></em> is a vector space over T<sup>0</sup> with dimension 2 <em><sup>n</sup></em> with respect the following lexicographic basis <a href="#page-15-7">[21]</a>:</p>
+
+    <p class="text-gray-300"><span class="math">$\\{x_0, x_1, x_0x_1, \\dots, x_0x_1 \\dots x_{n-1}\\}.</span>$</p>
+
+    <p class="text-gray-300">Each vector <em>v</em> &isin; T<em>n</em>, of length 2 <em><sup>n</sup></em>, can be written as <em>v</em> = <em>v</em><sup>0</sup> +<em>xn</em>&minus;1<em>v</em>1. Arithmetic operations of the field T<em><sup>n</sup></em> can be executed more efficiently using the binary towers. An example of binary tower F<sup>2</sup> <sup>3</sup> is described in <a href="#page-4-0">Figure 2.</a></p>
+
+    <p class="text-gray-300">We denote the complexity of addition, constant multiplication, multiplication of field elements, and inversion over F2<em>m</em>2<em><sup>n</sup></em> with A<em>n,</em> C<em>n,</em>M<em>n</em>, and I<em><sup>n</sup></em> respectively. Then, the complexity of each operation is analyzed in <a href="#page-16-5">[24]</a> as follows.</p>
+
+    <p class="text-gray-300"><strong>Addition.</strong> The addition of field elements is cheap regardless of whether using binary tower fields. For the case of fields with characteristic 2, the addition <em>v</em>1<em>, v</em><sup>2</sup> &isin; T<em>n</em>, corresponds to their bitwise XOR <em>v</em><sup>1</sup> &oplus; <em>v</em>2. The complexity of addition is A<em><sup>n</sup></em> = 2<em><sup>n</sup></em>A<sup>0</sup> where A<sup>0</sup> is the cost of addition over F2<em><sup>m</sup></em>.</p>
+
+    <p class="text-gray-300"><strong>Multiplication by constant.</strong> Multiplication of <em>v</em> &isin; T<em><sup>n</sup></em> with the constant <em>xn</em>&minus;<sup>1</sup> can be executed in &Theta;(2<em><sup>n</sup></em>). The complexity of multiplication with constant is</p>
+
+    <p class="text-gray-300"><span class="math">$\\mathcal{C}_n = \\mathcal{C}_0 + (2^n - 1)\\mathcal{A}_0.</span>$</p>
+
+    <p class="text-gray-300"><strong>Multiplication of field elements.</strong> Multiplication of <em>v</em><sup>1</sup> = <em>&alpha;</em>1<em>xn</em>&minus;<sup>1</sup> + <em>&alpha;</em><sup>0</sup> and <em>v</em><sup>2</sup> = <em>&beta;</em>1<em>xn</em>&minus;<sup>1</sup> + <em>&beta;</em>0, is done via three multiplications in T<em>n</em>&minus;1. In general:</p>
+
+    <p class="text-gray-300"><span class="math">$v_1 \\cdot v_2 = (\\alpha_0 \\beta_1 + \\beta_0 \\alpha_1 + \\alpha_1 \\beta_1 x_{n-2}) x_{n-1} + \\alpha_0 \\beta_0 + \\alpha_1 \\beta_1,</span>$</p>
+
+    <p class="text-gray-300">which can be computed by <a href="#page-15-7">[21]</a>:</p>
+
+    <p class="text-gray-300"><span class="math">$\\alpha_1 \\beta_1 x_{n-1}^2 + (\\alpha_0 \\beta_1 + \\alpha_1 \\beta_0) x_{n-1} + \\alpha_0 \\beta_0 - \\alpha_1 \\beta_1 (x_{n-1}^2 + x_{n-2} x_{n-1} + 1).</span>$</p>
+
+    <p class="text-gray-300">The complexity of multiplication is:</p>
+
+    <p class="text-gray-300"><span class="math">$\\mathcal{M}_n = 3^n \\mathcal{M}_0 + 6(3^n - 2^n)\\mathcal{A}_0 + \\frac{3^n - 1}{2}(\\mathcal{C}_0 - \\mathcal{A}_0).</span>$</p>
+
+    <p class="text-gray-300">A similar approach to multiplication is also known as Karatsuba method <a href="#page-17-9">[36]</a>, that has complexity of O <em>n</em> log<sup>2</sup> (3) .</p>
+
+    <p class="text-gray-300"><strong>Squaring.</strong> The square of vector  <span class="math">v = \\alpha_1 x_{n-1} + \\alpha_0</span>  is:</p>
+
+    <p class="text-gray-300"><span class="math">$(\\alpha_1^2 x_{n-2}) x_{n-1} + (\\alpha_0^2 + \\alpha_1^2).</span>$</p>
+
+    <p class="text-gray-300">The complexity of squaring a field element is:</p>
+
+    <p class="text-gray-300"><span class="math">$S_n = 2^n S_0 + n 2^n A_0 + (2^n - 1)(C_0 - A_0).</span>$</p>
+
+    <p class="text-gray-300"><strong>Inversion.</strong> The inverse of a field element  <span class="math">v = \\alpha_1 x_{n-1} + \\alpha_0</span>  is:</p>
+
+    <p class="text-gray-300"><span class="math">$v^{-1} = (\\alpha_1 x_{n-1} + \\alpha_0)^{-1} = (\\alpha_1 \\Delta^{-1}) + \\Delta^{-1}(\\alpha_0 + \\alpha_1 x_{n-2}),</span>$</p>
+
+    <p class="text-gray-300">where  <span class="math">\\Delta = \\alpha_0(\\alpha_0 + \\alpha_1 x_{n-2}) + \\alpha_1^2</span> . Computing the inverse of an element has asymptotic complexity of  <span class="math">\\mathcal{O}(n^{\\log_2(3)})</span> . For the detailed analysis of the complexity of inversion, we refer to [24, Section IV].</p>
+
+    <p class="text-gray-300">Vision Mark-32 is a hash function instantiating a Sponge construction using the Vision permutation [2]. Vision Mark-32 has 8 rounds and operates over  <span class="math">\\mathbb{F}_{2^{32}}</span> , with state size of m=24, and capacity of c=8. The security level guaranteed by Vision Mark-32 is 128 bits. In Algorithm 1, the pseudocode of Vision Mark-32 hash function is described. M is the MDS matrix and its structure is described in Subsection 3.3, and  <span class="math">C_{r,1}, C_{r,2} \\in \\mathbb{F}_{2^{32}}^{24}</span>  are round constants for  <span class="math">\\mathbf{r}^{th}</span>  round.</p>
+
+    <p class="text-gray-300">Algorithm 1 Underlying permutation of Vision Mark-32 hash function with number of rounds = 8 and state size = 24.</p>
+
+    <pre><code class="language-text">Input: State S = (s_1, \\ldots, s_{24}) \\in \\mathbb{F}_{2^{32}}^{24}
+</code></pre>
+
+    <p class="text-gray-300">Output: Result of applying Vision Mark-32 permutation on S</p>
+
+    <pre><code class="language-text">1: for r = 1 to 8 do
+        for i = 1 to 24 do
+ 2:
+            S[i] = S[i]^{-1}
+ 3:
+            S[i] = B^{-1}(S[i])
+ 4.
+        S = M \\cdot S + C_{r,1}
+ 5:
+        for i = 1 to 24 do
+ 6:
+           S[i] = S[i]^{-1}
+ 7:
+            S[i] = B(S[i])
+ 8:
+        S = M \\cdot S + C_{r,2}
+ 9.
+10: return S
+</code></pre>
+
+    <p class="text-gray-300">The inverse function is the only non-linear operation in the round function of Vision Mark-32. To efficiently implement inversion over  <span class="math">\\mathbb{F}_{2^{32}}</span> , the construction proposed by Wiedemann [46] is used. That is, each element of  <span class="math">\\mathbb{F}_{2^{32}}</span>  is represented as  <span class="math">\\alpha = a + x_4b</span> , where  <span class="math">a, b \\in \\mathbb{F}_{2^{16}}</span> , with the irreducible polynomial  <span class="math">F(x_4) = x_4^2 + x_3x_4 + 1</span> . To inverse  <span class="math">\\alpha</span> , we compute:</p>
+
+    <p class="text-gray-300"><span class="math">$\\alpha^{-1} = b\\Delta^{-1} + \\Delta^{-1}(a + bx_3),</span>$</p>
+
+    <p class="text-gray-300">where  <span class="math">\\Delta = a(a + bx_3) + b^2</span> . To compute  <span class="math">\\Delta^{-1}</span> , we recursively compute inversion in the subfield  <span class="math">\\mathbb{F}_{2^{16}}</span> , which itself require inversion in the subfield  <span class="math">\\mathbb{F}_{2^8}</span> . This way, inversion is</p>
+
+    <p class="text-gray-300">reduced to inversion over  <span class="math">\\mathbb{F}_2</span>  which is trivial. In our implementation, the cost of the inversion operation over  <span class="math">\\mathbb{F}_{2^{32}}</span>  is 1.58 times the cost of multiplication, whereas normal inversion using XGCD requires  <span class="math">\\approx 32</span>  multiplications.</p>
+
+      <h3 id="sec-3.2" class="text-xl font-semibold mt-8">3.2 <strong>Linearized Affine Layer</strong></h3>
+
+    <p class="text-gray-300">The linearized affine layer is one of the main bottlenecks of performance in hardware implementation. Mainly because of its density and large number of multiplications over the operating field,  <span class="math">\\mathbb{F}_{2^n}</span> . A linearized affine layer over  <span class="math">\\mathbb{F}_{2^n}</span>  has the form:</p>
+
+    <p class="text-gray-300"><span class="math">$B(x) = \\sum_{k=0}^{n-1} \\beta_k x^{2^k} + \\beta_n.</span>$</p>
+
+    <p class="text-gray-300">The polynomial B(x) has n terms, and evaluating it directly requires n constant multiplication, n additions, and n squaring in the  <span class="math">\\mathbb{F}_{2^{32}}</span> .</p>
+
+    <p class="text-gray-300">However, B(x) is an affine function over  <span class="math">\\mathbb{F}_2</span> . To efficiently compute B(x) for any  <span class="math">x \\in \\mathbb{F}_{2^n}</span>  we convert x to a binary vector  <span class="math">V = (V_0, \\dots, V_{n-1}) \\in \\mathbb{F}_2^n</span>  and transform the linearzied polynomial to a matrix over  <span class="math">\\mathbb{F}_2</span> . Converting monomials of B(x) to their Weil descent system using Code Listing 1 is time-consuming and impractical. However, to compute the Weil descent system of B(x), we only need to compute the matrix  <span class="math">M_1</span>  for the monomial  <span class="math">x^2</span> , using  <span class="math">M_1</span>  we then can compute the matrix for  <span class="math">x^{2^i}</span>  as  <span class="math">M_i = M_1^i</span> . The matrix representation of B(x) in  <span class="math">GL_n(2)</span>  is:</p>
+
+    <p class="text-gray-300"><span class="math">$M(V) = \\sum_{i=0}^{n-1} \\mathcal{B}_i \\cdot M_i(V) + \\mathcal{B}_n, \\tag{1}</span>$</p>
+
+    <p class="text-gray-300">where  <span class="math">\\mathcal{B}</span>  is a matrix representing the constant multiplication. The matrix M(V) can be computed using n matrix squaring once the matrix  <span class="math">M_1</span>  is calculated. The Sage code to convert an affine linearized polynomial to a matrix in  <span class="math">GL_n(2)</span>  is given in Algorithm 2.</p>
+
+    <p class="text-gray-300">Algorithm 2 Algorithm to compute the matrix representation of affine polynomial over  <span class="math">GL_n(2)</span> .</p>
+
+    <pre><code class="language-text">Input: Affine polynomial B(x) = \\sum_{k=0}^{n-1} \\beta_k x^{2^k} + \\beta_n.
+Output: Matrix M \\in GL_n(2) corresponding to B
+</code></pre>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>1: M[0] = Matrix of monomial x.</li>
+      <li>2:  <span class="math">M[1] = \\text{Matrix of the monomial } x^2</span> .</li>
+      <li>3: <strong>for</strong> i = 2 to n 1 <strong>do</strong></li>
+      <li><span class="math">\\triangleright M[i]</span>  is the matrix of the monomial  <span class="math">x^{2^i}</span> .</li>
+      <li><span class="math">M[i] = M[i-1] \\cdot M[1]</span></li>
+      <li>5: <strong>for</strong> i = 0 to n 1 <strong>do</strong></li>
+      <li><span class="math">\\triangleright C[i]</span>  is the matrix corresponding to the constant  <span class="math">\\beta_i</span> .</li>
+      <li>6:  <span class="math">M[i] = C[i] \\cdot M[i]</span> 7: <strong>return</strong>  <span class="math">\\sum_{i=0}^{n-1} M[i] + C[n]</span></li>
+    </ul>
+
+    <h4 id="sec-misc-1" class="text-lg font-semibold mt-6"><strong>MDS Matrix</strong> 3.3</h4>
+
+    <p class="text-gray-300">In [38], a novel basis of polynomials over a finite field of characteristic 2 is introduced for efficient encoding and decoding of Reed-Solomon erasure codes. The same basis is used in Vision Mark-32 to generate the MDS matrix. We fix a binary field  <span class="math">K = \\mathbb{F}_{2^n}</span>  with  <span class="math">\\mathbb{F}_2</span> -basis  <span class="math">\\langle \\beta_0, \\ldots, \\beta_{n-1} \\rangle</span> . For each  <span class="math">j \\in \\{0, \\ldots, 2^n - 1\\}</span> , we define  <span class="math">\\omega_j := j_0 \\cdot \\beta_0 + \\ldots + j_{n-1} \\cdot \\beta_{n-1}</span> , where  <span class="math">(j_0, \\ldots, j_{n-1})</span>  are j's bits.</p>
+
+    <p class="text-gray-300">Writing  <span class="math">U_i := \\langle \\beta_0, \\dots, \\beta_{i-1} \\rangle</span>  for the <em>i</em>-dimensional  <span class="math">\\mathbb{F}_2</span> -subspace generated by the first <em>i</em> basis elements, we set  <span class="math">W_i(X) := \\prod_{u \\in U_i} (X - u)</span> , a subspace polynomial of degree  <span class="math">2^i</span> ; its evaluation map  <span class="math">W_i : K \\to K</span>  is  <span class="math">\\mathbb{F}_2</span> -linear.</p>
+
+    <p class="text-gray-300"><span class="math">\\hat{W}_i(X) := \\frac{\\hat{W}_i(\\hat{X})}{W_i(\\beta_i)}</span>  is its normalized variant; moreover, it satisfies  <span class="math">\\hat{W}_i(\\beta_i) = 1</span> , and is also  <span class="math">\\mathbb{F}_2</span> -linear.</p>
+
+    <p class="text-gray-300">Finally, for each  <span class="math">j \\in \\{0, \\dots, 2^n - 1\\}</span> , we set:</p>
+
+    <p class="text-gray-300"><span class="math">$X_j(X) = \\prod_{i=0}^{n-1} (\\hat{W}_i(X))^{j_i},</span>$</p>
+
+    <p class="text-gray-300">where again  <span class="math">(j_0, \\ldots, j_{n-1})</span>  are j's bits. Since each  <span class="math">X_j(X)</span>  is of degree j, the set</p>
+
+    <p class="text-gray-300"><span class="math">$\\{(X_0(X),\\ldots,X_{2^n-1}(X))\\}</span>$</p>
+
+    <p class="text-gray-300">yields a K-basis of K[X].</p>
+
+    <p class="text-gray-300">For a state size of m, U[i][j] will contain  <span class="math">W_i(\\beta_j)</span> , for each  <span class="math">i \\in \\{0, ..., \\lceil \\log m \\rceil \\}</span>  and  <span class="math">j \\in \\{0, ..., \\lceil \\log m \\rceil + 1 \\}</span> . This information alone is be enough to compute  <span class="math">W_i(\\omega_j)</span>  for each  <span class="math">j \\in \\{0, ..., 2 \\cdot \\log m - 1 \\}</span> , using merely some additions, since the  <span class="math">W_i</span> s are  <span class="math">\\mathbb{F}_2</span> -linear (in particular, additively homomorphic). In order to compute the row  <span class="math">W_i(\\beta_0), ..., W_i(\\beta_{\\lceil \\log m \\rceil + 1})</span> , given the respective values of  <span class="math">W_{i-1}</span>  on these points, we use the recursive identity  <span class="math">W_i(X) = W_{i-1}(X) \\cdot (W_{i-1}(X) + W_{i-1}(\\beta_{i-1}))</span> . The sage code for computing U[i][j] is described in Code Listing 2.</p>
+
+    <pre><code class="language-text">#mds_field is a binary tower.
+U = [[self.mds_field.from_integer(2^j) for j in range(ceil(log(m,2)) + 1)]]
+for i in range(1, ceil(log(m,2))):
+    U.append([U[i - 1][j] * (U[i - 1][j] + U[i - 1][i - 1]) for j in range(ceil(log(m,2)) + 1)])
+
+for i in range(ceil(log(m,2))):
+    normalization_constant = self.mds_field.from_integer(1) / U[i][i ]
+
+U[i] = [U[i][j] * normalization_constant for j in range(ceil(log(m,2)) + 1)]
+</code></pre>
+
+    <p class="text-gray-300">The next step is to expand the matrix horizontally. W[i][j] will contain  <span class="math">\\hat{W}_i(\\omega_j)</span>  for each  <span class="math">i \\in \\{0, \\dots, \\lceil \\log m \\rceil \\}</span>  and  <span class="math">j \\in \\{0, \\dots, 2 \\cdot \\log m - 1 \\}</span> . This can be done by only using additions, having computed the values of U[i][j]. The code for horizontal expanding is described in Code Listing 3.</p>
+
+    <h4 id="sec-misc-2" class="text-lg font-semibold mt-6">Code Listing 3: Sage code for to horizontal expansion of the matrix.</h4>
+
+    <pre><code class="language-text">W = []
+for i in range(ceil(log(m,2))):
+    W_i = [self.mds_field.from_integer(0)]
+    for j in range(ceil(log(m,2)) + 1):
+        # W_i will contain all subset sums of U[i].
+        W_i += [W_i[k] + U[i][j] for k in range(1 &lt;&lt; j)]
+    W.append(W_i[: 2 * self.m])&lt;/pre&gt;
+</code></pre>
+
+    <p class="text-gray-300">To expand the matrix vertically, <em>X</em>[<em>j</em>][<em>i</em>] will contain <em>Xi</em>(<em>&omega;<sup>j</sup></em> ) for each <em>i</em> &isin; {0<em>, . . . , m</em> &minus; 1} and <em>j</em> &isin; {0<em>, . . . ,</em> 2 &middot; log <em>m</em> &minus; 1}. We can again compute these from the <em>W</em>&circ; <em><sup>i</sup></em>(<em>&omega;<sup>j</sup></em> ) values using a binary expansion; now multiplying instead of adding. Indeed, this is the definition of <em>X<sup>i</sup></em> . The sage code to vertically expand the matrix is described in <a href="#page-8-0">Code Listing 4.</a></p>
+
+    <p class="text-gray-300"><strong>Code Listing 4:</strong> Sage code for to vertical expansion of the matrix.</p>
+
+    <pre><code class="language-text">1 X = []
+2 for j in range (2 * self . m ) :
+3 X_j = [ self . mds_field . from_integer (1) ]
+4 for i in range ( ceil ( log (m ,2) ) ) :
+5 # standard binary expansion , with multiplying instead of
+              adding
+6 X_j += [ X_j [ k ] * W [ i ][ j ] for k in range (1 &lt;&lt; i ) ]
+7 X . append ( X_j [: self . m ])
+</code></pre>
+
+    <p class="text-gray-300">Since the evaluation of a polynomial for the basis <a href="#page-17-4">[38]</a> is a Reed&ndash;Solomon encoding, multiplication by the matrix <em>X</em> gives us that Reed&ndash;Solomon encoding in matrix form. Its rate is 1<em>/</em>2, i.e., it's the matrix that takes the novel-basis coefficients of a polynomial of degree <em>&lt; m</em> and returns its evaluations over the domain (<em>&omega;</em>0<em>, . . . , &omega;</em>2<em>m</em>&minus;1). We use the &quot;row convention&quot;: encoding is multiplying a row vector on the right by a wide matrix.</p>
+
+    <p class="text-gray-300">We obtain a systematic version of the same code by performing row reduction echelon form (RREF) on <em>G</em>. This code differs from the one above by precomposition with a <em>K</em>-isomorphism on the message space. Indeed, RREF simply amounts to left-multiplying the <em>m</em> &times; 2<em>m</em> matrix by an <em>m</em> &times; <em>m</em> invertible matrix. The result of RREF has the identity as its left-hand half and our desired MDS matrix on the right. Indeed, one definition of an MDS matrix is simply the &quot;nonsystematic&quot; part of a systematic MDS code of rate 1<em>/</em>2. In other words, it's the extrapolation matrix, which takes the values of some polynomial of degree less than <em>m</em> on the set <em>&omega;</em>0<em>, . . . , &omega;m</em>&minus;1, and returns the evaluations of the same polynomial on <em>&omega;m, . . . , &omega;</em>2<em>m</em>&minus;1.</p>
+
+    <p class="text-gray-300">Vision Mark-32 sponge is depicted in <a href="#page-9-0">Figure 3.</a> The state of the permutation consists of <em>R</em> = 16 rate elements, followed by <em>C</em> = 8 capacity elements in F<sup>2</sup> <sup>32</sup> . If the number of field elements in the message is not a multiple of the rate, it must be padded with the smallest number of zero elements so the number of field elements in the message is the multiple of the rate. The first two capacity elements are initialized to the 64-bit little-endian unsigned integer representing the message byte-length<a href="#page-8-1">2</a> . The remaining elements are initialized to zero. The first block is absorbed by overwriting 16 input rate elements with a message block. The remaining blocks are absorbed by overwriting 16 input rate elements with a message block and overwriting the 8 input capacity elements with the first 8 output rate elements of the preceding permutation. A digest is squeezed by reading the first 8 output rate elements from the final permutation.</p>
+
+    <p class="text-gray-300">The security of Vision Mark-32 relies on the security of the Marvelous family <a href="#page-14-5">[2]</a>, and generic security offered by Sponge constructions. The complexity of different attacks using state-of-the-art approaches against Vision Mark-32 is described in <a href="#page-9-1">Table 1.</a></p>
+
+    <p class="text-gray-300"><sup>2</sup> the proof for this padding scheme using domain separation can be found in the full version.</p>
+
+    <div class="overflow-x-auto my-4">
+      <table class="min-w-full text-sm text-gray-300">
+        <thead>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">to ensure security against a specific attack.</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left"></th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left"></th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left"></th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left"></th>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Type of Attack</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Required Number of Rounds</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Differential Cryptanalysis</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">1</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Linear Cryptanalysis</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">1</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Higher Order Differentials</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">2</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Interpolation Attacks</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">A</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p class="text-gray-300"><strong>Table 1:</strong> Cryptanalysis Techniques, the required number of rounds shows the number of rounds to ensure security against a specific attack.</p>
+
+    <p class="text-gray-300">3</p>
+
+      <h3 id="sec-4.1" class="text-xl font-semibold mt-8">4.1 Differential Crytpanalysis</h3>
+
+    <p class="text-gray-300">Gr&ouml;bner Basis Attacks</p>
+
+    <p class="text-gray-300">To argue the security of Vision Mark-32 against differential cryptanalysis attacks, we use the wide trail strategy [20]. For the binary field  <span class="math">\\mathbb{F}_{2^{32}}</span> , the differential uniformity of inverse function  <span class="math">f(x) = x^{-1}</span>  is  <span class="math">\\delta = 2^{-30}</span> . Since the MDS matrix activates 25 S-boxes in each round, the probability of an N-round differential is  <span class="math">2^{-750N}</span> , and a differential cryptanalysis attack is not feasible, even for a small number of rounds. For a more detailed analysis of the Vision family against differential attacks, we refer to [3].</p>
+
+    <p class="text-gray-300">Similar to the differential cryptanalysis in Subsection 4.1, the security against linear cryptanalysis is argued using the wide trail strategy. For the binary field  <span class="math">\\mathbb{F}_{2^{32}}</span> , the linearity of inverse function  <span class="math">f(x) = x^{-1}</span>  is  <span class="math">\\lambda = 2^{-15}</span> , and the probability of N-round linear approximation is  <span class="math">2^{-375N}</span> . Therefore, Vision Mark-32 is safe against linear cryptanalysis. Indeed, since the operating field is large, statistical attacks are not likely to be successful in breaking the security of Vision Mark-32.</p>
+
+      <h3 id="sec-4.3" class="text-xl font-semibold mt-8">4.3 Interpolation Attacks</h3>
+
+    <p class="text-gray-300">The round function of Vision Mark-32 has two mappings of high degree, the inverse function, and the affine polynomial  <span class="math">B^{-1}</span> . Indeed, no matter what direction the system is modeled as polynomials, either B or  <span class="math">B^{-1}</span>  has a high degree. In [3], the upper bound for the number of rounds that can be attacked using meet-in-the-middle approach is computed as 3, and for Vision Mark-32, the same security argument works.</p>
+
+    <p class="text-gray-300">    <img src="_page_9_Picture_10.jpeg" alt="" class="my-4 max-w-full" />
+</p>
+
+    <p class="text-gray-300">Figure 3: Vision Mark-32 sponge hash.</p>
+
+    <p class="text-gray-300">Arguing the security of a cryptographic primitive against Gr&ouml;bner basis attacks are usually done via arguing the hardness of computing the Gr&ouml;bner basis in <em>grevlex</em> order, which is believed to be the most efficient way to compute the Gr&ouml;bner basis for a general system. The complexity of computing Gr&ouml;bner basis in <em>grevlex</em> order is:</p>
+
+    <p class="text-gray-300"><span class="math">$\\mathcal{O}\\left(\\binom{n+d}{d}^{\\omega}\\right),</span>$</p>
+
+    <p class="text-gray-300">where <em>n</em> is the number of variables in the system, <em>d</em> is the solving degree of the system, and 2 <em>&lt; &omega; &lt;</em> 3 is the linear algebra constant. Estimating the solving degree <em>d</em> for structured systems, such as the systems describing cryptographic hash functions, is not a straightforward task. In <a href="#page-14-5">[2]</a>, the authors computed the solving degree for a toy version of Vision with small parameters and extrapolated the behavior of solving degree using linear regression. Yet, the extrapolation of solving degree is a heuristic approach and its correctness has not been proven. Recently, in <a href="#page-17-3">[42,</a> <a href="#page-17-5">43,</a> <a href="#page-14-8">9]</a> the authors described an approach to computing the Gr&ouml;bner basis for free in a tailored weighted term ordering and estimate the hardness of solving the system as the complexity of transforming such Gr&ouml;bner basis to the <em>lex</em> ordering, in which the system is triangular and easy to solve using univariate polynomial solving and substituting the roots in the rest of the system. In this case, the complexity of transforming the basis to Gr&ouml;bner basis in <em>lex</em> order is:</p>
+
+    <p class="text-gray-300"><span class="math">$\\mathcal{O}\\left(nD^{\\omega}\\right)</span>$
+,</p>
+
+    <p class="text-gray-300">where <em>D</em> is the degree of the ideal formed by the polynomial system that describes the hash function. The degree <em>D</em> of the ideal of the system represents the number of solutions to the polynomial system over the algebraic closure of the field and can be estimated using the B&eacute;zout theorem.</p>
+
+    <p class="text-gray-300"><strong>Theorem 1</strong> (B&eacute;zout Theorem)<strong>.</strong> <em>Let</em> F <em>be a field and let</em> F <em>be the algebraic closure of</em> F<em>, let f</em>1<em>, . . . , f<sup>n</sup></em> &isin; F[<em>x</em>1<em>, . . . , xm</em>] <em>be homogeneous polynomials where degree of f<sup>i</sup> is di, the number of solutions of f</em><sup>1</sup> = <em>. . .</em> = <em>f<sup>n</sup></em> = 0<em>, is given by:</em></p>
+
+    <p class="text-gray-300"><span class="math">$\\prod_{i=1}^{n} d_i,</span>$</p>
+
+    <p class="text-gray-300"><em>if the ideal</em> &#10216;<em>f</em>1<em>, . . . , fn</em>&#10217; <em>is zero-dimensional.</em></p>
+
+    <p class="text-gray-300">The asymptotic complexity of converting a Gr&ouml;bner basis to lexicographic (lex) monomial order using sparse FGLM algorithm is <a href="#page-16-11">[25]</a>:</p>
+
+    <p class="text-gray-300"><span class="math">$O\\left(\\sqrt{\\frac{6}{n\\pi}}D^{2+\\frac{n-1}{n}}\\right). \\tag{2}</span>$</p>
+
+    <p class="text-gray-300"><strong>Complexity of Step 3:</strong> When the ideal is zero-dimensional, the Gr&ouml;bner basis in lexicographic order is structured according to the shape lemma. This structure includes a unique univariate polynomial that can be factored and used to solve the entire system iteratively. Once the unique univariate polynomial is factored, it provides a partial solution to the system. By iteratively substituting these partial solutions into other polynomials and similarly factoring them, a complete solution is obtained. To solve a univariate polynomial system of degree <em>D</em> over the finite field F<em>p</em>, the Cantor/Zassenhaus algorithm can be used. This algorithm has a complexity of:</p>
+
+    <p class="text-gray-300"><span class="math">$O(D^2(\\log D \\log \\log D)(\\log p + \\log D)).</span>$</p>
+
+      <h4 id="sec-4.4.1" class="text-lg font-semibold mt-6"><strong>4.4.1 Determined System</strong></h4>
+
+    <p class="text-gray-300">The first approach is to model the Vision Mark-32 as a determined system of polynomials as described in <a href="#page-14-5">[2]</a>. Each round can be described as <a href="#page-14-10">[3]</a>:</p>
+
+    <p class="text-gray-300"><span class="math">$S_{2r-2}[j] \\cdot B\\left(\\sum_{k=1}^{24} M^{-1}[j,k] \\left(S_{2r-1}[k] - C_{r,1}\\right)\\right) - 1 = 0</span>$</p>
+
+    <p class="text-gray-300"><span class="math">$\\left(S_{2r-1}[j]\\right)^4 \\cdot B\\left(S_{2r-1}[j]^{-1}\\right) - \\left(S_{2r-1}[j]\\right)^4 \\left(\\sum_{k=1}^{24} M^{-1}[j,k] \\left(S_{2r}[k] - C_{r,2}\\right)\\right) - 1 = 0,</span>$</p>
+
+    <p class="text-gray-300">where 1 &le; <em>j</em> &le; 24. In total, the polynomial system describing Vision Mark-32 has 384 polynomials in 384 variables, and solving degree of the polynomial system is estimated to be 1513 <a href="#page-14-10">[3]</a>. Assuming that Gr&ouml;bner basis can be computed for free, the degree of the ideal of Vision for state size <em>m</em> and number of variables <em>n</em> with rate <em>r</em> and capacity <em>c</em>, can be computed as:</p>
+
+    <p class="text-gray-300"><span class="math">$\\prod_{i=1}^{2mn} d_i = 5^r c^4 + 4^r 5^c + 5^{2m(n-1)}.</span>$</p>
+
+    <p class="text-gray-300">Therefore, we re-evaluate the complexity of Gr&ouml;bner basis attack against Vision Mark-32 by analyzing the number of the solutions to the system in <a href="#page-9-1">Table 1.</a> In any case, the complexity of the attack is more than an exhaustive search of the input space.</p>
+
+    <p class="text-gray-300">In <a href="#page-17-10">[39]</a>, a new approach to analyze the security of the instances of Vision is described. The modeling proposed in <a href="#page-17-10">[39]</a> represents Vision as an over-determined system of polynomials. The premise is that having more equations enhances the performance of solving the system. Specifically, the model comprises 5<em>m</em> + 14<em>m</em>(<em>N</em> &minus;1) quadratic equations in 3<em>m</em> + 6<em>m</em>(<em>N</em> &minus;1) variables. For Vision Mark-32, this corresponds to a quadratic system of equations with 2472 equations in 1080 variables. Consequently, the degree of regularity of the system is the smallest non-positive coefficient of the Hilbert series:</p>
+
+    <p class="text-gray-300"><span class="math">$\\frac{\\left(1 - X^2\\right)^{2472}}{\\left(1 - X\\right)^{1080}},</span>$</p>
+
+    <p class="text-gray-300">which is 87, and therefore complexity of Gr&ouml;bner basis attack is lower bounded by:</p>
+
+    <p class="text-gray-300"><span class="math">$\\binom{87 + 1080}{87}^2 \\ge 442.</span>$</p>
+
+    <p class="text-gray-300">It is important to mention that this complexity is a lower bound for the complexity of the attack suggested in <a href="#page-17-10">[39]</a>, as the complexity is computed under the assumption that the resulting system is semi-regular. However, the system is not semi-regular, and the solving degree in reality would be higher.</p>
+
+    <p class="text-gray-300">We implement Vision Mark-32 in SystemVerilog targeting Alveo U55C High Performance Compute Card featuring Xilinx VU47P FPGA. We aim to use a Gen4 PCIe shell with 512-bit interface running at 250 MHz.</p>
+
+    <p class="text-gray-300">Tower field arithmetic is known for it's efficiency in hardware. <a href="#page-12-0">Table 2</a> shows the resource cost of basic arithmetic blocks for the 32-bit binary tower. For comparison, we present the resource cost of a single-cycle 32-bit unsigned integer multiplier. Multiplication and squaring circuits require a single clock cycle, while the inversion is fully pipelined and requires 3 cycles.</p>
+
+    <p class="text-gray-300"><strong>Table 2:</strong> Arithmetic circuit complexity implemented at 250 MHz for: multiply (MUL), square (SQR) and invert (INV) operations.</p>
+
+    <div class="overflow-x-auto my-4">
+      <table class="min-w-full text-sm text-gray-300">
+        <thead>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">Circuit</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">LUT</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">FF</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">CARRY8</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">Max Freq. [MHz]</th>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">32-bit tower MUL</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">521</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">378</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">32-bit tower SQR</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">43</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">791</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">32-bit tower INV</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">821</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">111</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">280</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">32-bit integer MUL</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">1107</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">96</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">192</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p class="text-gray-300">We acknowledge that 32-bit integer multiplication can be implemented using 2&ndash;3 DSP48E2 units. However, as these are hard IP blocks, i.e. ASIC components within the FPGA, a more representative comparison in terms of silicon efficiency can be made this way. We allow the use of fast CARRY8 chains for carry propagation&mdash;the critical path of the integer arithmetic circuits. The single-cycle 32-bit tower multiplier is over 4 times more efficient in terms of LUT-delay product compared to its unsigned integer counterpart. Squaring is nearly free in this tower field, whereas integer squaring is approximately the same as multiplication. Tower field inversion is only 1<em>.</em>58 times more expensive than multiplication.</p>
+
+    <p class="text-gray-300">Lastly, integer multiplier does not include modular reduction, whereas all tower operations do so by design.</p>
+
+    <p class="text-gray-300">Single round of Vision Mark-32 permutation consists of 48 round constant additions, 48 tower-field inversions, 48 affine linearized polynomial evaluations and 2 MDS matrix multiplications. We implement a fully pipelined permutation round with 28 stages.</p>
+
+    <p class="text-gray-300"><a href="#page-12-1">Table 3</a> shows total resource utilization of a single Vision Mark-32 permutation round broken down into components.</p>
+
+    <p class="text-gray-300"><strong>Table 3:</strong> Vision Mark-32 permutation round circuit complexity, implemented at 250 MHz.</p>
+
+    <div class="overflow-x-auto my-4">
+      <table class="min-w-full text-sm text-gray-300">
+        <thead>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">Component</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">LUT</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">FF</th>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Inversion</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">40.2 k</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">6.8 k</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Evaluate B</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0.3 k</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0.8 k</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Evaluate B&minus;1</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0.3 k</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0.8 k</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">MDS matrix multiplication</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">9.2 k</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">4.6 k</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Total</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">50.0 k</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">13.0 k</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p class="text-gray-300">Sponge absorb and squeeze do not use any additional resources other than wiring.</p>
+
+    <p class="text-gray-300">Due to the large volume of data that needs to be processed in the context of ZKP throughput is the most pressing bottleneck. Therefore, fully pipelined implementations are favorable. We compare 3 fully-pipelined implementations, each capable of performing 400 M hashes per second. This limitation is dictated by the Gen4 PCIe link, capable of providing 512-bits at 250 MHz.</p>
+
+    <p class="text-gray-300">Table 4 compares fully-pipelined implementation of Vision Mark-32 with Gr&oslash;stl-256 [26] and Poseidon [31]. The former is a SHA3 competition finalist, designed with traditional symmetric cryptography practices. The latter is an arithmetization-friendly hash function.</p>
+
+    <p class="text-gray-300"><strong>Table 4:</strong> Performance comparison, implemented at 250 MHz. In the comparison, LUT numbers are reported by Xilinx Vivado 2022.2, the tool we use to synthesize the designs. Comparison is made in the zero-knowledge setting where the high throughput is the primary goal (due to the large amounts of data to process). The shell we use operates on 512-bit @ 250 MHz (128Gbps), and in this setting, we can always use multiple layers of LUTs per layer of FFs, therefore LUTs are the bottleneck.</p>
+
+    <div class="overflow-x-auto my-4">
+      <table class="min-w-full text-sm text-gray-300">
+        <thead>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left"><span class="math">\\operatorname{Hash}</span></th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">LUT</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left"><span class="math">\\mathbf{FF}</span></th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">CARRY8</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">DSP</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">Latency</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">Throughput</th>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Gr&oslash;stl</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">132 k</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">62 k</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">82</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"><span class="math">64\\mathrm{Gbit/s}</span></td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Vision Mark-32</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"><span class="math">398\\mathrm{k}</span></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">104 k</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">112</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"><span class="math">128\\mathrm{Gbit/s}</span></td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Poseidon</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">868 k</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">909 k</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">79 k</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">5192</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">870</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"><span class="math">128\\mathrm{Gbit/s}</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p class="text-gray-300">LUTs are the bottleneck for both Gr&oslash;stl and Vision Mark-32. Since Poseidon uses DSPs it is difficult to make a direct comparison with LUT-only designs. Assuming the 32-bit unsigned multiplier from Table 2 corresponds to 2 DSPs used to implement 32-bit multipliers we can estimate the LUT cost of the fully-pipelined Poseidon hasher to 3.74 million LUTs. Table 5 provides a comparison in terms of hardware efficiency expressed as throughput per LUT, as well as qualitative metrics.</p>
+
+    <p class="text-gray-300">As a SHA3 finalist Gr&oslash;stl has undergone thorough scrutiny of the community and stood the test of time. Moreover, Gr&oslash;stl is based on AES, the most scrutinized algorithm of all. Marvelous design strategy is based on AES design strategy too. On the other hand, Poseidon is a more novel design.</p>
+
+    <p class="text-gray-300">Unlike Gr&oslash;stl, Poseidon was designed with efficient arithmetization in mind. However, 64-bit Goldilocks field on which Poseidon is based can be up to 64 times less efficient when dealing with 1-bit values.</p>
+
+    <p class="text-gray-300">Gr&oslash;stl-256 is a Merkle&ndash;Damg&aring;rd construction with a 512-bit compression function, and thus hashes an input of size 256 bits per compression. Both Vision Mark-32 and Poseidon are Sponge constructions with rates of 512 bits. Despite being arithmetization friendly, Vision Mark-32 is only 33% less efficient than Gr&oslash;stl in terms of throughput per LUT.</p>
+
+    <p class="text-gray-300"><strong>Table 5:</strong> Additional comparisons. Arithmetization-friendly in this context refers to the underlying finite field that the hash function operates on to be efficiently implemented for zero-knowledge applications. Poseidon is only defined over fields with prime characteristics and therefore is less arithmetization-friendly for our use case.</p>
+
+    <div class="overflow-x-auto my-4">
+      <table class="min-w-full text-sm text-gray-300">
+        <thead>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">Hash</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left"><span class="math">\\rm kbps/LUT</span></th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">Arithmetization-friendly</th>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Gr&oslash;stl</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">485</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Vision Mark-32</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">322</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"><span class="math">\\checkmark\\checkmark</span></td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Poseidon</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">34</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">&#10003;</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p class="text-gray-300">We introduced Vision Mark-32, a hash function for zero-knowledge applications, which is a sponge construction instantiated with a modified version of Vision with an optimized number of rounds and an efficient MDS matrix. We implement Vision Mark-32 in hardware, targeting a popular data center card. We delineated the efficient implementation of each step. Furthermore, we showed the advantages of tower arithmetic introduced in [24]. Efficient binary operations, especially often prohibitively expensive inversion, open new venues for design of cryptographic primitives. In this particular instance, we attain</p>
+
+    <p class="text-gray-300">hardware efficiency of a fast classical algorithm, while still allowing efficient arithmetization described in [21].</p>
+
+    <p class="text-gray-300">We would like to acknowledge our colleagues at Irreducible, Ben Diamond and Kabir Peshawaria, for their valuable input, optimizations to the MDS matrix, and assistance with Sage programming.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><p class="text-gray-300">[1] Martin R. Albrecht et al. &quot;Ciphers for MPC and FHE&quot;. In: Advances in Cryptology &ndash; EUROCRYPT 2015. Ed. by Elisabeth Oswald and Marc Fischlin. Berlin, Heidelberg: Springer Berlin Heidelberg, 2015, pp. 430&ndash;454. ISBN: 978-3-662-46800-5.</p></li>
+      <li><p class="text-gray-300">[2] Abdelrahaman Aly et al. &quot;Design of Symmetric-Key Primitives for Advanced Cryptographic Protocols&quot;. In: <em>IACR Trans. Symmetric Cryptol.</em> 2020.3 (2020), pp. 1&ndash;45. DOI: 10.13154/tosc.v2020.i3.1-45. URL: https://doi.org/10.13154/tosc.v2020.i3.1-45.</p></li>
+      <li><p class="text-gray-300">[3] Abdelrahaman Aly et al. &quot;Design of Symmetric-Key Primitives for Advanced Cryptographic Protocols&quot;. In: <em>IACR Trans. Symmetric Cryptol.</em> 2020.3 (2020), pp. 1&ndash;45. DOI: 10.13154/tosc.v2020.i3.1-45. URL: https://doi.org/10.13154/tosc.v2020.i3.1-45.</p></li>
+      <li><p class="text-gray-300">[4] Tomer Ashur, Thomas Buschman, and Mohammad Mahzoun. Algebraic cryptanalysis of POSEIDON. Tech. rep. Under submission. 2023.</p></li>
+      <li><p class="text-gray-300">[5] Tomer Ashur, Al Kindi, and Mohammad Mahzoun. &quot;XHash8 and XHash12: Efficient STARK-friendly Hash Functions&quot;. In: <em>IACR Cryptol. ePrint Arch.</em> (2023), p. 1045. URL: https://eprint.iacr.org/2023/1045.</p></li>
+      <li><p class="text-gray-300">[6] Tomer Ashur, Mohammad Mahzoun, and Dilara Toprakhisar. &quot;Chaghri - A FHE-friendly Block Cipher&quot;. In: Proceedings of the 2022 ACM SIGSAC Conference on Computer and Communications Security, CCS 2022, Los Angeles, CA, USA, November 7-11, 2022. Ed. by Heng Yin et al. ACM, 2022, pp. 139&ndash;150. DOI: 10.1145/3548606.3559364. URL: https://doi.org/10.1145/3548606.3559364.</p></li>
+      <li><p class="text-gray-300">[7] Tomer Ashur et al. Rescue-Prime Optimized. Cryptology ePrint Archive, Paper 2022/1577. https://eprint.iacr.org/2022/1577. 2022. URL: https://eprint.iacr.org/2022/1577.</p></li>
+      <li><p class="text-gray-300">[8] Augustin Bariant et al. &quot;Algebraic Attacks against Some Arithmetization-Oriented Primitives&quot;. In: IACR Transactions on Symmetric Cryptology 2022.3 (2022), 73-101. DOI: 10.46586/tosc.v2022.i3.73-101. URL: https://tosc.iacr.org/index.php/ToSC/article/view/9850.</p></li>
+      <li><p class="text-gray-300">[9] Augustin Bariant et al. The Algebraic Freelunch Efficient Gr&ouml;bner Basis Attacks Against Arithmetization-Oriented Primitives. Cryptology ePrint Archive, Paper 2024/347. https://eprint.iacr.org/2024/347. 2024. URL: https://eprint.iacr.org/2024/347.</p></li>
+      <li><p class="text-gray-300">[10] Guido Bertoni et al. &quot;On the Indifferentiability of the Sponge Construction&quot;. In:  <span class="math">Advances\\ in\\ Cryptology-EUROCRYPT\\ 2008.\\ Ed.\\ by\\ Nigel\\ Smart.\\ Berlin,\\ Heidelberg:\\ Springer\\ Berlin\\ Heidelberg,\\ 2008,\\ pp.\\ 181&ndash;197.\\ ISBN:\\ 978-3-540-78967-3.</span></p></li>
+      <li><p class="text-gray-300">[11] Guido Bertoni et al. <em>The Keccak Reference</em>. Keccak Team, 2011. URL: https://keccak.team/files/Keccak-reference-3.0.pdf.</p></li>
+      <li><p class="text-gray-300">[12] Tim Beyne et al. &quot;Out of Oddity &ndash; New Cryptanalytic Techniques Against Symmetric Primitives Optimized for Integrity Proof Systems&quot;. In: <em>Advances in Cryptology &ndash; CRYPTO 2020</em>. Ed. by Daniele Micciancio and Thomas Ristenpart. Cham: Springer International Publishing, 2020, pp. 299&ndash;328. ISBN: 978-3-030-56877-1.</p></li>
+      <li><p class="text-gray-300">[13] Ian F. Blake et al. <em>Applications of Finite Fields</em>. Ed. by Alfred J. Menezes. The Springer International Series in Engineering and Computer Science. Springer Science+Business Media, 1993.</p></li>
+      <li><p class="text-gray-300">[14] Cl&eacute;mence Bouvier et al. &quot;New Design Techniques for Efficient Arithmetization-Oriented Hash Functions: Anemoi Permutations and Jive Compression Mode&quot;. In: Advances in Cryptology - CRYPTO 2023: 43rd Annual International Cryptology Conference, CRYPTO 2023, Santa Barbara, CA, USA, August 20-24, 2023, Proceedings, Part III. Santa Barbara, CA, USA: Springer-Verlag, 2023, 507-539. ISBN: 978-3-031-38547-6. DOI: 10.1007/978-3-031-38548-3_17. URL: https://doi.org/10.1007/978-3-031-38548-3_17.</p></li>
+      <li><p class="text-gray-300">[15] Cl&eacute;mence Bouvier et al. New Design Techniques for Efficient Arithmetization-Oriented Hash Functions: Anemoi Permutations and Jive Compression Mode. Cryptology ePrint Archive, Paper 2022/840. https://eprint.iacr.org/2022/840. 2022. URL: https://eprint.iacr.org/2022/840.</p></li>
+      <li><p class="text-gray-300">[16] Anne Canteaut et al. &quot;Stream Ciphers: A Practical Solution for Efficient Homomorphic-Ciphertext Compression&quot;. In: <em>Journal of Cryptology</em> 31.3 (2018), pp. 885&ndash;916. ISSN: 1432-1378. DOI: 10.1007/s00145-017-9273-9. URL: https://doi.org/10.1007/s00145-017-9273-9.</p></li>
+      <li><p class="text-gray-300">[17] Carlos Cid, John Petter Indr&oslash;y, and H&aring;vard Raddum. &quot;FASTA &ndash; A Stream Cipher for Fast FHE Evaluation&quot;. In: Topics in Cryptology &ndash; CT-RSA 2022. Ed. by Steven D. Galbraith. Cham: Springer International Publishing, 2022, pp. 451&ndash;483. ISBN: 978-3-030-95312-6.</p></li>
+      <li><p class="text-gray-300">[18] Stephen D. Cohen. &quot;The explicit construction of irreducible polynomials over finite fields&quot;. In: <em>Designs, Codes and Cryptography</em> 2.2 (June 1992), pp. 169&ndash;174. ISSN: 1573-7586. DOI: 10.1007/BF00124895. URL: https://doi.org/10.1007/BF00124895.</p></li>
+      <li><p class="text-gray-300">[19] Orel Cosseron et al. &quot;Towards Case-Optimized Hybrid Homomorphic Encryption - Featuring the Elisabeth Stream Cipher&quot;. In: Advances in Cryptology - ASIACRYPT 2022 - 28th International Conference on the Theory and Application of Cryptology and Information Security, Taipei, Taiwan, December 5-9, 2022, Proceedings, Part III. Ed. by Shweta Agrawal and Dongdai Lin. Vol. 13793. Lecture Notes in Computer Science. Springer, 2022, pp. 32&ndash;67. DOI: 10.1007/978-3-031-22969-5\\_2. URL: https://doi.org/10.1007/978-3-031-22969-5\\_2.</p></li>
+      <li><p class="text-gray-300">[20] Joan Daemen and Vincent Rijmen. The design of Rijndael: AES &mdash; the Advanced Encryption Standard. Springer-Verlag, 2002, p. 238. ISBN: 3-540-42580-2.</p></li>
+      <li><p class="text-gray-300">[21] Benjamin E. Diamond and Jim Posen. Succinct Arguments over Towers of Binary Fields. Cryptology ePrint Archive, Paper 2023/1784. https://eprint.iacr.org/2023/1784. 2023. URL: https://eprint.iacr.org/2023/1784.</p></li>
+      <li><p class="text-gray-300">[22] Christoph Dobraunig et al. &quot;Pasta: A Case for Hybrid Homomorphic Encryption&quot;. In: IACR Trans. Cryptogr. Hardw. Embed. Syst. 2023.3 (2023), pp. 30-73. DOI: 10.46586/TCHES.V2023.I3.30-73. URL: https://doi.org/10.46586/tches.v2023.i3.30-73.</p></li>
+      <li><p class="text-gray-300">[23] Christoph Dobraunig et al. &quot;Rasta: A Cipher with Low ANDdepth and Few ANDs per Bit&quot;. In: <em>Advances in Cryptology &ndash; CRYPTO 2018</em>. Ed. by Hovav Shacham and Alexandra Boldyreva. Cham: Springer International Publishing, 2018, pp. 662&ndash;692. ISBN: 978-3-319-96884-1.</p></li>
+      <li><p class="text-gray-300">[24] J.L. Fan and C. Paar. &quot;On efficient inversion in tower fields of characteristic two&quot;. In: <em>Proceedings of IEEE International Symposium on Information Theory.</em> 1997, pp. 20&ndash;. DOI: 10.1109/ISIT.1997.612935.</p></li>
+      <li><p class="text-gray-300">[25] Jean-Charles Faug&egrave;re and Chenqi Mou. &quot;Sparse FGLM algorithms&quot;. In: Journal of Symbolic Computation 80 (2017), pp. 538-569. ISSN: 0747-7171. DOI: https://doi.org/10.1016/j.jsc.2016.07.025. URL: https://www.sciencedirect.com/science/article/pii/S0747717116300700.</p></li>
+      <li><p class="text-gray-300">[26] Praveen Gauravaram et al. &quot;Gr&oslash;stl - a SHA-3 candidate&quot;. In: Symmetric Cryptography, 11.01. - 16.01.2009. Ed. by Helena Handschuh et al. Vol. 09031. Dagstuhl Seminar Proceedings. Schloss Dagstuhl - Leibniz-Zentrum f&uuml;r Informatik, Germany, 2009. URL: http://drops.dagstuhl.de/opus/volltexte/2009/1955/.</p></li>
+      <li><p class="text-gray-300">[27] Lorenzo Grassi et al. Horst Meets Fluid-SPN: Griffin for Zero-Knowledge Applications. Cryptology ePrint Archive, Paper 2022/403. https://eprint.iacr.org/2022/403. 2022. URL: https://eprint.iacr.org/2022/403.</p></li>
+      <li><p class="text-gray-300">[28] Lorenzo Grassi et al. &quot;Horst Meets Fluid-SPN: Griffin for Zero-Knowledge Applications&quot;. In: Advances in Cryptology - CRYPTO 2023 - 43rd Annual International Cryptology Conference, CRYPTO 2023, Santa Barbara, CA, USA, August 20-24, 2023, Proceedings, Part III. Ed. by Helena Handschuh and Anna Lysyanskaya. Vol. 14083. Lecture Notes in Computer Science. Springer, 2023, pp. 573-606. DOI: 10.1007/978-3-031-38548-3\\_19. URL: https://doi.org/10.1007/978-3-031-38548-3\\_19.</p></li>
+      <li><p class="text-gray-300">[29] Lorenzo Grassi et al. Monolith: Circuit-Friendly Hash Functions with New Nonlinear Layers for Fast and Constant-Time Implementations. Cryptology ePrint Archive, Paper 2023/1025. https://eprint.iacr.org/2023/1025. 2023. URL: https://eprint.iacr.org/2023/1025.</p></li>
+      <li><p class="text-gray-300">[30] Lorenzo Grassi et al. &quot;Poseidon: A New Hash Function for Zero-Knowledge Proof Systems&quot;. In: 30th USENIX Security Symposium, USENIX Security 2021, August 11-13, 2021. Ed. by Michael Bailey and Rachel Greenstadt. USENIX Association, 2021, pp. 519-535. URL: https://www.usenix.org/conference/usenixsecurity21/presentation/grassi.</p></li>
+      <li><p class="text-gray-300">[31] Lorenzo Grassi et al. &quot;Poseidon: A New Hash Function for Zero-Knowledge Proof Systems&quot;. In: 30th USENIX Security Symposium (USENIX Security 21). USENIX Association, Aug. 2021, pp. 519-535. ISBN: 978-1-939133-24-3. URL: https://www.usenix.org/conference/usenixsecurity21/presentation/grassi.</p></li>
+      <li><p class="text-gray-300">[32] Lorenzo Grassi et al. &quot;Reinforced Concrete: A Fast Hash Function for Verifiable Computation&quot;. In: Proceedings of the 2022 ACM SIGSAC Conference on Computer and Communications Security. CCS '22. Los Angeles, CA, USA: Association for Computing Machinery, 2022, 1323&ndash;1335. ISBN: 9781450394505. DOI: 10.1145/3548606.3560686. URL: https://doi.org/10.1145/3548606.3560686.</p></li>
+      <li><p class="text-gray-300">[33] Jincheol Ha et al. &quot;Rubato: Noisy Ciphers for Approximate Homomorphic Encryption&quot;. In: <em>Advances in Cryptology &ndash; EUROCRYPT 2022</em>. Ed. by Orr Dunkelman and Stefan Dziembowski. Cham: Springer International Publishing, 2022, pp. 581&ndash;610. ISBN: 978-3-031-06944-4.</p></li>
+      <li><p class="text-gray-300">[34] Phil Hebborn and Gregor Leander. &quot;Dasta - Alternative Linear Layer for Rasta&quot;. In: IACR Trans. Symmetric Cryptol. 2020.3 (2020), pp. 46&ndash;86. DOI: 10.13154/tosc.v2020.i3.46-86. URL: https://doi.org/10.13154/tosc.v2020.i3.46-86.</p></li>
+      <li><p class="text-gray-300">[35] Ming-Deh A. Huang, Michiel Kosters, and Sze Ling Yeo. &quot;Last Fall Degree, HFE, and Weil Descent Attacks on ECDLP&quot;. In: <em>Advances in Cryptology &ndash; CRYPTO 2015</em>. Ed. by Rosario Gennaro and Matthew Robshaw. Berlin, Heidelberg: Springer Berlin Heidelberg, 2015, pp. 581&ndash;600. ISBN: 978-3-662-47989-6.</p></li>
+      <li><p class="text-gray-300">[36] Anatolii Karatsuba and Yu Ofman. &quot;Multiplication of Multidigit Numbers on Automata&quot;. In: <em>Soviet Physics Doklady</em> 7 (Dec. 1962), p. 595.</p></li>
+      <li><p class="text-gray-300">[37] Nathan Keller and Asaf Rosemarin. &quot;Mind the Middle Layer: The HADES Design Strategy Revisited&quot;. In: <em>Advances in Cryptology - EUROCRYPT 2021 - 40th Annual International Conference on the Theory and Applications of Cryptographic Techniques, Zagreb, Croatia, October 17-21, 2021, Proceedings, Part II</em>. Ed. by Anne Canteaut and Fran&ccedil;ois-Xavier Standaert. Vol. 12697. Lecture Notes in Computer Science. Springer, 2021, pp. 35&ndash;63. doi: <a href="https://doi.org/10.1007/978-3-030-77886-6_2" target="_blank" rel="noopener noreferrer">10.1007/978- 3- 030- 77886- 6\\_2</a>. url: <a href="https://doi.org/10.1007/978-3-030-77886-6_2" target="_blank" rel="noopener noreferrer">https:</a> <a href="https://doi.org/10.1007/978-3-030-77886-6_2" target="_blank" rel="noopener noreferrer">//doi.org/10.1007/978-3-030-77886-6\\_2</a>.</p></li>
+      <li><p class="text-gray-300">[38] Sian-Jheng Lin, Wei-Ho Chung, and Yunghsiang S. Han. &quot;Novel Polynomial Basis and Its Application to Reed-Solomon Erasure Codes&quot;. In: <em>2014 IEEE 55th Annual Symposium on Foundations of Computer Science</em>. 2014, pp. 316&ndash;325. doi: <a href="https://doi.org/10.1109/FOCS.2014.41" target="_blank" rel="noopener noreferrer">10.1109/</a> <a href="https://doi.org/10.1109/FOCS.2014.41" target="_blank" rel="noopener noreferrer">FOCS.2014.41</a>.</p></li>
+      <li><p class="text-gray-300">[39] Fukang Liu, Mohammad Mahzoun, and Willi Meier. <em>Modelling Ciphers with Overdefined Systems of Quadratic Equations: Application to Friday, Vision, RAIN and Biscuit</em>. Cryptology ePrint Archive, Paper 2024/786. <a href="https://eprint.iacr.org/2024/786" target="_blank" rel="noopener noreferrer">https://eprint.iacr.org/</a> <a href="https://eprint.iacr.org/2024/786" target="_blank" rel="noopener noreferrer">2024/786</a>. 2024. url: <a href="https://eprint.iacr.org/2024/786" target="_blank" rel="noopener noreferrer">https://eprint.iacr.org/2024/786</a>.</p></li>
+      <li><p class="text-gray-300">[40] Pierrick M&eacute;aux et al. &quot;Improved Filter Permutators for Efficient FHE: Better Instances and Implementations&quot;. In: <em>Progress in Cryptology &ndash; INDOCRYPT 2019</em>. Ed. by Feng Hao, Sushmita Ruj, and Sourav Sen Gupta. Cham: Springer International Publishing, 2019, pp. 68&ndash;91. isbn: 978-3-030-35423-7.</p></li>
+      <li><p class="text-gray-300">[41] Pierrick M&eacute;aux et al. &quot;Towards Stream Ciphers for Efficient FHE with Low-Noise Ciphertexts&quot;. In: <em>Advances in Cryptology &ndash; EUROCRYPT 2016</em>. Ed. by Marc Fischlin and Jean-S&eacute;bastien Coron. Berlin, Heidelberg: Springer Berlin Heidelberg, 2016, pp. 311&ndash;343. isbn: 978-3-662-49890-3.</p></li>
+      <li><p class="text-gray-300">[42] Matthias Johann Steiner. <em>A Zero-Dimensional Gr&ouml;bner Basis for Poseidon</em>. Cryptology ePrint Archive, Paper 2024/310. <a href="https://eprint.iacr.org/2024/310" target="_blank" rel="noopener noreferrer">https://eprint.iacr.org/2024/310</a>. 2024. url: <a href="https://eprint.iacr.org/2024/310" target="_blank" rel="noopener noreferrer">https://eprint.iacr.org/2024/310</a>.</p></li>
+      <li><p class="text-gray-300">[43] Matthias Johann Steiner. <em>Zero-Dimensional Gr&ouml;bner Bases for Rescue-XLIX</em>. Cryptology ePrint Archive, Paper 2024/468. <a href="https://eprint.iacr.org/2024/468" target="_blank" rel="noopener noreferrer">https://eprint.iacr.org/2024/468</a>. 2024. url: <a href="https://eprint.iacr.org/2024/468" target="_blank" rel="noopener noreferrer">https://eprint.iacr.org/2024/468</a>.</p></li>
+      <li><p class="text-gray-300">[44] Alan Szepieniec, Tomer Ashur, and Siemen Dhooghe. &quot;Rescue-Prime: a Standard Specification (SoK)&quot;. In: <em>IACR Cryptol. ePrint Arch.</em> (2020), p. 1143. url: <a href="https://eprint.iacr.org/2020/1143" target="_blank" rel="noopener noreferrer">https:</a> <a href="https://eprint.iacr.org/2020/1143" target="_blank" rel="noopener noreferrer">//eprint.iacr.org/2020/1143</a>.</p></li>
+      <li><p class="text-gray-300">[45] Alan Szepieniec et al. <em>The Tip5 Hash Function for Recursive STARKs</em>. Cryptology ePrint Archive, Paper 2023/107. <a href="https://eprint.iacr.org/2023/107" target="_blank" rel="noopener noreferrer">https://eprint.iacr.org/2023/107</a>. 2023. url: <a href="https://eprint.iacr.org/2023/107" target="_blank" rel="noopener noreferrer">https://eprint.iacr.org/2023/107</a>.</p></li>
+      <li><p class="text-gray-300">[46] Doug Wiedemann. &quot;An Iterated Quadratic Extension of GF (2)&quot;. In: <em>The Fibonacci Quarterly</em> 26.4 (1988), pp. 290&ndash;295.</p></li>
+    </ul>
+
+`;
+---
+
+<BaseLayout title="Vision Mark-32: ZK-Friendly Hash Function Over Binary Tower ... (2024/633)">
+  <article class="max-w-4xl mx-auto article-prose">
+    <nav class="mb-8">
+      <a href="/papers" class="text-blue-400 hover:text-blue-300">
+        &larr; Back to Papers
+      </a>
+    </nav>
+
+    <header class="mb-12">
+      <h1 class="text-3xl font-bold mb-4"
+        set:html={TITLE_HTML} />
+      <p class="text-gray-400 mb-2"
+        set:html={AUTHORS_HTML} />
+      <p class="text-gray-500 text-sm mb-4">
+        2024 &middot; eprint 2024/633
+      </p>
+      <div class="flex gap-4 text-sm">
+        <a
+          href={EPRINT_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          class="text-blue-400 hover:text-blue-300"
+        >
+          Paper (eprint) &rarr;
+        </a>
+      </div>
+      <PaperDisclaimer eprintUrl={EPRINT_URL} />
+      <p class="mt-1 text-xs text-gray-600">
+        Converted with: {CRAWLER} &middot; {CONVERTED_DATE}
+      </p>
+    </header>
+
+    <nav id="toc" class="mb-10 p-6 rounded-lg" style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06);">
+      <h2 class="text-lg font-bold mb-4">Table of Contents</h2>
+      <ol class="space-y-1 text-sm text-gray-300
+        list-decimal list-inside">
+        <li><a href="#sec-1" class="hover:text-white">Introduction</a></li>
+        <li>
+          <a href="#sec-2" class="hover:text-white">Preliminaries</a>
+          <ol class="ml-6 mt-1 space-y-1 list-decimal
+            list-inside text-gray-400">
+            <li><a href="#sec-2.1" class="hover:text-white">Vision</a></li>
+            <li><a href="#sec-2.2" class="hover:text-white">Weil Descent</a></li>
+            <li><a href="#sec-2.3" class="hover:text-white">Fake Weil Descent</a></li>
+            <li><a href="#sec-2.4" class="hover:text-white">Binary Towers</a></li>
+          </ol>
+        </li>
+        <li>
+          <a href="#sec-3" class="hover:text-white">Vision Mark-32</a>
+          <ol class="ml-6 mt-1 space-y-1 list-decimal
+            list-inside text-gray-400">
+            <li><a href="#sec-3.1" class="hover:text-white">Inverse Function</a></li>
+            <li><a href="#sec-3.2" class="hover:text-white">Linearized Affine Layer</a></li>
+            <li><a href="#sec-3.4" class="hover:text-white">Sponge Construction</a></li>
+          </ol>
+        </li>
+        <li>
+          <a href="#sec-4" class="hover:text-white">Security of Vision Mark-32</a>
+          <ol class="ml-6 mt-1 space-y-1 list-decimal
+            list-inside text-gray-400">
+            <li><a href="#sec-4.1" class="hover:text-white">Differential Crytpanalysis</a></li>
+            <li><a href="#sec-4.2" class="hover:text-white">Linear Cryptanalysis</a></li>
+            <li><a href="#sec-4.3" class="hover:text-white">Interpolation Attacks</a></li>
+            <li><a href="#sec-4.4" class="hover:text-white">Gr&ouml;bner Basis Attacks</a></li>
+            <li><a href="#sec-4.4.1" class="hover:text-white">Determined System</a></li>
+            <li><a href="#sec-4.4.2" class="hover:text-white">Overdetermined System</a></li>
+          </ol>
+        </li>
+        <li>
+          <a href="#sec-5" class="hover:text-white">Implementation</a>
+          <ol class="ml-6 mt-1 space-y-1 list-decimal
+            list-inside text-gray-400">
+            <li><a href="#sec-5.1" class="hover:text-white">Tower field arithmetic</a></li>
+            <li><a href="#sec-5.2" class="hover:text-white">Vision Mark-32 permutation</a></li>
+            <li><a href="#sec-5.3" class="hover:text-white">Performance comparison</a></li>
+          </ol>
+        </li>
+        <li><a href="#sec-6" class="hover:text-white">Conclusion</a></li>
+      </ol>
+      <p class="text-xs text-gray-500 mt-4 mb-1 font-semibold">
+        Additional
+      </p>
+      <ul class="space-y-1 text-sm text-gray-400
+        list-disc list-inside">
+        <li><a href="#acknowledgements" class="hover:text-white">Acknowledgements</a></li>
+        <li><a href="#references" class="hover:text-white">References</a></li>
+      </ul>
+    </nav>
+
+
+    <Fragment set:html={CONTENT} />
+
+    <PaperHistory slug="vision-mark-32-zk-friendly-hash-function-over-binary-tower-2024" />
+  </article>
+</BaseLayout>

@@ -1,0 +1,567 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import PaperDisclaimer from '../../components/PaperDisclaimer.astro';
+import PaperHistory from '../../components/PaperHistory.astro';
+
+const EPRINT_URL = 'https://eprint.iacr.org/2019/601';
+const CRAWLER = 'marker';
+const CONVERTED_DATE = '2026-02-16';
+const TITLE_HTML = 'AuroraLight: Improved prover efficiency and SRS size in a Sonic-like system';
+const AUTHORS_HTML = 'Ariel Gabizon';
+
+const CONTENT = `    <section id="abstract" class="mb-10">
+      <h2 class="text-2xl font-bold">Abstract</h2>
+      <p class="text-gray-300">Using ideas from the recent Aurora zk-STARK of Ben-Sasson et al. [BCRSVW, Eurocrypt 2019], we present a zk-SNARK with a universal and updatable SRS similar to the recent construction of Maller et al. [MBKM, 2019], called $\\mathsf{Sonic}$.
+Compared to $\\mathsf{Sonic}$, our construction achieves significantly better prover run time (less than half) and smaller SRS size (one sixth). However, we only achieve amortized succinct verification time for batches of proofs, either when the proofs are generated in parallel or in [MBKM]&#x27;s helper setting, and our proofs are longer than those of [MBKM] (but still contain a $\\mathit{constant}$ number of field and group elements).</p>
+      <p class="text-gray-300"><strong>Keywords:</strong> zk-SNARKs &middot; updatable SRS &middot; universal SRS &middot; polynomial commitment schemes</p>
+    </section>
+
+    <p class="text-gray-300">Due to real-world deployments of zk-SNARKs, e.g. Zcash; it has become of significant interest to have the structured reference string (SRS) be constructible in a &quot;universal and updatable&quot; fashion. Meaning that the same parameters (a different term for the SRS) can be used for statements about all circuits/computations of a certain bounded size; and that at any point in time the parameters can be updated by a new party, such that the honesty of only one party from all updaters up to that point is required for soundness. A natural direction to achieve this, is by having an &quot;SRS of monomials&quot; meaning that the SRS consists solely of elements g x i for a secret uniform x. Roughly speaking, such elements are easy to update as the new party can just raise them to power s i for their secretly chosen s.</p>
+
+    <p class="text-gray-300">Maller et al. [MBKM19] noticed that the polynomial commitment scheme of Kate, Zaverucha and Goldberg [KZG10] is very helpful in this context, as such an SRS of monomials is sufficient in [KZG10] to verifiably evaluate values of low-degree polynomials committed to by the prover this being perhaps the main problem to be dealt with (without the luxury of an SRS) in PCP constructions using techniques such as low-degree testing (starting from [BFL91]) and PCP's of proximity [BS08] (and in more modern works also IOP's of proximity [BCG+17]).</p>
+
+    <p class="text-gray-300">The Sonic approach [MBKM19]'s Sonic uses a variant of the arithmetization of Bootle et al. [BCC+16] to create a situation where a certain polynomial of the prover can have a zero constant coefficient only when the prover has a satisfying assignment. Roughly, this is achieved by using Laurent polynomials with both negative and positive powers, such that their product cancels out in the constant term only when a satisfying assignment was used to construct them. A lot of the ingenuity of [MBKM19] is that though the polynomials from [BCC+16] are bi-variate and [KZG10] is only efficient for univariate polynomials (in the sense of linear time proving in the degree) they are able to maneuver in a way that only requires to commit and evaluate univariate restrictions of the original bi-variates. However, using negative powers for the cancellation trick comes at a price of having the polynomials ultimately plugged in to the [KZG10] scheme have a larger range of powers - roughly a 7n size range from &minus;4n to 3n (where n is the number of multiplication gates in our circuit). Furthermore, [MBKM19] need to put a &quot;hole&quot; in this range to disallow the constant coefficient, which doubles the SRS size.</p>
+
+    <p class="text-gray-300">The main point is that the number of prover exponentiations and SRS size is directly tied to the size of this range when using [KZG10].</p>
+
+    <p class="text-gray-300">The Aurora approach Instead, we use a nice algebraic trick from the Aurora IOP[BCR+19]. [BCR+19] uses a lemma (Lemma 4.1) connecting between the value of a polynomial's constant coefficient, and its sum on a multiplicative subgroup. Together with a randomized sum check arithmetization in the style of [BCG+17, BCR+19], this allows us to create a &quot;constant coefficient=0 iff prover has witness&quot; situation without using negative powers. This enables only dealing with (regular not Laurent) polynomials of degree at most 2n; i.e. we have reduced the &quot;monomial range&quot; of Sonic from 7n to 2n, and do not need to deal with a &quot;hole&quot; in this range disallowing a constant coefficient. Moreover, all but one of the prover polynomials will have degree at most n, which further helps reduce prover run time. On the other hand, we have five polynomials to deal with rather than two as in [MBKM19], which is why our proofs are longer than Sonic's.</p>
+
+    <p class="text-gray-300">Before comparing performance with [MBKM19] in more detail, we discuss the three settings in which both our construction and Sonic can be used.</p>
+
+      <h3 id="sec-1.1" class="text-xl font-semibold mt-8">1.1 The three modes of Sonic</h3>
+
+    <p class="text-gray-300">The basic version of the Sonic verifier, as well as ours, is succinct (i.e. polylog(&lambda;) running time) except for the need to evaluate a polynomial s(X, Y ) of O(n) monomials. The evaluation of s in Sonic is done once per proof, at a point (z, y) chosen by the verifier during the protocol. There are three ways to deal with this evaluation.</p>
+
+    <p class="text-gray-300">Parallel proof generation for a batch: The crucial point is that the values z, y are only revealed to the prover at certain points in the protocol; but beyond this, there is no dependence between the values z, y and the specific statement proven - they just need to be uniform. It follows that if proofs are generated in parallel, e.g. in practice by posting the first part of all proofs on a blockchain and getting the random challenge z afterwords and continuing similarly for y - then the verifier can use the same (z, y) for a whole batch of proofs and do the non-succinct s evaluation only once per batch.<sup>1</sup> Our construction also has the property that the non-succinct verifier computations can be done only once per batch.</p>
+
+    <p class="text-gray-300">Arbitrary batching using an untrusted helper: [MBKM19] develop a method where a batch of evaluations {s(z<sup>j</sup> , y<sup>j</sup> )}j&isin;[m] can be performed by an untrusted helper and a proof can be given to the verifier that the evaluations are all correct. Verification of this proof only requires one evaluation of s. Hence, using this &quot;helper mode&quot; we can verify an arbitrary batch of proofs generated without any synchronization, with a non-succinct operation done only once per batch. This mode incurs the</p>
+
+    <p class="text-gray-300"><sup>1</sup> [MBKM19] do not explicitly discuss this mode, but we think it may be the most practical both for their construction and ours.</p>
+
+    <p class="text-gray-300">cost of needing such a helper, and adding the evaluation s(z<sup>j</sup> , y<sup>j</sup> ) and proof of correct evaluation, which increase the proof size. Our scheme can also leverage the Sonic helper, however with larger cost to proof size as we have six polynomials per proof that need to be evaluated by the verifier instead of one. See details in Section 5.</p>
+
+    <p class="text-gray-300">Fully succinct mode: [MBKM19] in fact manage to design a proof system that allows a fully succinct (i.e. not just in the amortized sense) verifier to verify that the evaluation s(z, y) is correct. However, their fully succinct mode requires significant increase of the constants in proof size, proving and verification time and may be less practical. Our construction does not currently support this mode, but it seems possible an extension to this mode can be done. We pose this as an open question with more details in Section 7.</p>
+
+      <h3 id="sec-1.2" class="text-xl font-semibold mt-8">1.2 Our results compared to [MBKM19]</h3>
+
+    <p class="text-gray-300">We compare the performance of Sonic to our system when generating proofs for arithmetic circuits with n multiplication gates, or analogously, an R1CS system with n constraints. Motivated by the discussion in Section 1.1 about settings of batched proofs - we omit from the tables the once per batch computations of the verifier. These are similar in Sonic and our system and are linear in the circuit size.</p>
+
+    <p class="text-gray-300">The first two columns in Table 1 describe SRS size when only knowing a bound d on the circuit size/number of R1CS constraints; and then the reduced size possible to work with when knowing the exact size n of the circuit.</p>
+
+    <p class="text-gray-300">When describing proof sizes, we separate between the elements from the prover in the parallel generation setting, and the additional elements from the helper in the helped setting.</p>
+
+    <p class="text-gray-300">We omit O(1) factors. For example, in the fixed circuit size SRS size, we omit the constant number of G<sup>2</sup> elements needed in the SRS both in Sonic and our system. We also mention that adding zero-knoweldge increases by a small constant the number of prover exponentiations both in our system, and it seems, in Sonic.</p>
+
+    <p class="text-gray-300">In a nutshell, our construction has better prover run time and SRS size; while Sonic has smaller proofs, less auxiliary data and extra verifier work in helper mode, and a fully succinct verifier mode. Thus, the advantage of this work is most prominent in the parallel proof generation setting.</p>
+
+    <div class="overflow-x-auto my-4">
+      <table class="min-w-full text-sm text-gray-300">
+        <thead>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left"></th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">size<br>&le;<br>d<br>SRS</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">size<br>=<br>n<br>SRS</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">prover<br>work</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">proof<br>length</th>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Sonic</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">G1, 12d<br>G2<br>12d</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">G1<br>12n</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">G1<br>18n<br>exp</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">G1, 2<br>F<br>4</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">This work</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">G1, 2d<br>G2<br>2d</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">G1<br>2n</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">G1<br>8n<br>exp</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">G1, 4<br>F<br>6</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p class="text-gray-300">Table 1: Prover comparison</p>
+
+      <h3 id="sec-1.3" class="text-xl font-semibold mt-8">1.3 Organization of paper</h3>
+
+    <p class="text-gray-300">Section 2 contains terminology we will use. Section 3 contains an adaptation of the [KZG10] scheme similar to that of [MBKM19] that we will use. Section 4 contains our main construction assuming a polynomial commitment scheme as a black box. Section 5 shows how to adapt the Sonic helper</p>
+
+    <div class="overflow-x-auto my-4">
+      <table class="min-w-full text-sm text-gray-300">
+        <thead>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left"></th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">verifier<br>work</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">elem. from<br>helper</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">extra verifier<br>work in<br>helper mode</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">fully succinct<br>ver. mode?</th>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Sonic</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">5P</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">G1, 2<br>F<br>3</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">4P</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Yes</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">This work</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">5P</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">G1, 10<br>F<br>8</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">12P</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">No</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p class="text-gray-300">Table 2: Verifier comparison per proof in batch, P=pairing</p>
+
+    <p class="text-gray-300">mode to our construction. Section 6 shows how to add zero-knoweldge to our construction. Section 7 discusses a possible extension to get a fully succinct verifier.</p>
+
+    <section id="sec-2" class="mb-10">
+      <h2 class="text-2xl font-bold">2 Terminology/conventions</h2>
+
+    <p class="text-gray-300">We assume our field F is of prime order. We denote by F&lt;d[X] the set of univariate polynomials over F of degree smaller than d. We assume all algorithms described receive as an implicit parameter the security parameter &lambda;.</p>
+
+    <p class="text-gray-300">Whenever we use the term &quot;efficient&quot;, we mean an algorithm running in time poly(&lambda;). Furthermore, we assume an &quot;object generator&quot; O that is run with input &lambda; before all protocols, and returns all fields and groups used. Specifically, in our protocol O(&lambda;) = (F, G1, G2, G<sup>t</sup> , e, g1, g2, gt) where</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>F is a prime field of super-polynomial size r = &lambda; &omega;(1) .</li>
+      <li>G1, G2, G<sup>t</sup> are all groups of size r, and e is an efficiently computable non-degenerate pairing e : G<sup>1</sup> &times; G<sup>2</sup> &rarr; G<sup>t</sup> .</li>
+      <li>g1, g<sup>2</sup> are uniformly chosen generators such that e(g1, g2) = g<sup>t</sup> .</li>
+    </ul>
+
+    <p class="text-gray-300">We usually let the &lambda; parameter be implicit, i.e. write F instead of F(&lambda;). We write G<sup>1</sup> and G<sup>2</sup> additively. We use the notations [x] 1 := x &middot; g<sup>1</sup> and [x] 2 := x &middot; g2.</p>
+
+    <p class="text-gray-300">Random oracles We describe public-coin interactive protocols between a prover and verifier; when deriving results for non-interactive protocols, we implicitly assume we can get a proof length equal to the total communcation of the prover, using the Fiat-Shamir transform/a random oracle. Using this reduction between interactive and non-interactive protocols, we can refer to the &quot;proof length&quot; of an interactive protocol.</p>
+
+    <p class="text-gray-300">We recall the [KZG10] scheme with two enhancements of [MBKM19] that will be important for us: The first is enabling a commitment to all degrees up to a certain size, rather than just the maximal degree. The second is &quot;batch openings&quot; of several polynomials at the same point z &isin; F. We define a polynomial commitment scheme with these enhancements in mind.</p>
+
+    <p class="text-gray-300">Definition 3.1. A d-polynomial commitment scheme consists of</p>
+
+    <p class="text-gray-300">&bull; Gen(d)- is a randomized algorithm that outputs an SRS &sigma;.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>com(f, max, &sigma;)- that given a polynomial f &isin; F&lt;max[X], where max &le; d, returns a commitment cm to f.</li>
+      <li>A public coin protocol open between parties Ppoly and Vpoly. Ppoly is given f1, . . . , f<sup>t</sup> &isin; F&lt;d[X]. Ppoly and Vpoly are both given integer t = poly(&lambda;), cm1, . . . , cm<sup>t</sup> - the alleged commitments to f1, . . . , ft, integers 0 &lt; d1, . . . , d<sup>t</sup> &le; d, z &isin; F and s1, . . . , s<sup>t</sup> &isin; F - the alleged correct openings f1(z), . . . , ft(z). At the end of the protocol Vpoly outputs acc or rej.</li>
+    </ul>
+
+    <p class="text-gray-300">such that</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Completeness: Fix integer t, z &isin; F, f1, . . . , f<sup>t</sup> &isin; F&lt;d[X] and 0 &lt; d1, . . . , d<sup>t</sup> &le; d such that deg(fi) &lt; di. Suppose that for each i &isin; [t], cm<sup>i</sup> = com(f<sup>i</sup> , d<sup>i</sup> , &sigma;). Then if open is run correctly with values t, z, {cm<sup>i</sup> , d<sup>i</sup> , fi(z)}i&isin;[t] , Vpoly outputs acc with probability one.</li>
+      <li>Knowledge soundness in the generic group model: There exists an efficient E such that for any efficient generic group model adversary A the probability of A winning the following game is negl(&lambda;) over the randomness of A and Gen.    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Given &sigma;, A outputs t, cm1, . . . , cmt.</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>E, given access to the state of A outputs f1, . . . , f<sup>t</sup> &isin; F&lt;d[X].</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>A outputs 0 &lt; d1, . . . , d<sup>t</sup> &le; d, s1, . . . , s<sup>t</sup> &isin; F, z &isin; F.</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>A takes the part of Ppoly in the protocol open with inputs cm1, . . . , cm<sup>t</sup> , d1, . . . , d<sup>t</sup> , s1, . . . , st.</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>A wins if</li>
+    </ol>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>V outputs acc at the end of the protocol.</li>
+      <li>For some i &isin; [t], s<sup>i</sup> 6= fi(z) or deg(fi) &ge; di.</li>
+    </ul></li>
+    </ul></li>
+    </ul>
+
+    <p class="text-gray-300">We describe the following scheme based on [KZG10, MBKM19]. It is in fact a slightly simpler scheme than in [MBKM19] because, as explained in the introduction, there is no need to deal with holes in the allowed range of degrees.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Gen(d) choose uniform <sup>x</sup> <sup>&isin;</sup> <sup>F</sup>. Output <sup>&sigma;</sup> = ([1]<sup>1</sup> , [x] 1 , . . . , x d&minus;1 1 , [x] 2 , [1]<sup>2</sup> , x &minus;1 2 , . . . , x <sup>&minus;</sup>(d&minus;1) 2 ).</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>com(f, d<sup>0</sup> , &sigma;) := h x d&minus;d 0 &middot; f(x) i 1 .</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>open({cmi} , {di} , {si} , z)</li>
+    </ol>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>(a) Vpoly sends random &gamma; &isin; F.</li>
+      <li>(b) Ppoly computes the polynomial</li>
+    </ul></li>
+    </ul>
+
+    <p class="text-gray-300"><span class="math">$h(X) := \\sum_{i=1}^{t} \\gamma^{i} \\cdot \\frac{f_{i}(X) - f_{i}(z)}{X - z}</span>$</p>
+
+    <p class="text-gray-300">and using &sigma; computes and sends W := [h(x)]<sup>1</sup> .</p>
+
+    <p class="text-gray-300">(c) Vpoly computes the elements</p>
+
+    <p class="text-gray-300"><span class="math">$F := \\prod_{i \\in [t]} e\\left(\\gamma^i \\cdot \\mathsf{cm}_i, \\left[x^{d_i - d}\\right]_2\\right), v := \\left[\\sum_{i \\in [t]} \\gamma^i \\cdot s_i\\right]</span>$</p>
+
+    <p class="text-gray-300">1</p>
+
+    <p class="text-gray-300">(d)  <span class="math">V_{\\text{poly}}</span>  computes outputs acc if and only if</p>
+
+    <p class="text-gray-300"><span class="math">$F = e(v - z \\cdot W, [1]_2) \\cdot e(W, [x]_2).</span>$</p>
+
+    <p class="text-gray-300">Note that  <span class="math">|\\sigma| = 2d</span>  in the above scheme. <em>However</em>, a crucial point is that once we fix  <span class="math">\\ell</span>  values from which we will always choose  <span class="math">\\{d_1, \\ldots, d_t\\}</span> , we can work with a subvector of  <span class="math">\\sigma</span>  of size  <span class="math">d + \\ell</span> . In our SNARK, given a circuit size, we will only need  <span class="math">\\ell = 3</span>  of the  <span class="math">\\mathbb{G}_2</span>  values from  <span class="math">\\sigma</span>  in our SRS.</p>
+
+    <p class="text-gray-300">The following is implied almost directly by Theorem 6.1 and Appendix C.1 of [MBKM19]. We leverage that the pairings in step 3c can be batched for indices i, j such that  <span class="math">d_i = d_j</span> .</p>
+
+    <p class="text-gray-300"><strong>Lemma 3.2.</strong> Fix any d and assume the d-power bi-linear Strong Diffie Hellman assumption holds. Then the above scheme is a d-polynomial commitment scheme such that</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><span class="math">P_{poly}</span>  requires  <span class="math">\\max \\mathbb{G}_1</span>  exponentiations for computing  <span class="math">com(f, \\max, \\sigma)</span> .</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><span class="math">P_{\\mathsf{poly}} \\ requires \\sum_{i=1}^{t} O(d_i \\log(d_i)) \\ field \\ operations \\ and \\sum_{i=1}^{t} d_i \\ exponentiations \\ for \\ computing \\ \\mathsf{open}(\\{cm_i\\}_{i \\in [t]}, \\{d_i\\}_{i \\in [t]}, \\{s_i\\}_{i \\in [t]}, z).</span></li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><span class="math">V_{poly}</span>  requires  <span class="math">t^* + 2</span>  pairings, where  <span class="math">t^*</span>  is the number of distinct values amongst  <span class="math">d_1, \\ldots, d_t</span> .</li>
+    </ol></li>
+    </ul>
+
+    </section>
+
+    <section id="sec-4" class="mb-10">
+      <h2 class="text-2xl font-bold">4 The main construction</h2>
+
+    <p class="text-gray-300">We begin by converting R1CS to a format that is convenient for us. We denote by n the number of private inputs and the number of constraints which we assume are equal (can be achieved by adding dummy variables or constraints if needed). We denote by  <span class="math">\\ell</span>  the number of public inputs; and define  <span class="math">N := n + \\ell</span> . We assume the first n variables correspond to the private inputs.</p>
+
+    <p class="text-gray-300">We assume we have a multiplicative subgroup  <span class="math">H \\subset \\mathbb{F}</span>  of size n. Somewhat confusingly, it will be convenient to identify the elements of H with the integers  <span class="math">\\{0, 1, \\dots, n-1\\}</span>  when using them as exponents.</p>
+
+    <p class="text-gray-300">Tweaking r1cs to our format Our original R1CS consists of the constraints:</p>
+
+    <p class="text-gray-300">For all  <span class="math">i \\in [n]</span></p>
+
+    <p class="text-gray-300"><span class="math">$(a_i \\cdot x)(b_i \\cdot x) - (c_i \\cdot x) = 0,</span>$</p>
+
+    <p class="text-gray-300">where  <span class="math">\\cdot</span>  denotes inner product of vectors of length N. We modify the system to &quot;flatten&quot; linear combinations to variables. That is, we add two vectors of variables  <span class="math">y, z \\in \\mathbb{F}^n</span>  and look at the following system with 3n constraints:</p>
+
+    <p class="text-gray-300">For all  <span class="math">i \\in [n]</span></p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><span class="math">1. \\ y_i \\cdot z_i (c_i \\cdot x) = 0.</span></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><span class="math">y_i (a_i \\cdot x) = 0</span> .</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><span class="math">z_i (b_i \\cdot x) = 0</span> .</li>
+    </ol></li>
+    </ul>
+
+    <p class="text-gray-300">Note that above  <span class="math">y_i, z_i \\in \\mathbb{F}</span>  but  <span class="math">a_i, b_i, c_i, x \\in \\mathbb{F}^N</span> . Similarly to the original system, we call  <span class="math">x_{n+1}, ..., x_N</span>  the public variables of this system, and all other variables private variables.</p>
+
+    <p class="text-gray-300"><strong>A lemma about sums on subgroups</strong> We use the following fact mentioned in Remark 5.6 in [BCR<sup>+</sup>19] that is crucial to the Aurora system, as well as ours:</p>
+
+    <p class="text-gray-300"><strong>Lemma 4.1.</strong> Fix any  <span class="math">f \\in \\mathbb{F}_{\\leq n}[X]</span> . Then for any multiplicative subgroup  <span class="math">H \\subset \\mathbb{F}</span>  with |H| = n,</p>
+
+    <p class="text-gray-300"><span class="math">$\\sum_{a \\in H} f(a) = 0</span>$</p>
+
+    <p class="text-gray-300">if and only if f has a zero constant term.</p>
+
+      <h3 id="sec-4.1" class="text-xl font-semibold mt-8">4.1 The main protocol</h3>
+
+    <p class="text-gray-300">When describing the protocol we assume we have a 2n-polynomial commitment scheme as defined in Section 3.</p>
+
+    <p class="text-gray-300">Step 1: prover committing to witness The prover <strong>P</strong> starts by computing three polynomials representing the satisfying assignment  <span class="math">(x, y, z) \\in \\mathbb{F}^{3n}</span>  of the private variables. Specifically, polynomials  <span class="math">W, Y, Z \\in \\mathbb{F}_{\\leq n}[X]</span> , such that for each  <span class="math">i \\in H</span> ,  <span class="math">W(i) = x_i</span> ,  <span class="math">Y(i) = y_i</span> , and  <span class="math">Z(i) = z_i</span> . <strong>P</strong> sends polynomial commitments to W, Y, Z, with parameter  <span class="math">\\max = n</span> , to the verifier <strong>V</strong>.</p>
+
+    <p class="text-gray-300">Step 2: verifier choosing a challenge; prover and verifier reducing to sumcheck V chooses random  <span class="math">r, r&#x27;, r&#x27;&#x27; \\in \\mathbb{F}</span>  which it sends to <strong>P</strong>. They both now independently reduce the satisfiability check to a sum check as follows: Look at the sum</p>
+
+    <p class="text-gray-300"><span class="math">$\\sum_{i \\in H} r^{i}(y_{i}z_{i} - c_{i} \\cdot x) + \\sum_{i \\in H} r&#x27;^{i}(y_{i} - a_{i} \\cdot x) + \\sum_{i \\in H} r&#x27;&#x27;^{i}(z_{i} - b_{i} \\cdot x).</span>$</p>
+
+    <p class="text-gray-300">Note that the sum is always zero for a satisfying assignment, and non-zero e.w.p  <span class="math">n/|\\mathbb{F}|</span>  over r, r', r'' for a non-satisfying one. Rearrange the sum as</p>
+
+    <p class="text-gray-300"><span class="math">$\\sum_{i \\in H} r^{i} y_{i} z_{i} + \\sum_{i \\in H} r&#x27;^{i} y_{i} + \\sum_{i \\in H} r&#x27;&#x27;^{i} z_{i} + \\sum_{i \\in H} \\alpha_{i} x_{i} + \\alpha_{0}</span>$</p>
+
+    <p class="text-gray-300">where  <span class="math">\\alpha_i</span>  is a coefficient containing some polynomial expression in r, r', r'',  <span class="math">\\{a_{i,j}, b_{i,j}, c_{i,j}\\}</span> ; and also the public inputs  <span class="math">x_{n+1}, ..., x_N</span>  in the case of  <span class="math">\\alpha_0</span> . Now compute  <span class="math">R, R&#x27;, R&#x27;&#x27;, Q \\in \\mathbb{F}_{&lt;n}[X]</span> , such that for  <span class="math">i \\in H, R(i) = r^i, R&#x27;(i) = r&#x27;^i, R&#x27;&#x27;(i) = r&#x27;&#x27;^i, Q(i) = \\alpha_i</span> . Define the polynomial  <span class="math">D \\in \\mathbb{F}_{&lt;n}[X]</span>  by</p>
+
+    <p class="text-gray-300"><span class="math">$D := R \\cdot Y \\cdot Z + R&#x27; \\cdot Y + R&#x27;&#x27; \\cdot Z + Q \\cdot W + \\alpha_0/n.</span>$</p>
+
+    <p class="text-gray-300">Our sum above becomes</p>
+
+    <p class="text-gray-300"><span class="math">$\\sum_{i \\in H} D(i).</span>$</p>
+
+    <p class="text-gray-300">We have thus reduced our problem to a polynomial sumcheck. To be able to use Lemma 4.1, as in  <span class="math">[BCR^+19]</span> , we use polynomial division.</p>
+
+    <p class="text-gray-300">Let
+<span class="math">$Z_H(X) := \\prod_{a \\in H} (X - a) = X^n - 1</span>$
+. <strong>P</strong> computes  <span class="math">g \\in \\mathbb{F}_{&lt;2n}[X]</span> ,  <span class="math">f \\in \\mathbb{F}_{&lt; n-1}[X]</span>  such that</p>
+
+    <p class="text-gray-300"><span class="math">$D(X) = g(X) \\cdot Z_H(X) + X \\cdot f(X).</span>$</p>
+
+    <p class="text-gray-300">Note that from polynomial division combined with Lemma 4.1 if the sum vanishes - such f, g indeed exist. <strong>P</strong> sends commitments of g with parameter  <span class="math">\\mathbf{max} = 2n</span>  and f with parameter  <span class="math">\\mathbf{max} = n - 1</span>  to  <span class="math">\\mathbf{V}</span> .</p>
+
+    <p class="text-gray-300">Step 3: Verifier verifying the sumcheck by opening commitments and checking a polynomial identity Note that if g and f are well-formed in the sense that indeed D(X) = g(X) &middot; ZH(X) + X &middot; f(X), then D(a) = a &middot; f(a) for any a &isin; H. In such a case it thus suffices that V check that</p>
+
+    <p class="text-gray-300"><span class="math">$\\sum_{a \\in H} a \\cdot f(a) = 0.</span>$</p>
+
+    <p class="text-gray-300">However, since deg(f) &lt; n &minus; 1 is guaranteed by the commitment scheme, we have that f 0 (X) := X &middot; f(X) is a polynomial of degree &lt; n with zero constant coefficient; therefore the sum vanishes by Lemma 4.1. Hence, V need only check that indeed D = g &middot; Z<sup>H</sup> + X &middot; f.</p>
+
+    <p class="text-gray-300">For this purpose, V chooses a random z &isin; F and asks for the openings Y (z), Z(z), W(z), g(z), f(z). Using Y (z), Z(z), W(z) together with R(z), R<sup>0</sup> (z), R00(z), Q(z), &alpha;<sup>0</sup> that it can compute by itself, V computes D(z). Now V checks if</p>
+
+    <p class="text-gray-300"><span class="math">$D(z) = g(z) \\cdot Z_H(z) + z \\cdot f(z),</span>$</p>
+
+    <p class="text-gray-300">and outputs acc if and only if the equality holds. Using Schwartz-Zippel, the probability of a false assignment leading to acceptance (via this identity or a bad choice of r, r<sup>0</sup> , r<sup>00</sup> above) is at most 4n/|F|.</p>
+
+      <h3 id="sec-4.2" class="text-xl font-semibold mt-8">4.2 Protocol summary</h3>
+
+    <p class="text-gray-300">For convenience, we summarize the main protocol steps deferring to the more detailed description above for missing details.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>P sends cm(W, n, &sigma;), cm(Y, n, &sigma;), cm(Z, n, &sigma;) to V.</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>V chooses random r, r<sup>0</sup> , r<sup>00</sup> &isin; F and sends them to P. They both derive the polynomials R, R<sup>0</sup> , R<sup>00</sup> .</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>P computes D. P computes f &isin; F&lt;n&minus;1[X], g &isin; F&lt;2n[X] such that D(X) = g(X) &middot; ZH(X) + X &middot; f(X).</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>P sends cm(g, 2n, &sigma;), cm(f, n &minus; 1, &sigma;) to V.</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>V chooses random z &isin; F and sends z to P.</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>P sends s<sup>W</sup> = W(z), s<sup>Y</sup> = Y (z), s<sup>Z</sup> = Z(z), s<sup>f</sup> = f(z), s<sup>g</sup> = g(z) to V.</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>P and V engage in the protocol open(5, {n, n, n, n &minus; 1, 2n} , {W, Y, Z, f, g} , {s<sup>W</sup> , s<sup>Y</sup> , sZ, s<sup>f</sup> , sg}). V outputs rej if the protocol verifier did.</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>V computes the alleged value of D(z), as</li>
+    </ol></li>
+    </ul>
+
+    <p class="text-gray-300"><span class="math">$s_D := R(z)s_Y s_Z + R&#x27;(z)s_Y + R&#x27;&#x27;(z)s_Z + Q(z)s_W + \\alpha_0</span>$</p>
+
+    <p class="text-gray-300">and outputs acc if and only if</p>
+
+    <p class="text-gray-300"><span class="math">$s_D = s_g \\cdot Z_H(z) + z \\cdot s_f.</span>$</p>
+
+    <p class="text-gray-300"><strong>Parallel proof generation</strong> Parallel proof generation with efficient amortized verification, as mentioned in Section 1.1, is achieved by running most steps separately for each public input, but jointly in steps 2 and 5, i.e. use the same verifier randomness r, r', r'', z for all proofs. When this is done the values R(z), R'(z), R''(z), Q(z) can be computed just once for all proofs in step 8.</p>
+
+    <p class="text-gray-300">Saving one field element as in Sonic Note that in the equation checked by <strong>V</strong> in step 8, when  <span class="math">z \\neq 0</span> , the value  <span class="math">s_f</span>  that will cause acceptance is uniquely determined by the other four values  <span class="math">s_W, s_Y, s_Z, s_q</span> . Thus <strong>V</strong> can compute it himself as</p>
+
+    <p class="text-gray-300"><span class="math">$s_f := \\left(s_D - s_g \\cdot Z_H(z)\\right)/z,</span>$</p>
+
+    <p class="text-gray-300">and check its correctness in the protocol open of step 7.</p>
+
+    <p class="text-gray-300">As in [MBKM19], the heavy/non-succinct part of the verifier computation is evaluating polynomials whose size is as large as the circuit/number of R1CS constraints. Sonic has a clever solution for this<sup>2</sup> - using an untrusted helper. The helper computes the polynomial evaluations for the verifier, and is able to prove the evaluations are correct. This is what [MBKM19] call a <em>signature of correct computation</em>. As we need to use the Sonic helper on several different polynomials in related evaluation points, it will be convenient to use a definition that supports multiple polynomials and evaluation points, at the cost of a more complicated definition of SCC.</p>
+
+    <p class="text-gray-300"><strong>Definition 5.1.</strong> A protocol  <span class="math">\\mathscr{P}</span>  between two-parties  <span class="math">(\\mathsf{P}_{\\mathsf{sc}},\\mathsf{V}_{\\mathsf{sc}})</span>  is a  <span class="math">(t,\\{m_i\\}_{i\\in[t]},d)</span> -signature of correct computation  <span class="math">((t,\\{m_i\\}_{i\\in[t]},d)\\text{-}SCC)</span>  if, when both parties are given  <span class="math">s_1,\\ldots,s_t\\in\\mathbb{F}_{&lt; d}[X,Y]</span>  and a sequence of values  <span class="math">S=\\{(x_{i,j},y_{i,j},s_{i,j})\\in\\mathbb{F}^3\\}_{i\\in[t],j\\in[m_i]}</span> ,  <span class="math">\\mathsf{V}_{\\mathsf{sc}}</span>  ends up outputting a value  <span class="math">\\mathsf{res}\\in\\{\\mathsf{acc},\\mathsf{rej}\\}</span>  such that</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Completeness: If for every  <span class="math">i \\in [t], j \\in [m_i], s_{i,j} = s_i(x_{i,j}, y_{i,j}), and (P_{sc}, V_{sc})</span>  follow the protocol then  <span class="math">V_{sc}</span>  outputs acc with probability one.</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><strong>Soundness:</strong> For any efficient generic group adversary A playing the part of  <span class="math">P_{sc}</span> , if for some  <span class="math">i \\in [t], j \\in [m_i], s_{i,j} \\neq s_i(x_{i,j}, y_{i,j})</span> , then the probability that  <span class="math">V_{sc}</span>  outputs acc is  <span class="math">negl(\\lambda)</span> .</li>
+    </ol></li>
+    </ul>
+
+    <p class="text-gray-300">The following lemma follows from [MBKM19]'s helped-SCC protocol, together with their batched opening commitment scheme as described in Section 3.</p>
+
+    <p class="text-gray-300"><strong>Lemma 5.2.</strong> Fix integers t,  <span class="math">\\{m_i\\}_{i \\in [t]}</span> , d. There is a pubic coin  <span class="math">(t, \\{m_i\\}_{i \\in [t]}, d)</span> -SCC such that the following holds. Let  <span class="math">S = \\{(x_{i,j}, y_{i,j}, s_{i,j}) \\in \\mathbb{F}^3\\}_{i \\in [t], j \\in [m_i]}</span>  be the common input to  <span class="math">\\mathsf{P}_{\\mathsf{sc}}</span>  and  <span class="math">\\mathsf{V}_{\\mathsf{sc}}</span>  in the beginning of the protocol.</p>
+
+    <p class="text-gray-300">Suppose that</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><span class="math">m^*</span>  is the sum over  <span class="math">i \\in [t]</span>  of the number of distinct values in  <span class="math">\\{y_{i,j}\\}_{j \\in [m_i]}</span> .</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><span class="math">m^{**}</span>  is the number of distinct values in  <span class="math">\\{y_{i,j}\\}_{i\\in[t],j\\in[m_i]}</span> .</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><span class="math">m^{***}</span>  is the number of distinct values in  <span class="math">\\{x_{i,j}\\}_{i\\in[t],j\\in[m_i]}</span> .</li>
+    </ol></li>
+    </ul>
+
+    <p class="text-gray-300"><sup>&amp;</sup>lt;sup&gt;2</sup>In fact, two different solutions for this and we'll discuss the second in Section 7.</p>
+
+    <p class="text-gray-300">Then</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>the total prover communication in the protocol consists of  <span class="math">m^* + m^{**} + m^{***} + t \\mathbb{G}_1</span>  elements and  <span class="math">m^* + t</span>  field elements.</li>
+      <li>The verifier computation consists of one evaluation of each  <span class="math">s_i</span>  and  <span class="math">3(m^{**} + m^{***} + t)</span>  pairings.</li>
+      <li>The SRS required for the scheme is the same as that of the d-polynomial commitment scheme described in Section 3.</li>
+    </ul>
+
+    <p class="text-gray-300">Let us see how Lemma 5.2 helps us improve verifier efficiency in the batch helped model: The heavy verifier computations - meaning those linear instead of polylogarithmic in the number of constraints - are the evaluation at the point z of the polynomials Q, R, R', R''. Recall that R, R', R'' were defined by a random choice of  <span class="math">r \\in \\mathbb{F}</span> . We could in fact think of them all as bi-variate polynomials evaluated at (r, z) (R', R'') are the same bi-variate polynomial as R when viewed this way); we claim that as bivariate polynomials they are all members of  <span class="math">\\mathbb{F}_{\\leq n}[X,Y]</span> : Let  <span class="math">\\{L_i \\in \\mathbb{F}[Y]\\}_{i \\in H}</span> be the Lagrange basis with respect to H. That is,  <span class="math">L_i</span>  is the unique polynomial of degree less than n with L(i) = 1 and L(j) = 0 for  <span class="math">i \\neq j \\in H</span> . Now, we can see that</p>
+
+    <p class="text-gray-300"><span class="math">$R(X,Y) = \\sum_{i \\in H} X^i \\cdot L_i(Y)</span>$</p>
+
+    <p class="text-gray-300">Similarly, Q was defined by a random choice of  <span class="math">r, r&#x27;, r&#x27;&#x27; \\in \\mathbb{F}</span>  and thus can be thought of as a sum of three bivariates  <span class="math">Q_1, Q_2, Q_3</span>  with</p>
+
+    <p class="text-gray-300"><span class="math">$Q_j(X,Y) = \\sum_{i \\in H} \\alpha_{i,j}(X) \\cdot L_i(Y)</span>$</p>
+
+    <p class="text-gray-300">for some  <span class="math">\\alpha_{i,j}(X) \\in \\mathbb{F}_{&lt; n}[X]</span> , such that the total number of non-zero coefficients in  <span class="math">\\{\\alpha_{i,j}(X)\\}</span>  is bounded by the number of wires in the circuit we constructed the R1CS from; hence we can assume it is O(n).</p>
+
+    <p class="text-gray-300">What will be important for us is that given  <span class="math">z \\in \\mathbb{F}</span> , the values  <span class="math">\\{L_i(z)\\}_{i \\in H}</span>  can be computed in at most O(n) field operations (As  <span class="math">L_i(Y) = \\frac{Y^n - 1}{Y - i} \\cdot \\frac{i - 1}{i^n - 1}</span> ). Thus, a helper can use the protocol of Lemma 5.2, with to compute Q(r, r', r'', z), R(r, z), R(r', z), R(r'', z)</p>
+
+    <p class="text-gray-300">for <strong>V</strong> and convince him the values are correct.</p>
+
+    <p class="text-gray-300">Mapping our situation to Lemma 5.2, for one execution of the main protocol we have</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>t = 4: Our polynomials are  <span class="math">Q_1, Q_2, Q_3, R</span> .</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><span class="math">m^* = 4</span> : Our second coordinate is always z.</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><span class="math">m^{**}=3</span> : The options for the first coordinate in all polynomials are r,r',r''.</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><span class="math">m^{***} = 1</span> : Again, cause our second coordinate is always z</li>
+    </ol></li>
+    </ul>
+
+    <p class="text-gray-300">On the other hand, when batching arbitrary proofs, there will not be necessarily any overlap between the values of the coordinates of evaluation points. It follow from Lemma 5.2 that, for a batch of T proofs, the helper mode adds  <span class="math">8T + 4 \\mathbb{G}_1</span>  elements and 10T + 4 field elements to the proofs (including a 6T factor for the evaluations of R,  <span class="math">Q_1</span> ,  <span class="math">Q_2</span> ,  <span class="math">Q_3</span>  themselves), and 12T+12 pairing operations to the verifier.</p>
+
+    <p class="text-gray-300">This while requiring the verifier to only perform O(n) field operations to compute the polynomials  <span class="math">Q_1, Q_2, Q_3, R</span>  at a single point, (instead of  <span class="math">O(n \\cdot T)</span>  without the helper).</p>
+
+    </section>
+
+    <section id="sec-6" class="mb-10">
+      <h2 class="text-2xl font-bold">6 Getting zero-knowledge</h2>
+
+    <p class="text-gray-300">We sketch how to add zero-knowledge to our scheme. The information given by the prover is limited to two evaluations of the polynomials W, Y, Z, f, g (one evaluation in the exponent during commitment, and one during opening). We need these evaluations not to leak any information. Note first that when the prover is honest, the evaluations of g are a function of the previous ones determined by the verifier equation. Thus, it is enough to show the evaluations of W, Y, Z, f don't leak information.</p>
+
+    <p class="text-gray-300">The natural method in such cases see e.g. [GGPR13, BCGV16, BCR<sup>+</sup>19], is to add to the polynomials random multiples of  <span class="math">Z_H</span> . This doesn't completely work in our case as f is the result of a modulu  <span class="math">Z_H</span>  operation that would neutralize this randomization.<sup>3</sup> So, we must take a slightly more cumbersome &quot;two-layered&quot; randomization approach:</p>
+
+    <p class="text-gray-300">We assume the last two indices  <span class="math">x_{n-2}, x_{n-1}, y_{n-2}, y_{n-1}, z_{n-2}, z_{n-1}</span>  of x, y, z do not participate in any constraints (this can be achieved by padding the original R1CS with two unused variables). Let  <span class="math">H_0 := H \\setminus \\{n-2, n-1\\}</span> .</p>
+
+    <p class="text-gray-300">The prover <strong>P</strong> will choose six random degree one polynomials  <span class="math">L_W^0, L_W^1, L_Y^0, L_Y^1, L_Z^0, L_Z^1</span>  and define</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><span class="math">W&#x27; := W + L_W^0 Z_{H_0} + L_W^1 Z_H</span> .</li>
+      <li><span class="math">Y&#x27; := Y + L_V^0 Z_{H_0} + L_V^1 Z_H</span> .</li>
+      <li><span class="math">Z&#x27; := Z + L_Z^0 Z_{H_0} + L_Z^1 Z_H</span> .</li>
+    </ul>
+
+    <p class="text-gray-300"><strong>P</strong> will conduct the protocol with W', Y', Z' instead of W, Y, Z. We claim this results in a zero-knowledge protocol.</p>
+
+    <p class="text-gray-300">Note first that W', Y', Z' satisfy the R1CS constraints when W, Y, Z did as they conicide on  <span class="math">H_0</span> .</p>
+
+    <p class="text-gray-300">Also, fixing any  <span class="math">\\tau, z \\in \\mathbb{F}</span> ; The twelve values  <span class="math">W&#x27;(\\tau), W&#x27;(z), (W&#x27; \\mod Z_H)(\\tau), (W&#x27; \\mod Z_H)(z),</span>  <span class="math">Y&#x27;(\\tau), Y&#x27;(z), (Y&#x27; \\mod Z_H)(\\tau), (Y&#x27; \\mod Z_H)(z), Z&#x27;(\\tau), Z&#x27;(z), (Z&#x27; \\mod Z_H)(\\tau), (Z&#x27; \\mod Z_H)(z)</span>  are all uniform and independent.</p>
+
+    <p class="text-gray-300">Thus, the two evaluations of W', Y', Z' give no information. The two evaluations of f are a function of the verifier randomness together with the evaluations at  <span class="math">\\tau, z</span>  of  <span class="math">(W&#x27; \\mod Z_H), (Y&#x27; \\mod Z_H), (Z&#x27; \\mod Z_H)</span> , which can thus be simulated by chosing the latter evaluations independently and uniformly and computing f from them.</p>
+
+    <p class="text-gray-300">[MBKM19] give a (1,d)-SCC where the run time of  <span class="math">V_{sc}</span>  is polylogarithmic in d; i.e. the verifier is fully succinct, in the following restricted case. The polynomial s(X,Y) can be written as a sum of a constant number of polynomials of the form</p>
+
+    <p class="text-gray-300"><span class="math">$\\sum_{i \\in [d]} a_i X^i Y^{\\sigma(i)}</span>$</p>
+
+    <p class="text-gray-300">where  <span class="math">\\sigma</span>  is a permutation of [d]. Our polynomials  <span class="math">Q_1, Q_2, Q_3, R</span>  from Section 5 are not of this form. However, it seems plausible the construction can be made to work while changing the polynomials into this form.</p>
+
+    <p class="text-gray-300"><span class="math">&lt;sup&gt;^{3}&lt;/sup&gt;</span> [BCR<sup>+</sup>19] has a very similar problem, that is more complex as their proof is a function, specifically the RS-IOPP part, of much more evaluations of f.</p>
+
+    </section>
+
+    <section id="acknowledgements" class="mb-10">
+      <h2 class="text-2xl font-bold">Acknowledgements</h2>
+
+    <p class="text-gray-300">We thank Mary Maller for sharing details of the [MBKM19] construction, even while it was a work in progress, which inspired and motivated this work. We thank Sean Bowe for discussions on Sonic.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>[BCC+16] J. Bootle, A. Cerulli, P. Chaidos, J. Groth, and C. Petit. Efficient zero-knowledge arguments for arithmetic circuits in the discrete log setting. In Advances in Cryptology - EUROCRYPT 2016 - 35th Annual International Conference on the Theory and Applications of Cryptographic Techniques, Vienna, Austria, May 8-12, 2016, Proceedings, Part II, pages 327&ndash;357, 2016.</li>
+      <li>[BCG+17] E. Ben-Sasson, A. Chiesa, A. Gabizon, M. Riabzev, and N. Spooner. Interactive oracle proofs with constant rate and query complexity. In 44th International Colloquium on Automata, Languages, and Programming, ICALP 2017, July 10-14, 2017, Warsaw, Poland, pages 40:1&ndash;40:15, 2017.</li>
+      <li>[BCGV16] E. Ben-Sasson, A. Chiesa, A. Gabizon, and M. Virza. Quasi-linear size zero knowledge from linear-algebraic pcps. In Theory of Cryptography - 13th International Conference, TCC 2016-A, Tel Aviv, Israel, January 10-13, 2016, Proceedings, Part II, pages 33&ndash;64, 2016.</li>
+      <li>[BCR+19] E. Ben-Sasson, A. Chiesa, M. Riabzev, N. Spooner, M. Virza, and N. P. Ward. Aurora: Transparent succinct arguments for R1CS. In Advances in Cryptology - EUROCRYPT 2019 - 38th Annual International Conference on the Theory and Applications of Cryptographic Techniques, Darmstadt, Germany, May 19-23, 2019, Proceedings, Part I, pages 103&ndash;128, 2019.</li>
+      <li>[BFL91] L. Babai, L. Fortnow, and C. Lund. Non-deterministic exponential time has two-prover interactive protocols. Computational Complexity, 1:3&ndash;40, 1991.</li>
+      <li>[BS08] E. Ben-Sasson and M. Sudan. Short pcps with polylog query complexity. SIAM J. Comput., 38(2):551&ndash;607, 2008.</li>
+      <li>[GGPR13] R. Gennaro, C. Gentry, B. Parno, and M. Raykova. Quadratic span programs and succinct nizks without pcps. In Advances in Cryptology - EUROCRYPT 2013, 32nd Annual International Conference on the Theory and Applications of Cryptographic Techniques, Athens, Greece, May 26-30, 2013. Proceedings, pages 626&ndash;645, 2013.</li>
+      <li>[KZG10] A. Kate, G. M. Zaverucha, and I. Goldberg. Constant-size commitments to polynomials and their applications. In Advances in Cryptology - ASIACRYPT 2010 - 16th International Conference on the Theory and Application of Cryptology and Information Security, Singapore, December 5-9, 2010. Proceedings, pages 177&ndash;194, 2010.</li>
+      <li>[MBKM19] M. Maller, S. Bowe, M. Kohlweiss, and S. Meiklejohn. Sonic: Zero-knowledge snarks from linear-size universal and updateable structured reference strings. IACR Cryptology ePrint Archive, 2019:99, 2019.</li>
+    </ul>
+
+    </section>
+`;
+---
+
+<BaseLayout title="AuroraLight: Improved prover efficiency and SRS size in a So... (2019/601)">
+  <article class="max-w-4xl mx-auto article-prose">
+    <nav class="mb-8">
+      <a href="/papers" class="text-blue-400 hover:text-blue-300">
+        &larr; Back to Papers
+      </a>
+    </nav>
+
+    <header class="mb-12">
+      <h1 class="text-3xl font-bold mb-4"
+        set:html={TITLE_HTML} />
+      <p class="text-gray-400 mb-2"
+        set:html={AUTHORS_HTML} />
+      <p class="text-gray-500 text-sm mb-4">
+        2019 &middot; eprint 2019/601
+      </p>
+      <div class="flex gap-4 text-sm">
+        <a
+          href={EPRINT_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          class="text-blue-400 hover:text-blue-300"
+        >
+          Paper (eprint) &rarr;
+        </a>
+      </div>
+      <PaperDisclaimer eprintUrl={EPRINT_URL} />
+      <p class="mt-1 text-xs text-gray-600">
+        Converted with: {CRAWLER} &middot; {CONVERTED_DATE}
+      </p>
+    </header>
+
+    <nav id="toc" class="mb-10 p-6 rounded-lg" style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06);">
+      <h2 class="text-lg font-bold mb-4">Table of Contents</h2>
+      <ol class="space-y-1 text-sm text-gray-300
+        list-decimal list-inside">
+        <li><a href="#abstract" class="hover:text-white">Abstract</a></li>
+        <li>
+          <a href="#sec-1" class="hover:text-white">Introduction</a>
+          <ol class="ml-6 mt-1 space-y-1 list-decimal
+            list-inside text-gray-400">
+            <li><a href="#sec-1.1" class="hover:text-white">The three modes of Sonic</a></li>
+            <li><a href="#sec-1.2" class="hover:text-white">Our results compared to [MBKM19]</a></li>
+            <li><a href="#sec-1.3" class="hover:text-white">Organization of paper</a></li>
+          </ol>
+        </li>
+        <li><a href="#sec-2" class="hover:text-white">Terminology/conventions</a></li>
+        <li><a href="#sec-3" class="hover:text-white">The [KZG10] scheme as used in Sonic</a></li>
+        <li>
+          <a href="#sec-4" class="hover:text-white">The main construction</a>
+          <ol class="ml-6 mt-1 space-y-1 list-decimal
+            list-inside text-gray-400">
+            <li><a href="#sec-4.1" class="hover:text-white">The main protocol</a></li>
+            <li><a href="#sec-4.2" class="hover:text-white">Protocol summary</a></li>
+          </ol>
+        </li>
+        <li><a href="#sec-5" class="hover:text-white">Batching arbitrary proofs with the Sonic helper</a></li>
+        <li><a href="#sec-6" class="hover:text-white">Getting zero-knowledge</a></li>
+        <li><a href="#sec-7" class="hover:text-white">Open question: getting a fully succinct verifier</a></li>
+      </ol>
+      <p class="text-xs text-gray-500 mt-4 mb-1 font-semibold">
+        Additional
+      </p>
+      <ul class="space-y-1 text-sm text-gray-400
+        list-disc list-inside">
+        <li><a href="#acknowledgements" class="hover:text-white">Acknowledgements</a></li>
+        <li><a href="#references" class="hover:text-white">References</a></li>
+      </ul>
+    </nav>
+
+
+    <Fragment set:html={CONTENT} />
+
+    <PaperHistory slug="auroralight-improved-prover-efficiency-and-srs-size-in-a-2019" />
+  </article>
+</BaseLayout>

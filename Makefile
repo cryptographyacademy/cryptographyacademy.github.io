@@ -56,7 +56,7 @@ build-lean: ## Build Lean project
 	@source ~/.elan/env && lake build --dir=lean
 
 .PHONY: build-web
-build-web: ## Build website
+build-web: convert-papers generate-papers-data ## Build website
 	@echo "Building website..."
 	@cd web && npm run build
 
@@ -155,7 +155,7 @@ check-outdated: ## Check for outdated dependencies
 # =============================================================================
 
 .PHONY: clean
-clean: clean-lean clean-web ## Clean all build artifacts
+clean: clean-lean clean-web clean-papers ## Clean all build artifacts
 
 .PHONY: clean-lean
 clean-lean: ## Clean Lean build artifacts
@@ -163,9 +163,16 @@ clean-lean: ## Clean Lean build artifacts
 	@source ~/.elan/env && lake clean --dir=lean 2>/dev/null || true
 
 .PHONY: clean-web
-clean-web: ## Clean web build artifacts
+clean-web: clean-papers ## Clean web build artifacts
 	@echo "Cleaning web..."
 	@rm -rf web/dist web/node_modules/.cache
+
+.PHONY: clean-papers
+clean-papers: ## Remove generated paper .astro files and data
+	@echo "Cleaning generated papers..."
+	@find web/src/pages/papers -name '*.astro' \
+		! -name 'index.astro' -delete 2>/dev/null || true
+	@rm -f web/src/data/papers.json web/src/data/papers-meta.json
 
 # =============================================================================
 # Trailing whitespace

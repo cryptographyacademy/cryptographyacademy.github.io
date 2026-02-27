@@ -1,0 +1,731 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import PaperDisclaimer from '../../components/PaperDisclaimer.astro';
+import PaperHistory from '../../components/PaperHistory.astro';
+
+const EPRINT_URL = 'https://eprint.iacr.org/2022/1447';
+const CRAWLER = 'marker';
+const CONVERTED_DATE = '2026-02-16';
+const TITLE_HTML = 'flookup: Fractional decomposition-based lookups in quasi-linear time independent of table size';
+const AUTHORS_HTML = 'Ariel Gabizon, Dmitry Khovratovich';
+
+const CONTENT = `    <section id="abstract" class="mb-10">
+      <h2 class="text-2xl font-bold">Abstract</h2>
+      <p class="text-gray-300">We present a protocol for checking the values of a committed polynomial $\\phi(X)$ over a multiplicative subgroup $H\\subset \\mathbb{F}$ of size $m$ are contained in a table $T\\in \\mathbb{F}^N$. After an $O(N \\log^2 N)$ preprocessing step, the prover algorithm runs in *quasilinear* time $O(m\\log ^2 m)$. 
+We improve upon the recent breakthrough results Caulk[ZBK+22] and Caulk+[PK22], which were the first to achieve the complexity sublinear in the full table size $N$ with prover time being $O(m^2+m\\log N)$ and $O(m^2)$, respectively.
+We pose further improving this complexity to $O(m\\log m)$ as the next important milestone for efficient zk-SNARK lookups.</p>
+      <p class="text-gray-300"><strong>Keywords:</strong> zk-SNARKs &middot; lookups &middot; pairings</p>
+    </section>
+
+    <section id="sec-1" class="mb-10">
+      <h2 class="text-2xl font-bold">1 Introduction</h2>
+
+    <p class="text-gray-300">The lookup problem is fundamental to the efficiency of modern zk-SNARKs. Somewhat informally, it asks for a protocol to prove the values of a committed polynomial  <span class="math">\\phi(X) \\in \\mathbb{F}_{\\leq m}[X]</span>  are contained in a table T of size N of predefined legal values. When the table T corresponds to an operation without an efficient low-degree arithmetization in  <span class="math">\\mathbb{F}</span> , such a protocol produces significant savings in proof construction time for programs containing the operation. Building on previous work of [BCG+18], plookup [GW20] was the first to explicitly describe a solution to this problem in the polynomial-IOP context. plookup described a protocol with prover complexity quasilinear in both m and N. This left the intriguing question of whether the dependence on N could be made sublinear after performing a preprocessing step for the table T. Caulk [ZBK+22] answered this question in the affirmative by leveraging bi-linear pairings, achieving a run time of  <span class="math">O(m^2 + m \\log N)</span> . Caulk+ [PK22] improved this to  <span class="math">O(m^2)</span>  getting rid of the dependence on table size completely.</p>
+
+    <p class="text-gray-300">However, the quadratic dependence on m of these works makes them impractical for a circuit with many lookup gates. We resolve this issue by giving a protocol called <strong>flookup</strong> that is quasi-linear in m and has no dependence on N after the preprocessing step.</p>
+
+      <h3 id="sec-1.1" class="text-xl font-semibold mt-8">1.1 Usefulness of the result</h3>
+
+    <p class="text-gray-300">When is it worth it to use Flookup instead of plookup? The plookup prover runs in time O(N log N) and the Flookup prover requires time O(m log<sup>2</sup> m) with small constants in the O(). Hence, Flookup is worth it roughly when the table is larger than the number of lookups by a logarithmic factor; i.e. when m &lt;&lt; N/ log N.</p>
+
+    <p class="text-gray-300">We write &lt;&lt; instead of &lt; as Flookup entails other complications that make the tradeoff potentially less attractive. Notably, verification requires a pairing with a prover-defined G<sup>2</sup> point (as do Caulk and Caulk+), which makes rescursive aggregation of proofs less smooth. Another inconvenience is that Flookup doesn't have the nice linearity properties of plookup or Caulk, and so reducing a tuple lookup to a single element lookup (cf. Section 4 of <a href="#page-17-1">[GW20]</a>), is less efficient. Because of these drawbacks, &quot;simple&quot; tables, like T = 0, . . . , 2 <sup>t</sup> &minus; 1 for a range check, may not be the best use case for Flookup. As in such a case we can decompose into limbs and use a much smaller table; more generally, this is the case when T is a product set.</p>
+
+    <p class="text-gray-300">A better use case would be complex &quot;SNARK unfriendly&quot; operations on large ranges. For example, those arising inside SHA-256, like mapping a 32-bit input A into a 32-bit output B, via bitwise XOR of three different shifts of A. Given such a mapping f with 32-bit input and output, we can construct the table T containing all 2<sup>32</sup> values A + 2<sup>32</sup> &middot; f(A).</p>
+
+    <p class="text-gray-300">To show witness values (w1, w2) satisfy f(w1) = w2, we check the corresponding combination w<sup>1</sup> + 2<sup>32</sup> &middot; w<sup>2</sup> &isin; T using Flookup. We additionaly range constrain each w<sup>i</sup> to 32 bits. The need for the additional range constraints stems from Flookup not having nice reductions from vector to single-element lookup. Even with them, being able to represent an arbitrary 32-bit operation in one table (and use it inside a circuit of size &lt;&lt; 2 <sup>32</sup>), constitutes a significant simplification and potential efficiency boost over current use of lookups in zk-SNARKs.</p>
+
+      <h3 id="sec-1.2" class="text-xl font-semibold mt-8">1.2 Organization of the paper and recommended reading route</h3>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>In Section <a href="#page-2-0">2</a> we go over required preliminaries.</li>
+      <li>In Section <a href="#page-5-0">3</a> we define the notion of a bi-linear polynomial IOP which enables us to model protocols that use pairings in addition to polynomial commitment schemes. A reader deterred by the formality of this section might skip it on a first read; and simply keep in mind that the term &quot;a bi-linear check&quot; in the subsequent section translates to a pairing in the compiled protocol.</li>
+      <li>In section <a href="#page-10-0">4</a> we review a method of <a href="#page-18-1">[PK22]</a> to extract a commitment to the vanishing polynomial of a subtable using pairings. We extend it to work with arbitrary sets and not just subgroups.</li>
+      <li>In Section <a href="#page-13-0">5</a> we give a lookup protocol given a commitment to the vanishing polynomial of the table.</li>
+    </ul>
+
+    <p class="text-gray-300">&bull; In Section 6 we combine the table extraction and subtable lookup protocols to give our final result.</p>
+
+    <p class="text-gray-300">We assume our field  <span class="math">\\mathbb{F}</span>  is of prime order. We denote by  <span class="math">\\mathbb{F}_{&lt; d}[X]</span>  the set of univariate polynomials over  <span class="math">\\mathbb{F}</span>  of degree smaller than d. We assume all algorithms described receive as an implicit parameter the security parameter  <span class="math">\\lambda</span> .</p>
+
+    <p class="text-gray-300">Whenever we use the term &quot;efficient&quot;, we mean an algorithm running in time  <span class="math">\\operatorname{poly}(\\lambda)</span> . Furthermore, we assume an &quot;object generator&quot;  <span class="math">\\mathcal{O}</span>  that is run with input  <span class="math">\\lambda</span>  before all protocols, and returns all fields and groups used. Specifically, in our protocol  <span class="math">\\mathcal{O}(\\lambda) = (\\mathbb{F}, \\mathbb{G}_1, \\mathbb{G}_2, \\mathbb{G}_t, e, g_1, g_2, g_t)</span>  where</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><span class="math">\\mathbb{F}</span>  is a prime field of super-polynomial size  <span class="math">r = \\lambda^{\\omega(1)}</span>  .</li>
+      <li><span class="math">\\mathbb{G}_1, \\mathbb{G}_2, \\mathbb{G}_t</span>  are all groups of size r, and e is an efficiently computable non-degenerate pairing  <span class="math">e : \\mathbb{G}_1 \\times \\mathbb{G}_2 \\to \\mathbb{G}_t</span> .</li>
+      <li><span class="math">g_1, g_2</span>  are uniformly chosen generators such that  <span class="math">e(g_1, g_2) = g_t</span> .</li>
+    </ul>
+
+    <p class="text-gray-300">We usually let the  <span class="math">\\lambda</span>  parameter be implicit, i.e. write  <span class="math">\\mathbb{F}</span>  instead of  <span class="math">\\mathbb{F}(\\lambda)</span> . We write  <span class="math">\\mathbb{G}_1</span>  and  <span class="math">\\mathbb{G}_2</span>  additively. We use the notations  <span class="math">[x]_1 := x \\cdot g_1</span>  and  <span class="math">[x]_2 := x \\cdot g_2</span> .</p>
+
+    <p class="text-gray-300">We often denote by [n] the integers  <span class="math">\\{1, \\ldots, n\\}</span> . We use the acronym e.w.p for &quot;except with probability&quot;; i.e. e.w.p  <span class="math">\\gamma</span>  means with probability at least  <span class="math">1 - \\gamma</span> .</p>
+
+    <p class="text-gray-300">universal SRS-based public-coin protocols We describe public-coin (meaning the verifier messages are uniformly chosen) interactive protocols between a prover and verifier; when deriving results for non-interactive protocols, we implicitly assume we can get a proof length equal to the total communication of the prover, using the Fiat-Shamir transform/a random oracle. Using this reduction between interactive and non-interactive protocols, we can refer to the &quot;proof length&quot; of an interactive protocol.</p>
+
+    <p class="text-gray-300">We allow our protocols to have access to a structured reference string (SRS) that can be derived in deterministic  <span class="math">\\operatorname{poly}(\\lambda)</span> -time from an &quot;SRS of monomials&quot; of the form  <span class="math">\\{[x^i]_1\\}_{a\\leq i\\leq b}, \\{[x^i]_2\\}_{c\\leq i\\leq d}</span> , for uniform  <span class="math">x\\in\\mathbb{F}</span> , and some integers a,b,c,d with absolute value bounded by  <span class="math">\\operatorname{poly}(\\lambda)</span> . It then follows from Bowe et al. [BGM17] that the required SRS can be derived in a universal and updatable setup requiring only one honest participant; in the sense that an adversary controlling all but one of the participants in the setup does not gain more than a  <span class="math">\\operatorname{negl}(\\lambda)</span>  advantage in its probability of producing a proof of any statement.</p>
+
+    <p class="text-gray-300">For notational simplicity, we sometimes use the SRS srs as an implicit parameter in protocols, and do not explicitly write it.</p>
+
+      <h3 id="sec-2.1" class="text-xl font-semibold mt-8">2.1 Analysis in the AGM model</h3>
+
+    <p class="text-gray-300">For security analysis we will use the Algebraic Group Model of Fuchsbauer, Kiltz and Loss[FKL18]. In our protocols, by an algebraic adversary  <span class="math">\\mathcal{A}</span>  in an SRS-based protocol we mean a  <span class="math">\\mathsf{poly}(\\lambda)</span> -time algorithm which satisfies the following.</p>
+
+    <p class="text-gray-300">&bull; For  <span class="math">i \\in \\{1, 2\\}</span> , whenever  <span class="math">\\mathcal{A}</span>  outputs an element  <span class="math">A \\in \\mathbb{G}_i</span> , it also outputs a vector v over  <span class="math">\\mathbb{F}</span>  such that  <span class="math">A = \\langle v, \\mathsf{srs}_i \\rangle</span> .</p>
+
+    <p class="text-gray-300">Idealized verifier checks for algebraic adversaries We introduce some terminology to capture the advantage of analysis in the AGM.</p>
+
+    <p class="text-gray-300">First we say our srs has degree Q if all elements of srs<sub>i</sub> are of the form  <span class="math">[f(x)]_i</span>  for  <span class="math">f \\in \\mathbb{F}_{\\leq Q}[X]</span>  and uniform  <span class="math">x \\in \\mathbb{F}</span> . In the following discussion let us assume we are executing a protocol with a degree Q SRS, and denote by  <span class="math">f_{i,j}</span>  the corresponding polynomial for the j'th element of srs<sub>i</sub>.</p>
+
+    <p class="text-gray-300">Denote by a, b the vectors of  <span class="math">\\mathbb{F}</span> -elements whose encodings in  <span class="math">\\mathbb{G}_1, \\mathbb{G}_2</span>  an algebraic adversary  <span class="math">\\mathcal{A}</span>  outputs during a protocol execution; e.g., the j'th  <span class="math">\\mathbb{G}_1</span>  element output by  <span class="math">\\mathcal{A}</span>  is  <span class="math">[a_j]_1</span> .</p>
+
+    <p class="text-gray-300">By a &quot;real pairing check&quot; we mean a check of the form</p>
+
+    <p class="text-gray-300"><span class="math">$(a \\cdot T_1) \\cdot (T_2 \\cdot b) = 0</span>$</p>
+
+    <p class="text-gray-300">for some matrices  <span class="math">T_1, T_2</span>  over  <span class="math">\\mathbb{F}</span> . Note that such a check can indeed be done efficiently given the encoded elements and the pairing function  <span class="math">e : \\mathbb{G}_1 \\times \\mathbb{G}_2 \\to \\mathbb{G}_t</span> .</p>
+
+    <p class="text-gray-300">Given such a &quot;real pairing check&quot;, and the adversary  <span class="math">\\mathcal{A}</span>  and protocol execution during which the elements were output, define the corresponding &quot;ideal check&quot; as follows. Since  <span class="math">\\mathcal{A}</span>  is algebraic when he outputs  <span class="math">[a_j]_i</span>  he also outputs a vector v such that, from linearity,  <span class="math">a_j = \\sum v_\\ell f_{i,\\ell}(x) = R_{i,j}(x)</span>  for  <span class="math">R_{i,j}(X) := \\sum v_\\ell f_{i,\\ell}(X)</span> . Denote, for  <span class="math">i \\in \\{1,2\\}</span>  the vector of polynomials  <span class="math">R_i = (R_{i,j})_j</span> . The corresponding ideal check, checks as a polynomial identity whether</p>
+
+    <p class="text-gray-300"><span class="math">$(R_1 \\cdot T_1) \\cdot (T_2 \\cdot R_2) \\equiv 0</span>$</p>
+
+    <p class="text-gray-300">The following lemma from [GWC19] is inspired by [FKL18]'s analysis of [Gro16]. It tells us that for soundness analysis against algebraic adversaries it suffices to look at ideal checks. Before stating the lemma we define the Q-DLOG assumption similarly to [FKL18].</p>
+
+    <p class="text-gray-300"><strong>Definition 2.1.</strong> Fix integer Q. The Q-DLOG assumption for  <span class="math">(\\mathbb{G}_1, \\mathbb{G}_2)</span>  states that given</p>
+
+    <p class="text-gray-300"><span class="math">$\\left[1\\right]_{1},\\left[x\\right]_{1},\\ldots,\\left[x^{Q}\\right]_{1},\\left[1\\right]_{2},\\left[x\\right]_{2},\\ldots,\\left[x^{Q}\\right]_{2}</span>$</p>
+
+    <p class="text-gray-300">for uniformly chosen  <span class="math">x \\in \\mathbb{F}</span> , the probability of an efficient A outputting x is  <span class="math">negl(\\lambda)</span> .</p>
+
+    <p class="text-gray-300"><strong>Lemma 2.2.</strong> Assume the Q-DLOG for  <span class="math">(\\mathbb{G}_1, \\mathbb{G}_2)</span> . Given an algebraic adversary A participating in a protocol with a degree Q SRS, the probability of any real pairing check passing is larger by at most an additive  <span class="math">\\operatorname{\\mathsf{negl}}(\\lambda)</span>  factor than the probability the corresponding ideal check holds.</p>
+
+    <p class="text-gray-300"><em>Proof.</em> Let  <span class="math">\\gamma</span>  be the difference between the satisfiability of the real and ideal check. We describe an adversary  <span class="math">\\mathcal{A}^*</span>  for the Q-DLOG problem that succeeds with probability  <span class="math">\\gamma</span> ; this implies  <span class="math">\\gamma = \\mathsf{negl}(\\lambda)</span> .  <span class="math">\\mathcal{A}^*</span>  receives the challenge</p>
+
+    <p class="text-gray-300"><span class="math">$[1]_1, [x]_1, \\dots, [x^Q]_1, [1]_2, [x]_2, \\dots, [x^Q]_2</span>$</p>
+
+    <p class="text-gray-300">and constructs using group operations the correct SRS for the protocol. Now  <span class="math">\\mathcal{A}^*</span>  runs the protocol with  <span class="math">\\mathcal{A}</span> , simulating the verifier role. Note that as  <span class="math">\\mathcal{A}^*</span>  receives from  <span class="math">\\mathcal{A}</span>  the vectors of coefficients v, he can compute the polynomials  <span class="math">\\{R_{i,j}\\}</span>  and check if we are in the case that the real check passed but ideal check failed. In case we are in this event,  <span class="math">\\mathcal{A}^*</span>  computes</p>
+
+    <p class="text-gray-300"><span class="math">$R := (R_1 \\cdot T_1)(T_2 \\cdot R_2).</span>$</p>
+
+    <p class="text-gray-300">We have that  <span class="math">R \\in \\mathbb{F}_{&lt;2Q}[X]</span>  is a non-zero polynomial for which R(x) = 0. Thus  <span class="math">\\mathcal{A}^*</span>  can factor R and find x.</p>
+
+    <p class="text-gray-300">Knowlege soundness in the Algebraic Group Model We say a protocol  <span class="math">\\mathscr{P}</span>  between a prover  <span class="math">\\mathbf{P}</span>  and verifier  <span class="math">\\mathbf{V}</span>  for a relation  <span class="math">\\mathcal{R}</span>  has <em>Knowledge Soundness in the Algebraic Group Model</em> if there exists an efficient E such that the probability of any algebraic adversary  <span class="math">\\mathcal{A}</span>  winning the following game is  <span class="math">\\mathsf{negl}(\\lambda)</span> .</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><span class="math">\\mathcal{A}</span>  chooses input x and plays the role of <strong>P</strong> in  <span class="math">\\mathscr{P}</span>  with input x.</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>E given access to all of  <span class="math">\\mathcal{A}</span> 's messages during the protocol (including the coefficients of the linear combinations) outputs  <span class="math">\\omega</span> .</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><span class="math">\\mathcal{A}</span>  wins if</li>
+    </ol>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>(a) V outputs acc at the end of the protocol, and</li>
+      <li>(b)  <span class="math">(x, \\omega) \\notin \\mathcal{R}</span> .</li>
+    </ul></li>
+    </ul>
+
+      <h3 id="sec-2.2" class="text-xl font-semibold mt-8">2.2 KZG-like Polynomial commitment schemes</h3>
+
+    <p class="text-gray-300">We define a polynomial commitment scheme where we force the commitment procedure to be consistent with that of [KZG10]. This will be useful in the next section when we define bi-linear polynomial IOPs.</p>
+
+    <p class="text-gray-300"><strong>Definition 2.3.</strong> A d-polynomial commitment scheme (d-PCS) over a field  <span class="math">\\mathbb{F}</span>  consists of</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>gen(d) a randomized algorithm that outputs an SRS srs that contains as a substring  <span class="math">[1]_1, [x]_1, \\ldots, [x^{d-1}]_1</span>  for uniformly chosen  <span class="math">x \\in \\mathbb{F}</span>  and no other  <span class="math">\\mathbb{G}_1</span>  elements.</li>
+      <li>com(f, srs) that given a polynomial  <span class="math">f \\in \\mathbb{F}_{&lt; d}[X]</span>  returns the commitment cm to f defined as  <span class="math">com(f) := [f(x)]_1</span> .</li>
+      <li>A public coin protocol open between parties  <span class="math">P_{PC}</span>  and  <span class="math">V_{PC}</span> .  <span class="math">P_{PC}</span>  is given  <span class="math">f_1, \\ldots, f_t \\in \\mathbb{F}_{&lt; d}[X]</span> .  <span class="math">P_{PC}</span>  and  <span class="math">V_{PC}</span>  are both given integer  <span class="math">t = \\text{poly}(\\lambda)</span> ,  <span class="math">\\text{cm}_1, \\ldots, \\text{cm}_t</span>  the alleged commitments to  <span class="math">f_1, \\ldots, f_t, z_1, \\ldots, z_t \\in \\mathbb{F}</span>  and  <span class="math">s_1, \\ldots, s_t \\in \\mathbb{F}</span>  the alleged correct openings  <span class="math">f_1(z_1), \\ldots, f_t(z_t)</span> . At the end of the protocol  <span class="math">V_{PC}</span>  outputs acc or rej.</li>
+    </ul>
+
+    <p class="text-gray-300">such that</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Completeness: Fix integer t, z1, . . . , z<sup>t</sup> &isin; F, f1, . . . , f<sup>t</sup> &isin; F&lt;d[X]. Suppose that for each i &isin; [t], cm<sup>i</sup> = com(f<sup>i</sup> ,srs). Then if open is run correctly with values t, {cm<sup>i</sup> , z<sup>i</sup> , s<sup>i</sup> = fi(zi)}i&isin;[t] , VPC outputs acc with probability one.</li>
+      <li>Binding Knowledge soundness in the algebraic group model: For any algebraic adversary A the probability of A winning the following game is negl(&lambda;) over the randomness of A and gen.    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Given srs, A outputs t, cm1, . . . , cmt.</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Note that as A is algebraic, in the step above it also outputs polynomials <sup>f</sup>1, . . . , f<sup>t</sup> <sup>&isin;</sup> <sup>F</sup>&lt;d[X] such that cm<sup>i</sup> = [fi(x)]<sup>1</sup> .</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>A outputs z1, . . . , z<sup>t</sup> &isin; F, s1, . . . , s<sup>t</sup> &isin; F.</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>A takes the part of PPC in the protocol open with common inputs cm1, . . . , cm<sup>t</sup> , z1, . . . , z<sup>t</sup> , s1, . . . , st.</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>A wins if</li>
+    </ol>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>VPC outputs acc at the end of the protocol.</li>
+      <li>For some i &isin; [t], s<sup>i</sup> &#824;= fi(zi).</li>
+    </ul></li>
+    </ul></li>
+    </ul>
+
+      <h3 id="sec-2.3" class="text-xl font-semibold mt-8">2.3 Other notational conventions</h3>
+
+    <p class="text-gray-300">Given a polynomial <sup>f</sup> <sup>&isin;</sup> <sup>F</sup>[X] and a subset <sup>I</sup> <sup>&sub;</sup> <sup>F</sup> we define <sup>f</sup>|<sup>I</sup> to be the set {f(v)}v&isin;<sup>I</sup> . Given a set T &sub; F we denote by Z<sup>T</sup> (X) &isin; F[X] the vanishing polynomial of T:</p>
+
+    <p class="text-gray-300"><span class="math">$Z_T(X) := \\prod_{i \\in T} (X - i).</span>$</p>
+
+    <p class="text-gray-300">While most recent works on zk-SNARKs have leveraged the power of polynomial commitment schemes <a href="#page-17-6">[KZG10]</a>, <a href="#page-18-0">[ZBK</a>+22] has additionaly leveraged the power of pairings to essentially take products of commitments. This enables checking degree two identities between polynomials without needing to compute the polynomials themselves, but only their commitments - which can be much faster when they are a small linear combination of preprocessed polynomials. We formalize a framework to capture protocols using pairings in addition to polynomial openings.</p>
+
+    <p class="text-gray-300">Definition 3.1. Fix positive integer d and field F. A d-bi-linear polynomial IOP over F (d-BLIOP) is a multiround protocol between a prover Ppoly, verifier Vpoly and trusted party I that proceeds as follows.</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>The protocol definition includes two sets of preprocessed polynomials P1, P<sup>2</sup> &sub; F&lt;d[X].</li>
+    </ol>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>The messages of  <span class="math">P_{poly}</span>  are sent to  <span class="math">\\mathcal{I}</span>  and are of the form (f,i) for  <span class="math">f \\in \\mathbb{F}_{&lt; d}[X]</span>  and  <span class="math">i \\in \\{1,2\\}</span> . If  <span class="math">P_{poly}</span>  sends a message not of this form, the protocol is aborted.</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>The messages of V<sub>poly</sub> to P<sub>poly</sub> are always random coins.</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>At the end of the protocol,</li>
+    </ol>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>For  <span class="math">i \\in \\{1, 2\\}</span> , let  <span class="math">F_i</span>  denote the set of polynomials f that were sent from  <span class="math">P_{\\mathsf{poly}}</span>  to  <span class="math">\\mathcal{I}</span>  as part of a message (f, i). And denote  <span class="math">A_i := F_i \\cup P_i</span> .</li>
+      <li><span class="math">V_{poly} may ask \\mathcal{I}</span>    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>(a) evaluation queries of the form (f, x) for  <span class="math">f \\in A_1</span>  and  <span class="math">x \\in \\mathbb{F}</span> .  <span class="math">\\mathcal{I}</span>  responds with the value f(x).</li>
+      <li>(b) bi-linear identity queries of the form  <span class="math">\\sum_{j\\in[k]} c_j f_j(X) h_j(X) \\stackrel{?}{=} 0</span> , where k is some positive integer,  <span class="math">c_j \\in \\mathbb{F}</span> ,  <span class="math">f_j \\in A_1</span> ,  <span class="math">h_j \\in A_2</span>  for each  <span class="math">j \\in [k]</span> . I responds with true or false according to whether the identity holds.</li>
+    </ul></li>
+      <li>After concluding her queries  <span class="math">V_{\\mathsf{poly}}</span>  outputs acc or rej by a deterministic procedure depending only on the query results.</li>
+    </ul></li>
+    </ul>
+
+    <p class="text-gray-300">We define bi-linear polynomial iops for relations and languages in the natural way.</p>
+
+    <p class="text-gray-300"><strong>Definition 3.2.</strong> Given a relation  <span class="math">\\mathcal{R}</span> , a d-BLIOP for  <span class="math">\\mathcal{R}</span>  is a d-BLIOP with the following additional properties.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>At the beginning of the protocol,  <span class="math">P_{\\mathsf{poly}}</span>  and  <span class="math">V_{\\mathsf{poly}}</span>  are both given in addition to the preprocessed polynomial sets  <span class="math">P_1, P_2</span>  an input x. The description of  <span class="math">P_{\\mathsf{poly}}</span>  assumes possession of  <span class="math">\\omega</span>  such that  <span class="math">(\\mathsf{x}, \\omega) \\in \\mathcal{R}</span> .</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Completeness: If  <span class="math">P_{poly}</span>  follows the protocol correctly using a witness  <span class="math">\\omega</span>  for x,  <span class="math">V_{poly}</span>  accepts with probability one.</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><strong>Knowledge Soundness:</strong> There exists an efficient E, that given access to the messages of  <span class="math">P_{\\mathsf{poly}}</span>  to  <span class="math">\\mathcal{I}</span> , and the random coins of  <span class="math">V_{\\mathsf{poly}}</span>  outputs  <span class="math">\\omega</span>  such that, for any strategy of  <span class="math">P_{\\mathsf{poly}}</span> , the probability of the following event is  <span class="math">\\mathsf{negl}(\\lambda)</span> .</li>
+    </ol>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>(a) V<sub>poly</sub> outputs acc at the end of the protocol, and</li>
+      <li>(b)  <span class="math">(x, \\omega) \\notin \\mathcal{R}</span> .</li>
+    </ul></li>
+    </ul>
+
+    <p class="text-gray-300"><strong>Definition 3.3.</strong> Given a language  <span class="math">\\mathcal{L}</span> , a d-BLIOP for  <span class="math">\\mathcal{L}</span>  is a d-BLIOP with the following additional properties.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>At the beginning of the protocol,  <span class="math">P_{poly}</span>  and  <span class="math">V_{poly}</span>  are both given an input x.</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Completeness: If  <span class="math">x \\in \\mathcal{L}</span> , and  <span class="math">P_{\\mathsf{poly}}</span>  follows the protocol correctly using x,  <span class="math">V_{\\mathsf{poly}}</span>  accepts with probability one.</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><strong>Soundness:</strong> If  <span class="math">x \\notin \\mathcal{L}</span>  then any strategy of  <span class="math">P_{\\mathsf{poly}}</span>  will result in  <span class="math">V_{\\mathsf{poly}}</span>  rejecting e.w.p  <span class="math">\\mathsf{negl}(\\lambda)</span> .</li>
+    </ol></li>
+    </ul>
+
+      <h3 id="sec-3.1" class="text-xl font-semibold mt-8">3.1 From bi-linear polynomial IOPs to protocols against algebraic adversaries</h3>
+
+    <p class="text-gray-300">We wish to &quot;compile&quot; BLIOPs to protocols against algebraic adversaries. We will define a few terms to enable us to track the compilation efficiency in terms of the resultant prover and verifier efficiency.</p>
+
+    <p class="text-gray-300">Note that given a polynomial protocol  <span class="math">\\mathscr{P}</span>  and fixed input  <span class="math">(x, \\omega)</span>  for the protocol. We have some distribution over the sets of polynomials  <span class="math">A_1, A_2</span>  sent during the protocol.</p>
+
+    <p class="text-gray-300">Thus, we can define,  <span class="math">D_1(\\mathscr{P},\\mathsf{x},\\omega) := \\sum_{f \\in F_1} (\\deg(f) + 1)</span> . And  <span class="math">D_2(\\mathscr{P},\\mathsf{x},\\omega)</span>  as the number of  <span class="math">\\mathbb{G}_2</span>  scalar multiplications required to compute  <span class="math">[f]_2</span>  for all  <span class="math">f \\in F_2</span> . Also, there will be some distribution over the set of evaluation queries (f,z) asked during the protocol.</p>
+
+    <p class="text-gray-300">Define  <span class="math">\\mathcal{O}</span>  to be the set of tuples  <span class="math">([f]_1, z, f(z); f)</span>  when iterating over all evaluation queries asked by  <span class="math">V_{\\mathsf{poly}}</span> .</p>
+
+    <p class="text-gray-300">Finally, define  <span class="math">E(\\mathcal{P}, \\mathsf{x}, \\omega)</span>  to be the total number of summands in all bi-linear queries asked by  <span class="math">V_{\\mathsf{poly}}</span>  during protocol execution.</p>
+
+    <p class="text-gray-300"><strong>Lemma 3.4.</strong> Assume the d-DLOG assumption holds for  <span class="math">(\\mathbb{G}_1, \\mathbb{G}_2)</span> . Given a d-BLIOP  <span class="math">\\mathscr{P}</span>  over  <span class="math">\\mathbb{F}</span>  and a d-PCS  <span class="math">\\mathscr{S}</span>  we can construct a protocol  <span class="math">\\mathscr{P}^*</span>  for  <span class="math">\\mathscr{R}</span>  with knowledge soundness against algebraic adversaries such that</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Preprocessing time: For  <span class="math">i = 1, 2, C_i(\\mathscr{P})</span>   <span class="math">\\mathbb{G}_i</span>  scalar multiplications, where  <span class="math">C_i(\\mathscr{P})</span>  is the number of  <span class="math">\\mathbb{G}_i</span>  scalar multiplications required to compute  <span class="math">[f]_i</span>  for all  <span class="math">f \\in P_i</span> .</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Prover efficiency: The prover  <span class="math">\\mathbf{P}</span>  in  <span class="math">\\mathscr{P}^*</span>  consists of running  <span class="math">P_{\\mathsf{poly}}</span>  on the same inputs;  <span class="math">D_i(\\mathscr{P},\\mathsf{x},\\omega)</span>   <span class="math">\\mathbb{G}_i</span>  scalar multiplications for  <span class="math">i \\in \\{1,2\\}</span>  and running the prover of  <span class="math">\\mathscr{S}</span>  with input  <span class="math">\\mathscr{O}</span> .</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Verifier efficiency: The verifier V in  <span class="math">\\mathscr{P}^*</span>  consists running  <span class="math">V_{\\mathsf{poly}}</span>  on the same inputs;  <span class="math">E(\\mathscr{P}, \\mathsf{x}, \\omega)</span>  pairings and  <span class="math">\\mathbb{G}_t</span>  exponentiations, and running the verifier of  <span class="math">\\mathscr{S}</span>  with input  <span class="math">\\mathcal{O}</span> .</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Proof size: For  <span class="math">i \\in \\{1,2\\}</span> , Let  <span class="math">B_i(\\mathscr{P})</span>  be the number of messaged (f,i) sent during a protocol execution by an honest  <span class="math">P_{\\mathsf{poly}}</span> ; and assume this number doesn't depend on  <span class="math">(\\mathsf{x},\\omega)</span> . The final proof consists of  <span class="math">B_i(\\mathscr{P})</span>   <span class="math">\\mathbb{G}_i</span> -elements, and a proof of  <span class="math">\\mathscr S</span>  with input  <span class="math">\\mathcal O</span> .</li>
+    </ol></li>
+    </ul>
+
+    <p class="text-gray-300"><em>Proof.</em> Let  <span class="math">\\mathscr{S} = (\\mathsf{gen}, \\mathsf{com}, \\mathsf{open})</span> . Let  <span class="math">P_1, P_2</span>  be the sets of preprocessed polynomials in the definition of  <span class="math">\\mathscr{P}</span> . The SRS of  <span class="math">\\mathscr{P}^*</span>  consists of</p>
+
+    <p class="text-gray-300"><span class="math">$\\bullet \\ \\operatorname{srs} = \\left[1\\right]_1, \\ldots, \\left[x^{d-1}\\right]_1, \\left[1\\right]_2, \\ldots, \\left[x^{d-1}\\right]_2,</span>$</p>
+
+    <p class="text-gray-300"><span class="math">\\bullet \\ \\left\\{ [f(x)]_1 \\right\\}_{f \\in P_1}, \\left\\{ [h(x)]_2 \\right\\}_{h \\in P_2}</span></p>
+
+    <p class="text-gray-300">Given  <span class="math">\\mathscr{P}</span>  we describe  <span class="math">\\mathscr{P}^*</span> . <strong>P</strong> and <strong>V</strong> behave identically to  <span class="math">P_{\\mathsf{poly}}</span>  and  <span class="math">V_{\\mathsf{poly}}</span> , except in the following two cases.</p>
+
+    <p class="text-gray-300">&bull; Whenever  <span class="math">P_{\\mathsf{poly}}</span>  sends a message (f, i), for  <span class="math">f \\in \\mathbb{F}_{&lt; d}[X]</span>  and  <span class="math">i \\in \\{1, 2\\}</span>  to  <span class="math">\\mathcal{I}</span>  in  <span class="math">\\mathscr{P}</span> ;  <span class="math">\\mathbf{P}</span>  instead sends  <span class="math">[f]_i</span>  to  <span class="math">\\mathbf{V}</span> .</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Instead of making evaluation queries to I, V does the following.    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>For each evaluation query (f, z) made by Vpoly to I, V instead sends the query directly to P which responds with the alleged value s = f(z). Let O be the set of tuples ([f] 1 , z, s; f) obtained by all evaluation queries.</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>P and V engage in the open protocol with input O</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>If V outputs rej in this execution of open, it also outputs rej in P<sup>&lowast;</sup> .</li>
+    </ol></li>
+    </ul></li>
+      <li>When Vpoly makes a bi-linear query P i&isin;[k] cifi(X)hi(X) ? &equiv; 0, V instead checks the pairing equation</li>
+    </ul>
+
+    <p class="text-gray-300"><span class="math">$\\prod_{i \\in [k]} e([f_i(x)]_1, [h_i(x)]_2)^{c_i} = 1</span>$</p>
+
+    <p class="text-gray-300">and proceeds as if the query reply was true if and only if the pairing equation held.</p>
+
+    <p class="text-gray-300">Finally, V outputs acc or rej according to whether Vpoly did given the query replies it has obtained.</p>
+
+    <p class="text-gray-300">To prove the claim about knowledge soundness in the AGM we must describe the extractor E for the protocol P<sup>&lowast;</sup> . For this purpose, let E<sup>P</sup> be the extractor of the protocol P as guaranteed to exist from Definition <a href="#page-6-0">3.2,</a> and E<sup>S</sup> be the extractor for the Knowledge Soundness game of S as in Definition <a href="#page-4-0">2.3.</a></p>
+
+    <p class="text-gray-300">Now assume an algebraic adversary A is taking the role of P in P<sup>&lowast;</sup> .</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>When A sends a message [f] i to V then E receives the coefficients of f from A and adds f to a set A<sup>i</sup> .</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>At the end of the protocol E sends A1, A<sup>2</sup> and the random coins of V to EP, and receives &omega; in return.</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>E returns &omega;.</li>
+    </ol></li>
+    </ul>
+
+    <p class="text-gray-300">Note that we can think of A1, A<sup>2</sup> as random variables over the randomness of V, A and gen.</p>
+
+    <p class="text-gray-300">Now let us define three events (also over the randomness of V,A and gen):</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>We let A be the event that for some (cm, z, s; f) &isin; O f(z) &#824;= s, and at the same time VPC has output acc when open was run by P and V. By the KS of S , Pr(A) = negl(&lambda;).</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Let B be the event that for one of the bi-linear queries, we had Pcifi(X)hi(X) &#824;&equiv; 0; but Q i&isin;[k] e([fi(x)]<sup>1</sup> , [hi(x)]<sup>2</sup> ) <sup>c</sup><sup>i</sup> = 1. The latter is equivalent to Pcifi(x)hi(x) = 0, where x is the &quot;secret&quot; in srs. We show the probability of this event is negl(&lambda;): Note that in the above event we have that x is a root of P(X) := Pcifi(X)hi(X). Thus, we can define an algorithm A for finding x given srs that runs P<sup>&lowast;</sup> between A and V, and for each bi-linear query of V attempts to factor the corresponding P, and checks for each of its roots x &prime; if it's equal to x. The success probability of A is at least the probability of the event C, and thus must be negl(&lambda;) as otherwise we would contradict the d-DLOG assumption for (G1, G2).</li>
+    </ol></li>
+    </ul>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>We think of an adversary A<sup>P</sup> participating in P, where Vpoly is using the same randomness as V, and using the polynomials A1, A<sup>2</sup> as their messages to I. We define C to be the event that Vpoly outputs acc but (x, &omega;) &isin; R/ . By the KS of P, Pr(C) = negl(&lambda;).</li>
+    </ol>
+
+    <p class="text-gray-300">Now look at the event D that V outputs acc, but E failed in the sense that (x, &omega;) &isin; R/ . This is the event we need to show has probability negl(&lambda;). We claim that D &sub; A&cup;B &cup;C. If A, B didn't happen, it means that V and Vpoly have received exactly the same answers to their queries, and thus will have the same output. In particular, if we are outside of the event A&cup;B, V will output acc only when Vpoly does. In other words, D(A&cup;B) &sub; C.</p>
+
+    <p class="text-gray-300">Remark 3.5. The above also implies a similar transformation for protocols for languages rather than relations: Given a language L we can define a relation R = {(x, &omega;)|x &isin; L}. A sound protocol for L will be knowledge sound for R (e.g. by defining an extractor that always outputs &omega; = 0), and vice versa.</p>
+
+      <h3 id="sec-3.2" class="text-xl font-semibold mt-8">3.2 Conventions for describing BLIOPs and PIOPs</h3>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>When a d-BLIOP doesn't include any bi-linear checks, and accordingly A<sup>2</sup> is empty, we call it a d-polynomial IOP or d-PIOP. In this case we abbreviate &quot;Ppoly sends (f, 1)&quot; to &quot;Ppoly sends f&quot;.</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>When we say Vpoly &quot;checks the identity P(f1(X), . . . , fk(X))&quot;, for f<sup>i</sup> &isin; A1, we mean that Vpoly chooses a random &alpha; &isin; F, queries f1(&alpha;), . . . , fk(&alpha;), computes the value z = P(f1(&alpha;), . . . , fk(&alpha;)) and outputs rej if z &#824;= 0. Note that when analyzing soundness or knowledge-soundness of a d-BLIOP, we can assume the event that g(X) := P(f1(X), . . . , fk(X)) is not the zero-polynomial but g(x) = 0 didn't happen as it has negl(&lambda;) probability.</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>When we say Vpoly &quot;checks the identity P(f1(X), ..., fk(X)) on H&quot;, for f<sup>i</sup> &isin; A<sup>1</sup> and a set H &sub; F, we mean that Ppoly sends the quotient T(X) := P(f1(X), ..., fk(X))/ZH(X) and that Vpoly checks the identity P(f1(X), . . . , fk(X)) = ZH(X)T(X).</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>When describing the efficiency of specific PIOPs and BLIOPs in the rest of the paper, we implicitly use the compilation lemma above, and actually describe the efficiency of the resultant protocol against algebraic adversaries. For example, when we state a BLIOP &quot;requires t G1-scalar multiplications on input x&quot;, we are implicitly claiming D1(P, x) = t and therefore this is the number of scalar multiplications in the resultant protocol against algebraic adversaries.</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Later on, we allow a d-BLIOP to have an input polynomials from F&lt;d[X]. In this case, we assume those polynomials have been added to A1, similarly to the preprocessed polynomials, and thus can be used in the verifier identities. Such protocols are meant to be used as components. For a d-BLIOP to be usable in the transformation of Lemma <a href="#page-7-0">3.4,</a> P must explicitly send all polynomials besides the preprocessed ones to I.</li>
+    </ol></li>
+    </ul>
+
+    </section>
+
+    <section id="sec-4" class="mb-10">
+      <h2 class="text-2xl font-bold">4 Protocol for subtable extraction</h2>
+
+    <p class="text-gray-300">The protocol in the following section is similar to one implicit in Caulk+ [PK22]. Based on the innovation of Caulk, Caulk+ uses fractional decomposition to efficiently &quot;extract&quot; a vanishing polynomial  <span class="math">Z_I</span>  of a subset  <span class="math">I \\subset T</span>  from  <span class="math">Z_T</span> . In [PK22], the large set T is always a multiplicative subgroup. This is fine for their protocol, as there T represents indices of table values, rather than the table values themselves.</p>
+
+    <p class="text-gray-300">Our main innovation in this section is an algorithm that computes all subtable commitments of size |T|-1 efficiently - this insures that also when T is an arbitrary set, our preprocessing remains quasilinear rather than quadratic. This allows us later to work with vanishing polynomials representing the actual table values.</p>
+
+    <p class="text-gray-300"><strong>Lemma 4.1.</strong> Given  <span class="math">T \\subset \\mathbb{F}</span>  of size N and  <span class="math">\\{[x^i]_2\\}_{i \\in \\{0,\\dots,N-1\\}}</span>  there is an algorithm using  <span class="math">O(N\\log^2 N)</span>   <span class="math">\\mathbb{G}_2</span> -scalar multiplications and  <span class="math">\\mathbb{F}</span> -operations for computing the set of elements</p>
+
+    <p class="text-gray-300"><span class="math">\\mathcal{T} = \\left\\{ \\left[ Z_{T \\setminus \\{i\\}}(x) \\right]_2 \\right\\}_{i \\in T}</span></p>
+
+    <p class="text-gray-300"><em>Proof.</em> For notational simplicity, we assume throughout the proof that  <span class="math">T = \\{0, \\ldots, N-1\\}</span> . Denote by  <span class="math">\\overline{Z_{T\\setminus\\{i\\}}}</span>  the vector  <span class="math">[a_0 \\ a_1 \\ \\cdots a_{N-1}]</span>  (N columns, 1 row) of coefficients of the polynomial  <span class="math">Z_{T\\setminus\\{i\\}}</span> . Then consider a matrix whose rows are coefficients of  <span class="math">Z_{T\\setminus\\{i\\}}(X)</span> :</p>
+
+    <p class="text-gray-300"><span class="math">$Z_{T\\backslash *} = \\begin{bmatrix} \\overline{Z_{T\\backslash \\{0\\}}} \\\\ \\overline{Z_{T\\backslash \\{1\\}}} \\\\ \\cdots \\\\ \\overline{Z_{T\\backslash \\{N-1\\}}} \\end{bmatrix}</span>$</p>
+
+    <p class="text-gray-300">Thus we have to compute  <span class="math">\\mathcal{T} = Z_{T \\setminus *} \\times SRS</span>  where</p>
+
+    <p class="text-gray-300"><span class="math">$SRS = \\left[ \\left[ 1 \\right]_2, \\; \\left[ x \\right]_2, \\; \\cdots, \\; \\left[ x^{N-2} \\right]_2, \\; \\left[ x^{N-1} \\right]_2 \\right]^T</span>$</p>
+
+    <p class="text-gray-300">Before we describe an algorithm to compute  <span class="math">\\mathcal{T}</span> , we first introduce the ideas behind it:</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>For polynomials a(X), b(X) of degree N/2 and c(X) such that c(X) = a(X)b(X) with coefficient vectors  <span class="math">\\overline{c}, \\overline{a}, \\overline{b}</span>  it holds that</li>
+    </ol>
+
+    <p class="text-gray-300"><span class="math">$\\begin{bmatrix} c_0 &amp; c_1 &amp; c_2 &amp; \\cdots &amp; c_{N-2} &amp; c_{N-1} &amp; c_N \\end{bmatrix} = \\\\ = \\begin{bmatrix} a_0 &amp; a_1 &amp; a_2 &amp; \\cdots &amp; a_{N/2-1} &amp; a_{N/2} \\end{bmatrix} \\cdot \\begin{bmatrix} b_0 &amp; b_1 &amp; b_2 &amp; b_3 &amp; \\cdots &amp; b_{N/2} &amp; \\cdots &amp; 0 \\\\ 0 &amp; b_0 &amp; b_1 &amp; b_2 &amp; \\cdots &amp; b_{N/2-1} &amp; \\cdots &amp; 0 \\\\ 0 &amp; 0 &amp; b_0 &amp; b_1 &amp; \\cdots &amp; b_{N/2-2} &amp; \\cdots &amp; 0 \\\\ &amp; &amp; \\ddots &amp; &amp; &amp; &amp; &amp; \\\\ 0 &amp; 0 &amp; 0 &amp; 0 &amp; \\cdots &amp; b_2 &amp; \\cdots &amp; 0 \\\\ 0 &amp; 0 &amp; 0 &amp; 0 &amp; \\cdots &amp; b_1 &amp; \\cdots &amp; 0 \\\\ 0 &amp; 0 &amp; 0 &amp; 0 &amp; \\cdots &amp; b_0 &amp; \\cdots &amp; b_{N/2} \\end{bmatrix}</span>$</p>
+
+    <p class="text-gray-300">or in matrix form</p>
+
+    <p class="text-gray-300"><span class="math">$\\overline{c} = \\overline{a} \\times A_b</span>$</p>
+
+    <p class="text-gray-300">where  <span class="math">A_b</span>  is a matrix with N/2 + 1 rows and N + 1 columns.</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Let us split T into  <span class="math">T_1=\\{v_1,v_2,\\ldots,v_{N/2}\\}</span>  and  <span class="math">T_2=\\{v_{N/2+1},\\ldots,v_N\\}</span> . Then we have</li>
+    </ol>
+
+    <p class="text-gray-300"><span class="math">$Z_{T\\backslash *} = \\begin{bmatrix} \\overline{Z_{T_1\\backslash \\{0\\}} \\cdot Z_{T_2}} \\\\ \\overline{Z_{T_1\\backslash \\{1\\}} \\cdot Z_{T_2}} \\\\ \\cdots \\\\ \\overline{Z_{T_2\\backslash \\{n-1\\}} \\cdot Z_{T_1}} \\end{bmatrix} = \\begin{bmatrix} \\overline{Z_{T_1\\backslash \\{0\\}}} \\times A_{Z_{T_2}} \\\\ \\overline{Z_{T_1\\backslash \\{1\\}}} \\times A_{Z_{T_2}} \\\\ \\cdots \\\\ \\overline{Z_{T_2\\backslash \\{N-1\\}}} \\times A_{Z_{T_1}} \\end{bmatrix} = \\begin{bmatrix} Z_{T_1\\backslash *} \\times A_{Z_{T_2}} \\\\ Z_{T_2\\backslash *} \\times A_{Z_{T_1}} \\end{bmatrix}</span>$</p>
+
+    <p class="text-gray-300">Therefore</p>
+
+    <p class="text-gray-300"><span class="math">$Z_{T \\setminus *} \\times SRS = \\begin{bmatrix} Z_{T_1 \\setminus *} \\times A_{Z_{T_2}} \\times SRS \\\\ Z_{T_2 \\setminus *} \\times A_{Z_{T_1}} \\times SRS \\end{bmatrix}</span>$</p>
+
+    <p class="text-gray-300">Algorithm to compute  <span class="math">\\mathcal{T} = Z_{T \\setminus *} \\times SRS</span></p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Compute coefficients of  <span class="math">Z_T(X)</span>  and its tree of subproducts in  <span class="math">O(N \\log^2 N)</span>  time (see below).</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Split T into halves  <span class="math">T_1</span>  and  <span class="math">T_2</span> . Retrieve  <span class="math">Z_{T_2}(X)</span>  and  <span class="math">Z_{T_1}(X)</span> .</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Compute vectors  <span class="math">a_2 = A_{Z_{T_2}} \\times SRS</span>  and  <span class="math">a_1 = A_{Z_{T_1}} \\times SRS</span>  as Toeplitz matrix-vector multiplication in  <span class="math">O(N \\log N)</span>  time [GVL13].</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Apply algorithm recursively (go to step 2) to compute  <span class="math">b_1 = Z_{T_1 \\setminus *} \\times a_2</span>  and  <span class="math">b_2 = Z_{T_2 \\setminus *} \\times a_1</span> .</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Output concatenation of  <span class="math">b_1</span>  and  <span class="math">b_2</span> .</li>
+    </ol></li>
+    </ul>
+
+    <p class="text-gray-300">We have an equation for the complexity  <span class="math">C_1(N)</span>  of the algorithm:</p>
+
+    <p class="text-gray-300"><span class="math">$C_1(N) = 2C_1(N/2) + O(N \\log N)</span>$</p>
+
+    <p class="text-gray-300">which gives  <span class="math">C_1(N) = O(N \\log^2 N)</span> .</p>
+
+    <p class="text-gray-300">Algorithm to compute  <span class="math">Z_T</span>  and subproducts: This algorithm is a direct adaptation of [vzGG] (Alg. 10.3).</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Split T to  <span class="math">T_1</span>  and  <span class="math">T_2</span> .</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Compute  <span class="math">Z_{T_1}</span>  and  <span class="math">Z_{T_2}</span>  by two recursive calls to this algorithm with  <span class="math">T=T_1</span>  and  <span class="math">T=T_2</span> .</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Multiply  <span class="math">Z_{T_1}</span>  by  <span class="math">Z_{T_2}</span>  in  <span class="math">O(N \\log N)</span>  time using FFT.</li>
+    </ol></li>
+    </ul>
+
+    <p class="text-gray-300">We have</p>
+
+    <p class="text-gray-300"><span class="math">$C_2(N) = 2C_2(N/2) + O(N \\log N)</span>$</p>
+
+    <p class="text-gray-300">which gives  <span class="math">C_2(N) = O(N \\log^2 N)</span> . This ends the proof.</p>
+
+    <p class="text-gray-300">We proceed to describe the subtable extraction protocol.</p>
+
+    <h2 id="sec-misc-1" class="text-2xl font-bold"><span class="math">\\mathsf{IsVanishingSubtable}_\\mathsf{T}(g(X))</span></h2>
+
+    <p class="text-gray-300">Preprocessed polynomials: Let  <span class="math">P_1 = \\{Z_T\\}</span> . For each  <span class="math">i \\in T</span>  insert into  <span class="math">P_2</span>  the polynomial  <span class="math">Z_{T \\setminus \\{i\\}}</span> .</p>
+
+    <p class="text-gray-300">Inputs:  <span class="math">g(X) \\in \\mathbb{F}_{&lt; d}[X]</span> .</p>
+
+    <p class="text-gray-300">We assume <strong>P</strong> also has the  <span class="math">S \\subset T</span>  such that  <span class="math">g(X) = Z_S(X)</span> .</p>
+
+    <h4 id="sec-misc-2" class="text-lg font-semibold mt-6">Protocol:</h4>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>P<sub>poly</sub> sends  <span class="math">(Z_{T \\setminus S}, 2)</span>  to  <span class="math">\\mathcal{I}</span> .</li>
+      <li><span class="math">V_{poly}</span>  makes the bi-linear query  <span class="math">g \\cdot Z_{T \\setminus S} \\stackrel{?}{=} Z_T</span>  and outputs acc iff it returns true.</li>
+    </ul>
+
+    <p class="text-gray-300"><strong>Lemma 4.2.</strong> IsVanishingSubtable<sub>T</sub> is a d-BLIOP for the language  <span class="math">\\mathcal{L} := \\{g(X) \\in \\mathbb{F}_{\\leq d}[X] | g(X) = Z_S(X) \\text{ for some } S \\subseteq T\\}</span> . On input  <span class="math">g = Z_S</span> , the prover complexity is  <span class="math">O(m \\log^2 m)</span>   <span class="math">\\mathbb{F}</span> -operations and O(m)  <span class="math">\\mathbb{G}_1</span>  and  <span class="math">\\mathbb{G}_2</span> -scalar multiplications, where m = |S|. Denoting |T| = N, preprocessing takes  <span class="math">O(N \\log^2 N)</span>   <span class="math">\\mathbb{G}_2</span> -scalar multiplications and  <span class="math">\\mathbb{F}</span> -operations.</p>
+
+    <p class="text-gray-300"><em>Proof.</em> Correctness and soundness are obvious: The check in Step 4 passes if and only if g divides  <span class="math">Z_T</span>  which happens if and only if  <span class="math">g = Z_S</span>  for some  <span class="math">S \\subseteq T</span> .</p>
+
+    <p class="text-gray-300">We turn to analyzing efficiency. Denote m = |S|. The coefficients of polynomial  <span class="math">Z_S</span>  can be computed in time  <span class="math">O(m \\log^2 m)</span>  (Lemma 4.1). Then, as noted in [TAB<sup>+</sup>20, vzGG], it holds that</p>
+
+    <p class="text-gray-300"><span class="math">$Z_{T \\setminus S}(X) = \\sum_{i \\in S} c_i Z_{T \\setminus \\{i\\}}(X)</span>$</p>
+
+    <p class="text-gray-300">where coefficients  <span class="math">c_i</span>  are computed via the derivative  <span class="math">Z&#x27;_S(X)</span>  as  <span class="math">c_i = \\frac{1}{Z&#x27;_S(i)}</span>  in  <span class="math">O(m \\log^2 m)</span>  time. Thus we can compute  <span class="math">\\left[Z_{T \\setminus S}(x)\\right]_2</span>  with  <span class="math">m \\ \\mathbb{G}_2</span>  scalar multiplications from the elements of  <span class="math">P_2</span> .</p>
+
+    <p class="text-gray-300">We move to analyze the cost of preprocessing. We must compute given  <span class="math">\\left\\{\\left[x^j\\right]_2\\right\\}_{j\\in\\{0,\\dots,N-1\\}}</span>  the set</p>
+
+    <p class="text-gray-300"><span class="math">$\\mathcal{T} = \\left\\{ \\left[ Z_{T \\setminus \\{i\\}}(x) \\right]_2 \\right\\}_{i \\in T}.</span>$</p>
+
+    <p class="text-gray-300">The complexity of this is  <span class="math">O(N \\log^2 N)</span>   <span class="math">\\mathbb{G}_2</span> -scalar multiplications and  <span class="math">\\mathbb{F}</span> -operations according to Lemma 4.1.</p>
+
+    </section>
+
+    <section id="sec-5" class="mb-10">
+      <h2 class="text-2xl font-bold">5 A PIOP for lookups when given the table in vanishing form</h2>
+
+    <p class="text-gray-300">The previous section gives us a way to extract the vanishing polynomial of the subtable we are interested in. We could use a grand product argument to convert the subtable into evaluation/Lagrange form, and then use a lookup protocol like <strong>plookup</strong> that expects to have the table in this form. Instead, we give a protocol that works directly with the vanishing form of the table. In fact, it is considerably more efficient than <strong>plookup</strong> in group operations: It requires roughly 3m  <span class="math">\\mathbb{G}_1</span> -scalar multiplications, when both witness and table are of size m, as opposed to <strong>plookup</strong> requiring roughly 5m (Lemma 3.2 in [GW20]).</p>
+
+    <p class="text-gray-300">Unnormalized rational Lagrange functions Central to our analysis is the idea of defining &quot;rational Lagrange functions&quot; also for points outside of the relevant set. Roughly speaking, this allows us to check inclusion in the set by checking if we ended up with a polynomial or rational function. Details follow.</p>
+
+    <p class="text-gray-300">Fix a set  <span class="math">T \\subset \\mathbb{F}</span> . For  <span class="math">v \\in \\mathbb{F}</span> , we denote by  <span class="math">\\Gamma_v^T</span>  the rational function</p>
+
+    <p class="text-gray-300"><span class="math">$\\Gamma_v^T(X) := \\frac{Z_T(X)}{X-v}</span>$</p>
+
+    <p class="text-gray-300">Note that  <span class="math">\\Gamma_v^T</span>  is a polynomial exactly when  <span class="math">v \\in T</span> .</p>
+
+    <p class="text-gray-300">The following lemma allows us to reduce lookups to distinguishing between polynomials and rational functions.</p>
+
+    <p class="text-gray-300"><strong>Lemma 5.1.</strong> Fix any vectors  <span class="math">v, a \\in \\mathbb{F}^m</span> , and any subset  <span class="math">T \\subset \\mathbb{F}</span> . Define the rational function  <span class="math">R(X) := \\sum_{j \\in [m]} a_j \\Gamma_{v_j}^T(X)</span> .</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>If for all  <span class="math">j \\in [m]</span> ,  <span class="math">v_j \\in T</span> ; then  <span class="math">R(X) \\in \\mathbb{F}[X]</span> .</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Let  <span class="math">S \\subset [m]</span>  be the set of  <span class="math">j \\in [m]</span>  such that  <span class="math">v_j \\notin T</span> . Assume that  <span class="math">S \\neq \\emptyset</span> . Then if  <span class="math">\\sum_{j \\in S} a_j \\neq 0</span> ,  <span class="math">R(X) \\notin \\mathbb{F}[X]</span> . In particular, assuming  <span class="math">|\\operatorname{char}(\\mathbb{F})| &gt; m</span> ,  <span class="math">R(X) \\notin \\mathbb{F}[X]</span>  when taking  <span class="math">a_j = 1</span>  for all  <span class="math">j \\in [m]</span> .</li>
+    </ol></li>
+    </ul>
+
+    <p class="text-gray-300"><em>Proof.</em> The first item in the lemma is obvious - a sum of polynomials is a polynomial. We prove the second. Let S be as in the lemma statement and assume it is non-empty. Our task is essentially to show the rational functions do not &quot;cancel out&quot; and create a polynomial. Let  <span class="math">a \\in \\mathbb{F}^m</span>  be such that  <span class="math">\\sum_{j \\in S} a_j \\neq 0</span> . We can write</p>
+
+    <p class="text-gray-300"><span class="math">$R(X) = R_1(X) + R_2(X)</span>$</p>
+
+    <p class="text-gray-300">where  <span class="math">R_1(X) = \\sum_{j \\in [m] \\setminus S} \\Gamma_{v_j}^T(X)</span>  and  <span class="math">R_2(X) := \\sum_{j \\in S} a_j \\Gamma_{v_j}^T(X)</span> . Since  <span class="math">R_1</span>  is a polynomial, R is a polynomial if and only if  <span class="math">R_2</span>  is. If  <span class="math">R_2(X) \\in \\mathbb{F}[X]</span> , then we have the polynomial identity</p>
+
+    <p class="text-gray-300"><span class="math">Z_T(X)\\sum_{j\\in S}\\frac{a_j}{X-v_j}=R_2(X).</span></p>
+
+    <p class="text-gray-300">Multiplying denominators, we get</p>
+
+    <p class="text-gray-300"><span class="math">$Z_T(X)Q&#x27;(X) = R_2(X)Q(X)</span>$</p>
+
+    <p class="text-gray-300">where  <span class="math">Q&#x27;(X) := \\sum_{j \\in S} a_j \\prod_{i \\in S \\setminus \\{j\\}} (X - v_i)</span>  and  <span class="math">Q(X) := \\prod_{j \\in S} (X - v_j)</span> . We first rule out the possibility  <span class="math">R_2(X) \\equiv 0</span> . If this was the case, we would have  <span class="math">Q&#x27;(X) \\equiv 0</span> . However, the coefficient of  <span class="math">X^{|S|-1}</span>  in Q' is  <span class="math">\\sum_{j \\in S} a_j</span>  which we are assuming is non-zero.</p>
+
+    <p class="text-gray-300">So assume now that  <span class="math">R_2(X) \\not\\equiv 0</span> . Since none of the factors of Q divide  <span class="math">Z_T</span> , we must have Q|Q'. However, we have  <span class="math">\\deg(Q) = |S|</span>  and  <span class="math">\\deg(Q&#x27;) &lt; |S|</span> ; so Q doesn't divide Q'. Therefore,  <span class="math">R_2 \\notin \\mathbb{F}[X]</span> .</p>
+
+    <p class="text-gray-300">In summary,  <span class="math">R \\notin \\mathbb{F}[X]</span>  in this case, and the second item in the lemma holds.</p>
+
+    <p class="text-gray-300">The above lemma suggests the following protocol. Let  <span class="math">\\mathbb{H} = \\{\\mathbf{g}, \\mathbf{g}^2, \\dots, \\mathbf{g}^m = 1\\} \\subset \\mathbb{F}</span>  be a multiplicative subgroup of size m with generator  <span class="math">\\mathbf{g}</span> . Given a polynomial  <span class="math">\\phi(X) \\in \\mathbb{F}_{&lt; d}[X]</span> , a set  <span class="math">T \\subset \\mathbb{F}</span>  and  <span class="math">\\mathbb{H}</span> , define  <span class="math">R_{T,\\phi}(X) := \\sum_{v \\in \\mathbb{H}} \\Gamma_{\\phi(v)}^T(X)</span>  ( <span class="math">\\mathbb{H}</span>  is an implicit parameter in this definition). We commit to  <span class="math">R_{T,\\phi}(X)</span>  and prove the commitment is correct. This will show  <span class="math">R_{T,\\phi}</span>  is a polynomial and therefore  <span class="math">\\phi|_{\\mathbb{H}} \\subset T</span>  according to the lemma. To show the commitment is indeed to  <span class="math">R_{T,\\phi}(X)</span> , we open it at random  <span class="math">\\beta \\in \\mathbb{F}</span> , and compare the value to an independent evaluation of  <span class="math">R_{T,\\phi}(\\beta)</span> . To compute this independent evaluation of  <span class="math">R_{T,\\phi}(\\beta)</span>  we use a &quot;grand sum argument&quot; suggested by Justin Drake [Dra] similar to [GWC19]'s grand product argument.</p>
+
+    <p class="text-gray-300">Below we denote by  <span class="math">\\{L_i(X)\\}_{i\\in[m]}</span>  the Lagrange basis of  <span class="math">\\mathbb{H}</span> . That is,  <span class="math">L_i(X) \\in \\mathbb{F}_{&lt; m}[X]</span> ,  <span class="math">L_i(\\mathbf{g}^i) = 1</span>  and  <span class="math">L_i(\\mathbf{g}^j) = 0</span>  for  <span class="math">i \\neq j \\in [m]</span> . Given subsets  <span class="math">\\mathbb{H}, T \\subset \\mathbb{F}</span>  we define the following protocol.</p>
+
+    <h4 id="sec-misc-3" class="text-lg font-semibold mt-6"><span class="math">IsInVanishing_{\\mathbb{H},\\mathsf{T}}(\\phi)</span></h4>
+
+    <p class="text-gray-300">Preprocessed polynomials: Let  <span class="math">P_1 = \\{Z_T\\}</span></p>
+
+    <p class="text-gray-300">Inputs: A polynomial  <span class="math">\\phi \\in \\mathbb{F}_{\\leq d}[X]</span></p>
+
+    <h4 id="sec-misc-4" class="text-lg font-semibold mt-6">Protocol:</h4>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><span class="math">P_{poly}</span>  sends the polynomial  <span class="math">g(X) := R_{T,\\phi}(X)</span></li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><span class="math">V_{poly}</span>  chooses and sends random  <span class="math">\\beta \\in \\mathbb{F}</span>  and queries the value  <span class="math">z := g(\\beta)</span> .</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><span class="math">P_{poly}</span>  computes and sends a polynomial  <span class="math">Z(X) \\in \\mathbb{F}_{\\leq m}[X]</span>  defined as follows</li>
+    </ol>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>For each  <span class="math">i \\in [m], Z(\\mathbf{g}^i) = \\sum_{j=1}^i \\Gamma_{\\phi(\\mathbf{g}^j)}^T(\\beta)</span></li>
+    </ul></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><span class="math">V_{poly}</span>  queries the value  <span class="math">Z_T(\\beta)</span> .</li>
+    </ol></li>
+      <li><p class="text-gray-300">5.  <span class="math">V_{poly}</span>  checks on  <span class="math">\\mathbb{H}</span>  the identities</p></li>
+      <li><p class="text-gray-300">(a)  <span class="math">L_1(X)(Z(X)(\\beta \\phi(X)) Z_T(\\beta)) = 0.</span></p></li>
+      <li><p class="text-gray-300">(b)  <span class="math">(X \\mathbf{g}) \\left( Z(X) Z(X/\\mathbf{g}) \\frac{Z_T(\\beta)}{\\beta \\phi(X)} \\right) = 0.</span></p></li>
+      <li><p class="text-gray-300">(c)  <span class="math">L_m(X)(Z(X) z) = 0</span> .</p></li>
+    </ul>
+
+    <p class="text-gray-300"><strong>Theorem 5.2.</strong> IslnVanishing<sub>H,T</sub> is a d-PIOP for the language  <span class="math">\\mathcal{L} := \\{\\phi(X) \\in \\mathbb{F}_{&lt; d}[X] | \\phi|_{\\mathbb{H}} \\subset T\\}</span> . When  <span class="math">\\deg(\\phi), |T| = O(m)</span> , the prover runs in time  <span class="math">O(m \\log^2 m)</span> .</p>
+
+    <p class="text-gray-300">Additionally, after a preprocessing phase depending on T consisting of  <span class="math">O(m \\log^2 m)</span>   <span class="math">\\mathbb{G}_1</span> -scalar multiplications; the prover only requires  <span class="math">O(m \\log m)</span>   <span class="math">\\mathbb{F}</span> -operations and O(m)  <span class="math">\\mathbb{G}_1</span> -scalar multiplications.</p>
+
+    <p class="text-gray-300"><em>Proof.</em> Assume that  <span class="math">\\phi \\notin \\mathcal{L}</span> . We show that  <span class="math">V_{\\mathsf{poly}}</span>  accepts with  <span class="math">\\mathsf{negl}(\\lambda)</span>  probability. Let E be the event that  <span class="math">g(\\beta) = R_{T,\\phi}(\\beta)</span> . When  <span class="math">\\phi(X) \\notin \\mathcal{L}</span> , Lemma 5.1 implies that  <span class="math">R_{T,\\phi(X)} \\notin \\mathbb{F}[X]</span> . As  <span class="math">g \\in \\mathbb{F}_{\\leq d}[X]</span> , E has probability  <span class="math">\\mathsf{negl}(\\lambda)</span> .</p>
+
+    <p class="text-gray-300">Note that the checks in step 5 passing imply that  <span class="math">R_{T,\\phi}(\\beta) = g(\\beta)</span> :</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>The first check implies  <span class="math">Z(\\mathbf{g}) = \\Gamma_{\\phi(\\mathbf{g})}^T(\\beta)</span> .</li>
+      <li>The second check implies for  <span class="math">i \\in \\{2, ..., m\\}</span> ,  <span class="math">Z(\\mathbf{g}^i) = Z(\\mathbf{g}^{i-1}) + \\Gamma_{\\phi(\\mathbf{g}^i)}^T(\\beta)</span> . Thus, the two first checks together imply  <span class="math">Z(\\mathbf{g}^m) = \\sum_{i \\in [m]} \\Gamma_{\\phi(\\mathbf{g}^i)}^T(\\beta) = R_{T,\\phi}(\\beta)</span> .</li>
+      <li>The third check implies  <span class="math">Z(\\mathbf{g}^m) = z = g(\\beta)</span> . Hence together with the first two checks, we have  <span class="math">R_{T,\\phi}(\\beta) = g(\\beta)</span> .</li>
+    </ul>
+
+    <p class="text-gray-300">Thus,  <span class="math">V_{\\mathsf{poly}}</span>  outputs acc only during a  <span class="math">\\mathsf{negl}(\\lambda)</span>  probability event.</p>
+
+    <p class="text-gray-300">Turning to analyze the  <span class="math">P_{\\mathsf{poly}}</span> 's runtime, the heaviest component is computing the coefficients of  <span class="math">R_{T,\\phi}</span> . We show that we can derive  <span class="math">R_{T,\\phi}</span> 's values on T in time  <span class="math">O(m \\log^2 m)</span> . From there, we can interpolate the coefficients in time  <span class="math">O(m \\log^2 m)</span> . To do so,  <span class="math">P_{\\mathsf{poly}}</span>  computes in  <span class="math">O(m \\log m)</span>  time<sup>1</sup> the values  <span class="math">\\{a_v\\}_{v \\in T}</span>  where  <span class="math">a_v</span>  is defined to be the number of  <span class="math">x \\in \\mathbb{H}</span>  with  <span class="math">\\phi(x) = v</span> . We have that</p>
+
+    <p class="text-gray-300"><span class="math">$R_{T,\\phi}(X) = \\sum_{v \\in T} a_v \\Gamma_v^T(X).</span>$</p>
+
+    <p class="text-gray-300">Let  <span class="math">\\{\\tau_v(X)\\}_{v\\in T}</span>  be the Lagrange base of T. We have for  <span class="math">v\\in T</span> , that  <span class="math">\\Gamma_v^T(X)=c_v\\tau_v(X)</span>  for the constant  <span class="math">c_v:=\\prod_{v\\neq i\\in T}(v-i)</span> . Thus, we have that</p>
+
+    <p class="text-gray-300"><span class="math">$R_{T,\\phi}(X) = \\sum_{v \\in T} a_v c_v \\tau_v(X).</span>$</p>
+
+    <p class="text-gray-300">Equivalently,  <span class="math">R_{T,\\phi}(v) = a_v c_v</span>  for each  <span class="math">v \\in T</span> . Thus, once we obtain the values  <span class="math">\\{a_v c_v\\}_{v \\in T}</span> , we can interpolate the coefficients of  <span class="math">R_{T,\\phi}(X)</span>  in  <span class="math">O(m \\log^2 m)</span>  time.</p>
+
+    <p class="text-gray-300">For this purpose, similarly to the proof of Lemma 4.2, we note that the constants  <span class="math">\\{c_v\\}_{v\\in T}</span>  are precisely the evaluations of the derivative  <span class="math">Z&#x27;_T(X)</span>  of  <span class="math">Z_T(X)</span>  at T. Thus they can be computed in the required time bound.</p>
+
+    <p class="text-gray-300"><sup>&amp;</sup>lt;sup&gt;1</sup>In applications, this will typically be O(m) time as  <span class="math">\\phi</span>  is often given in evaluation form over  <span class="math">\\mathbb{H}</span> .</p>
+
+    <p class="text-gray-300">To prove the &quot;additionally&quot; part of the lemma, note that given T, we can precompute the elements  <span class="math">S_v := \\left[\\Gamma_v^T(x)\\right]_1</span>  for all  <span class="math">v \\in T</span>  using the algorithm of Lemma 4.1 in  <span class="math">O(m\\log^2 m)</span>  operations. Given those values we can compute the KZG-commitment  <span class="math">[R_{T,\\phi}(x)]_1</span>  as  <span class="math">\\sum_{v \\in T} a_v \\cdot S_v</span> , in O(m)  <span class="math">\\mathbb{G}_1</span> -scalar multiplications and  <span class="math">O(m\\log m)</span>   <span class="math">\\mathbb{F}</span> -operations. We also compute during preprocessing the values  <span class="math">\\{c_v\\}_{v \\in T}</span> . Given these values, we can similarly compute the KZG opening proof of  <span class="math">R_{T,\\phi}</span>  at  <span class="math">r \\in \\mathbb{F} \\setminus T</span>  to value  <span class="math">z := R_{T,\\phi}(r)</span>  as</p>
+
+    <p class="text-gray-300"><span class="math">$\\left[\\frac{R_{T,\\phi}(x)-z}{x-r}\\right]_1 = \\sum_{v \\in T} \\frac{a_v - z/c_v}{v-r} \\cdot S_v.</span>$</p>
+
+    <p class="text-gray-300"><span class="math">IsInVanishingTable_{\\mathbb{H},\\mathsf{T}}(\\phi)</span></p>
+
+    <p class="text-gray-300">Preprocessed polynomials:  <span class="math">P_1 = \\{Z_T\\}</span>  where</p>
+
+    <p class="text-gray-300">Input:  <span class="math">\\phi \\in \\mathbb{F}_{&lt; d}[X]</span></p>
+
+    <p class="text-gray-300">Protocol:</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><p class="text-gray-300">P<sub>poly</sub> computes the set  <span class="math">I \\subseteq T</span>  such that  <span class="math">I = \\phi|_{\\mathbb{H}}</span> .</p></li>
+      <li><p class="text-gray-300"><span class="math">P_{poly}</span>  computes and sends  <span class="math">Z_I</span> .</p></li>
+    </ol>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><span class="math">P_{poly}</span>  and  <span class="math">V_{poly}</span>  run IsVanishingSubtable<sub>T</sub> <span class="math">(Z_I)</span></li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><span class="math">P_{poly}</span>  and  <span class="math">V_{poly}</span>  run  <span class="math">IsInVanishing_{\\mathbb{H},Z_I}(\\phi)</span> .</li>
+    </ol></li>
+    </ul>
+
+    <p class="text-gray-300">Combining Lemma 4.2 and Theorem 5.2 we have</p>
+
+    <p class="text-gray-300"><strong>Theorem 6.1.</strong> Let N=|T|. IsInVanishingTable<sub> <span class="math">\\mathbb{H},\\mathsf{T}</span> </sub> is a d-BLIOP for the language  <span class="math">\\{\\phi\\in\\mathbb{F}_{&lt; d}[X]|\\phi|_{\\mathbb{H}}\\subset T\\}</span>  such that</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><span class="math">O(N \\log^2 N)</span>   <span class="math">\\mathbb{G}_2</span> -scalar multiplications and  <span class="math">\\mathbb{F}</span> -operations are required in preprocessing.</li>
+      <li>The prover requires  <span class="math">O(m \\log^2 m)</span>   <span class="math">\\mathbb{F}</span> -operations and O(m)  <span class="math">\\mathbb{G}_1</span>  and  <span class="math">\\mathbb{G}_2</span> -scalar multiplications.</li>
+    </ul>
+
+    <p class="text-gray-300"><em>Proof.</em> The only thing left to address given previous sections is that the computation of  <span class="math">Z_I</span>  in the second step can be done in time  <span class="math">O(m \\log^2 m)</span> . This, again, follows from algorithm 10.3 in [vzGG].</p>
+
+    <p class="text-gray-300">The first author thanks Aztec Network for support of this work. We thank Mary Maller and Arantxa Zapico for helpful discussions. The construction in Section <a href="#page-13-0">5</a> is inspired by a construction of Carla R\`afols and Arantxa Zapico for a similar problem. We thank Piotr Miko lajczyk and Yuncong Zhang for corrections.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><p class="text-gray-300">[BCG+18] J. Bootle, A. Cerulli, J. Groth, S. K. Jakobsen, and M. Maller. Arya: Nearly linear-time zero-knowledge proofs for correct program execution. In Thomas Peyrin and Steven D. Galbraith, editors, Advances in Cryptology - ASI-ACRYPT 2018 - 24th International Conference on the Theory and Application of Cryptology and Information Security, Brisbane, QLD, Australia, December 2-6, 2018, Proceedings, Part I, volume 11272 of Lecture Notes in Computer Science, pages 595&ndash;626. Springer, 2018.</p></li>
+      <li><p class="text-gray-300">[BGM17] S. Bowe, A. Gabizon, and I. Miers. Scalable multi-party computation for zksnark parameters in the random beacon model. Cryptology ePrint Archive, Report 2017/1050, 2017. <a href="https://eprint.iacr.org/2017/1050" target="_blank" rel="noopener noreferrer">https://eprint.iacr.org/2017/1050</a>.</p></li>
+      <li><p class="text-gray-300">[Dra] J. Drake. https://youtu.be/tbnaud5wgxm?t=2251.</p></li>
+      <li><p class="text-gray-300">[FKL18] G. Fuchsbauer, E. Kiltz, and J. Loss. The algebraic group model and its applications. In Advances in Cryptology - CRYPTO 2018 - 38th Annual International Cryptology Conference, Santa Barbara, CA, USA, August 19- 23, 2018, Proceedings, Part II, pages 33&ndash;62, 2018.</p></li>
+      <li><p class="text-gray-300">[Gro16] J. Groth. On the size of pairing-based non-interactive arguments. In Advances in Cryptology - EUROCRYPT 2016 - 35th Annual International Conference on the Theory and Applications of Cryptographic Techniques, Vienna, Austria, May 8-12, 2016, Proceedings, Part II, pages 305&ndash;326, 2016.</p></li>
+      <li><p class="text-gray-300">[GVL13] Gene H Golub and Charles F Van Loan. Matrix computations. JHU press, 2013.</p></li>
+      <li><p class="text-gray-300">[GW20] A. Gabizon and Z. J. Williamson. plookup: A simplified polynomial protocol for lookup tables. IACR Cryptol. ePrint Arch., page 315, 2020.</p></li>
+      <li><p class="text-gray-300">[GWC19] A. Gabizon, Z. J. Williamson, and O. Ciobotaru. PLONK: permutations over lagrange-bases for oecumenical noninteractive arguments of knowledge. IACR Cryptology ePrint Archive, 2019:953, 2019.</p></li>
+      <li><p class="text-gray-300">[KZG10] A. Kate, G. M. Zaverucha, and I. Goldberg. Constant-size commitments to polynomials and their applications. pages 177&ndash;194, 2010.</p></li>
+      <li><p class="text-gray-300">[PK22] J. Posen and A. A. Kattis. Caulk+: Table-independent lookup arguments. 2022.</p></li>
+      <li><p class="text-gray-300">[TAB+20] A. Tomescu, I. Abraham, V. Buterin, J. Drake, D. Feist, and D. Khovratovich. Aggregatable subvector commitments for stateless cryptocurrencies. In Clemente Galdi and Vladimir Kolesnikov, editors, Security and Cryptography for Networks - 12th International Conference, SCN 2020, Amalfi, Italy, September 14-16, 2020, Proceedings, volume 12238 of Lecture Notes in Computer Science, pages 45&ndash;64. Springer, 2020.</p></li>
+      <li><p class="text-gray-300">[vzGG] J. von zur Gathen and J. Gerhard. Fast polynomial evaluation and interpolation. Modern Computer Algebra, chapter 10, pages 295&ndash;310.</p></li>
+      <li><p class="text-gray-300">[ZBK+22] A. Zapico, V. Buterin, D. Khovratovich, M. Maller, A. Nitulescu, and M. Simkin. Caulk: Lookup arguments in sublinear time. IACR Cryptol. ePrint Arch., page 621, 2022.</p></li>
+    </ul>
+
+    </section>
+`;
+---
+
+<BaseLayout title="flookup: Fractional decomposition-based lookups in quasi-lin... (2022/1447)">
+  <article class="max-w-4xl mx-auto article-prose">
+    <nav class="mb-8">
+      <a href="/papers" class="text-blue-400 hover:text-blue-300">
+        &larr; Back to Papers
+      </a>
+    </nav>
+
+    <header class="mb-12">
+      <h1 class="text-3xl font-bold mb-4"
+        set:html={TITLE_HTML} />
+      <p class="text-gray-400 mb-2"
+        set:html={AUTHORS_HTML} />
+      <p class="text-gray-500 text-sm mb-4">
+        2022 &middot; eprint 2022/1447
+      </p>
+      <div class="flex gap-4 text-sm">
+        <a
+          href={EPRINT_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          class="text-blue-400 hover:text-blue-300"
+        >
+          Paper (eprint) &rarr;
+        </a>
+      </div>
+      <PaperDisclaimer eprintUrl={EPRINT_URL} />
+      <p class="mt-1 text-xs text-gray-600">
+        Converted with: {CRAWLER} &middot; {CONVERTED_DATE}
+      </p>
+    </header>
+
+    <nav id="toc" class="mb-10 p-6 rounded-lg" style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06);">
+      <h2 class="text-lg font-bold mb-4">Table of Contents</h2>
+      <ol class="space-y-1 text-sm text-gray-300
+        list-decimal list-inside">
+        <li><a href="#abstract" class="hover:text-white">Abstract</a></li>
+        <li>
+          <a href="#sec-1" class="hover:text-white">Introduction</a>
+          <ol class="ml-6 mt-1 space-y-1 list-decimal
+            list-inside text-gray-400">
+            <li><a href="#sec-1.1" class="hover:text-white">Usefulness of the result</a></li>
+            <li><a href="#sec-1.2" class="hover:text-white">Organization of the paper and recommended reading route</a></li>
+          </ol>
+        </li>
+        <li>
+          <a href="#sec-2" class="hover:text-white">Terminology and Conventions</a>
+          <ol class="ml-6 mt-1 space-y-1 list-decimal
+            list-inside text-gray-400">
+            <li><a href="#sec-2.1" class="hover:text-white">Analysis in the AGM model</a></li>
+            <li><a href="#sec-2.2" class="hover:text-white">KZG-like Polynomial commitment schemes</a></li>
+            <li><a href="#sec-2.3" class="hover:text-white">Other notational conventions</a></li>
+          </ol>
+        </li>
+        <li>
+          <a href="#sec-3" class="hover:text-white">Bi-linear polynomial IOPs</a>
+          <ol class="ml-6 mt-1 space-y-1 list-decimal
+            list-inside text-gray-400">
+            <li><a href="#sec-3.1" class="hover:text-white">From bi-linear polynomial IOPs to protocols against algebraic adversaries</a></li>
+            <li><a href="#sec-3.2" class="hover:text-white">Conventions for describing BLIOPs and PIOPs</a></li>
+          </ol>
+        </li>
+        <li><a href="#sec-4" class="hover:text-white">Protocol for subtable extraction</a></li>
+        <li><a href="#sec-5" class="hover:text-white">A PIOP for lookups when given the table in vanishing form</a></li>
+        <li><a href="#sec-6" class="hover:text-white">Putting it all together</a></li>
+      </ol>
+      <p class="text-xs text-gray-500 mt-4 mb-1 font-semibold">
+        Additional
+      </p>
+      <ul class="space-y-1 text-sm text-gray-400
+        list-disc list-inside">
+        <li><a href="#acknowledgements" class="hover:text-white">Acknowledgements</a></li>
+        <li><a href="#references" class="hover:text-white">References</a></li>
+      </ul>
+    </nav>
+
+
+    <Fragment set:html={CONTENT} />
+
+    <PaperHistory slug="flowup-fractional-decomposition-based-lookups-in-quasi-2022" />
+  </article>
+</BaseLayout>

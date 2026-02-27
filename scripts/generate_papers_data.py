@@ -20,6 +20,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 PAPERS_DIR = ROOT / "web" / "src" / "pages" / "papers"
 OUTPUT_DIR = ROOT / "web" / "src" / "data"
+DATA_DIR = ROOT / "data" / "markdown" / "eprint"
 
 # Regex patterns for extracting constants from .astro frontmatter
 RE_EPRINT = re.compile(r"eprint\.iacr\.org/(\d{4})/(\d+)")
@@ -28,6 +29,32 @@ RE_TITLE = re.compile(r"const TITLE_HTML\s*=\s*'(.+?)';")
 RE_AUTHORS = re.compile(r"const AUTHORS_HTML\s*=\s*'(.+?)';")
 # Fallback: extract title from <BaseLayout title="...">
 RE_LAYOUT_TITLE = re.compile(r'<BaseLayout\s+title="(.+?)"')
+
+
+def load_eprint_metadata() -> dict[str, dict]:
+    """Load eprint metadata from *_meta.json files.
+
+    Returns a dict mapping eprint ID (e.g. "2001/107") to the
+    eprint metadata dict (title, authors, category, keywords).
+    """
+    result: dict[str, dict] = {}
+    if not DATA_DIR.exists():
+        return result
+    for paper_dir in DATA_DIR.iterdir():
+        if not paper_dir.is_dir():
+            continue
+        meta_path = paper_dir / f"{paper_dir.name}_meta.json"
+        if not meta_path.exists():
+            continue
+        with open(meta_path, encoding="utf-8") as f:
+            meta = json.load(f)
+        eprint = meta.get("eprint")
+        if not eprint:
+            continue
+        year, number = paper_dir.name.split("_", 1)
+        eprint_id = f"{year}/{number}"
+        result[eprint_id] = eprint
+    return result
 
 
 def unescape_html(s: str) -> str:
@@ -105,6 +132,9 @@ def parse_astro_file(path: Path) -> dict | None:
 def main() -> None:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
+    eprint_meta = load_eprint_metadata()
+    print(f"Loaded eprint metadata for {len(eprint_meta)} papers")
+
     astro_files = sorted(PAPERS_DIR.glob("*.astro"))
     print(f"Found {len(astro_files)} .astro files in {PAPERS_DIR}")
 
@@ -114,8 +144,20 @@ def main() -> None:
         if entry is None:
             continue
 
-        entry["category"] = ""
-        entry["keywords"] = []
+        eprint_id = f"{entry['year']}/{entry['number']}"
+        eprint = eprint_meta.get(eprint_id)
+
+        if eprint:
+            if eprint.get("title") and entry["title"] == entry["slug"]:
+                entry["title"] = eprint["title"]
+            if eprint.get("authors") and not entry["authors"]:
+                names = [a["name"] for a in eprint["authors"]]
+                entry["authors"] = ", ".join(names)
+            entry["category"] = eprint.get("category", "")
+            entry["keywords"] = eprint.get("keywords", [])
+        else:
+            entry["category"] = ""
+            entry["keywords"] = []
 
         papers.append(entry)
 

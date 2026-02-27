@@ -1,0 +1,1889 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import PaperDisclaimer from '../../components/PaperDisclaimer.astro';
+import PaperHistory from '../../components/PaperHistory.astro';
+
+const EPRINT_URL = 'https://eprint.iacr.org/2022/840';
+const CRAWLER = 'marker';
+const CONVERTED_DATE = '2026-02-16';
+const TITLE_HTML = 'New Design Techniques for Efficient Arithmetization-Oriented Hash Functions:Anemoi Permutations and Jive Compression Mode';
+const AUTHORS_HTML = 'Cl&eacute;mence Bouvier, Pierre Briaud, Pyrros Chaidos, L&eacute;o Perrin, Robin Salen, Vesselin Velichkov, Danny Willems';
+
+const CONTENT = `    <section id="abstract" class="mb-10">
+      <h2 class="text-2xl font-bold">Abstract</h2>
+      <p class="text-gray-300">Advanced cryptographic protocols such as Zero-knowledge (ZK) proofs of knowledge, widely used in cryptocurrency applications such as Zcash, Monero, Filecoin, Tezos, Topos, demand new cryptographic hash functions that are efficient not only over the binary field $\\mathbb{F}_2$, but also over large fields of prime characteristic $\\mathbb{F}_p$. This need has been acknowledged by the wider community and new so-called Arithmetization-Oriented (AO) hash functions have been proposed, e.g. MiMC-Hash, Rescue-Prime, Poseidon, Reinforced Concrete and Griffin to name a few.
+
+In this paper we propose Anemoi: a new family of ZK-friendly permutations, that can be used to construct efficient hash functions and compression functions. The main features of these algorithms are that 1) they are designed to be efficient within multiple proof systems (e.g. Groth16, Plonk, etc.), 2) they contain dedicated functions optimised for specific applications (namely Merkle tree hashing and general purpose hashing), 3) they have highly competitive performance e.g. about a factor of 2 improvement over Poseidon and Rescue-Prime in terms of R1CS constraints, a 21%-35% Plonk constraint reduction over a highly optimized Poseidon implementation, as well as competitive native performance, running between two and three times faster than Rescue-Prime, depending on the field size.
+
+On the theoretical side, Anemoi pushes further the frontier in understanding the design principles that are truly entailed by arithmetization-orientation. In particular, we identify and exploit a previously unknown relationship between CCZ-equivalence and arithmetization-orientation. In addition, we propose two new standalone components that can be easily reused in new designs. One is a new S-box called Flystel, based on the well-studied butterfly structure, and the second is Jive -- a new mode of operation, inspired by the \`\`Latin dance&#x27;&#x27; symmetric algorithms (Salsa, ChaCha and derivatives). Our design is a conservative one: it uses a very classical Substitution-Permutation Network structure, and our detailed analysis of algebraic attacks highlights can be of independent interest.</p>
+      <p class="text-gray-300"><strong>Keywords:</strong> Anemoi &middot; Flystel &middot; Jive &middot; Arithmetization-oriented hash function &middot; CCZ-equivalence &middot; Plonk &middot; R1CS &middot; Merkle tree &middot; Zero-knowledge</p>
+    </section>
+
+    <section id="sec-1" class="mb-10">
+      <h2 class="text-2xl font-bold">1 Introduction</h2>
+
+    <p class="text-gray-300">In recent years we have seen a rapid surge of interest in the practical application of an old cryptographic construction known as zero-knowledge (ZK) proofs of knowledge. Such protocols allow a prover P to convince a verifier V that a certain statement x is true without revealing any additional information beyond the fact that it is verifiably correct. Such a piece of information may, for example, be that the result of a specified complex computation is 1. ZK proofs of knowledge, and more generally computational integrity proofs, allow V to verify that the result of the proven computation is correct without having to perform the computation herself. In fact, to verify correctness, V does not even need to know some of the details of the computation e.g., its intermediate values or any potentially secret inputs.</p>
+
+    <p class="text-gray-300">ZK proof systems have been introduced with the seminal work of Micali, Goldwasser and Rackoff back in 1989 [GMR89]. Traditionally, ZK protocols were deployed to allow a prover to keep some elements of a computation secret (e.g. a private key). More recently, the blockchain ecosystem has witnessed a rise of a category of ZK protocols, namely Succinct Non-Interactive Arguments of Knowledge (ZK-SNARKs), that leverages their succinctness property to relieve the verifier from the necessity to perform an expensive computation for which it may not have sufficient resources (in terms of space as well as computational power). The increased interest in such protocols today is largely driven by the latest advancements in digital currencies such as Bitcoin, Ethereum, Tezos, Topos, etc. In particular, ZK proofs make it possible to add privacy on a public blockchain (e.g. Zcash [BCG+14]) and to perform off-chain computation verifiable by network nodes with significantly limited resources, improving scalability.</p>
+
+    <p class="text-gray-300">The computation performed by P and verified by V in a ZK proof is often expressed as an arithmetic circuit composed of <em>gates</em> (algebraic operations e.g. multiplication or addition) connected by <em>wires</em>. The quantities that pass over the wires and are operated on by the gates are elements of a field  <span class="math">\\mathbb{F}_q</span> , where  <span class="math">q \\geq 2</span> .</p>
+
+    <p class="text-gray-300">Cryptographic hash functions are fundamental to practical ZK applications. They are often used for testing membership of some element(s) by means of Merkle trees. They can also be used as part of the ZK protocol itself e.g. by compressing multiple public inputs to a single hash. The modified protocol has a reduced input footprint, and the collision resistance of the hash function implies that security is not impacted. This is relevant in proof systems where the verifier's costs are proportional to the number of public inputs such as Groth16 [Gro16].</p>
+
+    <p class="text-gray-300">Modern cryptographic hash functions such as SHA2, SHA3 and BLAKE are designed over vector spaces of the binary field  <span class="math">\\mathbb{F}_2</span>  (i.e. they work over bits), while ZK protocols often operate over  <span class="math">\\mathbb{F}_q</span>  for a large q &ndash; usually a prime number. Therefore the efficient execution of ZK protocols in applications such as Zcash or Filecoin, that aim to process millions of transactions per day, imposes the need for new hash functions designed to be natively efficient in  <span class="math">\\mathbb{F}_q</span>  &ndash; the so-called Arithmetization-Oriented (AO) designs. The need for new arithmetization-oriented hash functions has been acknowledged by both researchers and engineers. As a result, the past couple of years have seen a surge of new proposals of hash functions that operate natively in  <span class="math">\\mathbb{F}_q</span>  for q prime, enabling efficient verification: MiMC-Hash [AGR<sup>+</sup>16], Poseidon [GKR<sup>+</sup>21], Rescue-Prime [AAB<sup>+</sup>20, SAD20] and Griffin [GHR<sup>+</sup>22] to name a few. Another line of work, including Reinforced Concrete [GKL<sup>+</sup>22] and Tip5 [SLST23], aims at exploiting lookup tables for more efficient native computations, while remaining practical inside proving systems. This additional requirement for lookup tables however reduces the compatibility of these hash functions within the space of proving systems, and hence limiting the chances of global adoption.</p>
+
+    <p class="text-gray-300">The Design Requirements of Arithmetization-Orientation. Building upon the works mentioned above as well as on the study of practical use cases, we have identified several</p>
+
+    <p class="text-gray-300">properties and design requirements that are expected from arithmetization-oriented hash functions.</p>
+
+    <p class="text-gray-300"><strong>Evaluation vs. Verification.</strong> The operation for which the efficiency of an AO primitive is the most crucial is not its <em>evaluation</em>, but rather its <em>verification</em>. Concretely, while the cost of evaluating = () given remains important, the step with the harshest constraints is a verification: given both and , checking if is indeed equal to () should be &quot;efficient&quot;, where the exact meaning of &quot;efficient&quot; depends on the proof system considered.</p>
+
+    <p class="text-gray-300"><strong>-to-1 compression.</strong> One of the main use cases for AO hash functions is in Merkle trees. In this context, rather than a hash function taking arbitrarily long inputs, protocol designers need a compression function mapping to finite field elements, meaning a compression factor of (often, = 2).</p>
+
+    <p class="text-gray-300"><strong>Primitive Factories.</strong> Rather than a single primitive or a small family of primitives (such as for instance AES-128/192/256), AO hash functions are defined for a vast number of field sizes and security levels. In fact, we would argue that algorithms like Poseidon are <em>primitive factories</em><a href="#page-2-0">1</a> , and that the task of the cryptanalysts is not only to assess whether specific instances are secure. Rather, it is to verify if such factories can return weak algorithms. Furthermore, since the protocols and arithmetization techniques vary, a factory should be able to output primitives optimized for each use case.</p>
+
+    <p class="text-gray-300"><strong>Performance constraints.</strong> The space and time complexities of proving systems depend on the size (i.e. the number of gates) of the arithmetized program that is being verified. Therefore, it is crucial for practical applications to minimize the number of gates. Otherwise, the cost of a proof may be so high as to make it unusable, as the computational cost of the prover is often the bottleneck of an entire system. AIR-based systems additionally require keeping constraint degrees low for practical applications. Furthermore, good conventional CPU architecture performance is still required as real world applications tend to use the primitives both outside and inside the circuit.</p>
+
+    <p class="text-gray-300"><strong>Outline of our Contributions.</strong> In this paper, we study each of the specific design requirements of AO, and provide new tools to satisfy them. First, we present the necessary theoretical background in Section <a href="#page-3-0">2.</a></p>
+
+    <p class="text-gray-300">We then present two building blocks. First, in Section <a href="#page-4-0">3</a> we introduce a new mode of operation, Jive, which turns a public permutation into a -to-1 compression function. Its main advantage is that it compresses an input consisting of words using a permutation operating on a state consisting of words, unlike the sponge structure which needs a bigger state in order to accomodate a capacity. Then, in Section <a href="#page-6-0">4,</a> we argue that the asymmetry between the evaluation and the verification of a function is best framed in terms of <em>CCZ-equivalence</em>. Using this insight, we propose a new family of non-linear components (S-boxes) operating on F 2 which we call Flystel: they allow both a high degree evaluation, and a low degree verification.</p>
+
+    <p class="text-gray-300">In a natural progression, we use the Flystel structure to construct a new permutation factory: Anemoi. It uses the familiar Substitution-Permutation Network (SPN) structure, which simplifies our security analysis. Its specification is given in Section <a href="#page-10-0">5,</a> and our initial cryptanalysis is presented in Section <a href="#page-16-0">6.</a> We combine all these results together in Section <a href="#page-19-0">7,</a> where we show via detailed benchmarks that combining the Anemoi permutations with the Jive mode of operation allows us to compete with the best AO hash functions in the literature in terms of performance, and to substantially outclass them in some contexts.</p>
+
+    <p class="text-gray-300"><sup>1</sup>&quot;Factory&quot; is here used in the sense of the programming design pattern, i.e. it is an object returning functions.</p>
+
+    <p class="text-gray-300">In particular, in the case of Plonk, we can compute more than twice as many hashes for a fixed number of constraints as is possible with Poseidon, which to the best of our knowledge was the best until now. We conclude the paper in Section 8.</p>
+
+    </section>
+
+    <section id="sec-2" class="mb-10">
+      <h2 class="text-2xl font-bold">2 Theoretical Background</h2>
+
+    <p class="text-gray-300">In what follows, q is an integer corresponding to the size of the field  <span class="math">\\mathbb{F}_q</span> , so that q=p for some prime number p or  <span class="math">q=2^n</span> . In particular, for binary fields  <span class="math">\\mathbb{F}_{2^n}</span> , we focus on the case where n is odd as it is harder to build low degree permutations otherwise. As usual, the symbols &quot;+&quot; and &quot;&times;&quot; denote respectively the addition and multiplication operations over  <span class="math">\\mathbb{F}_q</span> . We also let  <span class="math">m \\geq 1</span>  be an integer corresponding to the number of field elements we are operating on. We denote by  <span class="math">\\langle a,b \\rangle</span>  the usual scalar product of  <span class="math">a \\in \\mathbb{F}_q^m</span>  and  <span class="math">b \\in \\mathbb{F}_q^m</span>  which is such that  <span class="math">\\langle a,b \\rangle = \\sum_{i=0}^{m-1} a_i b_i</span> .</p>
+
+    <p class="text-gray-300">Below, we consider a function  <span class="math">F: \\mathbb{F}_q^m \\to \\mathbb{F}_q^m</span> , and recall some of the concepts behind the use and analysis of functions to design symmetric cryptographic primitives. We first recall the definitions of their differential and linear properties, and then that of CCZ-equivalence. While the latter has seldom been used in practice so far, it plays a crucial role in our work.</p>
+
+    <p class="text-gray-300"><strong>Differential Properties.</strong> The Difference Distribution Table (DDT) of function F is the two dimensional array  <span class="math">\\delta_F</span> , where  <span class="math">\\delta_F[a,b] = \\#\\{x \\in \\mathbb{F}_q^m | F(x+a) - F(x) = b\\}</span> . The maximum value of  <span class="math">\\delta_F[a,b]</span>  for  <span class="math">a \\neq 0</span>  is the differential uniformity [Nyb94] of F.</p>
+
+    <p class="text-gray-300"><strong>Linear Properties.</strong> While a general formula that works both when q is a power of two and a prime can be given, it is simpler to treat the two cases separately, especially given that the reader is probably familiar with the case of characteristic 2. If  <span class="math">q=2^n</span> , then the Walsh transform of the component  <span class="math">\\langle b,F\\rangle:\\mathbb{F}_q\\to\\mathbb{F}_2</span>  for any  <span class="math">b\\in\\mathbb{F}_q\\setminus\\{0\\}</span>  is  <span class="math">\\mathcal{W}_{\\langle b,F\\rangle}(a)=\\sum_{x\\in\\mathbb{F}_{2n}^m}(-1)^{\\langle a,x\\rangle+\\langle b,F(x)\\rangle}.</span></p>
+
+    <p class="text-gray-300">Otherwise, when q = p the Fourier transform of a function  <span class="math">f : \\mathbb{F}_p^m \\to \\mathbb{F}_p</span>  is the function  <span class="math">\\mathcal{W}_f : \\mathbb{F}_p^m \\to \\mathbb{C}</span>  such that</p>
+
+    <p class="text-gray-300"><span class="math">$\\mathcal{W}_f(a) = \\sum_{x \\in \\mathbb{F}_p^m} \\exp\\left(\\frac{2\\pi i \\left(\\langle a, x \\rangle - f(x)\\right)}{p}\\right).</span>$</p>
+
+    <p class="text-gray-300">For a vectorial function  <span class="math">F: \\mathbb{F}_q^m \\to \\mathbb{F}_q^m</span> , we consider the Fourier transform of each of its components, i.e. of all the linear combinations  <span class="math">\\langle b, F \\rangle</span> .</p>
+
+    <p class="text-gray-300"><strong>CCZ-Equivalence [CCZ98].</strong> Let  <span class="math">F: \\mathbb{F}_q^m \\to \\mathbb{F}_q^m</span>  and  <span class="math">G: \\mathbb{F}_q^m \\to \\mathbb{F}_q^m</span>  be two functions. They are <em>affine-equivalent</em> if there exist two affine permutations  <span class="math">\\mu: \\mathbb{F}_q^m \\to \\mathbb{F}_q^m</span>  and  <span class="math">\\eta: \\mathbb{F}_q^m \\to \\mathbb{F}_q^m</span>  such that  <span class="math">F = \\eta \\circ G \\circ \\mu</span> . This can alternatively be written using the <em>graphs</em> of these functions:</p>
+
+    <p class="text-gray-300"><span class="math">$\\Gamma_F = \\underbrace{\\left\\{ \\left( x, F(x) \\right) \\mid x \\in \\mathbb{F}_q^m \\right\\}}_{\\text{graph of } F} = \\mathcal{L}(\\Gamma_G) = \\left\\{ \\mathcal{L}\\left( x, G(x) \\right) \\mid x \\in \\mathbb{F}_q^m \\right\\},</span>$</p>
+
+    <p class="text-gray-300">where  <span class="math">\\mathcal{L}</span>  is the affine permutation defined by  <span class="math">\\mathcal{L}(x,y) = (\\eta(x), \\mu^{-1}(y))</span> . If we allow  <span class="math">\\mathcal{L}</span>  to be any affine permutation,<sup>2</sup> we obtain CCZ-equivalence.</p>
+
+    <p class="text-gray-300"><sup>&amp;</sup>lt;sup&gt;2</sup>Starting from a given function F, applying any affine permutation of  <span class="math">\\mathbb{F}_q^2</span>  to its graph is unlikely to yield the graph of another function G. Indeed, this would require that the left hand side of  <span class="math">\\mathcal{L}(x, F(x))</span>  takes all the values in  <span class="math">\\mathbb{F}_q</span>  as x goes through  <span class="math">\\mathbb{F}_q</span> , which is a priori not the case. A mapping  <span class="math">\\mathcal{L}</span>  that does yield the graph of another function is called &quot;admissible&quot;, a concept that was extensively studied in [CP19].</p>
+
+    <p class="text-gray-300"><strong>Definition 1</strong> (CCZ-Equivalence). Let F and G be functions of  <span class="math">\\mathbb{F}_q^m</span> . We say that they are CCZ-equivalent if there exists an affine permutation  <span class="math">\\mathcal{L}: (\\mathbb{F}_q^m)^2 \\to (\\mathbb{F}_q^m)^2</span>  such that  <span class="math">\\Gamma_F = \\mathcal{L}(\\Gamma_G)</span> .</p>
+
+    <p class="text-gray-300">An important property of CCZ-equivalence that is instrumental in our work is that it preserves the differential spectrum and the squared Walsh coefficients. In other words, all functions within the same CCZ-equivalence class share the same differential and linear properties and hence offer the same resilience against differential and linear attacks. It also means that it is sufficient to investigate these properties for a single member of a CCZ-equivalence class.</p>
+
+    <p class="text-gray-300">Another relevant property of CCZ-equivalence is that it does <em>not</em> preserve the degree of the function. In fact, there are known cases where a low-degree function is CCZ-equivalent to a higher-degree one. It is most notably the case of the so-called <em>butterfly structure</em>, originally introduced in [PUB16], and then further generalized in two different ways in [CDP17] and [LTYW18].</p>
+
+    </section>
+
+    <section id="sec-3" class="mb-10">
+      <h2 class="text-2xl font-bold">3 Modes of Operation</h2>
+
+    <p class="text-gray-300">In advanced protocols, hash functions are used for two purposes. The first is to emulate a random oracle, in particular to return the &quot;fingerprint&quot; or digest of a message of arbitrary length. The idea is that this fixed length digest is simpler to sign than the full message. The second use is as a compression function within a Merkle-tree: in this case, the hash function H is used to map two inputs of size n to an output of size n, and the security of the higher level scheme relies on its collision resistance. While a general purpose hash function like SHA-3 [BDPA13, Dwo15] or an arithmetization-friendly one can safely be used for both cases, for improved efficiency we chose a full hash function only for the random oracle case (Section 3.1). Indeed, the specific constraints of the Merkle-tree case can be satisfied more efficiently using a dedicated structure that remains permutation-based, and which we introduce in Section 3.2. SAGE implementations of both modes are provided in Appendix C.</p>
+
+      <h3 id="sec-3.1" class="text-xl font-semibold mt-8">3.1 Random Oracle: the Sponge Structure</h3>
+
+    <p class="text-gray-300">A random oracle is essentially a theoretical function that picks each output uniformly at random while keeping track of its previous outputs in order to remain a deterministic function. The sponge construction is a convenient approach to try to emulate this behaviour. First introduced by Bertoni et al. in [BDPVA07], this method was most notably used to design SHA-3. It is also how most arithmetization-oriented hash functions have been designed, e.g. Rescue-Prime, gMiMC-Hash, POSEIDON [GKR+21], and Reinforced Concrete. Such hash functions can easily be tweaked into eXtendable Output Functions (XOF) [Dwo15] should the need arise.</p>
+
+    <p class="text-gray-300">The overall principle of the sponge construction is best explained by the diagram in Figure 1. In this paper, we slightly modify the original approach to operate on elements of  <span class="math">\\mathbb{F}_q</span>  instead of  <span class="math">\\mathbb{F}_2</span> . The main component of the structure is a permutation P operating on  <span class="math">\\mathbb{F}_q^{r+c}</span> , where both r and c are non-zero integers. The rate r is the size of the outer part of the state, while c is the capacity and corresponds to the size of the inner part of the state. The digest consists of h elements of  <span class="math">\\mathbb{F}_q</span> . Then, to process a message m consisting of elements of  <span class="math">\\mathbb{F}_q</span> , we apply the following operations.</p>
+
+    <p class="text-gray-300"><strong>Padding.</strong> A basic padding works as follows: append  <span class="math">1 \\in \\mathbb{F}_q</span>  to the message followed by enough zeroes so that the total length is a multiple of r, and then divide the result into blocks  <span class="math">m_0,...,m_{\\ell-1}</span>  of r elements.</p>
+
+    <p class="text-gray-300">However, with this approach, we may end up using one more call to P in the case where the length of the message was already a multiple of r. A more efficient approach is presented in [Hir16]: if the length of the message is already a multiple of r, then we do not append further blocks to it. Instead, we add a constant to the capacity before squeezing. This is summarized as the addition of  <span class="math">\\sigma</span>  which is equal to 0 if the message length is not a multiple of r, and to 1 otherwise (see Figure 1). This variant also has the advantage of gracefully handling the case where r=1.</p>
+
+    <p class="text-gray-300"><strong>Absorption.</strong> For each message block  <span class="math">m_i</span> , we add it into the outer part of the state, and then apply P on the full state.</p>
+
+    <p class="text-gray-300"><strong>Squeezing.</strong> We extract  <span class="math">\\min(h, r)</span>  elements from the outer part of the state to generate the first elements of the digest. If h &gt; r, we apply P and then extract additional elements again from the rate registers, repeating this process until the desired digest length is reached.</p>
+
+    <p class="text-gray-300">    <img src="_page_5_Figure_3.jpeg" alt="" class="my-4 max-w-full" />
+</p>
+
+    <p class="text-gray-300">Figure 1: Sponge construction with the modification of [Hir16].</p>
+
+    <p class="text-gray-300">The security of a sponge rests on the properties of its permutation. Informally, the only special property of the permutation should be the existence of an efficient implementation. Its differential, linear, algebraic, etc. properties should be similar to those expected from a permutation picked uniformly at random from the set of all permutations.</p>
+
+    <p class="text-gray-300">Following a flat sponge claim [BDPVA07], the designers of such an algorithm can essentially claim that any attack against it will have a complexity equivalent to at least  <span class="math">q^{c/2}</span>  calls to the permutation (provided  <span class="math">h \\geq c</span> ,  <span class="math">h \\log_2 q \\geq 2s</span>  and  <span class="math">c \\log_2 q \\geq 2s</span> ). Thus, a flat sponge claim states that a sponge-based hash function provides  <span class="math">c |\\log_2 q|/2</span>  bits of security.</p>
+
+      <h3 id="sec-3.2" class="text-xl font-semibold mt-8">3.2 Merkle Compression Function: the Jive Mode</h3>
+
+    <p class="text-gray-300">One of the main use cases for an arithmetization-oriented hash function is as a compression function in a Merkle tree. This case could be easily handled using a regular hashing mode, such as the sponge structure discussed above. However, due to the specifics of this use case, it is possible to use a more efficient mode.</p>
+
+    <p class="text-gray-300">In a Merkle tree, the elements considered are in  <span class="math">\\mathbb{F}_q^m</span> , where m is chosen so that  <span class="math">m\\lfloor \\log_2 q \\rfloor \\geq n</span> , where n is the intended security level. We then need to hash two such elements to obtain a new one. As a consequence, unlike in the usual case, the input size is fixed, and is equal to exactly twice the digest size. Given a permutation of  <span class="math">(\\mathbb{F}_q^m)^2</span> , we can thus construct a suitable hash function by plugging it into the following mode.</p>
+
+    <p class="text-gray-300"><strong>Definition 2</strong> (Jive). Consider a permutation P defined as follows:</p>
+
+    <p class="text-gray-300"><span class="math">$P: \\begin{cases} (\\mathbb{F}_q^m)^b &amp; \\to (\\mathbb{F}_q^m)^b \\\\ (x_0, ..., x_{b-1}) &amp; \\mapsto (P_0(x_0, ..., x_{b-1}), ..., P_{b-1}(x_0, ..., x_{b-1})) \\end{cases},</span>$</p>
+
+    <p class="text-gray-300">so that it operates on bm elements of  <span class="math">\\mathbb{F}_q</span> , where  <span class="math">P_i(x_0,\\ldots,x_{b-1}):0\\leq i&lt; b</span>  refers to the i-th element in  <span class="math">\\mathbb{F}_q^m</span>  of the output  <span class="math">P(x_0,\\ldots,x_{b-1})</span>  from P. The Jive mode is built from P</p>
+
+    <p class="text-gray-300">    <img src="_page_6_Figure_0.jpeg" alt="" class="my-4 max-w-full" />
+</p>
+
+    <p class="text-gray-300">Figure 2: The Jive mode turning a permutation into a compression function.</p>
+
+    <p class="text-gray-300">by defining the following one way function  <span class="math">\\mathsf{Jive}_b(P)</span> :</p>
+
+    <p class="text-gray-300"><span class="math">$\\mathsf{Jive}_b(P) : \\begin{cases} (\\mathbb{F}_q^m)^b &amp; \\to \\mathbb{F}_q^m \\\\ (x_0,...,x_{b-1}) &amp; \\mapsto \\sum_{i=0}^{b-1} \\left(x_i + P_i(x_0,...,x_{b-1})\\right) \\end{cases}.</span>$</p>
+
+    <p class="text-gray-300">This approach can be seen as a permutation-based variant of the Davies-Meyer mode which, like the latter, crucially relies on a feedforward to ensure one-wayness. Alternatively, it can be interpreted as a truncated instance of the mode used in the &quot;Latin dance&quot; ciphers ChaCha and Salsa [Ber08], which is also based on a public permutation combined with a feedforward. Incidentally, we called it Jive after another Latin dance.</p>
+
+    <p class="text-gray-300">If used inside a Merkle tree, this mode can save some computations. For example, in the case where the fan-in b is equal to 2, a sponge would use a permutation operating on  <span class="math">(\\mathbb{F}_q^m)^3</span>  in order to leave one vector of  <span class="math">\\mathbb{F}_q^m</span>  free for the capacity. Using  <span class="math">\\mathsf{Jive}_2</span>  instead, we only need a permutation of  <span class="math">(\\mathbb{F}_q^m)^2</span> . The trade-off of course is that, unlike a sponge-based approach, the relevance of  <span class="math">\\mathsf{Jive}</span>  is restricted to some specific cases.</p>
+
+    </section>
+
+    <section id="sec-4" class="mb-10">
+      <h2 class="text-2xl font-bold">4 The Flystel Structure</h2>
+
+    <p class="text-gray-300">The performance metrics for AO algorithms differ substantially from the usual ones in symmetric cryptography. Neither the number of CPU cycles, nor the RAM consumption or the code size are the dominant factors. Pin-pointing exactly what is needed for the various protocols relying on arithmetization is a difficult task as each protocol has its own subtleties. For example, Plonk offers custom gates, which add complexity and a small overall overhead but can drastically decrease the cost of a particular operation, while other proof systems might not. On the other hand, additions are essentially free for R1CS or AIR, but not for Plonk. In addition, permutations of a sequence of elements are likely to incur cost in Plonk or AIR (via copy-constraints), but are free in R1CS.</p>
+
+    <p class="text-gray-300">In this section, we present a family of non-linear components that provide both the cryptographic properties that we need to ensure the security of our primitives, and efficient implementations across proof systems, which we call <em>open Flystel</em>. It uses&mdash;and highlights&mdash;the connection between arithmetization-orientation and CCZ-equivalence.</p>
+
+      <h3 id="sec-4.1" class="text-xl font-semibold mt-8">4.1 On CCZ-Equivalence and Arithmetization-Orientation</h3>
+
+    <p class="text-gray-300">In order for a function F to be arithmetization-oriented, it is necessary that verifying whether y = F(x) can be done using few multiplications in a specific field (whose size is dictated by other parts of the protocol). A very straight-forward initial approach is to use a function F which, itself, can be evaluated using a small number of multiplications: both</p>
+
+    <p class="text-gray-300">MiMC-Hash [AGR<sup>+</sup>16] and Poseidon [GKR<sup>+</sup>21] work in this way. The downside is that using a low degree round function may imply vulnerability to attacks based on polynomial solving, known as <em>algebraic attacks</em>. As a consequence, these algorithms have to use a high number of rounds.</p>
+
+    <p class="text-gray-300">A first breakthrough on this topic was made by the designers of Rescue&ndash;Prime [AAB+20]. They noticed that for a permutation F, checking if y = F(x) is equivalent to checking if  <span class="math">x = F^{-1}(y)</span> . It allows them to use both  <span class="math">x^{\\alpha}</span>  and  <span class="math">x^{1/\\alpha}</span>  (where  <span class="math">x \\mapsto x^{\\alpha}</span>  is a permutation of the field used) in their round function, with  <span class="math">\\alpha</span>  chosen so as to minimize the number of multiplications. It means that both can be verified using a (cheap) evaluation of  <span class="math">x^{\\alpha}</span> , and at the same time that the degree of the round function is very high as  <span class="math">1/\\alpha</span>  is a dense integer of  <span class="math">\\mathbb{Z}/(q-1)\\mathbb{Z}</span> . As a consequence, much fewer rounds are needed to prevent algebraic attacks.</p>
+
+    <p class="text-gray-300">We go further and propose a generalization of this insight. So far, we have seen that AO implies that a function or its inverse must have a particular implementation property (low number of multiplications). In fact, we claim the following:</p>
+
+    <p class="text-gray-300">A subfunction is arithmetization-oriented if it is <strong>CCZ-equivalent</strong> to a function that can be verified efficiently.</p>
+
+    <p class="text-gray-300">The above should come as no surprise since a permutation and its inverse are known to be CCZ-equivalent [BCP06]. In that sense, this insight is a natural generalization of the one of the Rescue-Prime designers.</p>
+
+    <p class="text-gray-300">Exploiting this idea is simple: suppose that F and G are such that  <span class="math">\\Gamma_F = \\mathcal{L}(\\Gamma_G)</span> , where  <span class="math">\\mathcal{L}: (x,y) \\mapsto (\\mathcal{L}_L(x,y), \\mathcal{L}_R(x,y))</span>  is an affine permutation, and where G can be efficiently verified. Then we can use F to construct an AO algorithm: checking if y = F(x) is equivalent to checking if  <span class="math">\\mathcal{L}_R(x,y) = G(\\mathcal{L}_L(x,y))</span> , which only involves G and linear functions: it is efficient.</p>
+
+    <p class="text-gray-300">Below, we present a first component based on this idea: the Flystel. Nevertheless, we hope that further research in discrete mathematics will lead to new non-linear components that are even better suited to this use case: we need more permutations with good cryptographic properties (including a high degree) that are CCZ-equivalent to functions with a low number of multiplications.</p>
+
+      <h3 id="sec-4.2" class="text-xl font-semibold mt-8">4.2 High Level View of the Flystel Structure</h3>
+
+    <p class="text-gray-300">Let  <span class="math">Q_{\\gamma}: \\mathbb{F}_q \\to \\mathbb{F}_q</span>  and  <span class="math">Q_{\\delta}: \\mathbb{F}_q \\to \\mathbb{F}_q</span>  be two quadratic functions, and let  <span class="math">E: \\mathbb{F}_q \\to \\mathbb{F}_q</span>  be a permutation. Then, the <em>Flystel</em> is a pair of functions relying on  <span class="math">Q_{\\gamma}, Q_{\\delta}</span>  and E. The <em>open Flystel</em> is the permutation of  <span class="math">(\\mathbb{F}_q)^2</span>  obtained using a 3-round Feistel network with  <span class="math">Q_{\\gamma}, E^{-1}</span> , and  <span class="math">Q_{\\delta}</span>  as round functions, as depicted in Figure 3a. It is denoted  <span class="math">\\mathcal{H}</span> , so that  <span class="math">\\mathcal{H}(x,y)=(u,v)</span>  is evaluated as follows:</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><span class="math">$x \\leftarrow x - Q_{\\gamma}(y)</span>$
+, 3.  <span class="math">x \\leftarrow x + Q_{\\delta}(y)</span> ,</li>
+      <li><span class="math">y \\leftarrow y - E^{-1}(x)</span> , 4.  <span class="math">u \\leftarrow x</span> ,  <span class="math">v \\leftarrow y</span> .</li>
+    </ol>
+
+    <p class="text-gray-300">We define by  <span class="math">\\mathcal{V}: (y,v) \\mapsto (R_{\\gamma}(y,v), R_{\\delta}(y,v))</span>  the closed Flystel function over  <span class="math">\\mathbb{F}_q^2</span> , where  <span class="math">R_{\\gamma}: (y,v) \\mapsto E(y-v) + Q_{\\gamma}(y)</span>  and  <span class="math">R_{\\delta}: (y,v) \\mapsto E(y-v) + Q_{\\delta}(v)</span> .</p>
+
+    <p class="text-gray-300">Our terminology of &quot;open&quot; for the permutation and &quot;closed&quot; for the function is based on the relation between the Flystel and the butterfly structure, as detailed later. In particular, the two Flystels are linked in the following way.</p>
+
+    <p class="text-gray-300"><strong>Proposition 1.</strong> For a given tuple  <span class="math">(Q_{\\gamma}, E, Q_{\\delta})</span> , the corresponding closed and open Flystel are CCZ-equivalent.</p>
+
+    <p class="text-gray-300">    <img src="_page_8_Figure_0.jpeg" alt="" class="my-4 max-w-full" />
+</p>
+
+    <p class="text-gray-300">Figure 3: The Flystel structure (both variants are CCZ-equivalent).</p>
+
+    <p class="text-gray-300"><em>Proof.</em> Let  <span class="math">(u, v) = \\mathcal{H}(x, y)</span> . Then it holds that  <span class="math">v = y - E^{-1}(x - Q_{\\gamma}(y))</span> , so that we can write  <span class="math">x = E(y - v) + Q_{\\gamma}(y)</span> . Similarly, we have that  <span class="math">u = Q_{\\delta}(v) + E(y - v)</span> . Consider now the set  <span class="math">\\Gamma_{\\mathcal{H}} = \\{((x, y), \\mathcal{H}(x, y)), (x, y) \\in \\mathbb{F}_q^2\\}</span> . By definition, we have</p>
+
+    <p class="text-gray-300"><span class="math">$\\Gamma_{\\mathcal{H}} = \\{((x,y),(u,v)),(x,y) \\in \\mathbb{F}_q^2\\} = \\mathcal{L}(\\{((y,v),(x,u)),(x,y) \\in \\mathbb{F}_q^2\\})</span>$</p>
+
+    <p class="text-gray-300">where  <span class="math">\\mathcal{L}</span>  is the permutation of  <span class="math">(\\mathbb{F}_q^2)^2</span>  such that  <span class="math">\\mathcal{L}^{-1}((x,y),(u,v))=((y,v),(x,u))</span> , which is linear. Using the equalities we established at the beginning of this proof, we can write:</p>
+
+    <p class="text-gray-300"><span class="math">$\\mathcal{L}^{-1}(\\Gamma_{\\mathcal{H}}) = \\left\\{ ((y, v), (x, u)), (x, y) \\in \\mathbb{F}_q^2 \\right\\}</span>$</p>
+
+    <p class="text-gray-300"><span class="math">$= \\left\\{ ((y, v), (Q_{\\gamma}(y) + E(y - v), Q_{\\delta}(v) + E(y - v)) \\right\\}, (y, v) \\in \\mathbb{F}_q^2 \\right\\} = \\Gamma_{\\mathcal{V}}.</span>$</p>
+
+    <p class="text-gray-300">We deduce that  <span class="math">\\Gamma_{\\mathcal{H}} = \\mathcal{L}(\\Gamma_{\\mathcal{V}})</span> , so the two functions are CCZ-equivalent.</p>
+
+    <p class="text-gray-300">This simple proposition has two crucial corollaries on which we will rely in the remainder of the paper. The first is that it suffices to investigate the differential and linear properties of the closed butterfly to obtain results on the open one.</p>
+
+    <p class="text-gray-300"><strong>Corollary 1.</strong> The open and closed Flystel structures have identical differential and linear properties. More precisely, the set of the values in the DDT of both functions is the same, and the set of the square of the Fourier coefficients of the components is also the same.</p>
+
+    <p class="text-gray-300">The second corollary is the key reason behind the relevance of the Flystel structure in the arithmetization-oriented setting and is stated below.</p>
+
+    <p class="text-gray-300">Corollary 2. Verifying that  <span class="math">(u, v) = \\mathcal{H}(x, y)</span>  is equivalent to verifying that  <span class="math">(x, u) = \\mathcal{V}(y, v)</span> .</p>
+
+    <p class="text-gray-300">Indeed, Corollary 2 means that it is possible to encode the verification of the evaluation of the high degree open Flystel using the polynomial representation of the low degree closed Flystel.</p>
+
+    <p class="text-gray-300">In characteristic 2, quadratic mappings correspond to different exponents than in the general case. As a consequence, when giving concrete instantiations of the Flystel structure, we need to treat this case separately. To highlight the difference, we call  <span class="math">Flystel_2</span>  the instances used in characteristic 2, and  <span class="math">Flystel_p</span>  the instances used in odd prime characteristic.</p>
+
+      <h3 id="sec-4.3" class="text-xl font-semibold mt-8">4.3 Characteristic 2</h3>
+
+    <p class="text-gray-300">Let  <span class="math">q=2^n</span> , with n odd. Furthermore, let  <span class="math">\\alpha=2^i+1</span>  be such that  <span class="math">\\gcd(i,n)=1</span> , so that  <span class="math">x\\mapsto x^\\alpha</span>  is a permutation of  <span class="math">\\mathbb{F}_q</span> . In this case, the Flystel<sub>2</sub> structure with  <span class="math">Q_\\gamma(x)=Q_\\delta(x)=\\beta x^\\alpha</span> , with  <span class="math">\\beta\\neq 0</span> , and with  <span class="math">E(x)=x^\\alpha</span>  is a degenerate generalized butterfly structure. It was studied in [LTYW18] as a generalization of the structure</p>
+
+    <p class="text-gray-300">introduced in [PUB16], which was also refined in [CDP17]. We recall the following particular case<sup>3</sup> in Theorems 3, 4 and 5 of [LTYW18].</p>
+
+    <p class="text-gray-300"><strong>Proposition 2</strong> ([LTYW18]). Let  <span class="math">q = 2^n</span>  with n odd,  <span class="math">E = x \\mapsto x^{\\alpha}</span> , where  <span class="math">\\alpha = 2^i + 1</span>  is such that gcd(i, n) = 1, and  <span class="math">Q_{\\gamma} = Q_{\\delta} = x \\mapsto \\beta x^{\\alpha}</span> , where  <span class="math">\\beta \\neq 0</span>  Then the Flystel<sub>2</sub> structures defined by the functions  <span class="math">Q_{\\gamma}, E</span> , and  <span class="math">Q_{\\delta}</span>  have differential uniformity equal to 4, linearity equal to  <span class="math">2^{n+1}</span> , and algebraic degree of n.</p>
+
+    <p class="text-gray-300">In practice, to prevent some attacks (see Section A.3), we instead use  <span class="math">Q_{\\gamma}(x) = \\beta x^3 + \\gamma</span>  and  <span class="math">Q_{\\delta}(x) = \\beta x^3 + \\delta</span> , where  <span class="math">\\beta, \\gamma, \\delta</span>  are constants in  <span class="math">\\mathbb{F}_q</span>  such that  <span class="math">\\gamma \\neq \\delta</span>  and  <span class="math">\\beta \\neq 0</span> . The particular values of those constants are not essential to the properties of the construction as long as the noted requirements are satisfied. For simplicity we set  <span class="math">\\beta = g, \\gamma = g^{-1}</span>  and  <span class="math">\\delta = 0</span>  with g being a generator of the multiplicative subgroup of the field  <span class="math">\\mathbb{F}_q</span> . This results in  <span class="math">Q_{\\gamma}: x \\mapsto gx^3 + g^{-1}</span>  and  <span class="math">Q_{\\delta}: x \\mapsto gx^3</span>  as depicted in Figure 4a.</p>
+
+    <p class="text-gray-300">    <img src="_page_9_Figure_3.jpeg" alt="" class="my-4 max-w-full" />
+</p>
+
+    <p class="text-gray-300">    <img src="_page_9_Figure_4.jpeg" alt="" class="my-4 max-w-full" />
+</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>(a) Flystel<sub>2</sub> in characteristic 2.</li>
+      <li>(b) Flystel, in odd prime characteristic.</li>
+    </ul>
+
+    <p class="text-gray-300"><strong>Figure 4:</strong> The two variants of the open Flystel, mapping (x, y) to (u, v).</p>
+
+      <h3 id="sec-4.4" class="text-xl font-semibold mt-8">4.4 Odd Characteristic</h3>
+
+    <p class="text-gray-300">When q=p, the three functions of the Flystel<sub>p</sub> structure are resp.:  <span class="math">Q_{\\gamma}: x \\mapsto gx^2 + g^{-1}</span> ,  <span class="math">E: x \\mapsto x^{\\alpha}</span> , and  <span class="math">Q_{\\delta}: x \\mapsto gx^2</span> , where  <span class="math">\\alpha, g \\in \\mathbb{F}_q</span>  and g again is a generator of the multiplicative subgroup of the field  <span class="math">\\mathbb{F}_q</span> .</p>
+
+    <p class="text-gray-300"><strong>Differential Properties.</strong> Such structures have a low differential uniformity.</p>
+
+    <p class="text-gray-300"><strong>Proposition 3.</strong> Let q=p be a prime number,  <span class="math">E=x\\mapsto x^{\\alpha}</span> , where  <span class="math">\\alpha</span>  is such that  <span class="math">\\gcd(\\alpha,p-1)=1</span> , and  <span class="math">Q_{\\gamma}=x\\mapsto gx^2+g^{-1}</span> ,  <span class="math">Q_{\\delta}=x\\mapsto gx^2</span> . Then the Flystel<sub>p</sub> structures defined by the functions  <span class="math">Q_{\\gamma}</span> , E, and  <span class="math">Q_{\\delta}</span>  has a differential uniformity equal to  <span class="math">\\alpha-1</span> .</p>
+
+    <p class="text-gray-300"><em>Proof.</em> Let a, b, c, d be elements of  <span class="math">\\mathbb{F}_p</span>  such that  <span class="math">(a, b) \\neq (0, 0)</span> . To investigate the differential uniformity of  <span class="math">\\mathcal{V}: (y, v) \\mapsto (R_{\\gamma}(y, v), R_{\\delta}(y, v))</span> , we look at the number of solutions (y, v) of (1).</p>
+
+    <p class="text-gray-300">
+$$\\begin{cases}
+R_{\\gamma}(y+a,v+b) - R_{\\gamma}(y,v) = c \\
+R_{\\delta}(y+a,v+b) - R_{\\delta}(y,v) = d
+\\end{cases}$$
+(1)</p>
+
+    <p class="text-gray-300"><sup>&amp;</sup>lt;sup&gt;3</sup>The result of Li et al. covers all generalized butterflies, not just those corresponding to Flystel structures. In a Flystel, the first parameter (which we will denote a) is set to 1. Their results for the differential uniformity and the linearity hold only when  <span class="math">\\beta \\neq (1+a)^{\\alpha}</span> , meaning that we simply need to make sure that  <span class="math">\\beta \\neq 0</span> . For the algebraic degree, the condition they give in their Theorem 5 to have a degree equal to n+1 degenerates into  <span class="math">\\beta^{2^{i+1}} = \\beta^{2^{i}+1}</span> , which is never the case as i&gt;0.</p>
+
+    <p class="text-gray-300">We have:</p>
+
+    <p class="text-gray-300"><span class="math">$\\begin{cases} (y+a-(v+b))^{\\alpha}+g^{-1}+g(y+a)^2-(y-v)^{\\alpha}-g^{-1}-gy^2 &amp; = c\\\\ (y+a-(v+b))^{\\alpha}+g(v+b)^2-(y-v)^{\\alpha}-gv^2 &amp; = d \\; . \\end{cases}</span>$</p>
+
+    <p class="text-gray-300">We get:</p>
+
+    <p class="text-gray-300"><span class="math">$c - d = g(y+a)^{2} - gy^{2} + gv^{2} - g(v+b)^{2},</span>$</p>
+
+    <p class="text-gray-300">which is equivalent to:</p>
+
+    <p class="text-gray-300"><span class="math">$v = (2b)^{-1} (2ay + a^2 - b^2 - g^{-1}(c - d))</span>$
+.</p>
+
+    <p class="text-gray-300">As a consequence, we know that can be expressed as an affine polynomial in . We then have that the first equation is an equation in of degree &minus; 1 (since the terms cancel out), and thus has at most &minus; 1 solutions for . In the end, we have at most &minus; 1 solutions (<em>,</em> ) for the system (since for each value of , there is one ).</p>
+
+    <p class="text-gray-300"><strong>Linear Properties.</strong> We do not have a theoretical bound on the correlation for the Flystel<sup>p</sup> structure, but we provide informal arguments supporting its security against linear cryptanalysis attacks. Notice first that Flystel<sup>p</sup> is defined by the functions <em>,</em> &minus;<sup>1</sup> and , where and are quadratic. Given that the function 2 is bent (i.e. its correlations are the lowest possible), we argue that a linear trail which would activate just one of these functions should be expected to have a very low correlation. In Appendix <a href="#page-29-0">A,</a> we give a conjecture supported by experimental results, stating that the linearity of Flystel<sup>p</sup> is lower than log .</p>
+
+    <p class="text-gray-300"><strong>Invariant Subset.</strong> Regardless of the characteristic, it holds that &#8459; (()<em>,</em> ) = (()<em>,</em> ). Thus, setting = would mean that Flystel is the identity over a subset of size , which is why we use constant additions to ensure =&#824; . Nevertheless, this only ensures that the open Flystel is a translation over the set {(()<em>,</em> )<em>,</em>  &isin; F}, which remains cryptographically weak. While a priori undesirable, the impact of this property can be mitigated. First, the subset over which it has a simple expression is not an affine space. Second, as we show in Appendix <a href="#page-30-0">A.3,</a> the propagation of such patterns can be broken via the linear layer.</p>
+
+    <p class="text-gray-300"><strong>Degree.</strong> Given the structure of the open Flystelp, its degree is lower bounded by the inverse of modulo &minus; 1, a quantity which in practice corresponds to a dense integer of Z<em>/</em>(&minus;1)Z. We deduce that one call to the open Flystel<sup>p</sup> is likely to be of maximum degree and is therefore sufficient to thwart attacks that exploit the low degree of a component, such as higher order differentials.</p>
+
+      <h3 id="sec-4.5" class="text-xl font-semibold mt-8"><strong>4.5 Implementation Aspects</strong></h3>
+
+    <p class="text-gray-300">For direct computation, or witness calculation, one can simply implement the open Flystel. For the verification however, we also have the option to use the closed Flystel structure, since there is no requirement for the various verification steps to be performed in a particular order as long as consistency is enforced. In this case, the cost is one multiplication for and , and as many as are needed to compute &#8614;&rarr; . This can be implemented using a technique slightly more subtle than basic fast exponentiation, instead relying on addition chains as discussed for example in <a href="#page-24-2">[BC90]</a>. Good addition chains can be found using the addChain tool <a href="#page-27-5">[McL21]</a>. They are also particularly useful for implementing &#8614;&rarr; <sup>1</sup><em>/</em>.</p>
+
+    </section>
+
+    <section id="sec-5" class="mb-10">
+      <h2 class="text-2xl font-bold"><strong>5 Description of Anemoi</strong></h2>
+
+    <p class="text-gray-300">In this section, we present new primitives, and the way to deterministically construct all of their variants. At their core are the Anemoi permutations, that operate on F 2<em>&#8467;</em> for any field size q that is either a prime number or a power of two, and for positive integer  <span class="math">\\ell</span> . The round function of these permutations is presented in Section 5.1: for each value of  <span class="math">\\ell</span> , and for each value of q, there is a unique round function.</p>
+
+    <p class="text-gray-300">In order to build the primitives themselves, we need also to consider the security level required as it will influence the number of rounds of the permutation (note that the security level will also influence the size of the internal state). The procedures to follow to define higher level algorithms are described in Section 5.2. We then provide some specific instances in Section 5.3.</p>
+
+      <h3 id="sec-5.1" class="text-xl font-semibold mt-8">5.1 Round Function</h3>
+
+    <p class="text-gray-300">A round function is a permutation of  <span class="math">\\mathbb{F}_q^{2\\ell}</span> , where  <span class="math">\\ell &gt; 0</span>  is an integer, and where q is either a prime number or a power of 2 with a bitlength of at least 10.4</p>
+
+    <p class="text-gray-300">In order to define it, we organize its state into a rectangle of elements of  <span class="math">\\mathbb{F}_q</span>  of dimension  <span class="math">2 \\times \\ell</span> . The elements in the first row are denoted  <span class="math">(x_0,...,x_{\\ell-1})</span> , and those in the second row are  <span class="math">(y_0,...,y_{\\ell-1})</span>  (see Figure 5a). We refer to vectors of  <span class="math">\\mathbb{F}_q^\\ell</span>  using the same upper-case letters, e.g.  <span class="math">(x_0,...,x_{\\ell-1})</span>  is denoted X. Subscripts correspond to indices within a vector of  <span class="math">\\mathbb{F}_q^\\ell</span> , and superscripts to round indices, so  <span class="math">X^i</span>  is the top part of the state at the start of round i. We let g be a specific generator of the multiplicative subgroup of the field  <span class="math">\\mathbb{F}_q</span> . If q is prime, then g is the smallest such generator using the usual integer ordering. Otherwise, we have that  <span class="math">\\mathbb{F}_q = \\mathbb{F}_{2^n} = \\mathbb{F}_2[x]/p(x)</span> , where p is an irreducible polynomial of degree n, in which case we let g be one of its roots.</p>
+
+    <p class="text-gray-300">The function applied during round r is denoted  <span class="math">R_r</span> . It has the structure of a classical Substitution-Permutation Network, whose components are described below: first the linear layer, then the S-box layer, and finally the constant addition. The overall action of each of these operations on the state is summarized in Figure 5, and a complete round is represented in Figure 6.</p>
+
+    <p class="text-gray-300">    <img src="_page_11_Figure_6.jpeg" alt="" class="my-4 max-w-full" />
+</p>
+
+    <p class="text-gray-300">Figure 5: The internal state of Anemoi and its basic operations.</p>
+
+    <p class="text-gray-300"><strong>Constant Additions</strong>  <span class="math">\\mathcal{A}</span> . We let  <span class="math">x_j \\leftarrow x_j + c^i_j</span>  and  <span class="math">y_j \\leftarrow y_j + d^i_j</span> , where  <span class="math">c^i_j \\in \\mathbb{F}_q</span>  and  <span class="math">d^i_j \\in \\mathbb{F}_q</span>  are round constants that depend on both the position (index j) and the round (index i). The aim is to increase the complexity of the algebraic expression of multiple rounds of the primitive and to prevent the appearance of patterns that an attacker could leverage in their attack.</p>
+
+    <p class="text-gray-300">They are derived using the digits of  <span class="math">\\pi</span>  using the following procedure. We let</p>
+
+    <p class="text-gray-300"><span class="math">$\\begin{split} (\\pi_0,\\pi_1) &amp;= \\\\ (1415926535897932384626433832795028841971693993751058209749445923078164062862089986280348253421170679\\\\ 8214808651328230664709384460955058223172535940812848111745028410270193852110555964462294895493038196) \\end{split}</span>$</p>
+
+    <p class="text-gray-300"><sup>&amp;</sup>lt;sup&gt;4</sup>The field order must have a bitlength of at least 10 bits. The aim of this restriction is to ensure that e.g. MDS matrices can be found as those might not be defined for small field sizes.</p>
+
+    <p class="text-gray-300">    <img src="_page_12_Figure_0.jpeg" alt="" class="my-4 max-w-full" />
+</p>
+
+    <p class="text-gray-300"><strong>Figure 6:</strong>  <span class="math">R_r</span> , the r-th round of Anemoi, applied on the state  <span class="math">(X,Y) \\in \\mathbb{F}_q^{\\ell} \\times \\mathbb{F}_q^{\\ell}</span> , where  <span class="math">X = (x_0, ..., x_{\\ell-1})</span>  and  <span class="math">Y = (y_0, ..., y_{\\ell-1})</span> .</p>
+
+    <p class="text-gray-300">be the first and second blocks of 100 digits of  <span class="math">\\pi</span> . We derive the round constants  <span class="math">c_j^i</span>  and  <span class="math">d_j^i</span>  by applying an open Flystel with the same parameters as in the round function on the pair  <span class="math">(\\pi_0^i, \\pi_1^i)</span> , where superscripts are exponents, so that</p>
+
+    <p class="text-gray-300"><span class="math">$\\begin{cases} c_j^i &amp;= g(\\pi_0^i)^2 + \\left(\\pi_0^i + \\pi_1^j\\right)^{\\alpha} \\\\ d_j^i &amp;= g(\\pi_1^j)^2 + \\left(\\pi_0^i + \\pi_1^j\\right)^{\\alpha} + g^{-1} \\end{cases},</span>$</p>
+
+    <p class="text-gray-300">where the computations are done in  <span class="math">\\mathbb{F}_q</span> . When  <span class="math">q=2^n</span> ,  <span class="math">\\pi_0</span>  and  <span class="math">\\pi_1</span>  are cast to field elements using the usual mapping sending  <span class="math">\\sum_{k=0}^{n-1} x_i 2^i</span>  to  <span class="math">\\sum_{k=0}^{n-1} x_i g^i</span> , where  <span class="math">(x_0,...,x_{n-1})</span>  is the binary representation of x modulo  <span class="math">2^n</span> .</p>
+
+    <p class="text-gray-300"><strong>Diffusion Layer</strong>  <span class="math">\\mathcal{M}</span> . If  <span class="math">\\ell &gt; 1</span> , then the diffusion layer  <span class="math">\\mathcal{M}</span>  operates on X and Y separately, so that</p>
+
+    <p class="text-gray-300"><span class="math">$\\mathcal{M}(X,Y) = (\\mathcal{M}_x(X), \\mathcal{M}_y(Y))</span>$
+,</p>
+
+    <p class="text-gray-300">as summarized in Figure 5b. The linear permutations  <span class="math">\\mathcal{M}_x</span>  and  <span class="math">\\mathcal{M}_y</span>  are closely related, but differ in order to break the column structure imposed by the non-linear layer (see below). More precisely, we impose that  <span class="math">\\mathcal{M}_x</span>  is a matrix of size  <span class="math">\\ell \\times \\ell</span>  of  <span class="math">\\mathbb{F}_q</span>  with maximum diffusion, i.e. such that its branching number is equal to  <span class="math">\\ell + 1</span> . We then construct  <span class="math">\\mathcal{M}_y</span>  as  <span class="math">\\mathcal{M}_y = \\mathcal{M}_x \\circ \\rho</span> , where  <span class="math">\\rho</span>  is a simple word permutation:  <span class="math">\\rho(x_0, ..., x_{\\ell-1}) = (x_1, ..., x_{\\ell-1}, x_0)</span> .</p>
+
+    <p class="text-gray-300">The specifics of the linear permutation  <span class="math">\\mathcal{M}_x</span>  then depend on the value of  <span class="math">\\ell</span> . Furthermore, in order for our permutation to best satisfy different proof systems, we use different techniques to construct them. At a high level, there are two different situations:</p>
+
+    <p class="text-gray-300">&bull; if  <span class="math">\\ell</span>  is small, then the field size is expected to be large in order for the permutation to operate on a state large enough to offer security against generic attacks, meaning</p>
+
+    <p class="text-gray-300"><sup>&amp;</sup>lt;sup&gt;5</sup>Recall that the branching number of a linear permutation L is the minimum over  <span class="math">x \\neq 0</span>  of hw(x) + hw(L(x)), where hw(x) denotes the Hamming weight of x.</p>
+
+    <p class="text-gray-300">that this case is expected to happen when using pairing-based proof systems like Groth16 or standard Plonk which require large scalar fields for security.</p>
+
+    <p class="text-gray-300">&bull; if  <span class="math">\\ell</span>  is large, then the situation is the opposite, meaning that we would expect the field size to be smaller and thus to correspond to e.g. fields used in FRI-based proving systems.</p>
+
+    <p class="text-gray-300">In the Plonk case, additions have a non-negligible cost during verification. As a consequence, when  <span class="math">\\ell</span>  is at most equal to 4, we use linear layers requiring a number of additions as small as possible. To this end, we adapt results from [DL18] where Duval and Leurent present generic matrix constructions with a minimal number of additions. Their goal was to limit the number of XORs needed to implement a linear layer, which was especially welcome in the context of lightweight cryptography. In fact, one of their matrices has been used by the designers of Saturnin [CDL<sup>+</sup>20] precisely for this reason. More generally, we think this surprising connection between lightweight and arithmetization-oriented symmetric cryptography is interesting in itself: limiting the total number of additions can be important in both cases. As the approach of [DL18] is general enough that their matrices can work in most fields, we thus opt to use their matrices. In practice, when  <span class="math">\\ell \\in \\{2,3,4\\}</span> , we use the matrix  <span class="math">\\mathcal{M}_x^{\\ell}</span>  where</p>
+
+    <p class="text-gray-300"><span class="math">$\\mathcal{M}_{x}^{2} = \\left[ \\begin{smallmatrix} 1 &amp; &amp; &amp; &amp; &amp; &amp; &amp; &amp; &amp; &amp; &amp; &amp; &amp; &amp; &amp; &amp; &amp; &amp;</span>$</p>
+
+    <p class="text-gray-300">If  <span class="math">\\ell = 1</span> , then there is a unique column in the internal state, so  <span class="math">\\mathcal{M}_x^1</span>  is the identity.</p>
+
+    <p class="text-gray-300">Low-addition implementations are shown in Appendix C, and the corresponding diagrams are given in Figure 7. As [DL18] contains several different matrices for each number of inputs, we based our matrices on their candidates that have the lowest number of additions, and the least symmetries.</p>
+
+    <p class="text-gray-300">    <img src="_page_13_Picture_6.jpeg" alt="" class="my-4 max-w-full" />
+</p>
+
+    <p class="text-gray-300">Figure 7: Diagram representations of  <span class="math">\\mathcal{M}_x</span> .</p>
+
+    <p class="text-gray-300">In the AIR (STARK) case, linear operations are essentially free. Thus, the dominating constraint on a linear layer is its native implementation cost, i.e. the time it takes for a C or Rust program to evaluate  <span class="math">\\mathcal{M}_x(x)</span> . To minimize this cost, we need to minimize the value of the coefficients appearing in the matrix. To this end, we use the circulant matrix where the first row is the smallest in the lexicographic order, and such that the overall matrix is MDS. A script implementing this generation method is provided in Appendix C.</p>
+
+    <p class="text-gray-300"><strong>Pseudo-Hadamard transform</strong>  <span class="math">\\mathcal{P}</span> . To destroy some undesirable involutive patterns at the S-box level, we use a linear layer, namely the Pseudo-Hadamard transform (PHT), to have diffusion on the rows. In particular, this means that we still have a linear layer when  <span class="math">\\ell=1</span> . The PHT has good properties since it can be easily implemented with:  <span class="math">Y \\leftarrow Y + X</span>  and  <span class="math">X \\leftarrow X + Y</span>  and is also relevant against algebraic attacks (see Section 6.2).</p>
+
+    <p class="text-gray-300"><strong>S-box Layer .</strong> Let &#8459; be an open Flystel operating over F 2 . Then we let</p>
+
+    <p class="text-gray-300"><span class="math">$S(X,Y) = (\\mathcal{H}(x_0, y_0), ..., \\mathcal{H}(x_{\\ell-1}, y_{\\ell-1})),</span>$</p>
+
+    <p class="text-gray-300">as summarized in Figure <a href="#page-11-5">5d.</a> A Flystel instance is defined by 4 parameters, regardless of whether it is a Flystel<sup>p</sup> or Flystel2: the exponent , the multiplier , and the two added constants and . First, as mentionned in Section <a href="#page-8-2">4.3,</a> we let = : setting = 1 would lead to the invariant space (Section <a href="#page-30-0">A.3)</a> having equation ( 2 <em>,</em> ), which we deem too simple; is then the most natural non-trivial constant. Furthermore, in order to break the symmetry of the Flystel, we impose that &#824;= . We thus let = 0 and = <sup>&minus;</sup><sup>1</sup> as this value is both different from 1 and while retaining a simple definition.</p>
+
+    <p class="text-gray-300">All that remains is to choose the exponent . If = 2, then we let = 3: we have to use a Gold exponent (i.e. of the shape 2 + 1), and 3 always works since is odd. Otherwise, when is prime, the process is a bit more involved as a higher value allows using fewer rounds to thwart Gr&ouml;bner-basis-based attacks, but is also more expensive. Users should use the value of that yields the most efficient algorithm according to their metrics.</p>
+
+      <h3 id="sec-5.2" class="text-xl font-semibold mt-8"><strong>5.2 Higher Level Algorithms</strong></h3>
+
+    <p class="text-gray-300"><strong>Anemoi.</strong> The Anemoi permutation iterates rounds of the round function described in Figure <a href="#page-12-0">6,</a> followed by a call to the linear layer &#8499;:</p>
+
+    <p class="text-gray-300">Anemoi
+<span class="math">$_{q,\\alpha,\\ell} = \\mathcal{M} \\circ \\mathsf{R}_{n_r-1} \\circ ... \\circ \\mathsf{R}_0</span>$
+.</p>
+
+    <p class="text-gray-300">In symmetric cryptography, we usually <em>remove</em> outer linear layers, e.g. in the AES. That is because they don't contribute to the cryptographic strength of a block cipher (e.g. can be removed &quot;for free&quot; by an adversary). In the case of a sponge construction however, the adversary only controls a part of the state, namely the outer part (the rate). Thus, starting/finishing with a diffusion layer ensures that this control is spread across the full state in a way which is not aligned with the non-linear layer. A similar goal could be achieved using <em>indirect injection</em>, as is done in Esch <a href="#page-24-3">[BBC</a><sup>+</sup>20].</p>
+
+    <p class="text-gray-300">The number of rounds is computed using the following rule that is derived from our security analysis in Section <a href="#page-16-0">6.</a></p>
+
+    <p class="text-gray-300">More precisely, we focus on algebraic attacks since it appears to be the bottleneck. Indeed, we only need to activate few S-boxes to prevent statistical attacks. In prime characteristic we have an upper bound that is (&minus;1)<em>/</em><sup>2</sup> for the probability of a differential transition for one S-box, and that is conjectured to be log <em>/</em> for a linear transition. In the case where = 2, similar arguments hold: the best differential probability is 4<em>/</em>2 <sup>2</sup>, and the best linear probability is around 2 <sup>&minus;</sup> (see Appendix <a href="#page-29-0">A</a> for more details). Let be the required security level, and (<em>, &#8467;,</em> ) be the parameters imposed by the use case. As we believe that a construction with more branches gives more freedom to the attacker, we choose a security margin that increases with the size of the internal state, but setting a maximum of 5 additional rounds. In Section <a href="#page-17-0">6.2,</a> we study two models for algebraic attacks. We fix the number of rounds by considering the first model, which is easier to study, and add a security margin of 2 rounds to take into account the second model. Whilst it is not clear whether the second model actually outperforms the first, its complexity is more difficult to estimate and we opt to increase the safety margin as a conservative measure. Then the number of rounds is the smallest value satisfying both of the following conditions:</p>
+
+    <p class="text-gray-300">
+<span class="math">$n_r \\ge \\max \\left\\{ 8, \\underbrace{\\min(5, 1+\\ell)}_{\\text{security margin}} + \\underbrace{2 + \\min \\left\\{ r \\in \\mathbb{N} \\mid \\mathcal{C}_{alg(r)} \\ge 2^s \\right\\}}_{\\text{to prevent algebraic attacks, see Sec. 6.2}} \\right\\},</span>$
+(2)</p>
+
+    <p class="text-gray-300">Table 1: Number of Rounds of Anemoi.</p>
+
+    <div class="overflow-x-auto my-4">
+      <table class="min-w-full text-sm text-gray-300">
+        <thead>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left"><span class="math">\\alpha</span></th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">3</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">5</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">7</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">11</th>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"><span class="math">\\ell = 1</span></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">21</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">21</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">20</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">19</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"><span class="math">\\ell=2</span></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">14</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">14</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">13</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">13</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"><span class="math">\\ell = 3</span></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">12</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">12</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">12</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">11</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"><span class="math">\\ell = 4</span></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">12</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">12</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">11</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">11</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"><span class="math">\\ell = 6</span></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">10</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">10</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">10</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">10</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"><span class="math">\\ell = 8</span></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">10</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">10</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">9</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">9</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p class="text-gray-300"></p>
+
+    <div class="overflow-x-auto my-4">
+      <table class="min-w-full text-sm text-gray-300">
+        <thead>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">(a)</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">When</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">s</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">=</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">128.</th>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="overflow-x-auto my-4">
+      <table class="min-w-full text-sm text-gray-300">
+        <thead>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">&alpha;</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">3</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">5</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">7</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">11</th>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"><span class="math">\\ell = 1</span></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">37</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">37</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">36</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">35</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"><span class="math">\\ell = 2</span></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">22</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">22</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">21</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">21</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"><span class="math">\\ell = 3</span></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">17</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">17</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">17</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">17</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"><span class="math">\\ell = 4</span></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">16</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">16</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">15</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">15</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"><span class="math">\\ell = 6</span></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">13</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">13</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">13</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">13</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"><span class="math">\\ell = 8</span></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">12</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">12</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">11</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">11</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"><span class="math">\\ell = 8</span></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">12</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">12</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">11</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">11</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p class="text-gray-300"><strong>(b)</strong> When s = 256.</p>
+
+    <p class="text-gray-300">where
+<span class="math">$C_{alg(r)} = {4\\ell r + \\kappa_{\\alpha} \\choose 2\\ell r}^2</span>$
+when  <span class="math">q = p</span>  and  <span class="math">C_{alg(r)} = \\ell r \\cdot 9^{2\\ell r}</span>  when  <span class="math">q = 2^n</span> .</p>
+
+    <p class="text-gray-300">We compute the number of rounds needed both for a security level of 128 bits (Table 1a), and of 256 bits (Table 1b). Note that the values of the digest size h and of the state size  <span class="math">2\\ell n = 2\\ell \\log_2(q)</span>  must be coherent with the desired security level.</p>
+
+    <p class="text-gray-300"><strong>AnemoiSponge.</strong> This function is a &quot;regular&quot; hash function, in the sense that it should be able to process messages of arbitrary length. We therefore rely on the sponge construction detailed in Section 3, where r words are used as the rate, c are used as the capacity, and where the permutation is the <strong>Anemoi</strong> instance operating on  <span class="math">\\mathbb{F}_q^{r+c}</span> . Note that the inner workings of <strong>Anemoi</strong> imply that r+c must be even.</p>
+
+    <p class="text-gray-300">AnemoiJive. We can construct a compression function mapping b-to-1 vectors of  <span class="math">\\mathbb{F}_q^m</span>  elements, using  <span class="math">\\mathsf{Jive}_b</span>  and an Anemoi instance operating on bm elements of  <span class="math">\\mathbb{F}_q</span> . The only constraint is, again, that bm must be even.</p>
+
+    <p class="text-gray-300"><strong>Security Claims.</strong> All the Anemoi permutations generated as defined above can be used safely to construct cryptographic primitives with the given security level. In particular, we make a &quot;hermetic sponge&quot; claim about all the hash functions AnemoiSponge generated as above, and we claim that all the AnemoiJive functions are secure b-to-1 compression functions (provided of course that the state size is chosen correctly).</p>
+
+      <h3 id="sec-5.3" class="text-xl font-semibold mt-8">5.3 Specific Instances</h3>
+
+    <p class="text-gray-300">In this section, we present some examples of functions in the Anemoi family that are defined over different fields, aim for different APIs (both AnemoiSponge and AnemoiJive), and for a security level of 127 bits.</p>
+
+    <p class="text-gray-300">We consider the case of the BLS12-381 curve, in which case  <span class="math">(\\lceil \\log_2(q) \\rceil, \\alpha, g) = (255, 5, 7)</span> , and the case of the BN-254 curve, in which case  <span class="math">(\\lceil \\log_2(q) \\rceil, \\alpha, g) = (254, 5, 2)</span> . In both cases, we aim for 127 bits of security. We decided to consider these two curves because they have been historically used in SNARKs and have been deployed in production in projects that use Arithmetization-Oriented hash functions like ZCash or Ethereum.</p>
+
+    <p class="text-gray-300">AnemoiJive. AnemoiJive-BLS12-381 and AnemoiJive-BN-254 are Merkle Compression functions mapping two elements of  <span class="math">\\mathbb{F}_q</span>  to a unique one. In order to reach a security level of 127 bits,  <span class="math">\\ell=1</span>  is sufficient in both cases. The underlying permutations of the compression functions then use the following components.</p>
+
+    <p class="text-gray-300"><strong>S-box.</strong>  <span class="math">\\mathcal{H}</span>  uses the parameters g and  <span class="math">\\alpha</span>  corresponding to the elliptic curve.</p>
+
+    <p class="text-gray-300"><strong>Linear layer.</strong> As <em>&#8467;</em> = 1, we use the Pseudo-Hadamard transform:</p>
+
+    <p class="text-gray-300"><span class="math">$\\begin{bmatrix} 2 &amp; 1 \\\\ 1 &amp; 1 \\end{bmatrix} \\tag{3}</span>$</p>
+
+    <p class="text-gray-300"><strong>Round Constants.</strong> These are generated as described in Section <a href="#page-11-0">5.1.</a></p>
+
+    <p class="text-gray-300"><strong>Number of Rounds.</strong> Using Equation <a href="#page-14-1">(2)</a>, we obtain that 19 rounds are needed for a security level of 127 bits.</p>
+
+    <p class="text-gray-300">Round is then defined as R : (<em>,</em> ) &#8614;&rarr; &#8459; &#8728; &#8499;( + <em>,</em>  + ), and we define the compression functions as follows. Let (<em>,</em> ) be the input, and be the Anemoi instance defined by := &#8499; &#8728; R<sup>18</sup> &#8728; <em>...</em> &#8728; R0. Then AnemoiJive(<em>,</em> ) is evaluated as follows: first, let (<em>,</em> ) &larr; (<em>,</em> ), then, return + + + .</p>
+
+    <p class="text-gray-300"><strong>Security Claims.</strong> The best way to find collisions in AnemoiJive-BLS12-381 (respectively AnemoiJive-BN-254) is to rely on a generic collision search. Since the output is an element of F with log<sup>2</sup> () &ge; 254, this is expected to require about 2 <sup>127</sup> function calls on average.</p>
+
+    <p class="text-gray-300"><strong>AnemoiSponge.</strong> AnemoiSponge-BLS12-381 and AnemoiSponge-BN-254 are hash functions mapping a sequence {}0&le;<em>&lt;</em> of elements of F to an element of F, where is a positive integer. It is constructed using a sponge which relies on Anemoi as the permutation. We aim to provide about 127 bits of security, meaning that a capacity of 1 word of F is enough in both cases. We then pick an identical rate, so that = = 1, and thus <em>&#8467;</em> = 1. The permutations used are then the same as for AnemoiJive-BLS12-381 and AnemoiJive-BN-254.</p>
+
+    <p class="text-gray-300"><strong>Security Claims.</strong> We claim that AnemoiSponge-BLS12-381 and AnemoiSponge-BN-254 provide 127 bits of security against all known attacks.</p>
+
+    </section>
+
+    <section id="sec-6" class="mb-10">
+      <h2 class="text-2xl font-bold"><strong>6 Security Analysis</strong></h2>
+
+    <p class="text-gray-300">The security of AnemoiSponge and AnemoiJive is reduced to the security of their inner permutation, namely the Anemoi family. In this section, we argue that the latter has sufficient security level.</p>
+
+      <h3 id="sec-6.1" class="text-xl font-semibold mt-8"><strong>6.1 &quot;Classical&quot; Attacks</strong></h3>
+
+    <p class="text-gray-300">We call &quot;classical&quot; attacks those that have been used to target algorithms designed over (F2) . As we argue below, we do not expect those to be a significant problem. More detailed arguments are provided in Appendix <a href="#page-29-0">A.</a></p>
+
+    <p class="text-gray-300">Statistical attacks like differential and linear cryptanalysis exploit patterns that exist at the S-box level, and which are then propagated through the linear layers to form so-called &quot;trails&quot;. As the Flystel has excellent differential and linear properties, we do not expect those to pose a threat (especially given that our linear layers are MDS).</p>
+
+    <p class="text-gray-300">For integral attacks and invariant subspaces, we rely on the fact that our round structure is not &quot;aligned&quot;, meaning that the non-linear and linear layers operate over different alphabets (the columns and the rows). As a consequence, the propagation of the patterns exploited by these attacks is hindered. Similarly, thanks to the MDS matrix, truncated differentials, boomerang attacks and MitM attacks also do not pose a threat.</p>
+
+    <p class="text-gray-300">We refer the reader to Appendix <a href="#page-29-0">A</a> for a more detailed security analysis of the proposed constructions with respect to classical attacks.</p>
+
+      <h3 id="sec-6.2" class="text-xl font-semibold mt-8"><strong>6.2 Algebraic Attacks</strong></h3>
+
+    <p class="text-gray-300">Gr&ouml;bner basis attacks may constitute the main threat as is usually the case for this type of primitives. Since we are mainly interested in a minimal condition on the number of rounds to reach a security of 2 bits, we allow ourselves to <em>underestimate</em> complexity in several places, out of caution. We focus on the following version of the CICO (Constrained Input Constrained Output) problem, stated for <em>&#8467;</em> = 1:</p>
+
+    <p class="text-gray-300"><strong>Definition 3.</strong> Let : F 2 &rarr; F 2 be a permutation. The CICO problem consists in finding (in<em>,</em> out) &isin; F 2 such that (0<em>,</em> in) = (0<em>,</em> out).</p>
+
+      <h4 id="sec-6.2.1" class="text-lg font-semibold mt-6"><strong>6.2.1 Intermediate variables.</strong></h4>
+
+    <p class="text-gray-300">There are plenty of ways to model CICO as an algebraic system. We start from the one which consists in introducing equations and variables at each round. Such an approach was already proposed to study similar arithmetization-oriented primitives <a href="#page-26-8">[DGGK21,</a> <a href="#page-25-9">BSGL20,</a> <a href="#page-26-9">G&Oslash;SW23]</a>. It applies to Anemoi for any <em>&#8467;</em> &ge; 1 but for practical reasons a large part of our experiments has been restricted to <em>&#8467;</em> = 1. We now present our analysis of this particular case but we will also indicate how to deal with several columns. For 0 &le; &le; &minus; 1, let us define and by</p>
+
+    <p class="text-gray-300"><span class="math">$(x_{j+1},y_{j+1}) = \\mathsf{R}_j(x_j,y_j) \\Leftrightarrow \\left\\{ \\begin{array}{ll} f_j := f(x_j,y_j,x_{j+1},y_{j+1}) &amp;= 0 \\\\ g_j := g(x_j,y_j,x_{j+1},y_{j+1}) &amp;= 0, \\end{array} \\right.</span>$</p>
+
+    <p class="text-gray-300">where R is the round function and where and are closely related to the verification equations.</p>
+
+    <p class="text-gray-300"><strong>Modeling 1.</strong> <em>We consider the system</em> &#8497; &sub; F[0<em>, . . . , ,</em> 0<em>, . . . ,</em>  ] <em>containing the round equations and for</em> 0 &le; &le; &minus; 1<em>.</em></p>
+
+    <p class="text-gray-300">The CICO system &#8497;CICO is simply Modeling <a href="#page-17-1">1</a> in which we fix <sup>0</sup> = 0 and = 0. This system can be seen as containing 2 equations and variables when <em>&#8467;</em> = 1 and 2<em>&#8467;</em> in the general case. To solve it, we apply the standard <em>zero-dimensional</em> strategy:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Compute a Gr&ouml;bner basis drl for a DRL ordering <a href="#page-27-6">[Lou94,</a> Definition 1.4.3],</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Compute a new Gr&ouml;bner basis lex for the LEX ordering by using the FGLM algorithm <a href="#page-26-10">[FGLM93]</a> on drl.</li>
+    </ol></li>
+    </ul>
+
+    <p class="text-gray-300">For Step 1, the running time of Gr&ouml;bner basis algorithms such as F4 <a href="#page-26-11">[Fau99]</a> or F5 <a href="#page-26-12">[Fau02]</a> is usually estimated by evaluating the <em>solving degree</em> of the system denoted by solv. This degree can be informally defined as the maximal degree of a polynomial which occurs during the Gr&ouml;bner basis computation. Once solv is known, a generic estimate for the cost of F4/F5 is</p>
+
+    <p class="text-gray-300">
+<span class="math">$\\mathcal{O}\\left(\\binom{d_{\\text{solv}} + n_v}{n_v}\\right)^{\\omega}\\right) \\tag{4}</span>$</p>
+
+    <p class="text-gray-300">field operations, where is our number of variables and where 2 &le; &le; 3 is a linear algebra constant. We stress that this estimation is heuristic and it is an upper bound that does not take into account the structure or the sparsity of the given Macaulay matrices. In particular, to use it as a guidance, we will adopt the conservative = 2 for the linear algebra constant. Regarding Step 2, the complexity of FGLM is in ( &middot; deg (CICO) ), where CICO := &#10216;&#8497;CICO&#10217; is the ideal generated by the system and where deg (CICO) is the <em>degree</em> of this ideal.</p>
+
+    <h4 id="sec-misc-1" class="text-lg font-semibold mt-6"><strong>Characteristic 2.</strong></h4>
+
+    <p class="text-gray-300">In even characteristic, we derive the number of rounds from the following Estimate <a href="#page-18-0">1.</a></p>
+
+    <p class="text-gray-300"><strong>Estimate 1.</strong> <em>We estimate the cost of solving</em> &#8497;CICO <em>in even characteristic by one of the FGLM steps. This step has complexity</em></p>
+
+    <p class="text-gray-300"><span class="math">$\\mathcal{O}(\\ell n_r \\cdot 9^{\\omega \\ell n_r}),</span>$</p>
+
+    <p class="text-gray-300"><em>where &#8467; is the number of columns and is the linear algebra exponent from the FGLM algorithm.</em></p>
+
+    <p class="text-gray-300">More details are provided in Appendix <a href="#page-30-1">B.1</a> below, where we focus on the case <em>&#8467;</em> = 1. In short, Estimate <a href="#page-18-0">1</a> comes from the fact that the cost of the Gr&ouml;bner basis computation on &#8497;CICO is mostly independent from the number of rounds and that the cost of FGLM can be approximated by the one on a generic system containing 2<em>&#8467;</em> cubic equations.</p>
+
+      <h4 id="sec-6.2.2" class="text-lg font-semibold mt-6"><strong>6.2.2 Odd characteristic.</strong></h4>
+
+    <p class="text-gray-300">The &#8497;CICO system behaves differently in odd characteristic since the dominant cost corresponds to the Gr&ouml;bner basis computation. We derive the number of rounds from the following Estimate <a href="#page-18-1">2,</a> where exp is the experimental solving degree of &#8497;CICO given in Conjecture <a href="#page-18-2">1.</a></p>
+
+    <p class="text-gray-300"><strong>Conjecture 1</strong> (From experiments for <em>&#8467;</em> = 1)<strong>.</strong> <em>We have</em></p>
+
+    <p class="text-gray-300"><span class="math">$d_{exp} \\ge 2n_r + \\kappa_{\\alpha}</span>$</p>
+
+    <p class="text-gray-300"><em>where is a constant depending only on . We found</em> <sup>3</sup> = 1<em>,</em> <sup>5</sup> = 2<em>,</em> <sup>7</sup> = 4<em>,</em> <sup>9</sup> = 7 <em>and</em> = 9 <em>for</em><a href="#page-18-3">6</a> &ge; 11<em>.</em></p>
+
+    <p class="text-gray-300"><strong>Estimate 2.</strong> <em>In odd characteristic, we estimate the cost of solving</em> &#8497;CICO <em>for &#8467;</em> = 1 <em>by one of the Gr&ouml;bner basis steps. By using Equation</em> <a href="#page-17-2">(4)</a><em>, it has complexity</em></p>
+
+    <p class="text-gray-300"><span class="math">$\\mathcal{O}\\left( \\begin{pmatrix} d_{exp} + 2n_r \\\\ 2n_r \\end{pmatrix}^{\\omega} \\right),\\,</span>$</p>
+
+    <p class="text-gray-300"><em>where exp is given in Conjecture <a href="#page-18-2">1</a> and where is a linear algebra constant.</em></p>
+
+    <p class="text-gray-300">Appendix <a href="#page-31-0">B.2</a> contains more details on Conjecture <a href="#page-18-2">1</a> and Estimate <a href="#page-18-1">2.</a> There, we also compare &#8497;CICO to another system denoted by CICO which seems to take advantage of the particularities of our design but which does not seem to bring an improvement, at least asymptotically. Still, we add 2 extra rounds on top of Estimate <a href="#page-18-1">2</a> to ensure that these equations will not jeopardize security if exploited in a more ingenious way. We find it interesting that the complexities corresponding to the resolution of each system are extremely similar, despite their a priori significantly different structures.</p>
+
+    <p class="text-gray-300">When <em>&#8467; &gt;</em> 1, the number of equations and variables in &#8497;CICO is naturally multiplied by <em>&#8467;</em> and thus experiments were extremely difficult to conduct. We generalize Conjecture <a href="#page-18-2">1</a> to <em>&#8467; &gt;</em> 1 by replacing 2 by 2<em>&#8467;</em> everywhere, which is natural when looking at the expressions of the Macaulay bound. Similarly, we note that the bounds given for Rescue in <a href="#page-25-9">[BSGL20]</a> exhibit this extra <em>&#8467;</em> factor. We adjust the number of variables := 2<em>&#8467;</em> accordingly to obtain the final estimate.</p>
+
+    <p class="text-gray-300"><sup>6</sup>We would expect the value of to keep increasing with but the computations needed to estimate it become too costly as increases.</p>
+
+    </section>
+
+    <section id="sec-7" class="mb-10">
+      <h2 class="text-2xl font-bold">7 Benchmarks</h2>
+
+    <p class="text-gray-300">In this section, we compare various instances of Rescue-Prime, POSEIDON, GRIFFIN and Anemoi with respect to SNARK metrics: R1CS (Section 7.1) and Plonk (Section 7.2), and STARK: AIR (Section 7.3). For Plonk performance, we will also conduct a comparison with Reinforced Concrete.</p>
+
+    <p class="text-gray-300">Due to the increasing number of projects revolving around zk-STARKs, which do not require an algebraic group with large underlying fields, we also illustrate native performance comparison of 2-to-1 compression functions based on Rescue-Prime, Poseidon and Anemoi on a 64-bit field used in various projects ([add22], [Zer22]).</p>
+
+    <p class="text-gray-300">To do so, we need to set the parameters. Then, let  <span class="math">\\mathbb{F}_q</span> , where q=p, be a prime field, and let t be the number of field elements we operate on  <span class="math">(t=2\\ell \\text{ for Anemoi})</span> . Besides, let s denote the security level in bits,  <span class="math">n_r</span>  the number of rounds, and  <span class="math">\\mathcal{C}_{\\alpha}</span>  the cost of an exponentiation  <span class="math">x\\mapsto x^{\\alpha}</span> .</p>
+
+    <p class="text-gray-300">Rescue&ndash;Prime requires  <span class="math">1.5 \\cdot \\max\\{5, \\lceil (s+2)/4t \\rceil\\}</span>  rounds when  <span class="math">\\alpha=3</span>  and  <span class="math">1.5 \\cdot \\max\\{5, \\lceil (s+3)/5.5t \\rceil\\}</span>  rounds when  <span class="math">\\alpha=5</span>  (see [AAB<sup>+</sup>20, SAD20]). Poseidon has  <span class="math">n_r=\\mathsf{RF}+\\mathsf{RP}</span>  rounds. While the bound is a complex expression, in our setting and for the safety margin recommended by the authors, it holds that  <span class="math">\\mathsf{RF}=8</span> , and that  <span class="math">\\mathsf{RP}</span>  must be higher than (or equal to)  <span class="math">1.075 \\cdot (\\lceil \\log_{\\alpha}(2) \\cdot \\min\\{s, \\log_2(p)\\} \\rceil + \\lceil \\log_a t \\rceil - \\mathsf{RF})</span> . Griffin requires at least  <span class="math">\\lceil 1.2 \\max\\{6, 1 + R_\\mathsf{GB}\\} \\rceil</span>  rounds where  <span class="math">R_\\mathsf{GB}</span>  is the smallest integer such that  <span class="math">\\min\\left\\{\\binom{R_\\mathsf{GB}\\cdot(\\alpha+t)+1}{1+t\\cdot R_\\mathsf{GB}}, \\binom{\\alpha^{R_\\mathsf{GB}}+1+R_\\mathsf{GB}}{1+R_\\mathsf{GB}}\\right\\} \\ge 2^{s/2}</span> .</p>
+
+    <p class="text-gray-300">In the following, we use the  <span class="math">n_r</span>  values from Section 5.2.</p>
+
+      <h3 id="sec-7.1" class="text-xl font-semibold mt-8">7.1 R1CS Systems</h3>
+
+    <p class="text-gray-300">We first estimate the number of constraints for R1CS. Using the <em>closed Flystel</em> of Figure 3b, we obtain the following verification equations for the S-Box:</p>
+
+    <p class="text-gray-300">
+<span class="math">$\\begin{cases} (y-v)^{\\alpha} + \\beta y^2 + \\gamma - x = 0\\\\ (y-v)^{\\alpha} + \\beta v^2 + \\delta - u = 0 \\end{cases}</span>$
+(5)</p>
+
+    <p class="text-gray-300">Then, evaluating one S-Box costs  <span class="math">\\mathcal{C}_{\\alpha}</span>  constraints to obtain  <span class="math">(y-v)^{\\alpha}</span> , and 1 constraint for each of the two quadratics. For Rescue-Prime and Poseidon, each S-Box costs  <span class="math">\\mathcal{C}_{\\alpha}</span>  constraints. For Griffin, each S-Box costs  <span class="math">2 \\cdot \\mathcal{C}_{\\alpha}</span>  constraints for the first two words, and 1 constraint for each squaring of L and each word of the remaining state. As a consequence, when using Rescue-Prime, Poseidon, Griffin and Anemoi as hash functions in sponge mode, the number of constraints is respectively  <span class="math">\\mathcal{C}_{\\alpha} \\cdot 2t \\cdot n_r</span> ,  <span class="math">\\mathcal{C}_{\\alpha} \\cdot (t \\operatorname{RF} + \\operatorname{RP})</span> ,  <span class="math">(\\mathcal{C}_{\\alpha} + t - 2) \\cdot 2n_r</span>  and  <span class="math">(\\mathcal{C}_{\\alpha} + 2) \\cdot (\\frac{t}{2} \\cdot n_r)</span> .</p>
+
+    <p class="text-gray-300">We compare the number of constraints for those four schemes in Table 2. As we can see, the Anemoi permutations are consistently much more efficient than both Poseidon and Rescue-Prime by about a factor 2. Anemoi and Griffin are on par, and Anemoi takes the advantage for  <span class="math">\\alpha=3</span> .</p>
+
+      <h3 id="sec-7.2" class="text-xl font-semibold mt-8">7.2 Plonk</h3>
+
+    <p class="text-gray-300">For ease of exposition, we will consider rounds to be shifted so that constant additions and linear operations come after the S-box. As for R1CS, we again investigate Equation (5). In standard Plonk (i.e 3 wires and no custom gates), evaluating an S-Box costs 1 constraint to derive w = y - v and  <span class="math">\\mathcal{C}_{\\alpha}</span>  constraints to obtain  <span class="math">w^{\\alpha}</span> , 1 constraint for each of the two quadratics, and 1 each for the sums on x, u. The total cost for the S-box layer with 3 wires is  <span class="math">(\\mathcal{C}_{\\alpha} + 5)\\frac{t}{2}</span> .</p>
+
+    <p class="text-gray-300">The constant additions can be folded into the  <span class="math">n_r + 1</span>  linear layers and can thus be disregarded. For t = 2, the linear layer consists of the PHT, which requires 2 constraints.</p>
+
+    <div class="overflow-x-auto my-4">
+      <table class="min-w-full text-sm text-gray-300">
+        <thead>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">Table 2: Total R1CS</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">Plonk and AIR</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">cost for several ha</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">sh functions</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">(s = 128).</th>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">---------------------</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">---------------</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">---------------------</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">--------------</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">------------</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p class="text-gray-300"></p>
+
+    <div class="overflow-x-auto my-4">
+      <table class="min-w-full text-sm text-gray-300">
+        <thead>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left"></th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">t</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">Rescue'</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">Poseidon</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">Griffin</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">Anemoi</th>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">2</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">208</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">198</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">-</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">76</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">3</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">216</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">214</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">96</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">-</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">R1CS</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">4</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">224</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">232</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">112</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">96</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">6</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">216</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">264</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">-</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">120</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">8</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">256</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">296</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">176</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">160</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Plonk</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">2</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">312</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">380</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">-</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">189</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">3</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">432</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">594</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">197</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">-</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">4</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">560</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">824</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">260</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">308</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">6</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">756</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">1344</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">-</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">444</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">8</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">1152</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">1920</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">574</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">624</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">AIR</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">2</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">156</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">300</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">-</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">126</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">3</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">162</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">324</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">144</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">-</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">4</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">168</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">348</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">168</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">168</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">6</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">162</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">396</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">-</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">216</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">8</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">192</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">480</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">264</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">288</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="overflow-x-auto my-4">
+      <table class="min-w-full text-sm text-gray-300">
+        <thead>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left"></th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">t</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">Rescue'</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">Poseidon</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">Griffin</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">Anemoi</th>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">2</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">240</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">216</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">-</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">95</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">3</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">252</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">240</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">96</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">-</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">R1CS</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">4</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">264</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">264</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">110</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">120</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">6</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">288</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">315</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">-</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">150</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">8</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">384</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">363</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">162</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">200</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">2</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">320</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">344</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">-</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">210</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">3</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">420</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">512</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">173</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">-</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Plonk</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">4</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">528</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">696</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">222</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">336</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">6</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">768</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">1125</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">-</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">480</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">8</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">1280</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">1609</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">492</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">672</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">2</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">200</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">360</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">-</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">210</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">3</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">210</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">405</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">180</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">-</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">AIR</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">4</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">220</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">440</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">220</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">280</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">6</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">240</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">540</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">-</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">360</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">8</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">320</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">640</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">360</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">480</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p class="text-gray-300">(a) when  <span class="math">\\alpha = 3</span> .</p>
+
+    <p class="text-gray-300"><strong>(b)</strong> when  <span class="math">\\alpha = 5</span> .</p>
+
+    <p class="text-gray-300">For t &gt; 2, the linear layer itself consists of 2 separate matrix-vector multiplications, each producing  <span class="math">\\frac{t}{2}</span>  sums of  <span class="math">\\frac{t}{2}</span>  terms, requiring  <span class="math">t \\cdot (\\frac{t}{2} - 1)</span>  constraints, in addition to a cost of t constraints for the PHT. However, the number of constraints per matrix multiplication can be reduced by choosing MDS matrices lowering the number of additions. For the matrices given for t = 6 and t = 8 in 5.1, we have respectively a cost of 10 and 16 per linear layer.</p>
+
+    <p class="text-gray-300">Poseidon uses simpler S-Boxes, each costing  <span class="math">\\mathcal{C}_{\\alpha}</span>  constraints. Full rounds use t S-boxes whereas partial ones use only one. Using the optimisation described in the Supplementary Material of [GKR<sup>+</sup>21], the linear layer costs  <span class="math">t \\cdot (t-1)</span>  constraints for the full rounds and 2t-2 constraints for the partial rounds. Rescue-Prime uses t standard and t inverted S-Boxes, each costing  <span class="math">\\mathcal{C}_{\\alpha}</span> . Each round also utilizes 2 independent linear layers each costing  <span class="math">t \\cdot (t-1)</span>  constraints for all rounds.</p>
+
+    <p class="text-gray-300">For Griffin, the cost of the S-BOX is  <span class="math">2 \\cdot C_{\\alpha} + 3 + 4 \\cdot (t-3)</span> . Regarding the linear layer, the matrix used for t=3 can be computed in 5 constraints. For t=4, the cost of one multiplication by the matrix they chose is 8. By observing intermediate variables from the S-BOX computation which can be reused in the linear layer computation, Griffin gives 222 constraints for t=4 (resp. 492 for t=8).</p>
+
+    <p class="text-gray-300">We then compare the number of constraints for these four schemes in Table 2. Anemoi is consistently ahead of Rescue-Prime and Poseidon with a significant margin, but for larger t, our performances are slightly worse than Griffin, since our strategy to compute the security margin is different: we try to take into account the greater freedom given by the larger number of branches, which impacts our number of rounds.</p>
+
+      <h4 id="sec-7.2.1" class="text-lg font-semibold mt-6">7.2.1 Plonk Optimizations.</h4>
+
+    <p class="text-gray-300">One of the more fruitful, but also challenging aspects of Plonk is its ability to extend the expressive power of the constraints at a reasonable cost. In the analysis, the linear layer cost dominates that of the S-Boxes. This is particularly impactful for Poseidon, as the efficiency benefit of its partial rounds is negated. The recent work of Ambrona et al. [ASTW22] presents a set of generic and tailored optimizations for Plonk applicable to Poseidon.</p>
+
+    <p class="text-gray-300">While an exhaustive comparison of optimization options is beyond the scope of this work, real-world usage implies that a reasonable set of optimizations have been applied before deployment. For this reason, we perform a minimal comparison between: Poseidon as optimized by Ambrona et al., and Reinforced Concrete [GKL <span class="math">^+</span> 22] which was built with Plonk optimizations in mind, and Anemoi. As Poseidon and Reinforced Concrete are sponge based we use  <span class="math">s=128, \\alpha=5</span>  and t=3 to represent popular deployment choices,</p>
+
+    <p class="text-gray-300"><strong>Table 3:</strong> Constraints comparison of several hash functions for Plonk with an additional custom gate to compute . We fix = 128, and prime field sizes of 256.</p>
+
+    <div class="overflow-x-auto my-4">
+      <table class="min-w-full text-sm text-gray-300">
+        <thead>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left"></th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">&#119905;</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">Constraints</th>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Poseidon</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">3<br>2</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">110<br>88</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Reinforced Concrete</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">3<br>2</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">378<br>236</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Griffin</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">3</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">125</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">AnemoiJive</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">2</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">86</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="overflow-x-auto my-4">
+      <table class="min-w-full text-sm text-gray-300">
+        <thead>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left"></th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">(a) With 3 wires.</th>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="overflow-x-auto my-4">
+      <table class="min-w-full text-sm text-gray-300">
+        <thead>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left"></th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">&#119905;</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">Constraints</th>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Poseidon</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">3<br>2</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">98<br>82</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Reinforced Concrete</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">3<br>2</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">267<br>174</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Griffin</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">3</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">111</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">AnemoiJive</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">2</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">64</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p class="text-gray-300"><strong>(b)</strong> With 4 wires.</p>
+
+    <p class="text-gray-300">while we set = 2 for Anemoi, using the Jive<sup>2</sup> mode For comparison we also extrapolate a Jive<sup>2</sup> version of Poseidon with the optimizations of <a href="#page-24-5">[ASTW22]</a>, and Reinforced Concrete.</p>
+
+    <p class="text-gray-300">We use one of the constraint systems used by Ambrona et al. <a href="#page-24-5">[ASTW22]</a>: a 3-wire constraint system with a 5 , as well as selectors for the next constraint wires:</p>
+
+    <p class="text-gray-300"><span class="math">$q_L.a + q_R.b + q_O.c + q_M.a.b + q_5.c^5 + q_{L&#x27;}.a&#x27; + q_{R&#x27;}.b&#x27; + q_{O&#x27;}.c&#x27;</span>$
+.</p>
+
+    <p class="text-gray-300">At a base level, the relations we need to express for one AnemoiJive<sup>2</sup> round are</p>
+
+    <p class="text-gray-300"><span class="math">$1. \\ y - v - w = 0</span>$</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><p class="text-gray-300"><span class="math">$\\tilde{u} - 2u - v - \\rho = 0</span>$</p></li>
+      <li><p class="text-gray-300"><span class="math">$w^5 + \\beta yy + \\gamma - x = 0</span>$</p></li>
+    </ol>
+
+    <p class="text-gray-300"><span class="math">$3. \\ w^5 + \\beta vv + \\delta - u = 0</span>$</p>
+
+    <p class="text-gray-300"><span class="math">$5. \\ \\tilde{v} - u - v - \\kappa = 0</span>$</p>
+
+    <p class="text-gray-300">where <em>,</em> &tilde; &tilde; are the values of <em>,</em>  after the linear layer and <em>,</em>  are derived from round constants. We can save one constraint by calculating &tilde; directly and eliminating . We also need to make sure that the relations fit into the available wires, and make sure that the last constraint leaves the &quot;next constraint&quot; wires free, so that each set of round constraints can be followed by any constraint without restriction. To accomplish this, we also need to perform some reordering. Setting &prime; = + 2 and &prime; = &minus; , the end result is:</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><p class="text-gray-300"><span class="math">$w^5 + \\beta yy + \\gamma - x = 0</span>$
+, for:  <span class="math">(a, b, c) = (y, y, w)</span> ,  <span class="math">(a&#x27;, b, c&#x27;) = (x, \\_, \\_)</span> ,</p></li>
+      <li><p class="text-gray-300"><span class="math">$y - v - w = 0</span>$
+, for:  <span class="math">(a, b, c) = (x, y, w)</span> ,  <span class="math">(a&#x27;, b, c&#x27;) = (v, \\_, \\_)</span> ,</p></li>
+      <li><p class="text-gray-300"><span class="math">$2w^5 + 2\\beta vv + \\rho&#x27; + v - \\tilde{u} = 0</span>$
+, for:  <span class="math">(a, b, c) = (v, v, w)</span> ,  <span class="math">(a&#x27;, b, c&#x27;) = (\\tilde{u}, \\underline{\\ \\ \\ \\ \\ \\ )}</span> ,</p></li>
+      <li><p class="text-gray-300"><span class="math">$\\tilde{v} - \\tilde{u} + u - \\kappa&#x27; = 0</span>$
+, for:  <span class="math">(a, b, c) = (\\tilde{u}, \\tilde{v}, u), (a&#x27;, b&#x27;, c&#x27;) = (\\_, \\_, \\_)</span> .</p></li>
+    </ol>
+
+    <p class="text-gray-300">Thus, we are able to perform one AnemoiJive round in 4 constraints, and 2 additional constraints to account for the initial linear layer. We can fold the final Jive<sup>2</sup> addition into the final constraint (using the &quot;next&quot; wires), and ensuring the initial layer constraints are directly below it. With four wires, we can eliminate , by having the 5th power gate operate on &minus;. Rounds are reduced to 3 constraints, and we need only 1 extra constraint for the first linear layer as we handle <sup>0</sup> inline.</p>
+
+    <p class="text-gray-300">We summarize our findings in Table <a href="#page-21-0">3.</a> We extrapolate the = 2 costs for Poseidon and Reinforced Concrete by assuming a Jive<sup>2</sup> mode of operation is feasible at no additional overhead or increase in rounds. Against the next-best proposed system, Poseidon for = 3 as optimized by <a href="#page-24-5">[ASTW22]</a> we achieve a 21% reduction when using 3 wires and 35% when using 4.We note that while the costs between Poseidon, Anemoi and Griffin are directly comparable as they use the same features (namely <sup>5</sup> and &quot;next constraint&quot; selectors), Reinforced Concrete leverages lookup tables <a href="#page-26-4">[GKL</a><sup>+</sup>22, <a href="#page-26-13">GW20]</a> instead. We do note that by <a href="#page-24-5">[ASTW22,</a> Table 2], the additional overhead (compared to standard Plonk) for the custom gates we describe is between 10% and 40%.</p>
+
+      <h4 id="sec-7.2.2" class="text-lg font-semibold mt-6">7.2.2 Plonk optimisations with an additional quadratic custom gate</h4>
+
+    <p class="text-gray-300">We can go further in the optimisation given above by extending Plonk with a custom gate to compute the square of a wire, which adds a negligeable overhead to the prover and the verifier time. In the 3-wires setting, having the quadratic custom gate on the wire b frees a wire in the constraints given above and allow us to compute two rounds in 5 constraints as described below  <span class="math">^{7}</span> , giving a total number of constraints of 56.</p>
+
+    <pre><code class="language-text">1. w_0^2 + w_0 y_0 + w_0 - x_0 - y_0 + y_1 + q_c, where: (a, b, c) = (y_0, w_0, x_0) and (a&#x27;, b, c&#x27;) = (y_1, \\dots, w_0), (a&#x27;, b, c&#x27;) = (y_1, w_1, w_0) and (a&#x27;, b, c&#x27;) = (y_0, x_2, y_0), where: (a, b, c) = (y_1, w_1, w_0) and (a&#x27;, b, c&#x27;) = (y_0, x_2, y_0), (a&#x27;, b, c&#x27;) = (w_1, y_1, y_0), (a&#x27;, b, c&#x27;) = (w_1, y_1, y_0), and (a&#x27;, b, c&#x27;) = (w_1, y_1, y_0), and (a&#x27;, b, c&#x27;) = (w_0, y_0, y_0).
+
+5. w_0^5 + y_0^2 - x_0 + q_c, where: (a, b, c) = (w_0, y_0, x_0), and (a&#x27;, b, c&#x27;) = (w_0, y_0, x_0), and (a&#x27;, b, c&#x27;) = (w_0, y_0, x_0).
+</code></pre>
+
+      <h3 id="sec-7.3" class="text-xl font-semibold mt-8">7.3 AIR</h3>
+
+    <p class="text-gray-300">Finally, we also study the performance of Anemoi in the Algebraic Intermediate Representation (AIR) arithmetization used in STARKs [BBHR18]. Here, the relevant quantities are: the width of the computation state w, the number of computation steps T, and the maximum degree of the constraints  <span class="math">d_{\\rm max}</span> . While there are several ways to estimate the cost of a given AIR program given the above quantities, we will consider the total cost to be expressed as  <span class="math">w \\cdot T \\cdot d_{\\rm max}</span> , following [AAB<sup>+</sup>20].</p>
+
+    <p class="text-gray-300">For Rescue-Prime, Griffin and Anemoi, we have  <span class="math">w=t,\\,T=n_r</span>  and  <span class="math">d_{\\max}=\\alpha</span> . For Poseidon, we have  <span class="math">w=t,\\,T=\\mathsf{RF}+\\lceil\\mathsf{RP}/t\\rceil</span>  and  <span class="math">d_{\\max}=\\alpha</span> .</p>
+
+    <p class="text-gray-300">We then compare the total cost for these four schemes in Table 2. Anemoi and GRIFFIN are quite similar, and close to Rescue-Prime.</p>
+
+      <h3 id="sec-7.4" class="text-xl font-semibold mt-8">7.4 Native performance</h3>
+
+    <p class="text-gray-300">Outside of proving systems, Anemoi performance can challenge other algebraic hash functions, especially in Merkle trees thanks to its Jive mode. In particular in STARKs settings where one can use small cryptographic fields, Anemoi offers the best balance in terms of native evaluation and number of constraints. In Table 4, we illustrate the running time of a 2-to-1 compression method with AnemoiJive, Rescue&ndash;Prime, Poseidon and Griffin over the 64 bits prime field  <span class="math">\\mathbb{F}_p</span>  with  <span class="math">p=2^{64}-2^{32}+1</span> . Each instantiation has a 4 field elements (32 bytes) digest size to ensure 128 bits security<sup>8</sup>. Rescue&ndash;Prime, Poseidon and Griffin have been evaluated with two instantiations: a regular of width 12 with rate 8, capable of compressing two digests with one permutation using the sponge construction, and an instantiation of width 8 with rate 4 using Jive as compression mode. All experiments were performed on an  <span class="math">Intel(R)\\ Core(TM)\\ i7-9750H\\ CPU\\ @\\ 2.60GHz</span> . We present average times in microseconds of each experiment running for 5 seconds. Standard deviations are negligible. All instantiations have been implemented in Rust.</p>
+
+    <p class="text-gray-300"><sup>&amp;</sup>lt;sup&gt;7</sup>For readability, the selectors values have been omitted</p>
+
+    <p class="text-gray-300"><sup>&amp;</sup>lt;sup&gt;8</sup>We refer here to original instantiations, in opposition to a common practice in the industry to tweak parameters (typically the MDS matrix layer). All instantiations here are original, paper versions for fair comparison.</p>
+
+    <p class="text-gray-300"><strong>Table 4:</strong> Native performance comparison of 2-to-1 compression functions for  <span class="math">\\mathbb{F}_p</span>  with  <span class="math">p = 2^{64} - 2^{32} + 1</span> . We fix s = 128. Times are given in  <span class="math">\\mu s</span> . Rescue&ndash;Prime is denoted by RP.</p>
+
+    <div class="overflow-x-auto my-4">
+      <table class="min-w-full text-sm text-gray-300">
+        <thead>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">RP-12</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">RP-8</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">Poseidon-12</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">Poseidon-8</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">GRIFFIN-12</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">GRIFFIN-8</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">Anemoi-8</th>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">15.67</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">9.13</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">5.87</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">2.69</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">2.87</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">2.59</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">4.21</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p class="text-gray-300"><strong>Table 5:</strong> Native performance comparison of a permutation for the scalar field of BLS12-381. We fix s=128. Griffin is instantiated with a state size of 3 and Anemoi, Rescue-Prime and Poseidon with a state size of 2. Times are in  <span class="math">\\mu s</span> .</p>
+
+    <div class="overflow-x-auto my-4">
+      <table class="min-w-full text-sm text-gray-300">
+        <thead>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">Rescue-Prime</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">Poseidon</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">GRIFFIN</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">Anemoi</th>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">206</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">9.2</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">74.18</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">128.29</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p class="text-gray-300">In Table 5, we compare the native performance with Rescue&ndash;Prime, Poseidon and Griffin with a state size useful for applications like Merkle tree over the scalar field of BLS12-381. For small state size, the dominant computation for Anemoi (like Rescue&ndash;Prime and Griffin) is  <span class="math">x^{1/d}</span>  and can be implemented using an appropriate addition chain. All experiments were performed on an Intel(R) Core(TM) i7-8565U CPU @ 1.80GHz. We present average times in microseconds of each experiment running for 2 seconds. Standard deviations are in the order of tens of nanoseconds. Our implementation uses C via FFI through an OCaml binding, but this introduces a negligible overhead.</p>
+
+    </section>
+
+    <section id="sec-8" class="mb-10">
+      <h2 class="text-2xl font-bold">8 Conclusion</h2>
+
+    <p class="text-gray-300">We have made several contributions towards both the theoretical understanding and the practical use of arithmetization-oriented hash functions. Our main contribution is of course Anemoi, a family of permutations that are efficient across various arithmetization methods, yielding gains from 10% up to more than 50% depending on the context, over existing designs. Furthermore, in order to be able to design its main component, the Flystel structure, we had to first identify the link between arithmetization-orientation and CCZ-equivalence. We hope that functions such as the Flystel construction as well as similar ones will be studied by mathematicians as we believe those to be of independent interest.</p>
+
+    <p class="text-gray-300">Finally, we provided a new simple mode, Jive<sub>b</sub>, which adds to the growing list of permutation-based modes of operation providing a b-to-1 compression function, of particular relevance in Merkle trees. It allows us to further improve upon the state-of-the-art, so that Anemoi Jive requires only 56 Plonk constraints in total (when 3 wires and 2 custom gates are used), compared to the best sponge-based instance of Poseidon which requires 98 constraints with 4 wires (or 110 with 3) and 1 custom gate. With only one custom gate, Anemoi Jive requires 64 constraints for 4 wires (or 86 with 3).</p>
+
+    <p class="text-gray-300">Recent work by Liu et al. [LPP<sup>+</sup>22] has demonstrated the potential for further optimizations leveraging our design: by using 4 custom gates they are able to reduce the cost of a 4-to-1 Jive instance to just over 1 constraint per round (16 constraints for 14 rounds)<sup>9</sup>. This compares favorably to the highly optimized and customized version of POSEIDON specified in Mina [MRR<sup>+</sup>] which performs 2:1 compression using 15 wires and 11 constraints (at 55 rounds, 5 rounds per constraint).</p>
+
+    <p class="text-gray-300"><sup>&amp;</sup>lt;sup&gt;9</sup>Liu et al. originally utilized an earlier version of this work specifying 12 rounds in this setting.</p>
+
+    </section>
+
+    <section id="acknowledgements" class="mb-10">
+      <h2 class="text-2xl font-bold"><strong>Acknowledgements</strong></h2>
+
+    <p class="text-gray-300">We thank the reviewers of CRYPTO 2023 for providing insightful comments which helped improve the clarity of this paper. In particular, we would like to thank the shepherd for their assistance in finalizing the paper. We are also grateful to Markulf Kohlweiss, Antoine Rondelet and Duncan Tebbs for proofreading an earlier draft of this paper, and for providing insightful comments and suggestions. Additionally, we extend our thanks to Duncan Tebbs for providing an independent estimation of the Flystel circuit cost in terms of R1CS constraints. The work of L&eacute;o Perrin is supported by the European Research Council (ERC, grant agreement no. 101041545 &quot;ReSCALE&quot;). We thank Tomer Ashur for pointing out a mistake in Figure <a href="#page-5-1">1</a> in a previous version of the paper. We also thank Miguel Ambrona and Rapha&euml;l Toledo for the idea of the quadratic custom gate and their contribution to the Plonk implementation.</p>
+
+    </section>
+
+    <section id="references" class="mb-10">
+      <h2 class="text-2xl font-bold"><strong>References</strong></h2>
+
+    <ul class="space-y-2 text-gray-400 text-sm list-none">
+      <li><p class="text-gray-300">[AAB<sup>+</sup>20] Abdelrahaman Aly, Tomer Ashur, Eli Ben-Sasson, Siemen Dhooghe, and Alan Szepieniec. Design of symmetric-key primitives for advanced cryptographic protocols. <em>IACR Trans. Symm. Cryptol.</em>, 2020(3):1&ndash;45, 2020.</p></li>
+      <li><p class="text-gray-300">[add22] Polygon miden. Repository <a href="https://github.com/maticnetwork/miden" target="_blank" rel="noopener noreferrer">https://github.com/maticnetwork/miden</a>, September 2022.</p></li>
+      <li><p class="text-gray-300">[AGR<sup>+</sup>16] Martin R. Albrecht, Lorenzo Grassi, Christian Rechberger, Arnab Roy, and Tyge Tiessen. MiMC: Efficient encryption and cryptographic hashing with minimal multiplicative complexity. In Jung Hee Cheon and Tsuyoshi Takagi, editors, <em>ASIACRYPT 2016, Part I</em>, volume 10031 of <em>LNCS</em>, pages 191&ndash;219. Springer, Heidelberg, December 2016.</p></li>
+      <li><p class="text-gray-300">[ASTW22] Miguel Ambrona, Anne-Laure Schmitt, Raphael R. Toledo, and Danny Willems. New optimization techniques for plonk's arithmetization. Cryptology ePrint Archive, Paper 2022/462, 2022. <a href="https://eprint.iacr.org/2022/462" target="_blank" rel="noopener noreferrer">https://eprint.iacr.org/2022/</a> <a href="https://eprint.iacr.org/2022/462" target="_blank" rel="noopener noreferrer">462</a>.</p></li>
+      <li><p class="text-gray-300">[BBC<sup>+</sup>20] Christof Beierle, Alex Biryukov, Luan Cardoso dos Santos, Johann Gro&szlig;sch&auml;dl, L&eacute;o Perrin, Aleksei Udovenko, Vesselin Velichkov, and Qingju Wang. Lightweight AEAD and hashing using the Sparkle permutation family. <em>IACR Trans. Symm. Cryptol.</em>, 2020(S1):208&ndash;261, 2020.</p></li>
+      <li><p class="text-gray-300">[BBHR18] Eli Ben-Sasson, Iddo Bentov, Yinon Horesh, and Michael Riabzev. Scalable, transparent, and post-quantum secure computational integrity. Cryptology ePrint Archive, Report 2018/046, 2018. <a href="https://eprint.iacr.org/2018/046" target="_blank" rel="noopener noreferrer">https://eprint.iacr.org/2018/</a> <a href="https://eprint.iacr.org/2018/046" target="_blank" rel="noopener noreferrer">046</a>.</p></li>
+      <li><p class="text-gray-300">[BC90] Jurjen N. Bos and Matthijs J. Coster. Addition chain heuristics. In Gilles Brassard, editor, <em>CRYPTO'89</em>, volume 435 of <em>LNCS</em>, pages 400&ndash;407. Springer, Heidelberg, August 1990.</p></li>
+      <li><p class="text-gray-300">[BCD<sup>+</sup>20] Tim Beyne, Anne Canteaut, Itai Dinur, Maria Eichlseder, Gregor Leander, Ga&euml;tan Leurent, Mar&iacute;a Naya-Plasencia, L&eacute;o Perrin, Yu Sasaki, Yosuke Todo, and Friedrich Wiemer. Out of oddity - new cryptanalytic techniques against symmetric primitives optimized for integrity proof systems. In Daniele Micciancio and Thomas Ristenpart, editors, <em>CRYPTO 2020, Part III</em>, volume 12172 of <em>LNCS</em>, pages 299&ndash;328. Springer, Heidelberg, August 2020.</p></li>
+      <li><p class="text-gray-300">[BCG<sup>+</sup>14] Eli Ben-Sasson, Alessandro Chiesa, Christina Garman, Matthew Green, Ian Miers, Eran Tromer, and Madars Virza. Zerocash: Decentralized anonymous payments from bitcoin. In <em>2014 IEEE Symposium on Security and Privacy</em>, pages 459&ndash;474. IEEE Computer Society Press, May 2014.</p></li>
+      <li><p class="text-gray-300">[BCP06] Lilya Budaghyan, Claude Carlet, and Alexander Pott. New classes of almost bent and almost perfect nonlinear polynomials. <em>IEEE Transactions on Information Theory</em>, 52(3):1141&ndash;1152, 2006.</p></li>
+      <li><p class="text-gray-300">[BDPA13] Guido Bertoni, Joan Daemen, Micha&euml;l Peeters, and Gilles Van Assche. Keccak. In Thomas Johansson and Phong Q. Nguyen, editors, <em>EUROCRYPT 2013</em>, volume 7881 of <em>LNCS</em>, pages 313&ndash;314. Springer, Heidelberg, May 2013.</p></li>
+      <li><p class="text-gray-300">[BDPVA07] Guido Bertoni, Joan Daemen, Micha&euml;l Peeters, and Gilles Van Assche. Sponge functions. In <em>ECRYPT hash workshop</em>, number 9. Citeseer, 2007.</p></li>
+      <li><p class="text-gray-300">[Ber08] Daniel J Bernstein. The Salsa20 family of stream ciphers. In <em>New stream cipher designs</em>, pages 84&ndash;97. Springer, 2008.</p></li>
+      <li><p class="text-gray-300">[BS01] Alex Biryukov and Adi Shamir. Structural cryptanalysis of SASAS. In Birgit Pfitzmann, editor, <em>EUROCRYPT 2001</em>, volume 2045 of <em>LNCS</em>, pages 394&ndash;405. Springer, Heidelberg, May 2001.</p></li>
+      <li><p class="text-gray-300">[BS10] Alex Biryukov and Adi Shamir. Structural cryptanalysis of SASAS. <em>Journal of Cryptology</em>, 23(4):505&ndash;518, October 2010.</p></li>
+      <li><p class="text-gray-300">[BSGL20] Eli Ben-Sasson, Lior Goldberg, and David Levit. Stark friendly hash &ndash; survey and recommendation. Cryptology ePrint Archive, Report 2020/948, 2020. <a href="https://ia.cr/2020/948" target="_blank" rel="noopener noreferrer">https://ia.cr/2020/948</a>.</p></li>
+      <li><p class="text-gray-300">[BSV07] Thomas Baign&egrave;res, Jacques Stern, and Serge Vaudenay. Linear cryptanalysis of non binary ciphers. In Carlisle M. Adams, Ali Miri, and Michael J. Wiener, editors, <em>SAC 2007</em>, volume 4876 of <em>LNCS</em>, pages 184&ndash;211. Springer, Heidelberg, August 2007.</p></li>
+      <li><p class="text-gray-300">[CCZ98] Claude Carlet, Pascale Charpin, and Victor Zinoviev. Codes, bent functions and permutations suitable for DES-like cryptosystems. <em>Designs, Codes and Cryptography</em>, 15(2):125&ndash;156, 1998.</p></li>
+      <li><p class="text-gray-300">[CDL<sup>+</sup>20] Anne Canteaut, S&eacute;bastien Duval, Ga&euml;tan Leurent, Mar&iacute;a Naya-Plasencia, L&eacute;o Perrin, Thomas Pornin, and Andr&eacute; Schrottenloher. Saturnin: a suite of lightweight symmetric algorithms for post-quantum security. <em>IACR Trans. Symm. Cryptol.</em>, 2020(S1):160&ndash;207, 2020.</p></li>
+      <li><p class="text-gray-300">[CDP17] A. Canteaut, S. Duval, and L. Perrin. A generalisation of Dillon's APN permutation with the best known differential and nonlinear properties for all fields of size 2 4+2 . <em>IEEE Transactions on Information Theory</em>, 63(11):7575&ndash; 7591, Nov 2017.</p></li>
+      <li><p class="text-gray-300">[CLO15] David A. Cox, John Little, and Donal O'Shea. <em>Ideals, Varieties, and Algorithms</em>. Springer International Publishing, 2015.</p></li>
+      <li><p class="text-gray-300">[CP19] Anne Canteaut and L&eacute;o Perrin. On CCZ-equivalence, extended-affine equivalence, and function twisting. <em>Finite Fields and Their Applications</em>, 56:209&ndash;246, 2019.</p></li>
+      <li><p class="text-gray-300">[DGGK21] Christoph Dobraunig, Lorenzo Grassi, Anna Guinet, and Dani&euml;l Kuijsters. Ciminion: Symmetric encryption based on toffoli-gates over large finite fields. Springer-Verlag, 2021.</p></li>
+      <li><p class="text-gray-300">[DL18] S&eacute;bastien Duval and Ga&euml;tan Leurent. MDS matrices with lightweight circuits. <em>IACR Trans. Symm. Cryptol.</em>, 2018(2):48&ndash;78, 2018.</p></li>
+      <li><p class="text-gray-300">[Dwo15] Morris Dworkin. Sha-3 standard: Permutation-based hash and extendableoutput functions, 2015-08-04 2015.</p></li>
+      <li><p class="text-gray-300">[Fau99] Jean-Charles Faug&eacute;re. A new efficient algorithm for computing gr&ouml;bner bases (f4). <em>Journal of Pure and Applied Algebra</em>, 139(1):61&ndash;88, 1999.</p></li>
+      <li><p class="text-gray-300">[Fau02] Jean Charles Faug&egrave;re. A new efficient algorithm for computing gr&ouml;bner bases without reduction to zero (f5). In <em>Proceedings of the 2002 International Symposium on Symbolic and Algebraic Computation</em>, ISSAC '02, pages 75&ndash;83, New York, NY, USA, 2002. Association for Computing Machinery.</p></li>
+      <li><p class="text-gray-300">[FGLM93] J.C. Faug&egrave;re, P. Gianni, D. Lazard, and T. Mora. Efficient computation of zero-dimensional gr&ouml;bner bases by change of ordering. <em>Journal of Symbolic Computation</em>, 16(4):329&ndash;344, 1993.</p></li>
+      <li><p class="text-gray-300">[GHR<sup>+</sup>22] Lorenzo Grassi, Yonglin Hao, Christian Rechberger, Markus Schofnegger, Roman Walch, and Qingju Wang. A new feistel approach meets fluid-SPN: Griffin for zero-knowledge applications. Cryptology ePrint Archive, Report 2022/403, 2022. <a href="https://eprint.iacr.org/2022/403" target="_blank" rel="noopener noreferrer">https://eprint.iacr.org/2022/403</a>.</p></li>
+      <li><p class="text-gray-300">[GKL<sup>+</sup>22] Lorenzo Grassi, Dmitry Khovratovich, Reinhard L&uuml;ftenegger, Christian Rechberger, Markus Schofnegger, and Roman Walch. Reinforced concrete: A fast hash function for verifiable computation. In <em>Proceedings of the 2022 ACM SIGSAC Conference on Computer and Communications Security</em>, CCS '22, pages 1323&ndash;1335. Association for Computing Machinery, 2022.</p></li>
+      <li><p class="text-gray-300">[GKR<sup>+</sup>21] Lorenzo Grassi, Dmitry Khovratovich, Christian Rechberger, Arnab Roy, and Markus Schofnegger. Poseidon: A new hash function for zero-knowledge proof systems. In Michael Bailey and Rachel Greenstadt, editors, <em>USENIX Security 2021</em>, pages 519&ndash;535. USENIX Association, August 2021.</p></li>
+      <li><p class="text-gray-300">[GMR89] Shafi Goldwasser, Silvio Micali, and Charles Rackoff. The knowledge complexity of interactive proof systems. <em>SIAM Journal on Computing</em>, 18(1):186&ndash;208, 1989.</p></li>
+      <li><p class="text-gray-300">[G&Oslash;SW23] Lorenzo Grassi, Morten &Oslash;ygarden, Markus Schofnegger, and Roman Walch. From farfalle to megafono via ciminion: The PRF hydra for MPC applications. In Carmit Hazay and Martijn Stam, editors, <em>EUROCRYPT 2023, Part IV</em>, volume 14007 of <em>LNCS</em>, pages 255&ndash;286. Springer, Heidelberg, April 2023.</p></li>
+      <li><p class="text-gray-300">[Gro16] Jens Groth. On the size of pairing-based non-interactive arguments. In Marc Fischlin and Jean-S&eacute;bastien Coron, editors, <em>EUROCRYPT 2016, Part II</em>, volume 9666 of <em>LNCS</em>, pages 305&ndash;326. Springer, Heidelberg, May 2016.</p></li>
+      <li><p class="text-gray-300">[GW20] Ariel Gabizon and Zachary J. Williamson. plookup: A simplified polynomial protocol for lookup tables. Cryptology ePrint Archive, Report 2020/315, 2020. <a href="https://eprint.iacr.org/2020/315" target="_blank" rel="noopener noreferrer">https://eprint.iacr.org/2020/315</a>.</p></li>
+      <li><p class="text-gray-300">[Hir16] Shoichi Hirose. Sequential hashing with minimum padding. In <em>NIST Workshop on Lightweight Cryptography 2016</em>. National Institute of Standards and Technology (NIST), 2016.</p></li>
+      <li><p class="text-gray-300">[Knu95] Lars R. Knudsen. Truncated and higher order differentials. In Bart Preneel, editor, <em>FSE'94</em>, volume 1008 of <em>LNCS</em>, pages 196&ndash;211. Springer, Heidelberg, December 1995.</p></li>
+      <li><p class="text-gray-300">[Lou94] W.W.A.P. Loustaunau. <em>An Introduction to Grobner Bases</em>. American Mathematical Soc., 1994.</p></li>
+      <li><p class="text-gray-300">[LPP<sup>+</sup>22] Jianwei Liu, Harshad Patil, Akhil Sai Peddireddy, Kevin Singh, Haifeng Sun, Huachuang Sun, and Weikeng Chen. An efficient verifiable state for zk-evm and beyond from the anemoi hash function. Cryptology ePrint Archive, Paper 2022/1487, 2022. <a href="https://eprint.iacr.org/2022/1487" target="_blank" rel="noopener noreferrer">https://eprint.iacr.org/2022/1487</a>.</p></li>
+      <li><p class="text-gray-300">[LTYW18] Yongqiang Li, Shizhu Tian, Yuyin Yu, and Mingsheng Wang. On the generalization of butterfly structure. <em>IACR Trans. Symm. Cryptol.</em>, 2018(1):160&ndash;179, 2018.</p></li>
+      <li><p class="text-gray-300">[McL21] Michael B. McLoughlin. addchain: Cryptographic addition chain generation in go. Repository <a href="https://github.com/mmcloughlin/addchain" target="_blank" rel="noopener noreferrer">https://github.com/mmcloughlin/addchain</a>, October 2021.</p></li>
+      <li><p class="text-gray-300">[MRR<sup>+</sup>] Izaak Meckler, Vanishree Rao, Matthew Ryan, Ana&iuml;s Querol, Joseph Spadavecchia, and David Wong. Mina book, kimchi specification. <a href="https://o1-labs.github.io/proof-systems/specs/kimchi.html#poseidon" target="_blank" rel="noopener noreferrer">https:</a> <a href="https://o1-labs.github.io/proof-systems/specs/kimchi.html#poseidon" target="_blank" rel="noopener noreferrer">//o1-labs.github.io/proof-systems/specs/kimchi.html#poseidon</a>.</p></li>
+      <li><p class="text-gray-300">[Nyb94] Kaisa Nyberg. Differentially uniform mappings for cryptography. In Tor Helleseth, editor, <em>EUROCRYPT'93</em>, volume 765 of <em>LNCS</em>, pages 55&ndash;64. Springer, Heidelberg, May 1994.</p></li>
+      <li><p class="text-gray-300">[PUB16] L&eacute;o Perrin, Aleksei Udovenko, and Alex Biryukov. Cryptanalysis of a theorem: Decomposing the only known solution to the big APN problem. In Matthew Robshaw and Jonathan Katz, editors, <em>CRYPTO 2016, Part II</em>, volume 9815 of <em>LNCS</em>, pages 93&ndash;122. Springer, Heidelberg, August 2016.</p></li>
+      <li><p class="text-gray-300">[SAD20] Alan Szepieniec, Tomer Ashur, and Siemen Dhooghe. Rescue-prime: a standard specification (SoK). Cryptology ePrint Archive, Report 2020/1143, 2020. <a href="https://eprint.iacr.org/2020/1143" target="_blank" rel="noopener noreferrer">https://eprint.iacr.org/2020/1143</a>.</p></li>
+      <li><p class="text-gray-300">[SLST23] Alan Szepieniec, Alexander Lemmens, Jan Ferdinand Sauer, and Bobbin Threadbare. The tip5 hash function for recursive starks. Cryptology ePrint Archive, Paper 2023/107, 2023. <a href="https://eprint.iacr.org/2023/107" target="_blank" rel="noopener noreferrer">https://eprint.iacr.org/2023/107</a>.</p></li>
+      <li><p class="text-gray-300">[Zer22] Polygon Zero. Plonky2. Repository <a href="https://github.com/mir-protocol/plonky2" target="_blank" rel="noopener noreferrer">https://github.com/mir-protocol/</a> <a href="https://github.com/mir-protocol/plonky2" target="_blank" rel="noopener noreferrer">plonky2</a>, September 2022.</p></li>
+    </ul>
+
+    <p class="text-gray-300"><strong>Supporting Material</strong></p>
+
+    </section>
+
+    <section id="app-a" class="mb-10">
+      <h2 class="text-2xl font-bold">A Details of our Security Analysis</h2>
+
+      <h3 id="app-a.1" class="text-xl font-semibold mt-8">A.1 Differential and Linear Attacks</h3>
+
+    <p class="text-gray-300">In this part, we argue that differential and linear attacks can be prevented by the Flystel construction, thanks to the differential and linear properties of the scheme as presented in Section 5.</p>
+
+    <p class="text-gray-300">Differential attacks exploit the probability distribution of a given non-zero input difference leading to a given output difference after a certain number of rounds. As established in Proposition 2 for the Flystel<sub>2</sub> and in Proposition 3 for the Flystel<sub>p</sub>, the differential uniformity of a Flystel is low (namely 4 in the former case and  <span class="math">(\\alpha - 1)</span>  in the latter). As a consequence, the probability of any transition of the form  <span class="math">\\mathcal{H}(x+a,y+b) - \\mathcal{H}(x,y) = (c,d)</span>  is small: it is upper bounded by  <span class="math">(\\alpha - 1)/q^2</span> . Given that q is typically bigger than  <span class="math">2^{63}</span> , we only need to activate 3 S-boxes to obtain more than 128 bits of security, and 5 for 256 bits.</p>
+
+    <p class="text-gray-300">A similar argument holds for linear attacks. As for the differential uniformity, the correlation increases slowly with q according to Conjecture 1.</p>
+
+    <p class="text-gray-300">Conjecture 1. If q = p is a prime number, then the maximum module of the Walsh transform of  <span class="math">\\mathcal{H}</span>  satisfies</p>
+
+    <p class="text-gray-300"><span class="math">$\\max_{a \\in \\mathbb{F}_p^m, b \\in \\left(\\mathbb{F}_p^m\\right)^*} |\\mathcal{W}_{\\langle b, \\mathcal{H} \\rangle}(a)| \\leq p \\log p.</span>$</p>
+
+    <p class="text-gray-300">More precisely it appears that for any value of  <span class="math">\\alpha</span> , 4p+6 might even be a better bound, but for  <span class="math">\\alpha=3</span> , it seems that the most suitable bound is 2p, and for  <span class="math">\\alpha=5</span> , 3.5p. While the most general case remains a conjecture at the time of writing, this result holds for small values of p ( <span class="math">p \\le 809</span> ), as can be seen in Figure 8.</p>
+
+    <p class="text-gray-300">    <img src="_page_29_Figure_8.jpeg" alt="" class="my-4 max-w-full" />
+</p>
+
+    <p class="text-gray-300">Figure 8: The maximum value of the module of the Walsh transform of  <span class="math">\\mathcal{H}</span> .</p>
+
+    <p class="text-gray-300">As a consequence, it is again sufficient to activate a few S-boxes to prevent the existence of high correlation linear trails. Indeed, as established in [BSV07], a linear attack against F becomes possible when the squared modulus of  <span class="math">\\mathcal{W}_{\\langle b,F\\rangle}(a)</span>  for some  <span class="math">a,b\\in\\mathbb{F}_q^m</span>  is high enough. Roughly speaking, the data complexity of a linear attack is around  <span class="math">1/|\\mathcal{W}_{\\langle b,F\\rangle}(a)|^2</span> , so activating a few S-boxes will be sufficient for this quantity to drop below  <span class="math">2^{-s}</span> , where s is the intended security level.</p>
+
+    <p class="text-gray-300">For both attacks, the activation of many S-boxes is further helped by our use of MDS diffusion matrices. The structure  <span class="math">\\mathcal{M}</span> , based on two parallel MDS matrices  <span class="math">\\mathcal{M}_x</span>  and  <span class="math">\\mathcal{M}_y</span> , ensures that at least  <span class="math">\\ell+1</span>  S-boxes are active in every pair of rounds.</p>
+
+      <h3 id="app-a.2" class="text-xl font-semibold mt-8">A.2 Integral Attacks</h3>
+
+    <p class="text-gray-300">A classical integral attack tracks the evolution of simple patterns through the rounds. Consider a function of  <span class="math">\\mathbb{F}_q^\\ell</span> . As explained in [BS01, BS10], a multiset of elements of  <span class="math">\\mathbb{F}_q^\\ell</span>  can have a word be saturated (i.e. this word takes all possible values exactly once), be constant, have a sum equal to zero, or not yield any specific pattern. These patterns are denoted &quot;*&quot;, &quot;C&quot;, &quot;0&quot;, and &quot;?&quot; respectively. For example, through an S-box layer, (*, C, ..., C) is mapped to (*, C..., C), while the application of an MDS matrix maps (*, C, ..., C) to (*, *, ..., *).</p>
+
+    <p class="text-gray-300">In our case, such attacks do not pose a significant threat. First, the open Flystel is a 3-round Feistel network where the center round function is a permutation, so that the only integral pattern is of the form  <span class="math">(*,C) \\leadsto (?,*)</span> . As a consequence, patterns at the word level cannot be propagated over two full rounds since we would need to consider open Flystel instances where one of the inputs has the ? pattern. Patterns at the open Flystel level are a bit more promising, i.e. saturating a full column using  <span class="math">q^2</span>  queries would lead to having fully saturated columns after one round, a pattern destroyed by the following linear layer (see [BS01, BS10] for a more thorough treatment of such generic integral attacks against SPNs).</p>
+
+    <p class="text-gray-300">As shown in  <span class="math">[BCD^+20]</span> , a new direction can be used in  <span class="math">\\mathbb{F}_p</span> : instead of saturating a word of  <span class="math">\\mathbb{F}_q</span> , it is possible instead to saturate a multiplicative subgroup. Against some algorithms like gMiMC-Hash, this approach is promising as the diffusion is slow and the only non-linear operations are monomials&mdash;under which subgroups are stable. In our case, subgroups will not be stable through an open  <span class="math">\\mathsf{Flystel}_p</span>  call because of its three internal addition/subtractions and constant additions.</p>
+
+    <p class="text-gray-300">In binary fields, primitives with low algebraic degree are potentially vulnerable to higher order differential cryptanalysis [Knu95], which are themselves closely related to integral attacks. The open Flystel<sub>2</sub> is an efficient counter-measure against such attacks since open butterflies operating on  <span class="math">(\\mathbb{F}_{2^n})^2</span>  are known to have an algebraic degree equal to n (see Proposition 2). As shown in [BCD<sup>+</sup>20], a low degree can also be leveraged in the case where q is prime. Still, a similar argument will hold: the degree of  <span class="math">x \\mapsto x^{1/\\alpha}</span>  is too high to allow any meaningful pattern to emerge.</p>
+
+      <h3 id="app-a.3" class="text-xl font-semibold mt-8">A.3 Invariant Subspaces</h3>
+
+    <p class="text-gray-300">Remember that, regardless of the characteristic, it always holds that  <span class="math">\\mathcal{H}(Q_i(y), y) = (Q_f(y), y)</span> . For each Flystel instance in the round function (i.e., for each column in the state), the probability that an input is in this set is equal to 1/q. As this pattern is non-linear, we deem it unlikely that it is preserved by the combination of the constant addition and the linear layer with a probability higher than chance, meaning that this pattern will be activated in inner rounds with a negligible probability.</p>
+
+    <p class="text-gray-300">That being said, it is a pattern that can be used to simplify the equations modeling a call to Anemoi during an algebraic attack: if an attacker has some degrees of freedom, then forcing the emergence of such a pattern within some Flystel instances is the best strategy to simplify these equations.</p>
+
+    </section>
+
+    <section id="app-b" class="mb-10">
+      <h2 class="text-2xl font-bold">B Details on Algebraic Attacks</h2>
+
+      <h3 id="app-b.1" class="text-xl font-semibold mt-8"><strong>B.1</strong> Algebraic Attacks in Characteristic 2</h3>
+
+    <p class="text-gray-300">We now present the details on  <span class="math">\\mathcal{F}_{\\mathsf{CICO}}</span>  which motivate Estimate 1.</p>
+
+    <p class="text-gray-300"><strong>Gr&ouml;bner basis step.</strong> We observe that the Gr&ouml;bner basis computation on  <span class="math">\\mathcal{F}_{CICO}</span>  is cheap. This is due to the following lemma, whose proof is by computation since we simply have 2 polynomials per round when  <span class="math">\\ell=1</span> .</p>
+
+    <p class="text-gray-300"><strong>Lemma 1.</strong> We consider the polynomial ring  <span class="math">\\mathbb{F}_q[x_0, y_0, \\dots, x_{n_r}, y_{n_r}]</span>  endowed with the grevlex ordering. For  <span class="math">0 \\le i \\le n_r - 1</span> , let  <span class="math">\\{f_i, g_i\\}</span>  denote the two cubic equations at round i (which involve  <span class="math">x_i, y_i, x_{i+1}</span>  and  <span class="math">y_{i+1}</span> ). Then, the set of leading monomials in the reduced Gr&ouml;bner basis of  <span class="math">\\{f_i, g_i\\}</span>  is</p>
+
+    <p class="text-gray-300"> <span class="math">\\left\\{y_{i+1}^5, x_i y_{i+1}^3, x_i^3, x_i y_{i+1}\\right\\}. \\tag{6}</span></p>
+
+    <p class="text-gray-300">Moreover, the set of leading monomials in the reduced Gr&ouml;bner basis of  <span class="math">\\{x_0, f_0, g_0\\}</span>  is</p>
+
+    <p class="text-gray-300">
+<span class="math">$\\left\\{x_0, y_0^2 y_1, y_0^3, y_0 y_1^3, y_1^5\\right\\}. \\tag{7}</span>$</p>
+
+    <p class="text-gray-300">All these individual Gr&ouml;bner bases are obtained in degree 5.</p>
+
+    <p class="text-gray-300">Indeed, the leading monomials in two distinct sets defined by Equation (6) for  <span class="math">1 \\le i \\ne j \\le n_r - 1</span>  are always coprime to each other and they are also coprime to those in Equation (7) and to  <span class="math">x_{n_r}</span>  (which corresponds to the second CICO constraint). Using Buchberger's Second Criterion<sup>10</sup>, this shows that the Gr&ouml;bner basis computation on  <span class="math">\\mathcal{F}_{\\text{CICO}}</span>  terminates in degree 5 since one only needs to compute the individual Gr&ouml;bner bases of Lemma 1.</p>
+
+    <p class="text-gray-300">Note that this result is only valid for  <span class="math">\\ell=1</span> . When  <span class="math">\\ell&gt;1</span> , one can expect a similar behaviour for  <span class="math">\\mathcal{F}_{\\mathsf{CICO}}</span>  in the sense that the Gr&ouml;bner basis computation could only depend on the polynomials of a given round (e.g., on  <span class="math">\\ell</span> ) or on the contrary an overlap between the sets of leading terms. In this second case, the complexity will be higher as it will depend on  <span class="math">n_r</span> . Our experiments for  <span class="math">\\ell=2</span>  and  <span class="math">n_r\\in\\{1..3\\}</span>  suggest the latter but we have not been able to draw a more precise conclusion. For this reason and since this choice is conservative, we only consider FGLM in Estimate 1 even when  <span class="math">\\ell&gt;1</span> .</p>
+
+    <p class="text-gray-300"><strong>FGLM step.</strong> Using the generic Bezout bound for a system of  <span class="math">2n_r</span>  cubic equations and with  <span class="math">I_{\\text{CICO}} := \\langle \\mathcal{F}_{\\text{CICO}} \\rangle</span> , we obtain</p>
+
+    <p class="text-gray-300"><span class="math">$\\deg\\left(I_{\\mathsf{CICO}}\\right) \\le 3^{2n_r} \\ .</span>$</p>
+
+    <p class="text-gray-300">Also, from experiments it seems that this bound is tight as we always have  <span class="math">\\deg(I_{\\text{CICO}}) = 3^{2n_r}</span> . Therefore, we estimate the complexity of the FGLM step when  <span class="math">\\ell = 1</span>  to be  <span class="math">\\mathcal{O}(n_r \\cdot 3^{2n_r})</span> . Based on the expression of the Bezout bound for a system of  <span class="math">2\\ell n_r</span>  cubic polynomials, we also propose  <span class="math">\\mathcal{O}(\\ell n_r \\cdot 3^{2\\ell n_r})</span>  in the general case.</p>
+
+      <h3 id="app-b.2" class="text-xl font-semibold mt-8">B.2 Algebraic Attacks in Odd Characteristic</h3>
+
+    <p class="text-gray-300">Strategy with half less equations and variables. We now describe the system  <span class="math">\\mathcal{P}_{\\mathsf{CICO}}</span>  mentioned in the main text. The inputs  <span class="math">(x_0, y_0)</span>  are still seen as variables. This time, there is only one unknown  <span class="math">v_i</span>  and one equation  <span class="math">p_i</span>  in  <span class="math">x_0, y_0, v_0, \\ldots, v_i</span>  per round instead of the former  <span class="math">\\{f_i, g_i\\}</span>  in  <span class="math">x_i, y_i, x_{i+1}</span>  and  <span class="math">y_{i+1}</span> . Let us denote by  <span class="math">(x_i, y_i)</span>  the output after round i-1. After adding the round constants and applying the linear layer, we obtain</p>
+
+    <p class="text-gray-300"><span class="math">$(x_i&#x27;, y_i&#x27;) := (\\mathcal{M}_x(x_i, y_i)[0] + c_i, \\mathcal{M}_x(x_i, y_i)[1] + d_i).</span>$</p>
+
+    <p class="text-gray-300">We then set a new variable</p>
+
+    <p class="text-gray-300">
+<span class="math">$v_i := y_i&#x27; - y_{i+1}, \\tag{8}</span>$</p>
+
+    <p class="text-gray-300">and we consider the equation</p>
+
+    <p class="text-gray-300">
+<span class="math">$p_i := v_i^{\\alpha} - (x_i&#x27; - (\\beta y_i&#x27;^2 + \\gamma)) = 0.</span>$
+(9)</p>
+
+    <p class="text-gray-300">Note that we also have</p>
+
+    <p class="text-gray-300"><span class="math">$x_{i+1} = x_i&#x27; - \\beta \\gamma y_i&#x27;^2 + \\beta y_{i+1}^2 + \\delta.</span>$
+(10)</p>
+
+    <p class="text-gray-300"> <span class="math">&lt;sup&gt;^{10}\\&lt;/sup&gt;mathrm{see}</span>  for instance [CLO15, &sect;2, Proposition 4]</p>
+
+    <p class="text-gray-300">    <img src="_page_32_Figure_0.jpeg" alt="" class="my-4 max-w-full" />
+</p>
+
+    <p class="text-gray-300"><strong>Figure 9:</strong> Comparison in odd characteristic for <em>&#8467;</em> = 1.</p>
+
+    <p class="text-gray-300"><strong>Modeling 2.</strong> <em>We consider the system</em> := {0<em>, . . . ,</em> &minus;1} <em>in the polynomial ring</em> F[0<em>,</em> 0<em>,</em> 0<em>, . . . ,</em> &minus;1]<em>, where is given by Equation</em> <a href="#page-31-5">(9)</a><em>. It contains equations in</em> + 2 <em>variables.</em></p>
+
+    <p class="text-gray-300">The CICO system CICO is then obtained from by fixing the variable <sup>0</sup> = 0 and by adding the equation in 0<em>,</em> 0<em>,</em> 0<em>, . . . ,</em> &minus;<sup>1</sup> which corresponds to the constraint = 0 and which is not a linear equation anymore. Note that actually belongs to F[0<em>,</em> 0<em>,</em> 0<em>, . . . ,</em>  ].</p>
+
+    <p class="text-gray-300">The rationale behind Modeling <a href="#page-32-0">2</a> is that it contains half less equations and variables than Modeling <a href="#page-17-1">1.</a> More importantly and perhaps surprisingly, the degree of the 's only increases linearly with the number of rounds<a href="#page-32-1">11</a> while one could expect an exponential increase. This is only due to the particular shape of the polynomials and . Note however that these observations do not guarantee better performance for this second strategy, in particular because the degrees of the polynomials in Modeling <a href="#page-17-1">1</a> are constant. One can indeed imagine that the solving degree of CICO will increase more quickly than the one of &#8497;CICO. In particular, this very fact may prevail over the smaller system size after a certain number of rounds.</p>
+
+    <p class="text-gray-300"><strong>Experiments for Gr&ouml;bner bases.</strong> Practical results for both modelings are shown in Table <a href="#page-32-2">6</a> and Figure <a href="#page-32-3">9</a> below. Even if the strategy based on Modeling <a href="#page-32-0">2</a> seems more efficient for a small number of rounds, the trends for = 3 suggest that both approaches should behave similarly for more rounds.</p>
+
+    <p class="text-gray-300"><strong>Table 6:</strong> Gr&ouml;bner Basis computation in odd characteristic for both strategies when <em>&#8467;</em> = 1.</p>
+
+    <div class="overflow-x-auto my-4">
+      <table class="min-w-full text-sm text-gray-300">
+        <thead>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">&#120572;</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">&#119899;&#119903;</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">&#119889;solv(&#8497;CICO)</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">Total Time &#8497;CICO (s)</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">&#120572;</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">&#119899;&#119903;</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">Degrees</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">&#119889;solv(&#119979;CICO)</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">Total Time &#119979;CICO (s)</th>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">3</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">3</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">7</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0.010</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">3</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">3</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">3,4,6</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">7</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0.010</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">4</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">9</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0.040</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">4</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">3,4,6,8</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">10</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0.040</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">5</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">11</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0.550</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">5</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">3,4,6,8,10</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">11</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0.329</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">6</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">13</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">11.429</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">6</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">3,4,6,8,10,12</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">12</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">6.639</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">7</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">15</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">216.620</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">7</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">3,4,6,8,10,12,14</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">15</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">163.870</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">8</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">17</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">14450.530</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">8</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">3,4,6,8,10,12,14,16</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">16</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">10575.610</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">5</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">3</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">8</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0.040</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">5</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">3</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">5,5,6</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">11</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0.049</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">4</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">10</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">2.599</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">4</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">5,5,6,8</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">15</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0.879</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">5</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">12</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">226.330</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">5</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">5,5,6,8,10</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">19</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">19.129</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">6</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">5,5,6,8,10,12</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">23</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">875.379</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">7</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">3</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">10</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0.240</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">7</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">3</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">7,7,7</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">12</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0.190</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">4</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">12</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">55.420</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">4</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">7,7,7,8</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">17</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">16.870</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">5</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">14</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">23042.180</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">5</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">7,7,7,8,10</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">22</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">3903.280</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p class="text-gray-300">From these results and since Modeling <a href="#page-32-0">2</a> seems more complicated to analyze than Modeling <a href="#page-17-1">1</a> from a theoretical perspective, we focus on the latter to derive Estimate <a href="#page-18-1">2</a> and we conservatively add 2 extra rounds to this estimate. Actually, it might be possible to view Equation <a href="#page-31-6">(8)</a> as a change of variables. From Modeling <a href="#page-17-1">1,</a> one then obtains Modeling</p>
+
+    <p class="text-gray-300"><sup>11</sup>from round such that is not the term of maximal degree in .</p>
+
+    <p class="text-gray-300"><strong>Table 7:</strong> Solving degree of &#8497;CICO for higher values of .</p>
+
+    <div class="overflow-x-auto my-4">
+      <table class="min-w-full text-sm text-gray-300">
+        <thead>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">&#120572;</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">Values of &#119889;solv(&#8497;CICO) for 2 &le; &#119899;&#119903;<br>&le; 4</th>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">9</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">10, 13, 15</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">11</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">12, 15, 18</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p class="text-gray-300"><a href="#page-32-0">2</a> by using a particular monomial ordering which gets rid of the variables. Stating that Modeling <a href="#page-32-0">2</a> performs better than Modeling <a href="#page-17-1">1</a> indicates that we have found a more appropriate order than the DRL ordering on the same initial set of equations. This is not a standard approach in algebraic cryptanalysis and overall we have not pursued further in a formal comparison between these two strategies<a href="#page-33-0">12</a> .</p>
+
+    <p class="text-gray-300"><strong>Gr&ouml;bner basis step for &#8497;CICO.</strong> From Table <a href="#page-32-2">6</a> and the following Table <a href="#page-33-1">7,</a> we also deduce the experimental degree bound exp. Even for high values of , theoretical considerations lead us to think that the increase of this degree will be only by two after a few rounds, which motivates Conjecture <a href="#page-18-2">1.</a> Plugging this value into Equation <a href="#page-17-2">(4)</a> yields the final cost of Estimate <a href="#page-18-1">2.</a></p>
+
+    <p class="text-gray-300"><strong>FGLM step.</strong> Contrary to the even characteristic case, this step is negligible. The Bezout bound for CICO := &#10216;&#8497;CICO&#10217; yields deg (CICO) &le; 2 but we observed a much smaller degree:</p>
+
+    <p class="text-gray-300"><strong>Conjecture 2</strong> (From experiments)<strong>.</strong> <em>We have deg</em> (CICO) = ( + 2) <em>.</em></p>
+
+    <p class="text-gray-300">The proof of this result is left for future work and may require more insight on the underlying ideal. Actually, even by adopting the Bezout bound instead of Conjecture <a href="#page-33-2">2</a> as well as = 2, a very rough upper-bound for Step 2 is ( 2 &middot; 2 2 &middot; <sup>2</sup> ) and this is already below the cost given in Estimate <a href="#page-18-1">2.</a> Finally, we want to mention that we obtained the same result as in Conjecture <a href="#page-33-2">2</a> for the ideal CICO := &#10216;CICO&#10217; in the polynomial ring F[0<em>,</em> 0<em>,</em> 0<em>, . . . ,</em> &minus;1]. Once again, this may suggest a stronger connection between Modeling <a href="#page-17-1">1</a> and Modeling <a href="#page-32-0">2.</a></p>
+
+    <p class="text-gray-300"><sup>12</sup>for instance, we would probably need to work over the larger polynomial ring F[0<em>,</em> 0<em>, . . . , , ,</em> 0<em>, . . . ,</em> &minus;1] before selecting the relevant equations/variables.</p>
+
+    </section>
+
+    <section id="app-c" class="mb-10">
+      <h2 class="text-2xl font-bold"><strong>C Reference Implementation</strong></h2>
+
+    <p class="text-gray-300">A full reference implementation of Anemoi, including AnemoiJive and AnemoiSponge, is provided in our GitHub<a href="#page-34-1">13</a> repository. It contains various routines to evaluate these functions and to generate the corresponding systems of equations as well. Nevertheless, we include some snippets from this implementation below. First, we provide the linear layers.</p>
+
+    <pre><code class="language-text">1 def M_2 ( x_input , b):
+2 &quot;&quot;&quot; Adapted from a pseudo - Hadamard transform &quot;&quot;&quot;
+3 x = x_input [:]
+4 x [0] += b* x [1]
+5 x [1] += b* x [0]
+6 return x
+8 def M_3 ( x_input , b):
+9 &quot;&quot;&quot; Adapted from figure 6 of [ DL18 ]. &quot;&quot;&quot;
+10 x = x_input [:]
+11 t = x [0] + b*x [2]
+12 x [2] += x [1]
+13 x [2] += b* x [0]
+14 x [0] = t + x [2]
+15 x [1] += t
+16 return x
+18
+19 def M_4 ( x_input , b):
+20 &quot;&quot;&quot; Adapted from figure 8 of [ DL18 ]. &quot;&quot;&quot;
+21 x = x_input [:]
+22 x [0] += x [1]
+23 x [2] += x [3]
+24 x [3] += b* x [0]
+25 x [1] = b *( x [1] + x [2])
+26 x [0] += x [1]
+27 x [2] += b* x [3]
+28 x [1] += x [2]
+29 x [3] += x [0]
+30 return x
+32 def circulant_mds_matrix ( field , l , coeff_upper_limit = None ) :
+33 if coeff_upper_limit == None :
+34 coeff_upper_limit = l +1
+35 assert ( coeff_upper_limit &gt; l )
+36 for v in itertools . combinations_with_replacement ( range (1 , coeff_upper_limit ) , l):
+37 mat = matrix . circulant ( list (v)) . change_ring ( field )
+38 if is_mds ( mat ) :
+39 return ( mat )
+40 # For large cases , the method may not return any valid matrix ,
+41 # hence the need to increase the limit further .
+42 return circulant_mds_matrix ( field , l , coeff_upper_limit +1)
+</code></pre>
+
+    <p class="text-gray-300"><a href="https://github.com/anemoi-hash/anemoi-hash" target="_blank" rel="noopener noreferrer">https://github.com/anemoi-hash/anemoi-hash</a></p>
+
+    <p class="text-gray-300">Then, the following function computes the number of rounds.</p>
+
+    <pre><code class="language-text">1 def get_n_rounds (s , l , alpha ):
+2 &quot;&quot;&quot; Returns the number of rounds needed in Anemoi ( based on the
+3 complexity of algebraic attacks ).
+4
+5 &quot;&quot;&quot;
+6 r = 0
+7 complexity = 0
+8 kappa = {3:1 , 5:2 , 7:4 , 9:7 , 11:9}
+9 assert alpha in kappa
+10 while complexity &lt; 2** s:
+11 r += 1
+12 complexity = binomial (
+13 4* l*r + kappa [ alpha ],
+14 2* l*r
+15 ) **2
+16 r += 2 # considering the second model
+17 r += min (5 , l +1) # security margin
+18 return max (8 , r)
+</code></pre>
+
+    <p class="text-gray-300">Finally, the two modes in which Anemoi can be plugged are implemented by the following functions. They both take an input P which must implement a permutation. Concretely, it must be such that calling P(x) on a list x of elements of the relevant field returns a list of elements of the same field of the same size.</p>
+
+    <pre><code class="language-text">1 def jive (P , b , _x ):
+2 &quot;&quot;&quot; Returns an output b times smaller than _x using the Jive mode of
+3 operation and the permutation P.
+4
+5 &quot;&quot;&quot;
+6 if b &lt; 2:
+7 raise Exception (&quot;b must be at least equal to 2&quot;)
+8 if P. input_size () % b != 0:
+9 raise Exception (&quot;b must divide the input size !&quot;)
+10 c = P . input_size () / b # length of the compressed output
+11 # Output size check : we allow the output size to be 3 bits shorter than
+12 # the theoretical target , as commonly used finite fields usually have a
+13 # characteristic size slightly under a power of two .
+14 if c * P.F. cardinality () . nbits () &lt; 2 * P. security_level - 3:
+15 raise Exception (f&quot; digest size is too small for the targeted security level !&quot;)
+17 x = _x [:]
+18 u = P (x)
+19 compressed = []
+20 for i in range (0 , c ):
+21 compressed . append ( sum (x[ i+c*j ] + u[i +c*j ]
+22 for j in range (0 , b )))
+23 return compressed
+25 def sponge_hash (P , r , h , _x ) :
+26 &quot;&quot;&quot; Uses Hirose &#x27;s variant of the sponge construction to hash the
+27 message x using the permutation P with rate r, outputting a digest
+28 of size h.
+30 &quot;&quot;&quot;
+31 x = _x [:]
+32 if P. input_size () &lt;= r:
+33 raise Exception (&quot; rate must be strictly smaller than state size !&quot;)
+34
+35 # Digest size and capacity check : we allow the digest size to be 3 bits
+36 # shorter than the theoretical target , as commonly used finite fields
+37 # usually have a characteristic size slightly under a power of two .
+38 if h * P.F. cardinality () . nbits () &lt; 2 * P. security_level - 3:
+39 raise Exception (f&quot; digest size is too small for the targeted security level !&quot;)
+40 capacity = P. input_size () - r
+41 if capacity * P.F . cardinality () . nbits () &lt; 2 * P. security_level - 3:
+42 raise Exception (f&quot; capacity is too small for the targeted security level !&quot;)
+44 # message padding (and domain separator computation )
+45 if len (x) % r == 0 and len (x) != 0:
+46 sigma = 1
+47 else :
+48 sigma = 0
+49 x += [1]
+50 x += (len (x) % r ) *[0]
+51 padded_x = [[ x[ pos +i ] for i in range (0 , r) ]
+52 for pos in range (0 , len( x) , r)]
+</code></pre>
+
+    <pre><code class="language-text">53 # absorption phase
+54 internal_state = [0] * P. input_size ()
+55 for pos in range (0 , len ( padded_x ) ):
+56 for i in range (0 , r ):
+57 internal_state [i] += padded_x [ pos ][ i]
+58 internal_state = P( internal_state )
+59 if pos == len ( padded_x ) -1:
+60 # adding sigma if it is the last block
+61 internal_state [ -1] += sigma
+62 # squeezing
+63 digest = []
+64 pos = 0
+65 while len ( digest ) &lt; h:
+66 digest . append ( internal_state [ pos ])
+67 pos += 1
+68 if pos == r :
+69 pos = 0
+70 internal_state = P( internal_state )
+71 return digest
+</code></pre>
+
+    </section>
+`;
+---
+
+<BaseLayout title="New Design Techniques for Efficient Arithmetization-Oriented... (2022/840)">
+  <article class="max-w-4xl mx-auto article-prose">
+    <nav class="mb-8">
+      <a href="/papers" class="text-blue-400 hover:text-blue-300">
+        &larr; Back to Papers
+      </a>
+    </nav>
+
+    <header class="mb-12">
+      <h1 class="text-3xl font-bold mb-4"
+        set:html={TITLE_HTML} />
+      <p class="text-gray-400 mb-2"
+        set:html={AUTHORS_HTML} />
+      <p class="text-gray-500 text-sm mb-4">
+        2022 &middot; eprint 2022/840
+      </p>
+      <div class="flex gap-4 text-sm">
+        <a
+          href={EPRINT_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          class="text-blue-400 hover:text-blue-300"
+        >
+          Paper (eprint) &rarr;
+        </a>
+      </div>
+      <PaperDisclaimer eprintUrl={EPRINT_URL} />
+      <p class="mt-1 text-xs text-gray-600">
+        Converted with: {CRAWLER} &middot; {CONVERTED_DATE}
+      </p>
+    </header>
+
+    <nav id="toc" class="mb-10 p-6 rounded-lg" style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06);">
+      <h2 class="text-lg font-bold mb-4">Table of Contents</h2>
+      <ol class="space-y-1 text-sm text-gray-300
+        list-decimal list-inside">
+        <li><a href="#sec-1" class="hover:text-white">Introduction</a></li>
+        <li><a href="#sec-2" class="hover:text-white">Theoretical Background</a></li>
+        <li>
+          <a href="#sec-3" class="hover:text-white">Modes of Operation</a>
+          <ol class="ml-6 mt-1 space-y-1 list-decimal
+            list-inside text-gray-400">
+            <li><a href="#sec-3.1" class="hover:text-white">Random Oracle: the Sponge Structure</a></li>
+            <li><a href="#sec-3.2" class="hover:text-white">Merkle Compression Function: the Jive Mode</a></li>
+          </ol>
+        </li>
+        <li>
+          <a href="#sec-4" class="hover:text-white">The Flystel Structure</a>
+          <ol class="ml-6 mt-1 space-y-1 list-decimal
+            list-inside text-gray-400">
+            <li><a href="#sec-4.1" class="hover:text-white">On CCZ-Equivalence and Arithmetization-Orientation</a></li>
+            <li><a href="#sec-4.2" class="hover:text-white">High Level View of the Flystel Structure</a></li>
+            <li><a href="#sec-4.3" class="hover:text-white">Characteristic 2</a></li>
+            <li><a href="#sec-4.4" class="hover:text-white">Odd Characteristic</a></li>
+            <li><a href="#sec-4.5" class="hover:text-white">Implementation Aspects</a></li>
+          </ol>
+        </li>
+        <li>
+          <a href="#sec-5" class="hover:text-white">Description of Anemoi</a>
+          <ol class="ml-6 mt-1 space-y-1 list-decimal
+            list-inside text-gray-400">
+            <li><a href="#sec-5.1" class="hover:text-white">Round Function</a></li>
+            <li><a href="#sec-5.2" class="hover:text-white">Higher Level Algorithms</a></li>
+            <li><a href="#sec-5.3" class="hover:text-white">Specific Instances</a></li>
+          </ol>
+        </li>
+        <li>
+          <a href="#sec-6" class="hover:text-white">Security Analysis</a>
+          <ol class="ml-6 mt-1 space-y-1 list-decimal
+            list-inside text-gray-400">
+            <li><a href="#sec-6.1" class="hover:text-white">&quot;Classical&quot; Attacks</a></li>
+            <li><a href="#sec-6.2" class="hover:text-white">Algebraic Attacks</a></li>
+            <li><a href="#sec-6.2.1" class="hover:text-white">Intermediate variables.</a></li>
+            <li><a href="#sec-6.2.2" class="hover:text-white">Odd characteristic.</a></li>
+          </ol>
+        </li>
+        <li>
+          <a href="#sec-7" class="hover:text-white">Benchmarks</a>
+          <ol class="ml-6 mt-1 space-y-1 list-decimal
+            list-inside text-gray-400">
+            <li><a href="#sec-7.1" class="hover:text-white">R1CS Systems</a></li>
+            <li><a href="#sec-7.2" class="hover:text-white">Plonk</a></li>
+            <li><a href="#sec-7.2.1" class="hover:text-white">Plonk Optimizations.</a></li>
+            <li><a href="#sec-7.2.2" class="hover:text-white">Plonk optimisations with an additional quadratic custom gate</a></li>
+            <li><a href="#sec-7.3" class="hover:text-white">AIR</a></li>
+            <li><a href="#sec-7.4" class="hover:text-white">Native performance</a></li>
+          </ol>
+        </li>
+        <li><a href="#sec-8" class="hover:text-white">Conclusion</a></li>
+      </ol>
+      <p class="text-xs text-gray-500 mt-4 mb-1 font-semibold">
+        Appendices
+      </p>
+      <ol class="space-y-1 text-sm text-gray-400
+        list-[upper-alpha] list-inside">
+        <li>
+          <a href="#app-a" class="hover:text-white">Details of our Security Analysis</a>
+          <ol class="ml-6 mt-1 space-y-1 list-decimal
+            list-inside text-gray-400">
+            <li><a href="#app-a.1" class="hover:text-white">Differential and Linear Attacks</a></li>
+            <li><a href="#app-a.2" class="hover:text-white">Integral Attacks</a></li>
+            <li><a href="#app-a.3" class="hover:text-white">Invariant Subspaces</a></li>
+          </ol>
+        </li>
+        <li>
+          <a href="#app-b" class="hover:text-white">Details on Algebraic Attacks</a>
+          <ol class="ml-6 mt-1 space-y-1 list-decimal
+            list-inside text-gray-400">
+            <li><a href="#app-b.1" class="hover:text-white">Algebraic Attacks in Characteristic 2</a></li>
+            <li><a href="#app-b.2" class="hover:text-white">Algebraic Attacks in Odd Characteristic</a></li>
+          </ol>
+        </li>
+        <li><a href="#app-c" class="hover:text-white">Reference Implementation</a></li>
+      </ol>
+      <p class="text-xs text-gray-500 mt-4 mb-1 font-semibold">
+        Additional
+      </p>
+      <ul class="space-y-1 text-sm text-gray-400
+        list-disc list-inside">
+        <li><a href="#acknowledgements" class="hover:text-white">Acknowledgements</a></li>
+        <li><a href="#references" class="hover:text-white">References</a></li>
+      </ul>
+    </nav>
+
+
+    <Fragment set:html={CONTENT} />
+
+    <PaperHistory slug="new-design-techniques-for-efficient-arithmetization-2022" />
+  </article>
+</BaseLayout>

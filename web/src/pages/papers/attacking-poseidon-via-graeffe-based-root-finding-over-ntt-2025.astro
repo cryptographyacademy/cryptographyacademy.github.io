@@ -1,0 +1,641 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import PaperDisclaimer from '../../components/PaperDisclaimer.astro';
+import PaperHistory from '../../components/PaperHistory.astro';
+
+const EPRINT_URL = 'https://eprint.iacr.org/2025/937';
+const CRAWLER = 'marker';
+const CONVERTED_DATE = '2026-02-16';
+const TITLE_HTML = 'Attacking Poseidon via Graeffe-Based Root-Finding over NTT-Friendly Fields';
+const AUTHORS_HTML = 'Antonio Sanso, Giuseppe Vitto';
+
+const CONTENT = `    <section id="abstract" class="mb-10">
+      <h2 class="text-2xl font-bold">Abstract</h2>
+      <p class="text-gray-300">This paper explores the algebraic structure of the Poseidon and Poseidon2 permutations
+over NTT-friendly finite fields, with a focus on preimage recovery via root-finding
+techniques. We introduce an algorithm for efficiently identifying single roots of high-degree
+univariate polynomials that emerge from these constructions, based on the Graeffe transform
+and the tangent Graeffe method. Our approach is evaluated on reduced-round bounty
+instances of these permutations at various security levels, as proposed by the Ethereum
+Foundation, demonstrating practical effectiveness. These results yield new insights into the
+security of permutation-based cryptographic primitives instantiated over NTT-friendly prime
+fields.</p>
+      <p class="text-gray-300"><strong>Keywords:</strong> Poseidon &middot; Poseidon2 &middot; Cryptanalysis &middot; Root-finding &middot; Graeffe &middot; Interpolation &middot; CICO &middot; Zero-Knowledge &middot; Hash Break</p>
+    </section>
+
+    <p class="text-gray-300">POSEIDON [4] is a family of cryptographic permutations specifically designed for arithmetization and optimized for use in zero-knowledge proof systems. These permutations operate over finite fields  <span class="math">\\mathbb{F}_p</span>  and are defined as mappings on  <span class="math">\\mathbb{F}_p^t</span> . The construction of Poseidon follows a Substitution-Permutation Network (SPN) paradigm, where the nonlinear layer consists of parallel applications of low-degree power maps of the form  <span class="math">x \\mapsto x^d</span> , with  <span class="math">\\gcd(d, p-1) = 1</span> . The design of Poseidon incorporates the Hades strategy [6], which interleaves full and partial rounds to balance efficiency and security. Specifically, full rounds apply the S-box to every element in the state, while partial rounds apply it to only one element, reducing computational overhead while still increasing algebraic complexity. The full structure consists of  <span class="math">\\frac{R_F}{2}</span>  full rounds, followed by  <span class="math">R_P</span>  partial rounds, and another  <span class="math">\\frac{R_F}{2}</span>  full rounds, where  <span class="math">R_F</span>  and  <span class="math">R_P</span>  denote the number of full and partial rounds, respectively. Full rounds primarily provide resistance against statistical attacks, while partial rounds serve to raise the algebraic degree, mitigating algebraic attacks. An extension of the original design, Poseidon [5], introduces an initial linear layer and employs optimized matrices, yielding improved performance in both theoretical and practical scenarios.</p>
+
+    <p class="text-gray-300">The attack surface of Poseidon has been examined in recent cryptanalytic surveys [7], which outline the balance between statistical and algebraic vulnerabilities inherent to its design. Full rounds, by applying the S-box uniformly, effectively mitigate statistical distinguishers and enhance diffusion. However, partial rounds, which apply the nonlinear transformation more selectively, create structural nuances that may be exploited by algebraic attacks due to regions of lower nonlinearity within the state. The growth of the algebraic degree across the permutation is crucial in defending against attacks leveraging low-degree polynomial representations. While the use of low-degree power maps enables efficient computation, it requires careful round structuring to maintain resistance against algebraic cryptanalysis. Furthermore, the design and optimization of linear layers, including the MDS matrices, play a key role in maximizing diffusion and minimizing exploitable weaknesses.</p>
+
+    <p class="text-gray-300"><sup>*</sup> This manuscript is Work in Progress.</p>
+
+    <p class="text-gray-300">Some reduced-round instances of Poseidon have been successfully attacked using algebraic techniques, specifically by solving instances of the CICO-1 (Constrained Input - Constrained Output) problem, as demonstrated in [2]. This highlights the importance of careful parameter selection and the sensitivity of the design to the number and structure of rounds.</p>
+
+    <p class="text-gray-300">Our Contribution In this paper, we present a new type of algebraic attack targeting reduced-round instances of Poseidon and Poseidon2 over NTT-friendly prime fields. By exploiting the structure of these fields and employing the Graeffe transform, our method achieves improved efficiency in the root-finding stage of interpolation attacks. This results in a streamlined algorithm for preimage recovery that outperforms existing approaches and reveals practical vulnerabilities in these permutation-based primitives when instantiated over NTT-friendly primes.</p>
+
+    <p class="text-gray-300">Outline This paper is organized as follows. In Section 2, we provide additional details on the Poseidon and Poseidon2 permutations and survey relevant cryptanalytic attacks. Section 3 presents the core strategy of the attack in the setting of generic prime fields. In Section 4, we introduce the Graeffe Transform and Graeffe Tangent root-finding method. Finally, in Section 5, we demonstrate how to employ them to efficiently find roots of polynomials defined over NTT-friendly prime fields, and we apply them to break reduced-round instances of Poseidon2 over 64-bit fields and Poseidon over 256-bit fields.</p>
+
+    <p class="text-gray-300">Notation We write M(d) to denote the time complexity of multiplying two polynomials in  <span class="math">\\mathbb{F}_p[x]</span>  of degree less than d. It is known that  <span class="math">M(d) \\in \\mathcal{O}(d \\log d \\log \\log d)</span>  using fast multiplication algorithms.</p>
+
+    <section id="sec-2" class="mb-10">
+      <h2 class="text-2xl font-bold">2 The Poseidon Permutation</h2>
+
+    <p class="text-gray-300">The Poseidon permutation is a cryptographic primitive specifically designed for efficient implementation in finite fields, particularly within zero-knowledge proof systems and other proof-friendly cryptographic protocols. Its design strikes a careful balance between algebraic simplicity and resistance to cryptanalytic attacks. Unlike traditional permutations used in block ciphers (e.g., AES), Poseidon is optimized for settings where arithmetic over large prime fields is dominant and expensive operations like bitwise XOR or substitution tables are infeasible. Formally, Poseidon defines a permutation  <span class="math">P: \\mathbb{F}_p^T \\to \\mathbb{F}_p^T</span>  over a vector of T field elements, constructed through a sequence of carefully structured rounds. These rounds are divided into two types: full rounds and partial rounds, each comprising three essential transformation steps:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><span class="math">R_F</span> : Number of <strong>full rounds</strong>, applied symmetrically at the beginning and end of the permutation  <span class="math">(R_F/2 \\text{ each})</span> .</li>
+      <li><span class="math">-R_P</span> : Number of <strong>partial rounds</strong>, applied in between the full rounds.</li>
+    </ul>
+
+    <p class="text-gray-300">Each round executes the following sequence of transformations:</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Add Round Constants. A round-dependent constant vector  <span class="math">C^{(r)} = (c_0^{(r)}, c_1^{(r)}, \\dots, c_{T-1}^{(r)}) \\in \\mathbb{F}_p^T</span>  is added component-wise to the current state vector  <span class="math">w^{(r)} = (w_0^{(r)}, w_1^{(r)}, \\dots, w_{T-1}^{(r)})</span> , resulting in:</li>
+    </ol>
+
+    <p class="text-gray-300"><span class="math">$a \\leftarrow w^{(r)} + C^{(r)}</span>$
+.</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><strong>S-Box Layer.</strong> A non-linear transformation, given by raising state elements to a fixed power d, is applied. During a full round, this operation is applied independently to every element:</li>
+    </ol>
+
+    <p class="text-gray-300"><span class="math">$b \\leftarrow (a_0^d, a_1^d, \\dots, a_{T-1}^d).</span>$</p>
+
+    <p class="text-gray-300">Conversely, during a partial round, the operation is performed only on the first element of the state:</p>
+
+    <p class="text-gray-300"><span class="math">$b \\leftarrow (a_0^d, a_1, \\dots, a_{T-1}).</span>$</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><strong>Mixing Layer.</strong> The state vector is updated by applying a linear transformation, represented as multiplication by an MDS (Maximum Distance Separable) matrix  <span class="math">M \\in \\mathbb{F}_n^{T \\times T}</span> :</li>
+    </ol>
+
+    <p class="text-gray-300"><span class="math">$w^{(r+1)} \\leftarrow M \\cdot b</span>$
+.</p>
+
+    <p class="text-gray-300">The complete permutation thus follows this structure:</p>
+
+    <p class="text-gray-300"><span class="math">$\\underbrace{\\text{Full Rounds}}_{R_F/2} \\to \\underbrace{\\text{Partial Rounds}}_{R_P} \\to \\underbrace{\\text{Full Rounds}}_{R_F/2}.</span>$</p>
+
+    <p class="text-gray-300">The cryptographic strength of the Poseidon permutation hinges on the careful choice of its design parameters: the round constants  <span class="math">C^{(r)}</span> , the S-Box exponent d, the MDS matrix M, and the round numbers  <span class="math">R_F</span>  and  <span class="math">R_P</span> . These parameters are selected to ensure strong diffusion, non-linearity, and resistance to differential and linear cryptanalysis, while still being efficient in proof systems that rely on arithmetic circuits.</p>
+
+    <p class="text-gray-300"><strong>Poseidon2.</strong> Poseidon2 is a refined version of the original Poseidon permutation, defined over the same family of prime fields  <span class="math">\\mathbb{F}_p</span> . It supports usage in both the sponge construction and the feed-forward (compression) mode, enhancing its versatility in cryptographic protocols. The core structure remains round-based, but several important changes distinguish Poseidon2:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><strong>Pre-round Linear Layer.</strong> An additional linear layer  <span class="math">M_{\\epsilon}</span>  is applied to the state before the first round. This strengthens resistance against algebraic attacks that attempt to bypass the first rounds.</li>
+      <li>Non-MDS Matrices. Unlike POSEIDON, which uses an MDS matrix with maximal branch number for each round, POSEIDON2 employs two different non-MDS matrices  <span class="math">M_{\\epsilon}</span>  and  <span class="math">M_{I}</span>  in the external and internal rounds, respectively. These matrices have a reduced branch number (less than T-1), offering performance benefits.</li>
+      <li>Localized Round Constants. In internal rounds, round constants are not added to every\\nelement of the state. Instead, they are applied only at the position of the S-box application
+(typically the first element), simplifying the implementation and reducing the number of constraints in proof systems.</li>
+    </ul>
+
+    <p class="text-gray-300">These changes provide better efficiency in circuit representations and improved resilience against certain classes of algebraic and statistical attacks, while maintaining cryptographic robustness in relevant security models.</p>
+
+    </section>
+
+    <section id="sec-3" class="mb-10">
+      <h2 class="text-2xl font-bold">3 Attack Strategy</h2>
+
+    <p class="text-gray-300">In this section, we present the core methodology underlying our analysis of the Poseidon and Poseidon2 permutations over NTT-friendly prime fields. Our focus lies on algebraic techniques that leverage the inherent polynomial structure of the permutation to recover inputs from constrained outputs, a fundamental step in evaluating the permutation's resistance to preimage and related attacks.</p>
+
+    <p class="text-gray-300">Specifically, we frame our approach in terms of the Constrained Input &ndash; Constrained Output (CICO) problem. Given a permutation  <span class="math">P: \\mathbb{F}_p^T \\to \\mathbb{F}_p^T</span> , the CICO problem asks us to find pairs  <span class="math">(w,v) \\in \\mathbb{F}_p^T \\times \\mathbb{F}_p^T</span>  such that P(w) = v, while certain coordinates of w and v are fixed according to predetermined constraints. This problem naturally arises in cryptanalysis scenarios where partial information about inputs and outputs is known or controlled.</p>
+
+    <p class="text-gray-300">By exploiting the algebraic structure of P, we reduce the CICO problem to finding roots of certain univariate polynomials over  <span class="math">\\mathbb{F}_p</span>  derived from the permutation's internal relations. Our attack strategy centers on efficiently identifying these roots, which correspond to candidate inputs that satisfy the given constraints. This approach enables reconstruction of the corresponding outputs and facilitates preimage recovery in the constrained setting.</p>
+
+      <h3 id="sec-3.1" class="text-xl font-semibold mt-8">3.1 Solving Univariate Systems</h3>
+
+    <p class="text-gray-300">We solve the CICO problem for reduced-round instances of the Poseidon permutation through the following stages:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Univariate Transformation. We restrict the permutation's input by fixing all non-constrained input entries, except one, to random values  <span class="math">r_i</span> . This transforms the output entries into evaluations of univariate polynomials  <span class="math">f_j(x) \\in \\mathbb{F}_p[x]</span> , depending only on the single unknown input state  <span class="math">x \\in \\mathbb{F}_p</span> . An upper bound for each polynomial's degree,  <span class="math">\\deg(f_j)</span> , can be derived from the permutation's internal structure and parameters. More specifically, if d is the degree of the S-Box's non-linear power mapping, then  <span class="math">\\deg(f_j) \\leq d^{R_F + R_T}</span> .</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><strong>Interpolation.</strong> We evaluate the univariate transformation of the permutation, as defined in the previous step, at  <span class="math">\\deg(f_j)+1</span>  consecutive powers of a suitably chosen root of unity in  <span class="math">\\mathbb{F}_p</span> . We then collect the outputs corresponding to the entries constrained by the CICO problem and apply an inverse Number Theoretic Transform (NTT) to interpolate the polynomials  <span class="math">f_j(x)</span> . Note that, to solve a given CICO problem, it suffices to interpolate only those polynomials  <span class="math">f_j(x)</span>  corresponding to the indices j for which the output entries  <span class="math">\\{w_i\\}_j</span>  are constrained.</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Root-Finding. When certain output entries  <span class="math">\\{w_j\\}_j</span>  are constrained by the CICO problem, local solutions can be found by solving the polynomial equations  <span class="math">f_j(x) = w_j</span> . By Fermat's Little Theorem, all elements of  <span class="math">\\mathbb{F}_p</span>  are roots of the polynomial  <span class="math">\\pi_p(x) = x^p x \\in \\mathbb{F}_p[x]</span> . Therefore, each root in  <span class="math">\\mathbb{F}_p</span>  of  <span class="math">\\tilde{f}_j(x) = f_j(x) w_j</span>  divides  <span class="math">\\gcd(\\pi_p, \\tilde{f}_j)</span> . If a linear polynomial  <span class="math">x x_0</span>  divides the polynomial</li>
+    </ol></li>
+    </ul>
+
+    <p class="text-gray-300"><span class="math">$\\gcd\\left(\\gcd(\\pi_p, \\tilde{f}_{j_1}), \\ldots, \\gcd(\\pi_p, \\tilde{f}_{j_n})\\right),</span>$</p>
+
+    <p class="text-gray-300">then  <span class="math">x_0</span>  is a solution to the original CICO problem.</p>
+
+    <p class="text-gray-300">The root-finding stage can then be further divided into two sub-stages:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Compute  <span class="math">\\tilde{\\pi}_{p,j} = \\pi_p \\mod \\tilde{f}_j</span> . Since direct computation of  <span class="math">\\pi_p</span>  is impractical due to its large degree, we reduce the problem of computing  <span class="math">\\gcd(\\pi_p, \\tilde{f}_j)</span>  to the equivalent task of computing  <span class="math">\\gcd(\\tilde{\\pi}_{p,j}, \\tilde{f}_j)</span> , where  <span class="math">\\tilde{\\pi}_{p,j} = \\pi_p \\mod \\tilde{f}_j</span>  has degree less than  <span class="math">\\deg(\\tilde{f}_j)</span> . To achieve this, we first compute  <span class="math">x^p \\mod \\tilde{f}_j</span>  using a square-and-multiply approach based on the binary representation of p. We then subtract  <span class="math">x \\mod \\tilde{f}_j</span>  from this result.</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><strong>GCD Computations.</strong> We compute  <span class="math">g_j = \\gcd(\\tilde{\\pi}_{p,j}, \\tilde{f}_j)</span> . Assuming that Poseidon behaves similarly to a random permutation, the univariate transformation from the first step implies that each polynomial  <span class="math">g_j</span>  is expected to have an average degree close to 1. We then compute the polynomial  <span class="math">g = \\gcd(g_1, \\ldots, g_n)</span> , and select any root of g as a solution to the original CICO problem.</li>
+    </ol></li>
+    </ul>
+
+    <p class="text-gray-300">The complexity of solving the CICO problem using the outlined root-finding technique is primarily determined by polynomial arithmetic operations. The most computationally demanding step is the Root-finding, specifically the computation of  <span class="math">\\tilde{\\pi}_{p,j} = \\pi_p \\mod \\tilde{f}_j</span> , which involves exponentiation modulo a polynomial of degree  <span class="math">d = \\deg(\\tilde{f}_j)</span> . Applying a square-and-multiply method combined with fast polynomial multiplication, this step has a time complexity of approximately  <span class="math">\\mathcal{O}(M(d)\\log p)</span> , where M(d) denotes the cost of multiplying two polynomials of degree less than d over  <span class="math">\\mathbb{F}_p</span> .</p>
+
+    <p class="text-gray-300">The subsequent polynomial GCD computations have complexity bounded by  <span class="math">\\mathcal{O}(M(d)\\log d)</span> , which is generally less costly. Recall that  <span class="math">M(d)\\in\\mathcal{O}(d\\log d\\log\\log d)</span>  with state-of-the-art polynomial multiplication algorithms. Therefore, the root-finding process scales quasi-linearly with the polynomial degree, with the modular exponentiation step representing the computational bottle-neck.</p>
+
+    </section>
+
+    <section id="sec-4" class="mb-10">
+      <h2 class="text-2xl font-bold">4 Root-finding Based on the Graeffe Transform</h2>
+
+    <p class="text-gray-300">The root-finding strategy outlined in Subsection 3.1 is a well-known method for identifying roots of polynomials over finite fields, with its origins tracing back to Berlekamp's polynomial factorization algorithm. However, this algorithm is generic in nature and does not rely on any specific structural properties of the fields in which the polynomials are defined to improve computational efficiency.</p>
+
+    <p class="text-gray-300">In this section, we will introduce the Graeffe transform and examine its various properties. These properties will subsequently be used to accelerate polynomial root-finding over NTT-friendly fields&mdash;namely, that is finite fields  <span class="math">\\mathbb{F}_p</span>  in which p-1 is divisible by a large power of a small prime, such as 2.</p>
+
+    <p class="text-gray-300"><strong>Definition 1.</strong> The Graeffe transform of order r &gt; 0 of a monic polynomial  <span class="math">P \\in \\mathbb{F}_p[x]</span>  of degree d is defined as the unique monic polynomial  <span class="math">G(P) \\in \\mathbb{F}_p[x]</span>  of degree d satisfying</p>
+
+    <p class="text-gray-300"><span class="math">$G_r(P)(x^r) = (-1)^{(r-1)d} \\cdot P(x) \\cdot P(\\omega_r \\cdot x) \\cdot \\dots \\cdot P(\\omega_r^{r-1} \\cdot x)</span>$</p>
+
+    <p class="text-gray-300">with  <span class="math">\\omega_r \\in \\mathbb{F}</span>  a primitive r-th root of unity.</p>
+
+    <p class="text-gray-300">We are interested in exploring two properties of Graeffe transform: composition and roots' exponentiations.</p>
+
+      <h3 id="sec-4.1" class="text-xl font-semibold mt-8">4.1 Composition of Graeffe Transforms</h3>
+
+    <p class="text-gray-300">A consequence of Definition 1 is that for integers r, s &gt; 0, the transforms satisfies</p>
+
+    <p class="text-gray-300"><span class="math">$G_{rs}(P) = (G_r \\circ G_s)(P) = (G_s \\circ G_r)(P).</span>$</p>
+
+    <p class="text-gray-300">This property allows efficient computation of Graeffe transforms of order  <span class="math">r^k</span> , by iteratively applying k times a transform of order r.</p>
+
+    <p class="text-gray-300">In practice, Graeffe transforms of order r, with r prime, are computed using fast NTT-based polynomial multiplication. We recall that a generic product polynomial  <span class="math">f = f_0(x) \\cdots f_{r-1}(x) \\in \\mathbb{F}_p[x]</span>  can be efficiently computed in  <span class="math">O(n \\log n)</span>  operations as</p>
+
+    <p class="text-gray-300"><span class="math">$f = NTT_n^{-1} \\left( NTT_n(f_0) \\circ NTT_n(f_1) \\circ \\dots \\circ NTT_n(f_{r-1}) \\right)</span>$</p>
+
+    <p class="text-gray-300">where  <span class="math">n \\ge 1 + \\sum \\deg(f_i)</span> ,  <span class="math">\\mathbb{F}_p</span>  admits an n-th primitive root of unity,  <span class="math">NTT_n</span>  and  <span class="math">NTT_n^{-1}</span>  denote the forward and inverse NTT of size n and  <span class="math">\\circ</span>  denotes element-wise product of the NTT results.</p>
+
+    <p class="text-gray-300">It follows that naively computing a Graeffe transform of order  <span class="math">r^k</span>  as</p>
+
+    <p class="text-gray-300"><span class="math">$G_{r^k}(P)(x^{r^k}) = (-1)^{(r-1)d} \\cdot NTT_n^{-1} \\left( NTT_n(P(x)) \\circ NTT_n(P(\\xi x)) \\circ \\dots \\circ NTT_n(P(\\xi^{r^k-1}x)) \\right)</span>$</p>
+
+    <p class="text-gray-300">with  <span class="math">\\omega_{r^k} \\in \\mathbb{F}_p</span>  a primitive  <span class="math">r^k</span>  root of unity, requires at least  <span class="math">O(r^k d \\log(r^k d))</span>  operations, a much worse complexity compared to the  <span class="math">O(krd \\log(rd))</span>  operations required by iteratively applying k times a Graeffe transform of order r.</p>
+
+    <p class="text-gray-300">These observations imply that computing Graeffe's transforms is particularly efficient over finite fields  <span class="math">\\mathbb{F}_p</span>  with p-1 divided by a large power of a small prime such as 2, in which cases the field is said to be NTT-friendly.</p>
+
+      <h3 id="sec-4.2" class="text-xl font-semibold mt-8">4.2 Roots exponentiation</h3>
+
+    <p class="text-gray-300">From Definition 1, if  <span class="math">\\alpha \\in \\mathbb{F}_p</span>  is a root of P(x), then  <span class="math">(x - \\omega_r^{r-i}\\alpha)</span>  divides  <span class="math">P(\\omega_r^i x)</span>  for all  <span class="math">i \\in [0, r-1]</span> . Therefore,  <span class="math">\\prod_{i=0}^{r-1} (x - \\omega_r^{r-i}\\alpha) = x^r - \\alpha^r</span>  divides  <span class="math">G_r(P)(x^r)</span> , and thus  <span class="math">\\alpha^r</span>  is a root of  <span class="math">G_r(P)(x)</span> .</p>
+
+    <p class="text-gray-300">When working over a finite field  <span class="math">\\mathbb{F}_p</span>  with  <span class="math">p-1=r\\cdot s</span>  and  <span class="math">\\gcd(r,s)=1</span> , the Graeffe transform of order r of a polynomial P(x) maps non-zero roots  <span class="math">\\alpha</span>  of P(x) to non-zero roots  <span class="math">\\alpha^r</span>  of  <span class="math">G_r(P)(x)</span> , with the latter lying in the subgroup of order s of  <span class="math">\\mathbb{F}_p^{\\times}</span> . This implies that  <span class="math">\\alpha^r=\\omega_s^i</span>  for some  <span class="math">i\\in[0,s-1]</span>  and  <span class="math">\\omega_s\\in\\mathbb{F}_p</span>  primitive s-th root of unity.</p>
+
+    <p class="text-gray-300">To efficiently find non-zero roots of  <span class="math">G_r(P)(x)</span> , we can proceed as follows:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>If  <span class="math">\\deg G_r(P)(x) \\leq s</span> , we compute in  <span class="math">O(s \\log s)</span>  operations  <span class="math">NTT_s(G_r(P))</span> , then perform an O(s) search for zero entries in the NTT result. Indeed, computing  <span class="math">NTT_s(G_r(P))</span>  corresponds to evaluating  <span class="math">G_r(P)(x)</span>  at all powers of a primitive s-th root of unity  <span class="math">\\omega_s</span> . Thus, a zero entry at index i indicates that  <span class="math">\\omega_s^i</span>  is a root of  <span class="math">G_r(P)(x)</span> .</li>
+      <li>If deg  <span class="math">G_r(P)(x) &gt; s</span> , we compute  <span class="math">\\tilde{g}(x) = G_r(P)(x) \\pmod{x^s 1}</span>  and we proceed as above to find a root of  <span class="math">\\tilde{g}(x)</span> . Since  <span class="math">(x \\omega_s^i)</span>  divides  <span class="math">x^s 1</span>  for all  <span class="math">i \\in [0, s 1]</span> , whenever  <span class="math">(x \\omega_s^i)</span>  divides  <span class="math">G_r(P)(x)</span> , then  <span class="math">(x \\omega_s^i)</span>  must necessarily divide  <span class="math">\\tilde{g}(x)</span> , hence  <span class="math">\\omega_s^i</span>  is one of its root.</li>
+    </ul>
+
+      <h3 id="sec-4.3" class="text-xl font-semibold mt-8">4.3 Tangent Graeffe Transforms</h3>
+
+    <p class="text-gray-300">The Graeffe transform, by itself, does not allow for the direct computation of the roots of a polynomial  <span class="math">P(x) \\in \\mathbb{F}_p[x]</span> . However, a method known as the <em>Tangent Graeffe Transform</em> enables the extraction of such roots by operating over the ring of dual numbers. In this Section, we will briefly sketch this method.</p>
+
+    <p class="text-gray-300">Let  <span class="math">\\varepsilon</span>  be a formal indeterminate such that  <span class="math">\\varepsilon^2 = 0</span> . Elements of the quotient ring  <span class="math">\\mathbb{F}_p[\\varepsilon]/(\\varepsilon^2)</span>  are referred to as <em>tangent numbers</em>. These take the form  <span class="math">a + b\\varepsilon</span> , where  <span class="math">a, b \\in \\mathbb{F}_p</span> , and the basic arithmetic operations are defined as follows:</p>
+
+    <p class="text-gray-300"><span class="math">$(a+b\\varepsilon) \\pm (c+d\\varepsilon) = (a\\pm c) + (b\\pm d)\\varepsilon,</span>$</p>
+
+    <p class="text-gray-300"><span class="math">$(a+b\\varepsilon)(c+d\\varepsilon) = ac + (ad+bc)\\varepsilon.</span>$</p>
+
+    <p class="text-gray-300">Let  <span class="math">P \\in \\mathbb{F}_p[x]</span>  be a monic polynomial of degree d that splits completely over  <span class="math">\\mathbb{F}_p</span>  as  <span class="math">P(x) = \\prod_{i=1}^d (x - \\alpha_i)</span> , where the roots  <span class="math">\\alpha_1, \\ldots, \\alpha_d \\in \\mathbb{F}_p</span>  are pairwise distinct. Define the tangent deformation  <span class="math">\\widetilde{P}(x) := P(x + \\varepsilon)</span> . Using Taylor expansion, we obtain:</p>
+
+    <p class="text-gray-300"><span class="math">$\\widetilde{P}(x) = P(x) + P&#x27;(x)\\varepsilon = \\prod_{i=1}^{d} (x - (\\alpha_i - \\varepsilon)).</span>$</p>
+
+    <p class="text-gray-300">The Graeffe transform of order  <span class="math">r \\geq 2</span> , previously defined over  <span class="math">\\mathbb{F}_p</span> , extends naturally to polynomials with coefficients in  <span class="math">\\mathbb{F}_p[\\varepsilon]</span> . We define the tangent Graeffe transform of order r as  <span class="math">G_r(\\widetilde{P})</span> , satisfying</p>
+
+    <p class="text-gray-300"><span class="math">$G_r(\\widetilde{P})(x) = \\prod_{i=1}^d (x - (\\alpha_i - \\varepsilon)^r),</span>$</p>
+
+    <p class="text-gray-300">where each factor expands as</p>
+
+    <p class="text-gray-300"><span class="math">$(\\alpha_i - \\varepsilon)^r = \\alpha_i^r - r\\alpha_i^{r-1}\\varepsilon</span>$
+for  <span class="math">i = 1, \\dots, d</span> .</p>
+
+    <p class="text-gray-300">Assume we have an efficient method for computing the roots  <span class="math">\\alpha_1^r, \\ldots, \\alpha_d^r</span>  of  <span class="math">G_r(P)</span>  (see Subsection 4.2). Then  <span class="math">G_r(\\widetilde{P})</span>  may be written as:</p>
+
+    <p class="text-gray-300"><span class="math">$G_r(\\widetilde{P})(x) = A(x) + B(x)\\varepsilon,</span>$</p>
+
+    <p class="text-gray-300">for some polynomial  <span class="math">B \\in \\mathbb{F}_p[x]</span>  and  <span class="math">A = G_r(P)</span> . For each root  <span class="math">\\alpha_i^r</span>  of A, we evaluate:</p>
+
+    <p class="text-gray-300"><span class="math">$G_r(\\widetilde{P})(\\alpha_i^r - r\\alpha_i^{r-1}\\varepsilon) = A(\\alpha_i^r) + \\left(B(\\alpha_i^r) - A&#x27;(\\alpha_i^r) \\cdot r\\alpha_i^{r-1}\\right)\\varepsilon = 0</span>$</p>
+
+    <p class="text-gray-300">Since  <span class="math">\\alpha_i^r</span>  is a root of A, the above simplifies to:</p>
+
+    <p class="text-gray-300"><span class="math">$(B(\\alpha_i^r) - A&#x27;(\\alpha_i^r) \\cdot r\\alpha_i^{r-1}) \\varepsilon = 0.</span>$</p>
+
+    <p class="text-gray-300">Therefore, if  <span class="math">\\alpha_i^r</span>  is a simple root of A, it follows that  <span class="math">r\\alpha_i^{r-1} = \\frac{B(\\alpha_i^r)}{A&#x27;(\\alpha_i^r)}</span> . Provided that  <span class="math">\\alpha_i^r \\neq 0</span> , we can then recover the original root  <span class="math">\\alpha_i</span>  of P(x) as:</p>
+
+    <p class="text-gray-300"><span class="math">$\\alpha_i = \\frac{r\\alpha_i^r}{r\\alpha_i^{r-1}} = r\\alpha_i^r \\cdot \\frac{A&#x27;(\\alpha_i^r)}{B(\\alpha_i^r)}.</span>$</p>
+
+      <h3 id="sec-4.4" class="text-xl font-semibold mt-8">4.4 Heuristic Randomized Algorithm for Root Finding over a NTT-friendly Fields</h3>
+
+    <p class="text-gray-300">The Tangent Graeffe Method outlined in the previous Section has been extensively analyzed in [8], where the authors formalized an heuristic randomized algorithm for finding all roots of a polynomial over NTT-friendly fields. Their method has been successfully implemented in [9] and [10], where, for the prime  <span class="math">p = 5 \\cdot 2^{55} + 1</span> , it was used to compute the roots of polynomials of degree up to  <span class="math">10^9</span> . In this Section we will briefly review their algorithm as originally introduced in [8].</p>
+
+    <p class="text-gray-300">Let  <span class="math">\\mathbb{F}_p</span>  be a finite field, where p is a prime of the form  <span class="math">p = \\sigma \\cdot 2^m + 1</span>  for some small  <span class="math">\\sigma</span> . Suppose that  <span class="math">\\beta \\in \\mathbb{F}_p</span>  is a primitive element of order p-1 in the multiplicative group of  <span class="math">\\mathbb{F}_p</span> .</p>
+
+    <p class="text-gray-300">Let  <span class="math">P=(x-\\alpha_1)\\cdots(x-\\alpha_d)\\in \\mathbb{F}_p[x]</span>  be as defined in the previous subsection. The tangent Graeffe method can be used to efficiently compute those  <span class="math">\\alpha_k</span>  for which  <span class="math">\\alpha_k^r</span>  is a simple root of  <span class="math">G_r(P)</span> . In order to ensure a sufficient number of such roots, the polynomial P(x) is first replaced by  <span class="math">P(x+\\tau)</span> .</p>
+
+    <p class="text-gray-300">Let r be the largest power of two such that  <span class="math">r \\leq \\frac{p-1}{4d}</span> , and define  <span class="math">s = \\frac{p-1}{r}</span> . By construction, s = O(d). The roots  <span class="math">\\alpha_1^r, \\ldots, \\alpha_d^r</span>  of  <span class="math">G_r(P)</span>  are s-th roots of unity and lie in the set  <span class="math">\\{1, \\omega, \\ldots, \\omega^{s-1}\\}</span> , where  <span class="math">\\omega = \\beta^r</span> . These roots can be determined by evaluating  <span class="math">G_r(P)</span>  at  <span class="math">\\omega^i</span>  for  <span class="math">i = 0, \\ldots, s-1</span> . Since s = O(d), this evaluation can be performed efficiently using a discrete Fourier transform. Combined with the tangent Graeffe method described in the previous subsection, this yields the following probabilistic algorithm for root finding, along with its complexity expressed in  <span class="math">\\mathcal{O}</span>  notation:</p>
+
+    <p class="text-gray-300">Algorithm 1: Randomized Root Finding Algorithm over NTT-Friendly Fields [8]</p>
+
+    <pre><code class="language-text">Input: P \\in \\mathbb{F}_n[x] of degree d and only order one factors, p = \\sigma 2^m + 1
+     Output: The set \\{\\alpha_1, \\ldots, \\alpha_d\\} of roots of P
+     Data: Time complexities for the main steps are indicated on the right
+  1 if d=0 then
+  2 return 0
+ 3 Let r=2^N\\in\\mathbb{N} be the largest such that r\\leq \\frac{p-1}{4d}, and let s\\coloneqq \\frac{p-1}{r}; 4 Pick \\tau\\in\\mathbb{F}_p at random and compute P^*\\coloneqq P(x+\\tau)\\in\\mathbb{F}_p[x]
+                                                                                                                                O(M(d)):
+ 5 Compute \\tilde{P}(x) := P^*(x+\\epsilon) = P^*(x) + P^*(x)&#x27;\\epsilon \\in (\\mathbb{F}_n[\\epsilon]/(\\epsilon^2))[x];
+ 6 For i = 1, ..., N, set \\tilde{P} := G_2(\\tilde{P}) \\in (\\mathbb{F}_p[\\epsilon]/(\\epsilon^2))[x]
+                                                                                                            O(M(d) \\log p / s);
+ 7 Let \\omega \\in \\mathbb{F}_p^* be of order s, and write \\tilde{P} = A + B\\epsilon;
+ 8 Compute A(\\omega^i), A&#x27;(\\omega^i), B(\\omega^i) for i = 0, \\ldots, s-1
+                                                                                                                              O(M(s));
+ 9 if P(\\tau) = 0 then
+10 | Set S \\coloneqq \\{\\tau\\}
+11 else
+12 Set S := \\emptyset
+13 For \\beta \\in \\{1, \\omega, \\dots, \\omega^{s-1}\\};
+14 if A(\\beta) = 0 and A&#x27;(\\beta) \\neq 0 then
+    Set S := S \\cup \\left\\{ r\\beta \\frac{A&#x27;(\\beta)}{B(\\beta)} + \\tau \\right\\}
+16 Compute Q\\coloneqq\\prod_{\\alpha\\in S}(x-\\alpha)
+17 Compute R\\coloneqq\\frac{P}{Q}
+                                                                                                                   O(M(d) \\log d);
+                                                                                                                              O(M(d));
+18 Recursively determine the set of roots S&#x27; of R and return S \\cup S&#x27;
+</code></pre>
+
+    <p class="text-gray-300">The computational complexity of the presented root-finding algorithm is dominated by polynomial arithmetic over the ring  <span class="math">\\mathbb{F}_p[\\epsilon]/(\\epsilon^2)</span> . The key cost arises from the repeated application of the operator  <span class="math">G_2</span> , which involves  <span class="math">N = \\frac{r}{2}</span>  iterations and contributes a time complexity of approximately  <span class="math">\\mathcal{O}\\left(M(d)\\frac{\\log p}{s}\\right)</span> , where M(d) denotes the complexity of multiplying polynomials of degree at most d over  <span class="math">\\mathbb{F}_p</span> . Evaluating the polynomials A, A', and B at s points has complexity  <span class="math">\\mathcal{O}(M(s))</span> , while polynomial division and multiplication steps incur complexities bounded by  <span class="math">\\mathcal{O}(M(d)\\log d)</span>  and  <span class="math">\\mathcal{O}(M(d))</span> , respectively. Given that  <span class="math">M(d) \\in \\mathcal{O}(d\\log d\\log \\log d)</span>  using fast multiplication techniques,</p>
+
+    <p class="text-gray-300">the overall root-finding procedure runs quasi-linearly in d, with the exponentiation steps via G<sup>2</sup> dominating the runtime.</p>
+
+    </section>
+
+    <section id="sec-5" class="mb-10">
+      <h2 class="text-2xl font-bold">5 Attacking Poseidon and Poseidon2</h2>
+
+      <h3 id="sec-5.1" class="text-xl font-semibold mt-8">5.1 The Skip-Round Attack</h3>
+
+    <p class="text-gray-300">Bariant et al. <a href="#page-12-3">[2]</a> introduced a univariate transformation that simplifies solving the CICO problem for Poseidon, when exactly one input state element is constrained. Without loss of generality, and for ease of exposition, we assume that this constraint sets the last input and output indices to 0.</p>
+
+    <p class="text-gray-300">Their core strategy decomposes the full Poseidon permutation P into two sub-permutations, P = P<sup>2</sup> &#9702; P1. This decomposition allows one to solve a simplified modified CICO problem for P<sup>2</sup> whose solution can be efficiently mapped to a solution to the original CICO problem for P.</p>
+
+    <p class="text-gray-300">Remarkably, their approach requires the application of a univariate transformation to P<sup>2</sup> (and consequently to P), constraining the inputs to the particular form</p>
+
+    <p class="text-gray-300"><span class="math">$(A_0 \\cdot x + B_0, A_1 \\cdot x + B_1, \\dots, A_{T-1} \\cdot x + B_{T-1})</span>$</p>
+
+    <p class="text-gray-300">for certain efficiently computable constants A0, B0, . . . , A<sup>T</sup> <sup>&minus;</sup>1, B<sup>T</sup> <sup>&minus;</sup><sup>1</sup> &isin; Fp. These constants satisfy</p>
+
+    <p class="text-gray-300"><span class="math">$P_1^{-1}(A_0 \\cdot x + B_0, A_1 \\cdot x + B_1, \\dots, A_{T-1} \\cdot x + B_{T-1}) = (v_0, \\dots, v_{T-2}, 0)</span>$</p>
+
+    <p class="text-gray-300">for every possible choice of x &isin; Fp. <a href="#page-7-1">3</a></p>
+
+    <p class="text-gray-300">Consequently, if x<sup>0</sup> solves the modified CICO problem given by</p>
+
+    <p class="text-gray-300"><span class="math">$P_2(A_0 \\cdot x + B_0, A_1 \\cdot x + B_1, \\dots, A_{T-1} \\cdot x + B_{T-1}) = (w_0, \\dots, w_{T-2}, 0),</span>$</p>
+
+    <p class="text-gray-300">then the vector</p>
+
+    <p class="text-gray-300"><span class="math">$(v_0, \\dots, v_{T-2}, 0) = P_1^{-1}(A_0 \\cdot x + B_0, A_1 \\cdot x + B_1, \\dots, A_{T-1} \\cdot x + B_{T-1})</span>$</p>
+
+    <p class="text-gray-300">solves the original CICO problem</p>
+
+    <p class="text-gray-300"><span class="math">$P(v_0,\\ldots,v_{T-2},0)=(w_0,\\ldots,w_{T-2},0)</span>$</p>
+
+    <p class="text-gray-300">The 2-Round Attack for Poseidon In the case of Poseidon, we define the permutation P<sup>1</sup> as comprising the first two full rounds, omitting the second mixing layer. The subsequent permutation P<sup>2</sup> includes this omitted mixing layer as well as all remaining rounds.</p>
+
+    <p class="text-gray-300">The univariate representation of P<sup>2</sup> yields output polynomials f<sup>j</sup> (x) whose degrees are lower than those obtained from the full permutation P. This reduction in degree is due to the absence of two S-Boxes in P<sup>2</sup> that are otherwise present in the complete permutation. As a result, we obtain the bound deg(f<sup>j</sup> ) &le; d <sup>R</sup><sup>F</sup> <sup>+</sup>R<sup>P</sup> <sup>&minus;</sup><sup>2</sup> which significantly simplifies both interpolation and root-finding when solving the CICO problem.</p>
+
+    <p class="text-gray-300">The 1-Round Attack for Poseidon2 While the authors of <a href="#page-12-3">[2]</a> did not explicitly apply their technique to Poseidon2, the method can be adapted to skip one full round. For Poseidon2, we define the permutation P<sup>1</sup> to consist of the initial application of the external matrix M&#1013;, followed by the first full round, excluding the final mixing layer M&#1013;. The permutation P<sup>2</sup> then comprises the mixing layer of the first full round followed by all subsequent rounds.</p>
+
+    <p class="text-gray-300">The corresponding univariate transformation of P<sup>2</sup> then results in output polynomials f<sup>j</sup> (x) satisfying the bound deg(f<sup>j</sup> ) &le; d R<sup>F</sup> +R<sup>P</sup> &minus;1 .</p>
+
+    <p class="text-gray-300"><sup>3</sup> Only one input entry can be constrained with this technique. Without loss of generality, we constrain the last entry to 0.</p>
+
+      <h3 id="sec-5.2" class="text-xl font-semibold mt-8">5.2 Accelerate Root-finding with Graeffe's Transform</h3>
+
+    <p class="text-gray-300">In the previous section, we saw how the Graeffe Transform and the Tangent Graeffe method can be used to find roots of a polynomial over  <span class="math">\\mathbb{F}_p</span> . However, as discussed in Section 3, solving the CICO-1 problem for the univariate transformation requires finding a single root, thus we can optimize algorithm 1 for the specific instances of Poseidon and Poseidon2 we want to attack.</p>
+
+    <p class="text-gray-300">In this section, we describe the modifications made to obtain a more efficient algorithm tailored to finding a single root (if one exists) of a polynomial  <span class="math">P(x) \\in \\mathbb{F}_p[x]</span> . We will first present it, and then examine its components in detail:</p>
+
+    <pre><code class="language-text">Input: P \\in \\mathbb{F}_p[x] of degree d; r, s \\in \\mathbb{N} so that p = rs + 1 and r = 2^k for a certain k \\in \\mathbb{N},
+             \\omega_r and \\omega_s primitive r-th and s-th, respectively, roots of unity of \\mathbb{F}_p.
+    Output: An \\alpha \\in \\mathbb{F}_p such that P(\\alpha) = 0, if one exists.
+ 1 if d = 0 then
+ 2 return &empty;
+ 3 if P(0) = 0 then
+ 4 return 0
+ 5 Set G(x) = P(x). For i = 0, ..., k - 1, compute G(x) = G_2(G)(x)
+                                                                                            O(M(d) \\log r);
+ 6 Set \\tilde{P}(x) = G(x) \\pmod{x^s - 1};
+ 7 Compute the vector V = NTT_s(\\tilde{P}) using \\omega_s \\in \\mathbb{F}_p
+                                                                                                 O(s log s);
+ 8 for i = 0, ..., s - 1 do
+        if V[i] = 0 then
+            Set \\beta = \\omega_s^i;
+10
+            break
+11
+12
+         \\rightharpoonupreturn \\emptyset
+14 For i = 0, \\dots, k - 1, compute \\beta = \\sqrt{\\beta};
+15 for i = 0, ..., r - 1 do
+        Set \\alpha = \\omega_r^i \\cdot \\gamma;
+        if P(\\alpha) = 0 then
+17
+         return \\alpha
+19 return 0
+</code></pre>
+
+    <p class="text-gray-300">Since we are interested in finding a single root of P(x), for the sake of exposition we will assume that it has at most one root and that this is non-zero.</p>
+
+    <p class="text-gray-300">The main idea underlying the algorithm is that when working over a finite field  <span class="math">\\mathbb{F}_p</span>  where  <span class="math">p-1=r\\cdot s=2^k\\cdot s</span> , we can iteratively apply the efficient Graeffe transform of order 2 exactly k times to the polynomial P(x) (line 5). This process effectively &quot;pushes&quot; the root  <span class="math">\\alpha</span>  of P to the root  <span class="math">\\alpha^r</span>  of the transformed polynomial  <span class="math">G_r(P)</span> , which lies in the multiplicative subgroup of order s of  <span class="math">\\mathbb{F}_p</span> .</p>
+
+    <p class="text-gray-300">Since all roots of  <span class="math">G_r(P)</span>  must have order dividing s, they are also roots of  <span class="math">x^s - 1</span> . Therefore, they are also roots of the polynomial  <span class="math">\\tilde{P}(x) = G_r(P)(x) \\mod x^s - 1</span> , which has degree less than s (line 6). We note that this step can be computed in  <span class="math">\\max(d-s,0)</span>  operations by folding the coefficients of G(x) according to the relation  <span class="math">x^s = 1 \\pmod{x^s - 1}</span> .</p>
+
+    <p class="text-gray-300">At this stage, we apply  <span class="math">NTT_s</span>  to  <span class="math">\\tilde{P}</span>  in order to evaluate it over the full subgroup of order s. This allows us to efficiently locate its root  <span class="math">\\alpha^r</span> , if one exists (line 7, line 8).</p>
+
+    <p class="text-gray-300">Once a root  <span class="math">\\beta = \\omega_s^i = \\alpha^r</span>  of  <span class="math">\\tilde{P}(x)</span>  is found, we can recover the original root  <span class="math">\\alpha</span>  of P(x) as follows:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Extract an r-th root  <span class="math">\\beta = \\sqrt[r]{\\xi^i} \\in \\mathbb{F}_p</span>  by iteratively computing k square roots (line 14).</li>
+    </ul>
+
+    <p class="text-gray-300">&ndash; For all  <span class="math">i \\in [0, r-1]</span> , check whether  <span class="math">P(\\omega_r^i \\cdot \\beta) = 0</span>  (line 15). This works because the values  <span class="math">\\omega_r^i \\cdot \\beta</span>  represent all roots of the polynomial  <span class="math">x^r - \\alpha^r</span> , and thus the true root  <span class="math">\\alpha</span>  must equal one of these elements for some exponent i.</p>
+
+    <p class="text-gray-300">We note that the complexity of the final loop (line 15) is, in principle, O(dr) for an arbitrary polynomial  <span class="math">P(x) \\in \\mathbb{F}_p[x]</span>  of degree d. However, in the context of attacking Poseidon, the polynomial P(x) corresponds to the univariate representation of the permutation  <span class="math">P_2</span> , as defined in Subsection 5.1. Since the evaluation of  <span class="math">P_2</span>  can be performed with a constant number of operations once the targeted Poseidon instance is fixed, this approach is more efficient than evaluating the univariate polynomial directly, which would otherwise incur a cost of O(d) operations per evaluation. In practical attacks, the last loop is then performed by evaluating the permutation  <span class="math">P_2</span>  over an input state evaluated at  <span class="math">\\alpha</span> , thus costing O(r) operations overall.</p>
+
+    <p class="text-gray-300">When applied to Poseidon and Poseidon2 permutations, the total cost of the optimize single root finding algorithm is then  <span class="math">O(M(d) \\log r + s \\log s + r)</span> .</p>
+
+    <p class="text-gray-300"><strong>Large Input Polynomials.</strong> We recall that the degree d of the Graeffe transform G(x) is equal to the degree of the input polynomial P(x). Since, in line 6, G(x) will be reduced modulo  <span class="math">x^s - 1</span> , it is advantageous&mdash;particularly when  <span class="math">d \\gg s</span> &mdash;to gradually reduce the size of the intermediate Graeffe transforms down to s during the execution of line 5. This strategy helps to reduce the memory footprint of the algorithm without affecting correctness.</p>
+
+    <p class="text-gray-300">The key observation is that if  <span class="math">\\alpha \\neq 0</span>  is a root of a polynomial P(x), then  <span class="math">\\alpha^{2^i}</span>  is a root of the Graeffe transform  <span class="math">G_{2^i}(P)</span> . Since this value lies in the multiplicative subgroup of order  <span class="math">\\frac{p-1}{2^i}</span>  in  <span class="math">\\mathbb{F}_p^{\\times}</span> , it follows that  <span class="math">\\alpha^{2^i}</span>  is a root of the polynomial  <span class="math">x^{\\frac{p-1}{2^i}} - 1</span> , as well as of the reduced polynomial</p>
+
+    <p class="text-gray-300"><span class="math">$\\tilde{G}_{2^i}(x) = G_{2^i}(x) \\pmod{x^{\\frac{p-1}{2^i}} - 1}</span>$</p>
+
+    <p class="text-gray-300">whose degree satisfies</p>
+
+    <p class="text-gray-300"><span class="math">$\\operatorname{deg} \\tilde{G}_{2^{i}} = \\min \\left( \\operatorname{deg} \\left( G_{2^{i}} \\right), \\frac{p-1}{2^{i}} - 1 \\right)</span>$</p>
+
+    <p class="text-gray-300">Thus, as soon as  <span class="math">d = \\deg(G_{2^i}) &gt; \\frac{p-1}{2^i} - 1</span> , that is, starting from iteration</p>
+
+    <p class="text-gray-300"><span class="math">$i = \\lceil \\log_2 \\left( \\frac{p-1}{d} \\right) \\rceil</span>$</p>
+
+    <p class="text-gray-300">we can begin reducing the size of the transformed polynomials at each step of line 5 by halving, continuing until their degree falls below the threshold s.</p>
+
+    <p class="text-gray-300"><strong>Large NTT-Friendly Fields.</strong> When the field is small, performing the NTT of size s at line 7 poses no practical difficulties. However, for large fields &mdash;such as BLS12-381&mdash; computing such an NTT is infeasible due to memory and computational constraints.</p>
+
+    <p class="text-gray-300">To understand the necessity of computing such large NTTs, we observe that the goal is to find a root in the subgroup of order s of  <span class="math">\\mathbb{F}_p^{\\times}</span>  for the Graeffe transform G of order r applied to P(x) (since  <span class="math">s \\gg r</span> , we have  <span class="math">\\tilde{P} = G</span>  in line 6).</p>
+
+    <p class="text-gray-300">As a result, we may alternatively employ the classical root-finding strategy based on Berlekamp's polynomial factorization algorithm, as described in Subsection 3.1, but with a key adaptation: we compute  <span class="math">\\gcd(G(x), x^s - 1 \\mod G(x))</span>  instead of  <span class="math">\\gcd(G(x), x^p - x \\mod G(x))</span> , thus saving  <span class="math">\\log r</span>  exponentiation and modulo reduction steps. Once a root  <span class="math">\\alpha^r</span>  to G is found, we then proceed from line 15.</p>
+
+      <h3 id="sec-5.3" class="text-xl font-semibold mt-8">5.3 Breaking Reduced-Round Instances of Poseidon and Poseidon2</h3>
+
+    <p class="text-gray-300">We now demonstrate how the techniques developed in the previous sections can be applied to break reduced-round instances of the Poseidon and Poseidon2 permutations over prime fields. Our focus is on instances defined over NTT-friendly fields  <span class="math">\\mathbb{F}_p</span> , where  <span class="math">p = \\sigma \\cdot 2^m + 1</span>  and efficient root-finding techniques are applicable. The reduced-round instances analyzed here originate from the Ethereum Foundation bug bounty program, as detailed on the official Poseidon initiative website [1]. We apply our method to instances with 64-bit and 256-bit state sizes. In the 64-bit setting, we employ the Graeffe-based root-finding approach described in Section 4, while for the 256-bit instances, we rely on the more traditional algebraic method outlined in Section 3. In both settings, we demonstrate that our root-finding strategy can recover a preimage (or equivalently, solve the CICO-1 problem).</p>
+
+    <p class="text-gray-300">The remainder of this Section details the specific parameters used, the reduction in rounds, and the computational results achieved by our attack. These primes were chosen for their NTT-friendly properties, enabling efficient polynomial operations and root-finding algorithms in our attack. The factorizations of p-1 support the use of large-order multiplicative subgroups, which are essential for the Graeffe transform techniques discussed in Section 4.</p>
+
+    <p class="text-gray-300">Attack running times were measured on a machine equipped with an AMD EPYC 9374F 32-core processor, 1.1 TB of RAM, and 8 NVIDIA L4 GPUs, each with 23 GiB of memory. The AWS cloud instance closest to this hardware configuration is the g6.48xlarge, featuring 192 vCPUs, 768 GiB of memory, and 8 NVIDIA L4 GPUs, priced at $13.35/h on-demand.</p>
+
+    <p class="text-gray-300"><strong>Poseidon-256</strong> The Poseidon bounty instances for the 256-bit state size are defined over the scalar field  <span class="math">\\mathbb{F}_n</span>  of the BLS12-381 elliptic curve [3], where</p>
+
+    <p class="text-gray-300"><span class="math">$p-1 = 2^{32} \\cdot 3 \\cdot 11 \\cdot 19 \\cdot 10177 \\cdot 125527 \\cdot 859267 \\cdot 906349^2 \\cdot 2508409 \\cdot 2529403 \\cdot 52437899 \\cdot 254760293^2.</span>$</p>
+
+    <p class="text-gray-300">We examine the computational cost and resource demands of solving each bounty instance detailed in Table 1.</p>
+
+    <div class="overflow-x-auto my-4">
+      <table class="min-w-full text-sm text-gray-300">
+        <thead>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">Instance</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">Field</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left"><span class="math">\\operatorname{Bits}</span></th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">dT</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left"><span class="math">R_F</span></th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left"><span class="math">R_P</span></th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left"><span class="math">\\kappa</span></th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">CI</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">&#1057;&#1054;</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">GPU</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">Interp.</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">Root Find.</th>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">P_6_8<br>P_6_8_GPU I<br>P_6_9</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">BLS12-381</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">256</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">5 3</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">6</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">8<br>8<br>9</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">24</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">1</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Yes</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">45s</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">3d 7h 17m<em><br>9h 17m</em><br>2d 18h 10m</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p class="text-gray-300"><sup>*</sup>Our solution was not the first on this instance (P_6.8).</p>
+
+    <p class="text-gray-300"><strong>Table 1.</strong> Parameters and attack cost summary for Poseidon reduced-round instances at security level  <span class="math">\\kappa</span> . Running time measured on a machine equipped with an AMD EPYC 9374F 32-core processor, 1.1 TB of RAM, and 8 NVIDIA L4 GPUs, each with 23 GiB of memory.</p>
+
+    <p class="text-gray-300">Since each scalar in the BLS12-381 implementation requires 32 bytes of storage, applying the 2-round attack to each bounty instance involves interpolating a univariate polynomial of degree  <span class="math">5^{(R_F+R_P-2)}</span> . Specifically, the polynomials interpolating the instances 6_8 and 6_9 require approximately 7.3 GiB and 36.4 GiB of memory, respectively.</p>
+
+    <p class="text-gray-300">To benefit from the efficiency of radix-2 transforms, we pad polynomials with zeros to the nearest power-of-two length before applying the NTT. Consequently, the interpolated polynomials are represented as vectors of size  <span class="math">2^{28}</span>  and  <span class="math">2^{31}</span>  for instances 6_8 and 6_9, respectively, each entry occupying 32 bytes. All implemented polynomial arithmetic primitives are optimized to use NTTs whose sizes are at most twice the size of their input polynomials. Therefore, for these bounty instances, we will handle multiple NTTs of sizes  <span class="math">2^{29}</span>  and  <span class="math">2^{32}</span> , respectively, reaching the finite field supported 2-radix NTT size limit of  <span class="math">2^{32}</span>  for the application of the fast 2-radix algorithm.</p>
+
+    <p class="text-gray-300"></p>
+
+    <div class="overflow-x-auto my-4">
+      <table class="min-w-full text-sm text-gray-300">
+        <thead>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">Instance</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">Field</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">Bits</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">dT</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left"><span class="math">R_F</span></th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left"><span class="math">R_P</span></th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">&kappa;</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">CI</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">&#1057;&#1054;</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">GPU</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">Interp.</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">Root Find.</th>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">P2_6_7</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Goldilocks</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">64</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">7 8</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">6</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">7</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">24</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">1</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">1</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Yes</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"><span class="math">20 \\mathrm{m}</span></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">9h 38m*</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">*0 1 1 (72.57)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p class="text-gray-300">*Our solution was not the first submitted for this instance (P2_6.7).</p>
+
+    <p class="text-gray-300"><strong>Table 2.</strong> Parameters and attack cost summary for Poseidon2 reduced-round instances. Running time measured on a machine equipped with an AMD EPYC 9374F 32-core processor, 1.1 TB of RAM, and 8 NVIDIA L4 GPUs, each with 23 GiB of memory.</p>
+
+    <p class="text-gray-300">Unfortunately, execution-time measurements for the NTL-based GCD computations are no longer available. However, this step required a few hours of computation on a single CPU core for the 6-8 instance and around 3 days for 6-9. Since the GCD step does not require GPU acceleration, we estimate its computational cost independently, using a CPU-only AWS instance (r5.24xlarge), featuring 96 vCPUs, 768GiB RAM, priced at $6.05/h on-demand. We remark that enabling parallel execution or optimizing further this GCD implementation could significantly reduce this machine cost overhead.</p>
+
+    <p class="text-gray-300">This results in a total estimated attack cost of:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Instance  <span class="math">P_6_8</span> : $185, computed as 9h17m at $13.35/h plus an additional 10h at $6.05/h. The bounty prize was set at $4000.</li>
+      <li>Instance P_6_9: $1101, computed as 2d18h10m at $13.35/h plus an additional 36h at $6.05/h. The bounty prize was set at $6000.</li>
+    </ul>
+
+    <p class="text-gray-300">We note that these attacks were performed using the classical strategy described in Subsection 3.1, without employing the potential optimizations afforded by the Graeffe transform, as outlined in Section 19. As a result, the reported cost and time estimates may be conservative. Investigating the potential improvements achievable through the use of Graeffe-based methods is left as future work.</p>
+
+    <p class="text-gray-300"><strong>Poseidon-64</strong> The Poseidon2 bounty instances for 64-bit state size are defined over the Goldilocks prime field  <span class="math">\\mathbb{F}_p</span> , where</p>
+
+    <p class="text-gray-300"><span class="math">$p - 1 = 2^{32} \\cdot 3 \\cdot 5 \\cdot 17 \\cdot 257 \\cdot 65537.</span>$</p>
+
+    <p class="text-gray-300">As presented in [11], our attacks targeted the CICO-1 POSEIDON2 bounty instance at the 24-bits security level, proposed as part of the Ethereum Foundation's bounty program. In Table 2 we summarize the relevant parameters for this instance, including its S-box degree d, number of rounds, and constraint configuration, along with the measured running times of our attack on high-performance GPU-equipped hardware.</p>
+
+    <p class="text-gray-300">In contrast to the Poseidon-256, only a single round can be skipped in Poseidon2 instances (see Subsection 5.1), and the higher S-Box degree further increases the memory requirements for polynomial arithmetic. The univariate transformation of the permutation  <span class="math">P_2</span>  yields a polynomial of degree  <span class="math">7^{6+7-1} \\approx 2^{33.7}</span> , which significantly exceeds the maximum size limit of a radix-2 NTT over the field, capped at  <span class="math">2^{32}</span> . As a consequence, it becomes necessary to employ mixed-radix NTTs capable of handling sizes up to  <span class="math">q \\cdot 2^{32}</span> , with q a small integer, allowing the efficient radix-2 NTT algorithm to be used for the radix-2 component of the computation.</p>
+
+    <p class="text-gray-300">However, q must be chosen large enough to accommodate all NTT sizes required at various stages of algorithm 2, including the Graeffe transforms, the NTT of size s (we emply Bluestein's Algorithm to deal with NTT sizes not dividing  <span class="math">q \\cdot 2^{32}</span> ), and any corresponding padded sizes needed during computation (for example, in order to perform NTT of size s using Bluestein's algorithm, we must support sizes exceeding 2s). In order to attack the  <span class="math">P2_{-}6_{7}</span>  instance, we chose q=15.</p>
+
+    <p class="text-gray-300">Another important consideration is the choice of parameters  <span class="math">r=2^k</span>  and s such that  <span class="math">r \\cdot s = p-1</span> . This selection is influenced by the resulting degree d of the attacked polynomial, since</p>
+
+    <p class="text-gray-300">each Graeffe transform of order 2 requires three NTTs of size d, amounting to a total of 3k NTTs. This cumulative cost must be balanced against the single NTT of size s, which can be treated as a constant overhead provided it falls within the limits supported by mixed-radix NTT implementations.</p>
+
+    <p class="text-gray-300">In the attack on the P2 6 7 instance, we selected r = 2<sup>30</sup> and s = 4(2<sup>32</sup> &minus; 1), resulting in an approximate runtime of 17 minutes for each Graeffe transform of order 2, and about one hour for the final Bluestein's NTT of size s. At the time of this attack, the Graeffe transform implementation was sub-optimal, as it followed the original definition: computing the product of two polynomials of degree d, thereby requiring three NTTs of size 2d. However, by noting that the Graeffe transform of order 2 satisfies the identity</p>
+
+    <p class="text-gray-300"><span class="math">$G_2(P) = (-1)^d (P_e(x)^2 - xP_o(x)^2)</span>$</p>
+
+    <p class="text-gray-300">where P(x) = Pe(x 2 ) + x &middot; Po(x 2 ), we can reduce the computational cost by performing only three NTTs of size d instead. As a result, we expect the total runtime of the attack to be reduced by approximately half compared to the time reported in <a href="#page-11-0">Table 2.</a> Verifying this performance improvement is left as future work.</p>
+
+    <p class="text-gray-300">This results in a total estimated attack cost of:</p>
+
+    <p class="text-gray-300">&ndash; Instance P2 6 8: $133, computed as 9h58m at $13.35/h. The bounty prize was set at $4000.</p>
+
+    <p class="text-gray-300">We have presented a root-finding strategy based on the Graeffe transform, tailored to instances of the Poseidon and Poseidon2 permutations instantiated over NTT-friendly prime fields. By exploiting the specific algebraic structure of these constructions, the proposed method streamlines the root recovery process in interpolation attacks and demonstrates its practical effectiveness by successfully solving the CICO-1 problem for reduced-round instances proposed by the Ethereum Foundation within the Poseidon Cryptanalysis Initiative.</p>
+
+    <p class="text-gray-300">This work underscores the importance of comprehensive security evaluations for cryptographic permutations, particularly when deployed over structured fields that may enable specialized algebraic attacks. Future research directions include extending these techniques to broader parameter ranges and to other permutation-based primitives, with the aim of further understanding their security properties.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><p class="text-gray-300">1. Poseidon initiative. <a href="https://www.poseidon-initiative.info/" target="_blank" rel="noopener noreferrer">https://www.poseidon-initiative.info/</a>, accessed: 2025-05-16 <a href="#page-10-1">11</a></p></li>
+      <li><p class="text-gray-300">2. Bariant, A., Bouvier, C., Leurent, G., Perrin, L.: Algebraic attacks against some arithmetizationoriented primitives. IACR Transactions on Symmetric Cryptology 2022(3), 73&ndash;101 (9 2022). <a href="https://doi.org/10.46586/tosc.v2022.i3.73-101" target="_blank" rel="noopener noreferrer">https://doi.org/10.46586/tosc.v2022.i3.73-101</a>, <a href="https://tosc.iacr.org/index.php/ToSC/article/view/9850" target="_blank" rel="noopener noreferrer">https://tosc.iacr.org/index.php/ToSC/</a> <a href="https://tosc.iacr.org/index.php/ToSC/article/view/9850" target="_blank" rel="noopener noreferrer">article/view/9850</a> <a href="#page-1-1">2,</a> <a href="#page-7-3">8</a></p></li>
+      <li><p class="text-gray-300">3. Bowe, S.: BLS12-381: New zk-SNARK Elliptic Curve Construction (2017), <a href="https://electriccoin.co/blog/new-snark-curve/" target="_blank" rel="noopener noreferrer">https://electriccoin.</a> <a href="https://electriccoin.co/blog/new-snark-curve/" target="_blank" rel="noopener noreferrer">co/blog/new-snark-curve/</a> <a href="#page-10-1">11</a></p></li>
+      <li><p class="text-gray-300">4. Grassi, L., Khovratovich, D., Rechberger, C., Roy, A., Schofnegger, M.: Poseidon: A new hash function for zero-knowledge proof systems. In: Bailey, M., Greenstadt, R. (eds.) USENIX Security 2021. pp. 519&ndash;535. USENIX Association (Aug 2021) <a href="#page-0-0">1</a></p></li>
+      <li><p class="text-gray-300">5. Grassi, L., Khovratovich, D., Schofnegger, M.: Poseidon2: A faster version of the poseidon hash function. In: El Mrabet, N., De Feo, L., Duquesne, S. (eds.) AFRICACRYPT 23. LNCS, vol. 14064, pp. 177&ndash;203. Springer, Cham (Jul 2023). <a href="https://doi.org/10.1007/978-3-031-37679-5_8" target="_blank" rel="noopener noreferrer">https://doi.org/10.1007/978-3-031-37679-5\\_8</a> <a href="#page-0-0">1</a></p></li>
+      <li><p class="text-gray-300">6. Grassi, L., L&uml;uftenegger, R., Rechberger, C., Rotaru, D., Schofnegger, M.: On a generalization of substitution-permutation networks: The HADES design strategy. In: Canteaut, A., Ishai, Y. (eds.) EUROCRYPT 2020, Part II. LNCS, vol. 12106, pp. 674&ndash;704. Springer, Cham (May 2020). <a href="https://doi.org/10.1007/978-3-030-45724-2_23" target="_blank" rel="noopener noreferrer">https:</a> <a href="https://doi.org/10.1007/978-3-030-45724-2_23" target="_blank" rel="noopener noreferrer">//doi.org/10.1007/978-3-030-45724-2\\_23</a> <a href="#page-0-0">1</a></p></li>
+      <li><p class="text-gray-300">7. Grassi, L., Rechberger, C., Schofnegger, M., Khovratovich, D.: Survey of cryptanalytic attacks on poseidon and poseidon2 (2025), available at: <a href="https://drive.google.com/file/d/1bqmIk5I8s-4S9TQJO0xk26fnSSU0q_Hx/view" target="_blank" rel="noopener noreferrer">https://drive.google.com/file/d/</a> <a href="https://drive.google.com/file/d/1bqmIk5I8s-4S9TQJO0xk26fnSSU0q_Hx/view" target="_blank" rel="noopener noreferrer">1bqmIk5I8s-4S9TQJO0xk26fnSSU0q\\_Hx/view</a> <a href="#page-0-0">1</a></p></li>
+      <li><p class="text-gray-300">8. Grenet, B., van der Hoeven, J., Lecerf, G.: Randomized root finding over finite fft-fields using tangent graeffe transforms. In: Proceedings of the 2015 ACM International Symposium on Symbolic and Algebraic Computation. p. 197&ndash;204. ISSAC '15, Association for Computing Machinery, New York, NY, USA (2015). <a href="https://doi.org/10.1145/2755996.2756647" target="_blank" rel="noopener noreferrer">https://doi.org/10.1145/2755996.2756647</a>, <a href="https://doi.org/10.1145/2755996.2756647" target="_blank" rel="noopener noreferrer">https://doi.org/10.1145/2755996.2756647</a> <a href="#page-6-1">7</a></p></li>
+      <li><p class="text-gray-300">9. van der Hoeven, J., Monagan, M.: Implementing the tangent graeffe root finding method. In: Bigatti, A.M., Carette, J., Davenport, J.H., Joswig, M., de Wolff, T. (eds.) Mathematical Software &ndash; ICMS 2020. pp. 482&ndash;492. Springer International Publishing, Cham (2020) <a href="#page-6-1">7</a></p></li>
+      <li><p class="text-gray-300">10. van der Hoeven, J., Monagan, M.: Computing one billion roots using the tangent graeffe method. ACM Commun. Comput. Algebra 54(3), 65&ndash;85 (Mar 2021). <a href="https://doi.org/10.1145/3457341.3457342" target="_blank" rel="noopener noreferrer">https://doi.org/10.1145/3457341.3457342</a>, <a href="https://doi.org/10.1145/3457341.3457342" target="_blank" rel="noopener noreferrer">https://doi.org/10.1145/3457341.3457342</a> <a href="#page-6-1">7</a></p></li>
+      <li><p class="text-gray-300">11. Sanso, A., Vitto, G.: Poseidon over finite fft-fields: Leveraging graeffe transform ftw. Talk at Algebraic Hash Cryptanalysis Days, Eurocrypt Affiliated Event (2025), madrid, Spain <a href="#page-11-1">12</a></p></li>
+    </ul>
+
+    </section>
+`;
+---
+
+<BaseLayout title="Attacking Poseidon via Graeffe-Based Root-Finding over NTT-F... (2025/937)">
+  <article class="max-w-4xl mx-auto article-prose">
+    <nav class="mb-8">
+      <a href="/papers" class="text-blue-400 hover:text-blue-300">
+        &larr; Back to Papers
+      </a>
+    </nav>
+
+    <header class="mb-12">
+      <h1 class="text-3xl font-bold mb-4"
+        set:html={TITLE_HTML} />
+      <p class="text-gray-400 mb-2"
+        set:html={AUTHORS_HTML} />
+      <p class="text-gray-500 text-sm mb-4">
+        2025 &middot; eprint 2025/937
+      </p>
+      <div class="flex gap-4 text-sm">
+        <a
+          href={EPRINT_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          class="text-blue-400 hover:text-blue-300"
+        >
+          Paper (eprint) &rarr;
+        </a>
+      </div>
+      <PaperDisclaimer eprintUrl={EPRINT_URL} />
+      <p class="mt-1 text-xs text-gray-600">
+        Converted with: {CRAWLER} &middot; {CONVERTED_DATE}
+      </p>
+    </header>
+
+    <nav id="toc" class="mb-10 p-6 rounded-lg" style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06);">
+      <h2 class="text-lg font-bold mb-4">Table of Contents</h2>
+      <ol class="space-y-1 text-sm text-gray-300
+        list-decimal list-inside">
+        <li><a href="#sec-1" class="hover:text-white">Introduction</a></li>
+        <li><a href="#sec-2" class="hover:text-white">The Poseidon Permutation</a></li>
+        <li>
+          <a href="#sec-3" class="hover:text-white">Attack Strategy</a>
+          <ol class="ml-6 mt-1 space-y-1 list-decimal
+            list-inside text-gray-400">
+            <li><a href="#sec-3.1" class="hover:text-white">Solving Univariate Systems</a></li>
+          </ol>
+        </li>
+        <li>
+          <a href="#sec-4" class="hover:text-white">Root-finding Based on the Graeffe Transform</a>
+          <ol class="ml-6 mt-1 space-y-1 list-decimal
+            list-inside text-gray-400">
+            <li><a href="#sec-4.1" class="hover:text-white">Composition of Graeffe Transforms</a></li>
+            <li><a href="#sec-4.2" class="hover:text-white">Roots exponentiation</a></li>
+            <li><a href="#sec-4.3" class="hover:text-white">Tangent Graeffe Transforms</a></li>
+            <li><a href="#sec-4.4" class="hover:text-white">Heuristic Randomized Algorithm for Root Finding over a NTT-friendly Fields</a></li>
+          </ol>
+        </li>
+        <li>
+          <a href="#sec-5" class="hover:text-white">Attacking Poseidon and Poseidon2</a>
+          <ol class="ml-6 mt-1 space-y-1 list-decimal
+            list-inside text-gray-400">
+            <li><a href="#sec-5.1" class="hover:text-white">The Skip-Round Attack</a></li>
+            <li><a href="#sec-5.2" class="hover:text-white">Accelerate Root-finding with Graeffe&#x27;s Transform</a></li>
+            <li><a href="#sec-5.3" class="hover:text-white">Breaking Reduced-Round Instances of Poseidon and Poseidon2</a></li>
+          </ol>
+        </li>
+      </ol>
+      <p class="text-xs text-gray-500 mt-4 mb-1 font-semibold">
+        Additional
+      </p>
+      <ul class="space-y-1 text-sm text-gray-400
+        list-disc list-inside">
+        <li><a href="#references" class="hover:text-white">References</a></li>
+      </ul>
+    </nav>
+
+
+    <Fragment set:html={CONTENT} />
+
+    <PaperHistory slug="attacking-poseidon-via-graeffe-based-root-finding-over-ntt-2025" />
+  </article>
+</BaseLayout>

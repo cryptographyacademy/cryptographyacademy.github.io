@@ -1,0 +1,1261 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import PaperDisclaimer from '../../components/PaperDisclaimer.astro';
+import PaperHistory from '../../components/PaperHistory.astro';
+
+const EPRINT_URL = 'https://eprint.iacr.org/2022/1565';
+const CRAWLER = 'modal-marker';
+const CONVERTED_DATE = '2026-02-16';
+const TITLE_HTML = 'Baloo: Nearly Optimal Lookup Arguments';
+const AUTHORS_HTML = 'Arantxa Zapico, Ariel Gabizon, Dmitry Khovratovich, Mary Maller, Carla R&agrave;fols';
+
+const CONTENT = `    <section id="abstract" class="mb-10">
+      <h2 class="text-2xl font-bold">Abstract</h2>
+      <p class="text-gray-300">We present Baloo, a protocol for lookup tables where the prover work is linear on the number of lookups and independent of the table size. Baloo is built over previous lookup arguments, and the framework for SNARKs from R&agrave;fols and Zapico (CRYPTO 21).
+Our protocol supports commit-and-prove expansions: the prover selects the subtable containing the elements used in the lookup, that is unknown to the verifier, commits to it and later proves its relation with the committed elements. This feature makes Baloo especially suitable for proving input-output relations on hash functions, and in particular to instantiate the Ethereum Virtual Machine (EVM).</p>
+      <p class="text-gray-300"><strong>Keywords:</strong> SNARK &middot; Lookup &middot; Scalability &middot; EVM</p>
+    </section>
+
+    <section id="sec-1" class="mb-10">
+      <h2 class="text-2xl font-bold">1 Introduction</h2>
+
+    <p class="text-gray-300">The rise of succinct proving systems in the recent decade has brought us close to one of the Holy Grails of computer science. Namely, being able to prove a large computation while spending not much more time on the proof than on the computation itself. We know how to make a proof only a handful of bytes large, and how to make the verifier run in a millisecond &ndash; but the prover time remains a bottleneck.</p>
+
+    <p class="text-gray-300">In recent years, there has been increasing focus on improving prover efficiency in cryptographic protocols. A key technique that has gained attention is the use of lookups table arguments, which allow heavy computations to be replaced by retrieving values from pre-defined tables, such as caches or databases.</p>
+
+    <p class="text-gray-300">In lookup table arguments, prover and verifier each have as input some representation of a table  <span class="math">\\vec{c}</span>  and a vector  <span class="math">\\vec{a}</span> , and the former aims to convince the latter that all elements of  <span class="math">\\vec{a}</span>  are also present in  <span class="math">\\vec{c}</span> . When this is the case, we say that  <span class="math">\\vec{a}</span>  is a lookup on  <span class="math">\\vec{c}</span> . In the settings we consider in this work, we have  <span class="math">\\vec{c} \\in \\mathbb{F}^N</span>  and  <span class="math">\\vec{a} \\in \\mathbb{F}^m</span> , with m &lt;&lt; N. We also assume that the table  <span class="math">\\vec{c}</span>  is public, and its representation can be precomputed and reused in several prover-verifier interactions. For instance,  <span class="math">\\vec{c}</span>  can contain all field elements within a range, or input-output pairs for some heavy public computation.</p>
+
+    <p class="text-gray-300">This approach can significantly speed up certain operations, such as efficient regular  <span class="math">(2^n)</span>  integer arithmetic and bit-oriented algorithms, like modern hash functions. Until recently, the most efficient construction for proving lookups was Plookup [GW20], which constrained prover time to be linear in the size of the lookup table, N, limiting its use with</p>
+
+    <p class="text-gray-300">E-mail: arantxa.zapico@ethereum.org (Arantxa Zapico), ariel.gabizon@gmail.com (Ariel Gabizon), khovratovich@gmail.com (Dmitry Khovratovich), mary.maller@ethereum.org (Mary Maller), carla.rafols@upf.edu (Carla R&agrave;fols)</p>
+
+    <p class="text-gray-300"><sup>&amp;</sup>lt;sup&gt;a</sup>This work was done while Arantxa Zapico was a PhD student at Universitat Pompeu Fabra, funded by Protocol Labs PhD Fellowship PL-RGP1-2021-062.</p>
+
+    <p class="text-gray-300">large tables. However, in 2022, a second breakthrough lead by Caulk <a href="#page-28-0">[ZBK</a><sup>+</sup>22, <a href="#page-27-0">PK22]</a> appears as the first method to prove <em>m</em> lookups in more reasonable <em>O</em>(<em>m</em><sup>2</sup> ) time, i.e. independent of <em>N</em>, after a pre-processing step of size <em>O</em>(<em>N</em> log <em>N</em>).</p>
+
+    <p class="text-gray-300">At the same time, a number of computationally powerful blockchains, with Ethereum being the most prominent example, barely withstand the demand for a higher transaction rate and computational bandwidth. One bold attempt to get consensus on the computation without every node repeating work is to use a SNARK as a certificate of correctness. However, efforts to build a prover for Ethereum's virtual machine <a href="#page-23-0">[BBCCL21,</a> <a href="#page-25-0">Eth22,</a> <a href="#page-27-1">Pol22,</a> <a href="#page-28-1">Sta22,</a> <a href="#page-29-0">Zha22,</a> <a href="#page-29-1">zks22]</a> have been hindered by the cost of proving the Keccak hash function, even if a prover is lookup-enhanced. As Keccak is used in the Merkle tree of the blockchain state, a proof for all state transitions in one block results in tens of millions of lookups &mdash; an amount insurmountable by Caulk.</p>
+
+    <p class="text-gray-300">Baloo is the first lookup argument to prove <em>m</em> lookups in quasi-linear time. It is tailored to prime fields suitable for KZG commitments and opening proofs <a href="#page-27-2">[KZG10]</a>, which are around 256-bit large, and thus to computations defined on such domains. The prover complexity is quasi-linear in the field and linear in the group. This is thanks to a number of new techniques designed around proving statements over sets that are not multiplicative subgroups (where we cannot use Fast Fourier Transforms).</p>
+
+    <p class="text-gray-300">In Fig. <a href="#page-2-0">1</a> we compare the concrete costs of the closest schemes to this work (that is, use univariate polynomials and are pairing-based), when compiled using the KZG polynomial commitment scheme <a href="#page-27-2">[KZG10]</a>. Plookup <a href="#page-26-0">[GW20]</a> and Halo2 <a href="#page-24-0">[BGH19]</a> require no preprocessing but the prover work in the group is quasi-linear in the size of the table. They can be compiled using any polynomial commitment scheme including solutions that do not require pairings. Caulk <a href="#page-28-0">[ZBK</a><sup>+</sup>22] introduced the first solution with prover work that is sublinear in the size of the table by using preprocessing, but they incur a quadratic cost in the number of lookups. Posen and Kattis introduced Caulk+<a href="#page-27-0">[PK22]</a>, an improvement over Caulk that leads to a table-independent prover, still quadratic on number of lookups. Flookup <a href="#page-26-1">[GK22]</a> reduced the prover complexity to quasi-linear on the lookups while retaining a table-independent prover. However, their techniques rely on committing to a table as roots of a polynomial instead of coefficients. This means their commitments are not homomorphic, which limits the applicability of their solution to stand-alone set membership proofs and makes it challenging to use their lookup to speed up SNARK provers (see Section <a href="#page-34-0">C)</a>. We discuss concurrent and follow-up work at the end of this section.</p>
+
+    <p class="text-gray-300">We provide an implementation of Ba<em>loo</em> and compare its performance with those protocols that have publicly available implementations in Appendix <a href="#page-36-0">D.</a></p>
+
+    <p class="text-gray-300">Other approaches, such as discrete-log based <a href="#page-24-1">[BG13,</a> <a href="#page-26-2">GK15,</a> <a href="#page-23-1">BCC</a><sup>+</sup>15, <a href="#page-24-2">BCG</a><sup>+</sup>18] require no trusted setup but incur a linear verifier. Bootle et al. <a href="#page-24-2">[BCG</a><sup>+</sup>18] initially suggested the use of lookup arguments to improve the prover time in proving machine computations. Their solution targetted the TinyRAM virtual machine <a href="#page-23-2">[BCG</a><sup>+</sup>13]. Campanelli et al. <a href="#page-25-1">[CFH</a><sup>+</sup>22] present also a scheme for position-hiding linkability of RSA accumulators for large prime numbers and Pedersen commitments. Concretely they achieve good efficiency: their proof size is constant and their proving times do not depend on the size of the accumulator. Further, they can support larger lookup tables than Ba<em>loo</em> because they are not constrained by the size of their setup. However, their scheme crucially relies on groups of hidden order such as a trusted RSA modulus or class groups.</p>
+
+    <p class="text-gray-300">Lookup arguments are often used in the context of key-value lookups in verifiable registries <a href="#page-24-3">[CDGM19]</a>. Multiple works <a href="#page-28-2">[TBP</a><sup>+</sup>19, <a href="#page-27-3">MKL</a><sup>+</sup>20, <a href="#page-27-4">HHK</a><sup>+</sup>21, <a href="#page-28-3">TFBT21]</a> explore how to ensure the correctness of the table that is used in verifiable registries. Campanelli et</p>
+
+    <p class="text-gray-300"></p>
+
+    <div class="overflow-x-auto my-4">
+      <table class="min-w-full text-sm text-gray-300">
+        <thead>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left"><b>Table 1:</b> Cost comparison of our scheme with other</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">pairing-based lookups. <span class="math">N</span> is the size</th>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">of the table and <span class="math">m</span> the size of the set to be opened.</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">The preprocessing costs are given in</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">the number of group operations.</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="overflow-x-auto my-4">
+      <table class="min-w-full text-sm text-gray-300">
+        <thead>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">Scheme</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">Preproc</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">Proof size</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">]</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">Verifier</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left"></th>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"><span class="math">\\mathbb{G}</span></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"><span class="math">\\mathbb{F}</span></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Plookup [GW20]</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">_</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"><span class="math">5\\mathbb{G}_1, 9\\mathbb{F}</span></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">O(N)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"><span class="math">O(N \\log N)</span></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">2P</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Halo2 [BGH19]</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">_</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"><span class="math">6\\mathbb{G}_1, 5\\mathbb{F}</span></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">O(N)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"><span class="math">O(N \\log N)</span></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">2P</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Caulk [ZBK <sup>+</sup> 22]</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"><span class="math">O(N \\log N)</span></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"><span class="math">14\\mathbb{G}_1, 1\\mathbb{G}_2, 4\\mathbb{F}</span></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">15m</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"><span class="math">O(m^2 + m\\log(N))</span></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">4P</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Caulk+ [PK22]</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"><span class="math">O(N \\log N)</span></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"><span class="math">7\\mathbb{G}_1, 1\\mathbb{G}_2, 2\\mathbb{F}</span></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">8m</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"><span class="math">O(m^2)</span></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">3P</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Flookup [GK22]</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"><span class="math">O(N \\log^2 N)</span></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"><span class="math">7\\mathbb{G}_1, 1\\mathbb{G}_2, 4\\mathbb{F}</span></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">6m</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"><span class="math">O(m\\log^2 m)</span></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">3P</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">cq [EFG22]</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"><span class="math">O(N \\log N)</span></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"><span class="math">8\\mathbb{G}_1, 3\\mathbb{F}</span></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">8m</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"><span class="math">O(m \\log m)</span></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">5P</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Baloo</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"><span class="math">O(N \\log N)</span></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"><span class="math">12\\mathbb{G}_1, 1\\mathbb{G}_2, 4\\mathbb{F}</span></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">14m</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"><span class="math">O(m \\log^2 m)</span></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">5P</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p class="text-gray-300">al. [CEO22] demonstrate how homomorphic commitments can be used to build key-value lookups. Their solution is zero-knowledge, does not require a trusted setup or pairings, and uses techniques similar to Section C. However, their prover work is linear on the size of the table. Agrawal and Raghuraman [AR20] build key-value lookups using hidden order groups. Campanelli et al. [CFG <span class="math">^+</span> 20] use lookup arguments to construct <em>verifiable decentralized storage</em> and achieve a sublinear prover assuming preprocessing. Benarroch et al. [BCF <span class="math">^+</span> 21] discuss commit-and-prove set membership proofs, which is a useful primitive for constructing modular zero-knowledge proofs.</p>
+
+    <p class="text-gray-300">Concurrent and follow-up work. Eagen et al. [EFG22] introduce cq, a lookup argument where prover work is O(m) in the group and  <span class="math">O(m\\log m)</span>  in the field, for m lookups on tables of any size N. To prove that for a table  <span class="math">\\vec{c} \\in \\mathbb{F}^N</span>  and vector  <span class="math">\\vec{a} \\in \\mathbb{F}^m</span> , it is true that all the elements in  <span class="math">\\vec{a}</span>  are also in  <span class="math">\\vec{c}</span> , Baloo creates an intermediate shorter table  <span class="math">\\vec{t} \\in \\mathbb{F}^k</span>  with  <span class="math">k \\leq N</span>  such that  <span class="math">\\vec{t}</span>  has all the elements in  <span class="math">\\vec{c}</span>  that are used in  <span class="math">\\vec{a}</span> . That is, our first step is to get rid of the unused elements in  <span class="math">\\vec{c}</span> . The main novelty in [EFG22], and follow-up work [PH23, CFF<sup>+</sup>24], is to use a property of logarithmic derivatives exploited in [Hab22] that allows to link directly the initial table  <span class="math">\\vec{c}</span>  with the lookup  <span class="math">\\vec{a}</span> , with prover work independent of  <span class="math">|\\vec{c}|</span> . On the downside, the commitments to vectors  <span class="math">\\vec{c}</span> , and  <span class="math">\\vec{a}</span>  are not homomorphic. Baloo is, to the best of our knowledge, the most efficient lookup argument with homomorphic commitments that uses a univariate setup.</p>
+
+    <p class="text-gray-300">Roughly speaking, the techniques of cq are related to the ones used to prove the permutation argument in Plonk [GWC19]. In contrast, the ones of this work are based on a novel analysis of an argument for simple linear relations of [RZ21], which was designed as a plug-in for the Marlin proof system [CHM<sup>+</sup>20]. The core technical part of this work is to use techniques developed in the context of the Marlin proof system, namely, Checkable Subspace Sampling (CSS) arguments, to show that a vector  <span class="math">\\vec{d}</span>  is in the row space of some public matrix  <span class="math">\\mathbf{M}</span>  and use them in another context where  <span class="math">\\mathbf{M}</span>  is unknown. Therefore, our work presents a new technique, a stronger analysis of Marlin-like sparse polynomial commitments.</p>
+
+    <p class="text-gray-300">The essence of Baloo is the observation that, to prove the lookup relation between  <span class="math">\\vec{t}</span>  and  <span class="math">\\vec{a}</span>  it is enough to prove the existence of a matrix  <span class="math">\\mathbf{M} \\in \\mathbb{F}^{m \\times k}</span>  such that (i)  <span class="math">\\mathbf{M}\\vec{t} = \\vec{a}</span> , and (ii) the rows of  <span class="math">\\mathbf{M}</span>  are unit vectors and so,  <span class="math">\\mathbf{M}</span>  is what we define as a lookup matrix. Proving matrix-vector products is a problem that arises in the design of SNARKs for R1CS arithmetization [BCR<sup>+</sup>19, CHM<sup>+</sup>20, CFF<sup>+</sup>21, Set20, RZ21]. Baloo's characterization of a lookup argument has opened a line of research where SNARK techniques can be exploited. Setty et al. proposed in Lasso [STW24] the first completely linear-time lookup building on multivariate polynomial commitments. The authors follow the same approach of committing to the (secret) matrix that relates  <span class="math">\\vec{a}</span>  and  <span class="math">\\vec{t}</span>  proposed in this work, but upholding</p>
+
+    <p class="text-gray-300"><span class="math">_{\\rm Ba}</span> loo</p>
+
+    <p class="text-gray-300">the techniques in Spartan [Set20]. A significant contribution of Lasso [STW24] and the companion paper [AST24] is the observation that many tables in practice are structured tables. Roughly speaking, this means that the lookup operation can be reconstructed by different lookups in smaller tables. This allows to handle much bigger tables than previous works. As pointed out in [STW24], to use proof systems that use KZG commitments [KZG10], Lasso needs an additional argument to link them with multivariate commitments, whereas Baloo natively supports them. Recently, Garreta and Manzur [GM24] introduced FLI, a folding scheme for lookup instances built over Baloo and the folding scheme for R1CS presented in [KST22].</p>
+
+    <p class="text-gray-300">It is natural to ask how Baloo can be used for lookup arguments over witnesses defined on smaller domains. Natural examples include 64-bit proof systems such as Plonky2 [PZ22] and a family of hash functions [GKL<sup>+</sup>22, SLST23, Sal23] recently introduced to speed up such proof systems. This question was addressed for the multivariate case, building on Lasso, in a recent work [DP25], and we leave the extension to the univariate case for future work.</p>
+
+    </section>
+
+    <section id="sec-3" class="mb-10">
+      <h2 class="text-2xl font-bold">3 Preliminaries</h2>
+
+      <h3 id="sec-3.1" class="text-xl font-semibold mt-8">3.1 Notation</h3>
+
+    <p class="text-gray-300">A bilinear group gk is a tuple  <span class="math">gk = (q, \\mathbb{G}_1, \\mathbb{G}_2, \\mathbb{G}_T, e, \\mathcal{P}_1, \\mathcal{P}_2)</span>  where  <span class="math">\\mathbb{G}_1, \\mathbb{G}_2</span>  and  <span class="math">\\mathbb{G}_T</span>  are groups of prime order q, the elements  <span class="math">\\mathcal{P}_1</span> ,  <span class="math">\\mathcal{P}_2</span>  are generators of  <span class="math">\\mathbb{G}_1</span> ,  <span class="math">\\mathbb{G}_2</span>  respectively,  <span class="math">e: \\mathbb{G}_1 \\times \\mathbb{G}_2 \\to \\mathbb{G}_T</span>  is an efficiently computable, non-degenerate bilinear map, and there is no efficiently computable isomorphism between  <span class="math">\\mathbb{G}_1</span>  and  <span class="math">\\mathbb{G}_2</span> . Elements in  <span class="math">\\mathbb{G}_{\\gamma}</span> , are denoted implicitly as  <span class="math">[a]_{\\gamma} = a\\mathcal{P}_{\\gamma}</span> , where  <span class="math">\\gamma \\in \\{1, 2, T\\}</span>  and  <span class="math">[1]_T = e(\\mathcal{P}_1, \\mathcal{P}_2)</span> . With this notation,  <span class="math">e([a]_1, [b]_2) = [ab]_T</span> .</p>
+
+    <p class="text-gray-300">Let  <span class="math">\\lambda \\in \\mathbb{N}</span>  denote the security parameter and  <span class="math">1^{\\lambda}</span>  its unary representation. A function  <span class="math">\\text{negl}: \\mathbb{N} \\to \\mathbb{R}^+</span>  is called <em>negligible</em> if for all c &gt; 0, there exists  <span class="math">k_0</span>  such that  <span class="math">\\text{negl}(k) &lt; \\frac{1}{k^c}</span>  for all  <span class="math">k &gt; k_0</span> . For a non-empty set S, let  <span class="math">x \\leftarrow S</span>  denote sampling an element of S uniformly at random and assigning it to x.</p>
+
+    <p class="text-gray-300">PPT denotes probabilistic polynomial-time, and algorithms are randomized unless explicitly noted otherwise. Let  <span class="math">y \\leftarrow A(x;r)</span>  denote running algorithm A on input x and randomness r and assigning its output to y and  <span class="math">y \\leftarrow A(x)</span>  denotes  <span class="math">y \\leftarrow A(x;r)</span>  for a uniformly random r.</p>
+
+    <p class="text-gray-300">For a finite field  <span class="math">\\mathbb{F}</span> ,  <span class="math">\\mathbb{F}[X]</span>  the ring of univariate polynomials with coefficients in  <span class="math">\\mathbb{F}</span> . For  <span class="math">m \\in \\mathbb{F}</span> , we set  <span class="math">[m] = \\{1, \\ldots, m\\}</span> . For a set S, |S| denotes its cardinality, and  <span class="math">\\alpha \\leftarrow S</span>  means  <span class="math">\\alpha</span>  has been uniformly sampled from S. Matrices are denoted in boldface.</p>
+
+      <h3 id="sec-3.2" class="text-xl font-semibold mt-8">3.2 Lagrange Polynomials</h3>
+
+    <p class="text-gray-300">Given a vector  <span class="math">\\vec{v} \\in \\mathbb{F}^d</span>  and a basis  <span class="math">\\mathcal{B} = \\{B_i(X)\\}_{i=1}^d</span>  of the polynomials of degree d-1, we can represent vector v as a polynomial  <span class="math">v(X) = \\sum_{i=1}^d v_i B_i(X)</span> . We call such a representation an <em>encoding</em> of  <span class="math">\\vec{v}</span> , and omit reference to the basis when possible.</p>
+
+    <p class="text-gray-300">Along this work, we will set  <span class="math">\\mathcal{B}</span>  to be the basis of Lagrange interpolation polynomials for some set S of size d. We recall the Lagrange basis with respect to a set  <span class="math">S=(s_1,\\ldots,s_d)</span>  consists of d polynomials  <span class="math">p_i(X)</span>  of degree d-1 such that  <span class="math">p_i(s_i)=1</span>  and  <span class="math">p_i(s_j)=0</span>  when  <span class="math">i\\neq j</span> . The vanishing polynomial  <span class="math">z_S(X)</span>  is the polynomial that takes value 0 in all the elements of S, i.e.,  <span class="math">z_S(X)=\\prod_{s_i\\in S}(X-s_i)</span> . For any set of Lagrange interpolation polynomials  <span class="math">\\{p_i(X)\\}_{i=1}^d</span>  it is true that  <span class="math">\\sum_{i=1}^d p_i(X)=1</span> ,  <span class="math">z_S(X)|p_i(X)p_j(X)</span>  for  <span class="math">i\\neq j</span> , and since  <span class="math">p_i^2(X)=p_i(X)(1-\\sum_{j\\neq i}p_j(X))</span> , it always hold that  <span class="math">p_i^2(X)\\equiv p_i(X)\\mod z_S(X)</span> .</p>
+
+    <p class="text-gray-300">We will work with three different sets and their corresponding Lagrange interpolation basis in order to encode vectors of three different sizes:  <span class="math">\\mathbb{H}</span>  of size N,  <span class="math">\\mathbb{V}</span>  of size m, and  <span class="math">\\mathbb{H}_I</span></p>
+
+    <p class="text-gray-300">of size k. If possible, we choose the set S to be a set of roots of unity in the field  <span class="math">\\mathbb{F}</span> , as this choice leads to sparse representations for both Lagrange and vanishing polynomials. For a vector of size N, we assume without loss of generality that there exists a primitive Nth root of unity  <span class="math">\\omega^1</span> . We define the subgroup  <span class="math">\\mathbb{H} = \\{\\omega, \\omega^2, \\dots, \\omega^{N-1}, 1\\} \\subset \\mathbb{F}</span> . The Lagrange interpolation polynomials for this set are denoted as  <span class="math">\\{\\lambda_s(X)\\}_{s=1}^N</span> , and the vanishing polynomial is  <span class="math">z_H(X)</span> . Since  <span class="math">\\mathbb{H}</span>  is a subgroup, the Lagrange polynomial  <span class="math">\\lambda_s(X)</span>  can be expressed as  <span class="math">\\lambda_s(X) = \\frac{\\omega^s}{N} \\frac{X^N - 1}{X - \\omega^s}</span> , and the vanishing polynomial is  <span class="math">z_H(X) = X^N - 1</span> . For vectors of size m ( <span class="math">m \\neq N</span> ) we assume  <span class="math">\\nu</span>  is a primitive mth root of unity, and we define the set  <span class="math">\\mathbb{V} = \\{\\nu, \\nu^2, \\dots, \\nu^m\\}</span> . The Lagrange interpolation polynomials for this set are denoted as  <span class="math">\\{\\mu_j(X)\\}_{j=1}^m</span> , and the vanishing polynomial is  <span class="math">z_V(X)</span> .</p>
+
+    <p class="text-gray-300">Finally, we consider vectors of size k, which are constructed as subvectors of a vector of size N. To do this, we define  <span class="math">I \\subset [N]</span>  with |I| = k, and we set  <span class="math">\\mathbb{H}_I \\subset \\mathbb{H}</span>  such that  <span class="math">\\mathbb{H}_I = \\{\\omega^s \\mid s \\in I\\}</span> , maintaining the same order as in  <span class="math">\\mathbb{H}</span> . For simplicity, we rename the elements in  <span class="math">\\mathbb{H}_I</span>  and denote them as  <span class="math">\\mathbb{H}_I = \\{\\xi_i\\}_{i=1}^k</span> , where  <span class="math">\\xi_i = \\omega^s</span>  for the ith index  <span class="math">s \\in I</span> . The Lagrange polynomials for this set are denoted as  <span class="math">\\{\\tau_i(X)\\}_{i=1}^k</span> , and the vanishing polynomial is  <span class="math">z_I(X)</span> . Note that  <span class="math">\\mathbb{H}_I</span>  is generally not a subgroup and thus  <span class="math">z_I(X)</span>  and the  <span class="math">\\tau_i(X)</span> 's are not sparse.</p>
+
+      <h3 id="sec-3.3" class="text-xl font-semibold mt-8">3.3 Cryptographic Assumptions</h3>
+
+    <p class="text-gray-300">The security of our protocols holds in the Algebraic Group Model (AGM) of Fuchsbauer et al. [FKL18], using the bilinear version of the q-dlog and q-sfrac assumptions [GG17, BB04] defined below. In the AGM, adversaries are restricted to be algebraic algorithms, namely, whenever  <span class="math">\\mathcal{A}</span>  outputs a group element [y] in a cyclic group  <span class="math">\\mathbb{G}</span>  of order p, it also outputs its representation as a linear combination of all previously received group elements. In other words, if  <span class="math">[y] \\leftarrow \\mathcal{A}([x_1], \\ldots, [x_m])</span> ,  <span class="math">\\mathcal{A}</span>  must also provide  <span class="math">\\vec{z}</span>  such that  <span class="math">[y] = \\sum_{j=1}^m z_j[x_j]</span> . This definition generalizes naturally in asymmetric bilinear groups with a pairing  <span class="math">e: \\mathbb{G}_1 \\times \\mathbb{G}_2 \\to \\mathbb{G}_T</span> , where for  <span class="math">i \\in 1, 2</span> , the adversary must construct  <span class="math">\\mathbb{G}_i</span>  elements as linear combinations of received  <span class="math">\\mathbb{G}_i</span>  elements.</p>
+
+    <p class="text-gray-300"><strong>Definition 1</strong> (q-dlog). The  <span class="math">q(\\lambda)</span> -discrete logarithm assumption holds for a bilinear group generator  <span class="math">qk \\leftarrow \\mathcal{G}(1^{\\lambda})</span>  if for all PPT algorithm  <span class="math">\\mathcal{A}</span></p>
+
+    <p class="text-gray-300"><span class="math">$\\mathsf{Adv}_{gk,\\mathcal{A}}^{q-dlog}(\\lambda) = \\mathsf{Pr}\\left[x \\leftarrow \\mathcal{A}(gk,[x]_{1,2},\\dots,[x^q]_{1,2})\\right] = \\mathsf{negl}(\\lambda).</span>$</p>
+
+    <p class="text-gray-300"><strong>Definition 2</strong> (q-sfrac). The  <span class="math">q(\\lambda)</span> -Simple Fractional assumption holds for a bilinear group generator  <span class="math">gk \\leftarrow \\mathcal{G}(1^{\\lambda})</span>  if for all PPT algorithm  <span class="math">\\mathcal{A}</span>  the following probability is negligible in  <span class="math">\\lambda</span></p>
+
+    <p class="text-gray-300"><span class="math">$\\mathsf{Adv}_{gk,\\mathcal{A}}^{q-sfrac}(\\lambda) = \\Pr \\begin{bmatrix} \\frac{r(x)}{s(x)} e([1]_1,[1]_2) \\leftarrow \\mathcal{A}(gk,[1]_{1,2},[x]_{1,2},\\dots,[x^q]_{1,2}) &amp; gk \\leftarrow \\mathcal{G}(1^\\lambda) \\\\ \\wedge \\deg(r) &lt; \\deg(s) \\leq q. &amp; x \\leftarrow \\mathbb{F} \\end{bmatrix}.</span>$</p>
+
+      <h3 id="sec-3.4" class="text-xl font-semibold mt-8">3.4 Non-Interactive Argument of Knowledge</h3>
+
+    <p class="text-gray-300">Let  <span class="math">\\mathcal{R}</span>  be a family of universal relations. Given a relation  <span class="math">R \\in \\mathcal{R}</span>  and an instance x we call w a witness for x if  <span class="math">(x, w) \\in R</span> ,  <span class="math">\\mathcal{L}(R) = \\{x | \\exists w : (x, w) \\in R\\}</span>  is the language of all the x that have a witness w in the relation R, while  <span class="math">\\mathcal{L}(R)</span>  is the language of all the pairs (x, R) such that  <span class="math">x \\in \\mathcal{L}(R)</span> . We will assume R is implicit as prover and verifier input.</p>
+
+    <p class="text-gray-300"><strong>Definition 3.</strong> A Non-Interactive Argument of Knowledge is a tuple of PPT algorithms (Setup, Prove, Verify) such that:</p>
+
+    <p class="text-gray-300">&bull;  <span class="math">(srs, \\tau) \\leftarrow Setup(\\mathcal{R})</span> : On input a family of relations  <span class="math">\\mathcal{R}</span> , Setup outputs a structured reference string srs and a trapdoor  <span class="math">\\tau</span>  as a private output;</p>
+
+    <p class="text-gray-300"><sup>&amp;</sup>lt;sup&gt;1</sup>In the case a (FFT-friendly) group of this size does not exist, we pad with zero entries.</p>
+
+    <p class="text-gray-300">&bull;  <span class="math">\\pi \\leftarrow \\text{Prove}(\\text{srs}, (\\mathsf{x}, w))</span> : On input a pair  <span class="math">(\\mathsf{x}, w) \\in \\mathsf{R}</span> , it outputs a proof  <span class="math">\\pi</span>  of the fact that  <span class="math">\\mathsf{x} \\in \\mathcal{L}(\\mathsf{R})</span> ;</p>
+
+    <p class="text-gray-300">1/0 &larr; Verify(srs, x, &pi;): On input the srs, the instance x and the proof, it produces a bit expressing acceptance (1), or rejection (0);</p>
+
+    <p class="text-gray-300">and that satisfies completeness, knowledge soundness and zero-knowledge as defined below.</p>
+
+    <p class="text-gray-300"><strong>Completeness:</strong> holds if an honest prover will always convince an honest verifier. Formally,  <span class="math">\\forall R \\in \\mathcal{R}, (x, w) \\in R</span> ,</p>
+
+    <p class="text-gray-300"><span class="math">$\\Pr\\left[\\mathsf{Verify}(\\mathsf{srs},\\mathsf{x},\\pi) = 1 \\,\\middle|\\, \\begin{matrix} (\\mathsf{srs},\\tau) \\leftarrow \\mathsf{Setup}(\\mathcal{R}) \\\\ \\pi \\leftarrow \\mathsf{Prove}(\\mathsf{srs},(\\mathsf{x},w)) \\end{matrix}\\right] = 1.</span>$</p>
+
+    <p class="text-gray-300"><strong>Knowledge-Soundness:</strong> captures the fact that a cheating prover cannot, except with negligible probability, create a proof  <span class="math">\\pi</span>  accepted by the verification algorithm unless it has a witness w such that  <span class="math">(x, w) \\in R</span> . Formally, for all PPT adversaries  <span class="math">\\mathcal{A}</span> , there exists a PPT extractor  <span class="math">\\mathcal{E}</span>  such that</p>
+
+    <p class="text-gray-300"><span class="math">$\\Pr\\left[ (\\mathsf{x}, w) \\notin \\mathsf{R} \\land \\mathsf{Verify}(\\mathsf{srs}, \\mathsf{x}, \\pi) = 1 \\, \\middle| \\begin{array}{l} (\\mathsf{srs}, \\tau) \\leftarrow \\mathsf{Setup}(\\mathcal{R}) \\\\ (\\mathsf{x}, \\pi) \\leftarrow \\mathcal{A}(\\mathsf{srs}) \\\\ w \\leftarrow \\mathcal{E}(\\mathsf{srs}, \\mathsf{x}, \\pi) \\end{array} \\right] \\leq \\mathsf{negl}.</span>$</p>
+
+      <h3 id="sec-3.5" class="text-xl font-semibold mt-8">3.5 The KZG Polynomial Commitment Scheme</h3>
+
+    <p class="text-gray-300">Our construction heavily relies on the polynomial commitment introduced by Kate, Zaverucha and Goldberg in [KZG10] that we described below. As noted in Caulk [ZBK<sup>+</sup>22], the protocol can be slightly modified to support degree checks, so it consists on a tuple (KZG.Setup, KZG.Commit, KZG.Open, KZG.Verify) such that:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><span class="math">\\operatorname{srs}_{\\mathsf{KZG}} \\leftarrow \\mathsf{KZG.Setup}(gk,d)</span> : On input a bilinear group gk and a degree bound d, it samples  <span class="math">x \\leftarrow \\mathbb{F}</span>  uniformly, and outputs a structured reference string  <span class="math">\\operatorname{srs}_{\\mathsf{KZG}} = (\\{[x^i]_{1,2}\\}_{i=1}^d)</span> .</li>
+      <li><span class="math">\\mathsf{cm}_{\\mathsf{c}} \\leftarrow \\mathsf{KZG}.\\mathsf{Commit}\\big(\\mathsf{srs}_{\\mathsf{KZG}}, p(X)\\big)</span> : On input polynomial  <span class="math">p(X) \\in \\mathbb{F}[X]</span>  of degree d, it outputs  <span class="math">\\mathsf{cm}_{\\mathsf{c}} = [p(x)]_1</span> .</li>
+      <li><span class="math">(s, \\pi_{\\mathsf{KZG}}) \\leftarrow \\mathsf{KZG.Open}(\\mathsf{srs}_{\\mathsf{KZG}}, p(X), \\alpha)</span> : Let  <span class="math">\\deg &lt; d</span>  be the degree of p(X). Given  <span class="math">\\alpha \\in \\mathbb{F}</span> , prover computes</li>
+    </ul>
+
+    <p class="text-gray-300"><span class="math">$q(X) = \\frac{p(X) - p(\\alpha)}{X - \\alpha} ,</span>$</p>
+
+    <p class="text-gray-300">sets  <span class="math">s = p(\\alpha), [Q]_1 = [q(x)x^{d-\\deg + 1}]_1</span> , and outputs  <span class="math">(s, \\pi_{\\mathsf{KZG}} = [Q]_1)</span> .</p>
+
+    <p class="text-gray-300">&bull;  <span class="math">1/0 \\leftarrow \\mathsf{KZG}.\\mathsf{Verify}(\\mathsf{srs}_{\\mathsf{KZG}},\\mathsf{cm}_{\\mathsf{c}},\\deg,\\alpha,s,\\pi_{\\mathsf{KZG}})</span> : Verifier accepts if and only if</p>
+
+    <p class="text-gray-300"><span class="math">$e(\\mathsf{cm}_{\\mathsf{c}} - [s]_1, [x^{d-\\deg + 1}]_2) = e([Q]_1, [x - \\alpha]_2).</span>$</p>
+
+    <p class="text-gray-300"><strong>Multiple Openings.</strong> We also implement the optimization noted in [KZG10] to open one polynomial to many distinct points. In a nutshell, given the polynomial p(X), a vector of opening points  <span class="math">\\vec{\\alpha} \\in \\mathbb{F}^t</span>  and  <span class="math">\\vec{s}</span>  such that  <span class="math">s_i = p(\\alpha_i)</span>  for all i = 1, ..., t, prover and verifier define  <span class="math">C_{\\vec{\\alpha}}(X)</span>  as the unique polynomial of degree t-1 such that  <span class="math">C_{\\vec{\\alpha}}(\\alpha_i) = s_i</span>  for all  <span class="math">i \\in [t]</span> . Then,  <span class="math">p(\\alpha_i) = s_i</span>  for all i = 1, ..., t if and only if there exists q(X) such that</p>
+
+    <p class="text-gray-300"><span class="math">$p(X) - C_{\\vec{\\alpha}}(X) = \\prod_{i=1}^{t} (X - \\alpha_i) q(X).</span>$</p>
+
+    <p class="text-gray-300"><strong>Subset openings.</strong> Crucial for our construction is the subvector opening scheme of Tomescu et al. [TAB<sup>+</sup>20] that works for the vector commitment inspired by KZG.</p>
+
+    <p class="text-gray-300">Consider  <span class="math">\\vec{c} \\in \\mathbb{F}^N</span>  and let  <span class="math">\\vec{t} \\in \\mathbb{F}^k</span>  be a subvector of  <span class="math">\\vec{c}</span> , i.e., there exists  <span class="math">I \\subset [N]</span>  such that  <span class="math">\\vec{t} = (c_i)_{i \\in I}</span> . Given an encoding  <span class="math">C(X) = \\sum_{s=1}^N c_s \\lambda_s(X)</span>  of  <span class="math">\\vec{c} \\in \\mathbb{F}^N</span>  and  <span class="math">C_I(X) = \\sum_{i=1}^k t_i \\tau_i(X)</span> , where  <span class="math">\\{\\tau_i(X)\\}</span>  are the Lagrange interpolation polynomials of the set  <span class="math">\\mathbb{H}_I = \\{\\xi_i\\}_{i=1}^k = \\{\\omega^s\\}_{s \\in I}</span> , then note that for  <span class="math">z_I(X) = \\prod_{i=1}^k (X - \\xi_i)</span> ,</p>
+
+    <p class="text-gray-300"><span class="math">$C(X) - C_I(X) = z_I(X)Q_I(X),</span>$</p>
+
+    <p class="text-gray-300">for some polynomial  <span class="math">Q_I(X)</span>  if and only if  <span class="math">t_i = c_s</span>  for the pairs (i, s) such that  <span class="math">\\xi_i = \\omega^s</span> .</p>
+
+    <p class="text-gray-300">What is more, it is demonstrated in [TAB<sup>+</sup>20] that the prover can compute  <span class="math">[Q_I]_1</span>  by performing k group and  <span class="math">O(k \\log^2(k))</span>  field operations, given they already have stored proofs  <span class="math">\\{[Q_s]_1\\}_{s\\in I}</span>  that  <span class="math">C(\\omega^s)=c_s</span> . Precomputing all the proofs  <span class="math">\\{[Q_s]_1\\}_{s=1}^N</span>  can be done in time  <span class="math">O(N \\log N)</span>  using techniques by Feist and Khovratovich [FK23].</p>
+
+      <h3 id="sec-3.6" class="text-xl font-semibold mt-8">3.6 Polynomial Holographic Proofs</h3>
+
+    <p class="text-gray-300">For a family of relations  <span class="math">\\mathcal{R}</span> , we denote  <span class="math">(R, x, w) \\in \\mathcal{R}</span>  if  <span class="math">(x, w) \\in R</span> , and  <span class="math">R \\in \\mathcal{R}</span> .</p>
+
+    <p class="text-gray-300"><strong>Definition 4.</strong> [Polynomial Holographic IOPs (PHP) [CFF<sup>+</sup>21]] A Polynomial Holographic IOP for a family of relations  <span class="math">\\mathcal{R}</span>  is a tuple PHP = (rnd, n, m, d,  <span class="math">\\mathcal{I}, \\mathcal{P}, \\mathcal{V}</span> ), where |.|, rnd, n, m, d:  <span class="math">\\{0,1\\}^* \\to \\mathbb{N}</span>  are polynomial-time computable functions, and  <span class="math">\\mathcal{I}, \\mathcal{P}, \\mathcal{V}</span>  are algorithms that work as follows:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Offline phase: The encoder or indexer  <span class="math">\\mathcal{I}(\\mathsf{R})</span>  is executed on a relation description  <span class="math">\\mathsf{R} \\in \\mathcal{R}</span> , and returns  <span class="math">\\mathsf{n}(0)</span>  polynomials  <span class="math">\\{p_{0,j}(X)\\}_{j=1}^{\\mathsf{n}(0)} \\in \\mathbb{F}[X]</span>  encoding the relation  <span class="math">\\mathsf{R}</span> .</li>
+      <li>Online phase: The prover  <span class="math">\\mathcal{P}(\\mathsf{R},\\mathsf{x},\\mathsf{w})</span>  and the verifier  <span class="math">\\mathcal{V}^{\\mathcal{I}(\\mathsf{R})}(\\mathsf{x})</span>  are executed for  <span class="math">\\mathsf{rnd}(|\\mathsf{R}|)^2</span>  rounds, the prover has a tuple  <span class="math">(\\mathsf{x},\\mathsf{w}) \\in \\mathsf{R}</span> , and the verifier has an instance  <span class="math">\\mathsf{x}</span>  and oracle access to the polynomials encoding  <span class="math">\\mathsf{R}</span> . In the ith round,  <span class="math">\\mathcal{V}</span>  sends a message  <span class="math">\\rho_i \\in \\mathbb{F}</span>  to the prover, and  <span class="math">\\mathcal{P}</span>  replies with  <span class="math">\\mathsf{m}(i)</span>  messages  <span class="math">\\{\\pi_{i,j} \\in \\mathbb{F}\\}_{j=1}^{\\mathsf{m}(i)}</span> , and  <span class="math">\\mathsf{n}(i)</span>  oracle polynomials  <span class="math">\\{p_{i,j} \\in \\mathbb{F}[X]\\}_{i=1}^{\\mathsf{n}(i)}</span> , such that  <span class="math">\\deg(p_{i,j}) &lt; \\mathsf{d}(|\\mathsf{R}|,i,j)</span> .</li>
+      <li><strong>Decision phase</strong>: After the rnd(|R|)-th round, the verifier outputs two sets of algebraic checks of the following type:    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Degree checks: to check a bound on the degree of the polynomials sent by the prover.</li>
+      <li>Polynomial checks: to verify that certain polynomial identities hold between the oracle polynomials and the messages sent by the prover.</li>
+    </ul></li>
+    </ul>
+
+    <p class="text-gray-300">The verifier accepts if and only if all the checks are satisfied.</p>
+
+    <p class="text-gray-300"><strong>Definition 5.</strong> A PHP is complete if for any triple  <span class="math">(R, x, w) \\in \\mathcal{R}</span> , the checks returned by  <span class="math">\\mathcal{V}^{\\mathcal{I}(R)}</span>  after interacting with the honest prover  <span class="math">\\mathcal{P}(R, x, w)</span> , are satisfied with probability 1.</p>
+
+    <p class="text-gray-300"><strong>Definition 6.</strong> A PHP is  <span class="math">\\epsilon</span> -sound if for every relation-instance tuple  <span class="math">(R,x) \\notin \\mathcal{L}(\\mathcal{R})</span>  and polynomial-time prover  <span class="math">\\mathcal{P}^*</span>  we have</p>
+
+    <p class="text-gray-300"><span class="math">$\\Pr\\left[\\langle \\mathcal{P}^*, \\mathcal{V}^{\\mathcal{I}(\\mathsf{R})}(\\mathsf{x})\\rangle = 1\\right] \\le \\epsilon.</span>$</p>
+
+    <p class="text-gray-300"> <span class="math">&lt;sup&gt;^{2}|\\&lt;/sup&gt;mathsf{R}|</span>  is the size of the witness in field elements</p>
+
+    <p class="text-gray-300"><strong>Definition 7.</strong> A PHP is  <span class="math">\\epsilon</span> -knowledge sound if there exists a polynomial-time knowledge extractor  <span class="math">\\mathcal{E}</span>  such that for any prover  <span class="math">\\mathcal{P}^*</span> , relation R, instance x and auxiliary input z we have</p>
+
+    <p class="text-gray-300"><span class="math">$\\Pr\\left[(\\mathsf{R},\\mathsf{x},\\mathsf{w}) \\in \\mathcal{R} : \\mathsf{w} \\leftarrow \\mathcal{E}^{\\mathcal{P}^*}(\\mathsf{R},\\mathsf{x},z)\\right] \\geq \\Pr\\left[\\langle \\mathcal{P}^*(\\mathsf{R},\\mathsf{x},z), \\mathcal{V}^{\\mathcal{I}(\\mathsf{R})}(\\mathsf{x})\\rangle = 1\\right] - \\epsilon,</span>$</p>
+
+    <p class="text-gray-300">where  <span class="math">\\mathcal{E}</span>  has oracle access to  <span class="math">\\mathcal{P}^*</span> , it can query the next message function of  <span class="math">\\mathcal{P}^*</span>  (and also rewind it) and obtain all the messages and polynomials returned by it.</p>
+
+      <h3 id="sec-3.7" class="text-xl font-semibold mt-8">3.7 Generalized Sumcheck</h3>
+
+    <p class="text-gray-300">Following [BCR<sup>+</sup>19], in Section 5.2.4 we construct a scheme for inner product relations that rely on the univariate sumcheck argument. Since the sumcheck in [BCR<sup>+</sup>19] requires to work with Lagrange polynomials that interpolate subgroups, and we will work with an arbitrary subset  <span class="math">\\mathbb{H}_I</span>  of  <span class="math">\\mathbb{H}</span> , we use the generalized variant of the sumcheck:</p>
+
+    <p class="text-gray-300"><strong>Theorem 1</strong> (Generalized Sumcheck [RZ21]). Let  <span class="math">\\mathbb{H}_I = \\{\\xi_i\\}_{i=1}^k</span>  be an arbitrary subset of size k in some finite field  <span class="math">\\mathbb{F}</span>  and  <span class="math">z_I(X)</span>  its vanishing polynomial. For any  <span class="math">P(X) \\in \\mathbb{F}[X]</span> ,  <span class="math">\\sum_{i=1}^k P(\\xi_i) = \\sigma</span>  if and only if there exist polynomials  <span class="math">Q(X) \\in \\mathbb{F}[X]</span> ,  <span class="math">R(X) \\in \\mathbb{F}[X]</span>  with  <span class="math">\\deg(R) \\leq k-2</span>  such that</p>
+
+    <p class="text-gray-300"><span class="math">$P(X)N_{\\mathbb{H}_I}(X) - \\sigma = XR(X) + z_I(X)Q(X),</span>$</p>
+
+    <p class="text-gray-300">where  <span class="math">N_{\\mathbb{H}_I}(X) = \\sum_{i=1}^k \\tau_i(0)^{-1} \\tau_i(X)</span>  and  <span class="math">\\tau_i(X)</span>  is the ith Lagrange polynomial associated to  <span class="math">\\mathbb{H}_I</span> .</p>
+
+    </section>
+
+    <section id="sec-4" class="mb-10">
+      <h2 class="text-2xl font-bold">4 Overview</h2>
+
+    <p class="text-gray-300">In this section we provide a technical overview of the Baloo protocol, which proves a committed lookup relation, informally:</p>
+
+    <p class="text-gray-300">Given element  <span class="math">\\mathsf{cm}_{\\mathsf{a}} \\in \\mathbb{G}_1</span>  and a public set represented as vector  <span class="math">\\vec{c} \\in \\mathbb{F}^N</span> , there exists  <span class="math">\\vec{a} \\in \\mathbb{F}^m</span>  such that all elements of  <span class="math">\\vec{a}</span>  are elements of  <span class="math">\\vec{c}</span>  and  <span class="math">\\mathsf{cm}_{\\mathsf{a}}</span>  is a KZG commitment to  <span class="math">\\vec{a}</span> .</p>
+
+    <p class="text-gray-300">To give an intuition of our protocol, we will first analyze the relation above in algebraic terms: given a public table represented in vector  <span class="math">\\vec{c} \\in \\mathbb{F}^N</span>  and a vector  <span class="math">\\vec{a} \\in \\mathbb{F}^m</span> , prove that for all  <span class="math">j \\in [m]</span> , there exists  <span class="math">s \\in [N]</span>  such that  <span class="math">a_j = c_s</span> . The first observation made also in previous work ([ZBK+22], [PK22]) is that as not all elements of  <span class="math">\\vec{c}</span>  are used in  <span class="math">\\vec{a}</span> , we can create a new, shorter table  <span class="math">\\vec{t}</span>  by selecting from  <span class="math">\\vec{c}</span>  only those elements that are also in  <span class="math">\\vec{a}</span> . This step is to prevent the prover from an unnecessary dependency on N.</p>
+
+    <p class="text-gray-300">Secondly, we prove that  <span class="math">\\vec{a}</span>  is a result of some expansion of  <span class="math">\\vec{t}</span> , i.e., we design a lookup argument for  <span class="math">\\vec{a}</span>  in the new table  <span class="math">\\vec{t}</span> . The hurdle of this step is that  <span class="math">\\vec{t}</span>  is unknown to the verifier and is encoded as a polynomial with an unknown Lagrange basis  <span class="math">\\{\\tau_i(X)\\}_{i=1}^k</span> . Designing an efficient lookup argument for such a table is our main contribution. To do so, we note that the relation above has a simple algebraic representation: as  <span class="math">\\vec{a}</span>  is a vector generated using elements of  <span class="math">\\vec{t}</span> , there exists a matrix  <span class="math">\\mathbf{M} \\in \\mathbb{F}^{m \\times k}</span>  whose rows are unit vectors such that</p>
+
+    <p class="text-gray-300">
+<span class="math">$\\mathbf{M}\\vec{t} = \\vec{a}.\\tag{1}</span>$</p>
+
+    <p class="text-gray-300">Concretely, all elements in <strong>M</strong> are zero except for one element per row  <span class="math">1 = m_{j,i}</span>  when j, i are such that  <span class="math">a_i = t_i</span> . Recall we call such a matrix a <em>lookup matrix</em>.</p>
+
+    <p class="text-gray-300">In Figure 1, we depict the relations we aim to prove:  <span class="math">\\vec{c}</span>  is the original table.  <span class="math">\\vec{t}</span>  is a subvector of it: it keeps the ordering of the elements in  <span class="math">\\vec{c}</span> , and takes some of them only</p>
+
+    <p class="text-gray-300">once. On the other hand,  <span class="math">\\vec{a}</span>  is itself a lookup on  <span class="math">\\vec{t}</span> : all elements of  <span class="math">\\vec{a}</span>  are taken from  <span class="math">\\vec{t}</span> , in no strict order and with potential repetitions.</p>
+
+    <p class="text-gray-300">    <img src="_page_8_Figure_2.jpeg" alt="" class="my-4 max-w-full" />
+</p>
+
+    <p class="text-gray-300"><strong>Figure 1:</strong> Relation between  <span class="math">\\vec{t}</span> ,  <span class="math">\\vec{c}</span> , and  <span class="math">\\vec{a}</span></p>
+
+    <p class="text-gray-300">To prove equation (1) and that <strong>M</strong> is a lookup matrix, we leverage SNARK techniques where proving linear relations is done via a lincheck argument, e.g. [BCR<sup>+</sup>19]. In particular, we use the framework of R&agrave;fols and Zapico [RZ21], that separates the lincheck into two parts: a Checkable Subspace Sampling (CSS) argument, and an inner product.</p>
+
+    <p class="text-gray-300">The CSS is a PHP that deals with the problem of committing to a matrix of size  <span class="math">m \\times k</span>  in a succinct way. The solution, adopted in other works ([CHM+20], [CFF+21]), is to sample a vector in the row-space of matrix  <span class="math">\\mathbf{M}</span>  and then commit to such vector. If the new vector is sampled using random coins chosen by the verifier, the linear relation can be reduced to proving the following inner product (with overwhelming probability):</p>
+
+    <p class="text-gray-300"><span class="math">$(\\vec{r}^{\\mathsf{T}}\\mathbf{M}) \\cdot \\vec{t} = \\vec{r}^{\\mathsf{T}}\\vec{a}. \\tag{2}</span>$</p>
+
+    <p class="text-gray-300">Finally, to prove M is of the correct form, we adapt the construction of [RZ21] to prove that a matrix has one non-zero element per column, so it works for lookup matrices.</p>
+
+    <p class="text-gray-300">Overall, to build Baloo and prove the committed relation defined at the beginning of this section, we first use a succinct argument from [PK22] to prove an element  <span class="math">\\mathsf{cm}_t</span>  is the commitment to a subvector of the vector committed in  <span class="math">\\mathsf{cm}_c</span> , introduced in Section 5.1. Then, we design a PHP for proving  <span class="math">\\vec{a}</span>  is an expansion of vector  <span class="math">\\vec{t}</span> , in Section 5.2 and compile it into a succinct argument in Section 6.1. Finally, we put all the building blocks together and present the full Baloo construction with optimizations in 6.2.</p>
+
+      <h3 id="sec-4.1" class="text-xl font-semibold mt-8">4.1 Select a subvector</h3>
+
+    <p class="text-gray-300">We denote by  <span class="math">\\mathsf{cm}_\\mathsf{c}</span>  the commitment to  <span class="math">\\vec{c}</span> . Then we create a commitment  <span class="math">\\mathsf{cm}_\\mathsf{t}</span>  to a subvector  <span class="math">\\vec{t} \\in \\mathbb{F}^k</span>  defined by  <span class="math">\\vec{a}</span>  through the set of index  <span class="math">I = \\{s \\in [N] \\text{ s.t. } \\exists a_j \\text{ with } c_s = a_j\\}</span> . That is,  <span class="math">\\vec{t}</span>  is the subvector of  <span class="math">\\vec{c}</span>  that contains only the elements of  <span class="math">\\vec{c}</span>  that are also in  <span class="math">\\vec{a}</span> , i.e.,  <span class="math">\\vec{t} = (c_s)_{s \\in I}</span> . Recall that Since I is unknown to the verifier, we cannot use directly the subvector protocol in Section 3.5.</p>
+
+    <p class="text-gray-300">Instead, to prove that  <span class="math">\\mathsf{cm}_t</span>  commits to a subvector of  <span class="math">\\vec{c}</span> , the prover provides  <span class="math">W_1 \\in \\mathbb{G}_1, [z_I]_2</span>  such that</p>
+
+    <p class="text-gray-300"><span class="math">$e(\\mathsf{cm}_{\\mathsf{c}} - \\mathsf{cm}_{\\mathsf{t}}, [1]_2) = e(W_1, [z_I]_2),</span>$</p>
+
+    <p class="text-gray-300">along with a proof of well-formedness of  <span class="math">[z_I]_2</span> . That is, a proof that  <span class="math">[z_I]_2</span>  is a commitment to the vanishing polynomial of <em>some</em> subset of  <span class="math">\\mathbb{H}</span> . For proving the latter, we use the Caulk+ core protocol by [PK22] described in Section 5.1. If the prover has access to precomputed KZG proofs  <span class="math">\\{[Q_s]_1\\}_{s=1}^N</span>  of opening for all the elements  <span class="math">c_s \\in \\vec{c}</span>  and individual proofs  <span class="math">\\{[H_s]_1\\}_{s=1}^N</span>  of statements &quot; <span class="math">(X-\\omega^s)|z_H(X)</span> &quot;, it performs only  <span class="math">O(|\\vec{t}|)</span>  group operations to convince the verifier that  <span class="math">cm_t</span>  is a commitment to some subvector of  <span class="math">\\vec{c}</span> .</p>
+
+      <h3 id="sec-4.2" class="text-xl font-semibold mt-8">4.2 PHP for expansion</h3>
+
+    <p class="text-gray-300">Our Checkable Subspace Sampling, that is a PHP for a special sampling relation, can be seen as a partial evaluation problem: given matrix  <span class="math">\\mathbf{M} \\in \\mathbb{F}^{m \\times k}</span> , sets  <span class="math">\\mathbb{H}_I</span>  and  <span class="math">\\mathbb{V}</span>  of size k</p>
+
+    <p class="text-gray-300">and m with Lagrange interpolation polynomials  <span class="math">\\{\\tau_i(X)\\}_{i=1}^k</span>  and  <span class="math">\\{\\mu_j(X)\\}_{j=1}^m</span>  respectively, we can construct a bivariate polynomial encoding matrix  <span class="math">\\mathbf{M}</span>  as follows:</p>
+
+    <p class="text-gray-300">
+<span class="math">$M(X,Y) = (\\mu_1(Y), \\dots, \\mu_m(Y)) \\mathbf{M} (\\tau_1(X) \\dots \\tau_k(X))^{\\top}</span>$
+(3)</p>
+
+    <p class="text-gray-300">Then, the goal of a CSS argument is to show that for some  <span class="math">\\alpha \\in \\mathbb{F}</span>  sent by the verifier,</p>
+
+    <p class="text-gray-300"><span class="math">$D(X) = M(X, \\alpha) = \\sum_{i=1}^{k} \\sum_{j=1}^{m} M_{ji} \\tau_i(X) \\mu_j(\\alpha).</span>$</p>
+
+    <p class="text-gray-300">That is, D(X) is an encoding for  <span class="math">\\vec{d} = \\sum_{j=1}^{m} \\mu_j(\\alpha) \\vec{m}_j</span> , where  <span class="math">\\vec{m}_j</span>  are the row vectors of  <span class="math">\\mathbf{M}</span> . Performing a CSS argument allows to reduce the statement in eq. (1) to a single inner product relation  <span class="math">\\vec{d} \\cdot \\vec{t} = \\sum_{j=1}^{m} a_j \\mu_j(\\alpha)</span> , that can be proven with the univariate sumcheck [BCR<sup>+</sup>19].</p>
+
+    <p class="text-gray-300">We solve many challenges when using the framework in [RZ21]:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>The indexer. The framework is built to work for a public matrix  <span class="math">\\mathbf{M}</span>  and secret  <span class="math">\\vec{t}, \\vec{a}</span> . Because in our case matrix  <span class="math">\\mathbf{M}</span>  is only known by the prover, we replace the offline phase performed by the indexer in the CSS with a commitment phase performed by the prover itself. To support our protocol, we give a new definition of Commitand-Prove CSS which works for matrices that are chosen in a commit-and-prove fashion [CFQ19], that is, the prover selects matrix  <span class="math">\\mathbf{M}</span> , communicates it to the verifier in a succinct manner and then convinces them that  <span class="math">\\mathbf{M}\\vec{t} = \\vec{a}</span> .</li>
+      <li>Matrix M. To prove the lookup relation between  <span class="math">\\vec{a}</span>  and  <span class="math">\\vec{t}</span> , the prover must convince the verifier that matrix M is a lookup matrix, i.e., that its rows are unit vectors. For this, we adapt a construction of CSS given in [RZ21] for so-called <em>basic matrices</em> to work for lookup matrices. A basic matrix is a matrix with one non-zero element per column, while a lookup matrix has only one non-zero element per row.</li>
+      <li>Inner Product. To complete the proof for the linear relation, in Section 5.2.4 we present a scheme for proving the inner product relation between  <span class="math">\\vec{d}</span>  as described above and table  <span class="math">\\vec{t}</span> , from its encodings D(X) and T(X). Both T(X) and D(X) can be naturally written in the Lagrange basis  <span class="math">\\{\\tau_i(X)\\}_{i=1}^k</span>  corresponding to set  <span class="math">\\mathbb{H}_I</span> , and we build the argument from the encoding using the generalized univariate sumcheck in Section 3.7.</li>
+    </ul>
+
+      <h3 id="sec-4.3" class="text-xl font-semibold mt-8">4.3 Summary</h3>
+
+    <p class="text-gray-300">We summarize the statement to be proven and challenges of building an argument for it in Fig. 2.</p>
+
+    <p class="text-gray-300">In this section we present the building blocks of Baloo. In Section 5.1, we describe the Caulk+ core protocol that lets the prover convince the verifier that a group element  <span class="math">\\mathsf{cm}_\\mathsf{t}</span>  is a commitment to a subvector of a public table  <span class="math">\\vec{c}</span> , by performing  <span class="math">O(|\\vec{t}|)</span>  operations. In Section 5.2 we introduce the expansion argument that proves the committed lookup relation between  <span class="math">\\mathsf{cm}_\\mathsf{t}</span>  and  <span class="math">\\mathsf{cm}_\\mathsf{a}</span> . This expansion argument consists of a CSS scheme introduced in Section 5.2.3 and the inner product described in Section 5.2.4.</p>
+
+    <p class="text-gray-300"><strong>Statement:</strong> Given  <span class="math">\\mathsf{cm}_\\mathsf{c}</span>  a commitment to  <span class="math">C(X) = \\sum_{j=1}^N c_i \\vec{\\lambda}_j(X)</span> , the claim is that  <span class="math">\\mathsf{cm}_\\mathsf{a}</span>  is a commitment to  <span class="math">A(X) = \\sum_{j=1}^m a_j \\vec{\\mu}_j(X)</span> , and  <span class="math">\\vec{a} \\in \\mathbb{F}^m</span>  is a lookup of  <span class="math">\\vec{c} \\in \\mathbb{F}^N</span> .</p>
+
+    <p class="text-gray-300"><span class="math">\\{\\lambda_j(X)\\}_{j=1}^N</span>  (respectively,  <span class="math">\\{\\mu_j(X)\\}_{j=1}^m</span> ) are Lagrange basis polynomials associated to the set of roots of unity  <span class="math">\\mathbb{H}=\\{\\omega^i\\}_{i=1}^N</span>  (resp.  <span class="math">\\mathbb{V}=\\{\\nu^i\\}_{i=1}^m</span> ).</p>
+
+    <h4 id="sec-misc-1" class="text-lg font-semibold mt-6"><strong>Proof Elements:</strong></h4>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>I is a set of indexes  <span class="math">I \\subset [N]</span>  and  <span class="math">\\mathbb{H}_I = \\{\\xi_i\\}_{i=1}^k</span>  the set of  <span class="math">\\mathbb{H}</span>  indexed by I. The verifier does not know I and only sees  <span class="math">[z_I]_1</span>  a commitment to  <span class="math">z_I(X)</span> .</li>
+      <li><span class="math">\\{\\tau_i(X)\\}_{i=1}^k</span>  is the set of Lagrange basis polynomials associated to  <span class="math">\\mathbb{H}_I</span> , which is an arbitrary subset of  <span class="math">\\mathbb{H}</span> .</li>
+      <li><span class="math">\\vec{t} \\in \\mathbb{F}^k</span>  is a subtable, i.e.  <span class="math">\\vec{t} = (\\vec{c})_I</span> .  <span class="math">\\mathsf{cm_t}</span>  is a commitment to  <span class="math">T(X) = \\sum_{j=1}^k t_j \\tau_j(X)</span> , and such that  <span class="math">\\vec{a} = \\mathbf{M}\\vec{t}</span> , where  <span class="math">\\mathbf{M}</span>  is a matrix whose non-zero elements are ones, and where there is at most one non-zero element per row.</li>
+      <li>The matrix  <span class="math">\\mathbf{M}</span>  is represented by a bivariate polynomial with mixed polynomial basis, i.e.</li>
+    </ul>
+
+    <p class="text-gray-300"><span class="math">$M(X,Y) = (\\mu_1(Y), \\dots, \\mu_m(Y)) \\ \\mathbf{M} (\\tau_1(X) \\dots \\tau_k(X))^{\\top},</span>$</p>
+
+    <p class="text-gray-300">to make it compatible with the encodings of  <span class="math">\\vec{a}, \\vec{t}</span>  on left and right sides.</p>
+
+    <p class="text-gray-300">&bull; The bivariate encoding is never sent to the verifier, but only a partial evaluation on a challenge  <span class="math">\\alpha</span> , i.e. a commmitment to  <span class="math">D(X) = M(X, \\alpha)</span> . The prover sends certain commitments that allow to prove that D(X) is correct<sup>3</sup>.</p>
+
+    <p class="text-gray-300">Figure 2: Summary of Baloo.</p>
+
+      <h3 id="sec-5.1" class="text-xl font-semibold mt-8">5.1 Caulk+ core</h3>
+
+    <p class="text-gray-300">We use a subroutine of the lookup argument Caulk+, which we call Caulk+ core, as a building block of Baloo. Caulk+, by Posen and Kattis [PK22], is an improvement on Caulk [ZBK+22] that takes prover computation in the group from  <span class="math">O(m^2 + m \\log(N))</span>  to just  <span class="math">O(m^2)</span>  for m lookups on tables of size N. Following their blueprint, our first step is to create a subtable. That is, given a public vector  <span class="math">\\vec{c}</span> , encoded as polynomial C(X) and committed as  <span class="math">\\mathsf{cm}_{\\mathsf{c}}</span> , and elements  <span class="math">\\mathsf{cm}_{\\mathsf{t}} \\in \\mathbb{G}_1</span>  and  <span class="math">k \\in \\mathbb{N}</span> , Caulk+ core proves that  <span class="math">\\mathsf{cm}_{\\mathsf{t}}</span>  is a commitment to a subvector  <span class="math">\\vec{t} \\in \\mathbb{F}^k</span>  of  <span class="math">\\vec{c}</span> . In other words, there exist  <span class="math">I \\subset [N]</span>  such that  <span class="math">\\vec{t} = (c_s)_{s \\in I}</span> .</p>
+
+    <p class="text-gray-300"><span class="math">\\mathsf{Caulk}+\\mathsf{core}</span>  considers the subvector length k as a public parameter, and proves the following relation</p>
+
+    <p class="text-gray-300"><span class="math">$\\mathsf{R}_{\\mathsf{subtable}} = \\left\\{ \\begin{array}{l} (C(X), \\mathsf{cm_t}, [z_I]_2); \\\\ (\\mathbb{H}_I, T(X)) \\end{array} \\middle| \\begin{array}{l} \\mathbb{H}_I = \\{\\xi_1, \\dots, \\xi_k\\} \\subset \\mathbb{H} \\\\ \\forall \\xi \\in \\mathbb{H}_I, \\ T(\\xi) = C(\\xi) \\\\ \\mathsf{cm_t} = [T(x)]_1 \\\\ [z_I]_2 = [z_I(x)]_2 \\ \\text{for} \\ z_I(X) = \\prod_{i=1}^k (X - \\xi_i) \\end{array} \\right\\}</span>$</p>
+
+    <p class="text-gray-300">where  <span class="math">C(X) = \\sum_{s=1}^{N} c_s \\lambda_s(X)</span>  for  <span class="math">\\{\\lambda_s(X)\\}_{s=1}^{N}</span>  the Lagrange interpolation polynomials of a subgroup of roots of unity  <span class="math">\\mathbb{H} = \\{\\omega^s\\}_{s=1}^{N}</span> .</p>
+
+    <p class="text-gray-300">In Fig. 3 we describe a SNARK for  <span class="math">R_{\\text{subtable}}</span>  [PK22]. The prover running time of Caulk+core is quasi-linear in k for field and linear in k for group operations (assuming some precomputations). We refer the reader to Section B for more details.</p>
+
+    <p class="text-gray-300">Setup<sub>C+</sub>: Runs KZG.Setup(par, N) to obtain
+<span class="math">$\\{[x^s]_{1,2}\\}_{s=1}^N</span>$
+, computes  <span class="math">[z_H(x)]_1</span>  for  <span class="math">z_H(X) = \\prod_{s=0}^{N-1} (X - \\omega^s)</span>  and outputs  <span class="math">\\text{srs} = \\left(\\{[x^s]_{1,2}\\}_{s=1}^N, [z_H(x)]_1\\right)</span></p>
+
+    <p class="text-gray-300">Prover<sub>C+</sub>: Takes as input  <span class="math">\\mathbb{H}_I</span> , T(X),  <span class="math">\\{[Q_i(x)]_1 = [(C(x) - C(\\xi_i))/(x - \\xi_i)]_1, [H_i(x)]_1 = [z_H(x)/(x - \\xi_i)]_1\\}_{i=1}^k</span></p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Set  <span class="math">z_I(X) = \\prod_{i=1}^k (X \\xi_i)</span>  and  <span class="math">z_{H \\setminus I} = \\prod_{s \\in [N] \\setminus I} (X \\omega^s)</span></li>
+      <li>Compute  <span class="math">W_1 = \\left[\\frac{C(x) T(x)}{z_I(x)}\\right]_1</span>  and  <span class="math">W_2 = [z_{H \\setminus I}(x)]_1</span></li>
+      <li>Compute  <span class="math">W_3 = [(z_I(x) x^k)x^{N-k+1}]_1</span></li>
+    </ul>
+
+    <p class="text-gray-300">It outputs  <span class="math">\\pi_{C+} = (W_1, W_2, W_3)</span> .</p>
+
+    <p class="text-gray-300">Verifier<sub>C+</sub>: On input srs,  <span class="math">\\pi_{C+}</span> , cm<sub>c</sub>, cm<sub>t</sub> and  <span class="math">[z_I]_2</span> , accepts if and only if</p>
+
+    <p class="text-gray-300">(i)
+<span class="math">$e\\left(\\operatorname{cm}_{\\mathsf{c}} - \\operatorname{cm}_{\\mathsf{t}}, [1]_{2}\\right) = e\\left(W_{1}, [z_{I}]_{2}\\right) \\quad \\# \\ \\vec{t} \\text{ and } \\vec{c} \\text{ agree on } \\mathbb{H}_{I}</span>$</p>
+
+    <p class="text-gray-300">(ii)
+<span class="math">$e([z_H(x)]_1, [1]_2) = e(W_2, [z_I]_2)</span>$</p>
+
+    <p class="text-gray-300">(iii)  <span class="math">e([x^{N-k+1}]_1, [z_I]_2 - [x^k]_2) = e(W_3, [1]_2)</span>  #  <span class="math">|\\mathbb{H}| = k</span></p>
+
+    <p class="text-gray-300"><strong>Figure 3:</strong> The Caulk+ core [PK22] quasi-linear time protocol for proving R<sub>subtable</sub> that a commitment contains a subtable.</p>
+
+    <p class="text-gray-300"><strong>Theorem 2.</strong> The protocol in Fig. 3 is a knowledge sound Non-Interactive Argument of Knowledge (Fig. 3) in the algebraic group model assuming the q-dlog and the q-sfrac (App. 3.3) assumptions hold.</p>
+
+    <p class="text-gray-300">We refer the reader to Appendix A for the proof.</p>
+
+      <h3 id="sec-5.2" class="text-xl font-semibold mt-8">5.2 Expansion Argument</h3>
+
+    <p class="text-gray-300">In this section we introduce the building blocks of a PHP (Definition 4) that proves vector  <span class="math">\\vec{a}</span>  encoded in a polynomial A(X) is an expansion of the vector  <span class="math">\\vec{t}</span>  encoded in a polynomial T(X), which means that for all  <span class="math">j \\in [m]</span>  there exists  <span class="math">i \\in [k]</span>  such that  <span class="math">a_j = t_i</span> . Our PHP uses two main components: (i) a checkable subspace sampling argument and (ii) an inner product argument.</p>
+
+    <p class="text-gray-300">Designing (i) is the main technical contribution of this work, and there are several challenges sorted in order to achieve a CSS for a lookup matrix. We divide the presentation of such protocol in three parts: In Section 5.2.1 we introduce the definition of a Commitand-Prove CSS, after discussing its need. In section 5.2.2, we introduce the relation prover and verifier will run the proving phase for, and introduce the final CSS for it in 5.2.3. In Section 5.2.4 we describe the PHP for inner product relations we will use. All these schemes are compiled into a succinct argument in Section 6.</p>
+
+    <p class="text-gray-300"><sup>&amp;</sup>lt;sup&gt;3</sup>In previous works, these commitments were sent by the indexer. Our analysis shows that the technique works when these commitments are potentially adversarially chosen.</p>
+
+      <h4 id="sec-5.2.1" class="text-lg font-semibold mt-6"><strong>5.2.1 Commit-and-Prove Checkable Subspace Sampling</strong></h4>
+
+    <p class="text-gray-300">The first step for proving the relation between <em>&#8407;t</em> and <em>&#8407;a</em> through polynomial encodings is that the prover and the verifier agree on a polynomial <em>D</em>(<em>X</em>) encoding a uniformly sampled element in the row space of matrix <strong>M</strong> such that <strong>M***&#8407;t* = <em>&#8407;a</em>. That is, that <em>D</em>(<em>X</em>) is a random linear combination of polynomials <em>M&#8407;</em> (<em>X</em>) = (<em>M</em>1(<em>X</em>)<em>, . . . , Mm</em>(<em>X</em>))<sup>&#8868;</sup> that are encodings of the rows <em>&#8407;m<sup>i</sup></em> of **M</strong>.</p>
+
+    <p class="text-gray-300">Naturally, we do not want the verifier to have to read <strong>M</strong> and thus they need to receive a succinct representation of it. In many SNARK constructions (<a href="#page-25-5">[CHM</a><sup>+</sup>20], <a href="#page-24-6">[CFF</a><sup>+</sup>21], <a href="#page-27-6">[RZ21]</a>) where matrix <strong>M</strong> is public before the interaction, such a representation is given during an offline phase of the CSS by a trusted party, called the indexer. We take a similar approach but, since matrix <strong>M</strong> is not part of the instance, we present a variant of CSS schemes where we ask the prover to provide the succinct representation.</p>
+
+    <p class="text-gray-300">We call this variant a commit-and-prove CSS, where instead of having an indexer that in an offline phase computes polynomials describing the matrix, we have that the prover commits to a matrix and then proves attributes of it. More concretely, <em>&#8407;a</em> is an <em>expansion</em> of <em>&#8407;t</em> if and only if <strong>M</strong> is a matrix that has unit vectors in its rows, that is, there exists only one non-zero element in each row of <strong>M</strong> and it equals 1.</p>
+
+    <p class="text-gray-300">In our commit-and-prove CSS, the prover and verifier first engage in a commit and sampling phase, during which they jointly agree on the statement being proven. This statement is described in Section <a href="#page-13-1">5.2.2.</a> Afterwards the prover and verifier engage in a proving phase where the prover demonstrates that the statement is correct (Section <a href="#page-13-0">5.2.3)</a>.</p>
+
+    <p class="text-gray-300"><strong>Definition 8</strong> (Commit-and-Prove CSS)<strong>.</strong> A commit-and-prove checkable subspace sampling argument over a field F, is a tuple of PPT algorithms (PCSS<em>,</em> VCSS) that defines <em>k, m</em> &isin; N, a set of allowed vectors of polynomials M(<em>X</em>), a coinspace C, a sampling function Smp : C &rarr; F <em><sup>m</sup></em> and runs in four different stages:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><strong>Commit Phase:</strong> The prover PCSS sends a vector of polynomials <em>&#8407;pM&#8407;</em> (<em>X</em>) that succinctly describe a vector <em>M&#8407;</em> (<em>X</em>) &isin; M(<em>X</em>).</li>
+      <li><strong>Sampling Phase</strong>: Prover PCSS and verifier VCSS engage in an interactive protocol Sample. In some round, the verifier sends cns &larr; C, and the prover replies with a polynomial <em>D</em>(<em>X</em>) = <em>&#8407;s</em><sup>&#8868;</sup><em>M&#8407;</em> (<em>X</em>), for <em>&#8407;s</em> = Smp(cns).</li>
+      <li><strong>Proving Phase</strong>: PCSS and VCSS engage in an interactive protocol to prove that <em>&#8407;pM&#8407;</em> (<em>X</em>)<em>,</em> cns<em>, D</em>(<em>X</em>) &isin; LCSS where LCSS is the language for the following relation:</li>
+    </ul>
+
+    <p class="text-gray-300"><span class="math">$\\mathsf{R}_{\\mathsf{CSS}} = \\left\\{ \\begin{array}{c|c} \\left( (\\vec{p}_{\\vec{M}}(X), \\mathsf{cns}, D(X)), \\vec{M}(X) \\right) &amp; \\vec{M}(X) \\in \\mathcal{M}(X) \\\\ \\left( (\\vec{p}_{\\vec{M}}(X), \\mathsf{cns}, D(X)), \\vec{M}(X) \\right) &amp; \\vec{p}_{\\vec{M}}(X) = Commit(\\vec{M}(X)) \\\\ \\vec{s} = \\mathsf{Smp}(\\mathsf{cns}); \\\\ D(X) = \\vec{s}^{\\intercal} \\vec{M}(X) \\end{array} \\right\\}.</span>$</p>
+
+    <p class="text-gray-300">&bull; <strong>Decision Phase</strong>: When the proving phase is concluded, the verifier outputs a bit indicating acceptance or rejection.</p>
+
+    <p class="text-gray-300"><strong>Completeness.</strong> A Commit-and-Prove checkable subspace sampling argument is complete if for any (<em>&#8407;pM&#8407;</em> (<em>X</em>)<em>,</em> cns<em>, D</em>(<em>X</em>))<em>,</em>(<em>M&#8407;</em> (<em>X</em>)) &isin; RCSS, the probability of this event is 1:</p>
+
+    <p class="text-gray-300"><span class="math">$\\left[\\begin{array}{c|c} \\vec{p}_{\\vec{M}}(X) \\leftarrow \\mathcal{P}_{\\mathsf{CSS}}(\\vec{M}(X)); \\\\ 1 \\leftarrow \\langle \\mathcal{P}_{\\mathsf{CSS}}(\\mathsf{inst}, \\vec{M}(X)), \\mathcal{V}_{\\mathsf{CSS}}(\\mathsf{inst}) \\rangle &amp; \\vec{p}_{\\vec{M}}(X) \\leftarrow \\mathsf{Sample} \\langle \\mathcal{P}_{\\mathsf{CSS}}(\\vec{M}(X)), \\mathcal{V}_{\\mathsf{CSS}}(\\mathcal{C}) \\rangle; \\\\ \\mathsf{inst} \\leftarrow (\\vec{p}_{\\vec{M}}(X), \\mathsf{cns}, D(X)) \\end{array}\\right]</span>$</p>
+
+    <p class="text-gray-300"><strong>Soundness.</strong> A Commit-and-Prove checkable subspace sampling argument is  <span class="math">\\epsilon</span> -sound if for any polynomial-time prover  <span class="math">\\mathcal{P}^*_{\\mathsf{CSS}} = (\\mathcal{P}^*_{\\mathsf{CSS},1}, \\mathcal{P}^*_{\\mathsf{CSS},2})</span> , the probability of the following event is less than  <span class="math">\\epsilon</span> :</p>
+
+    <p class="text-gray-300"><span class="math">$\\begin{bmatrix} \\text{inst} \\not\\in \\mathcal{L}(\\mathsf{R}_{\\mathsf{CSS}}) &amp; \\vec{p}_{\\vec{M}}(X) \\leftarrow \\mathcal{P}_{\\mathsf{CSS},1}^*; \\\\ b = 1 &amp; \\text{inst} \\leftarrow (\\vec{p}_{\\vec{M}}(X), \\mathsf{cns}, D(X)); \\\\ b \\leftarrow \\langle \\mathcal{P}_{\\mathsf{CSS}}^*(\\mathsf{inst}), \\mathcal{V}_{\\mathsf{CSS},2}(\\mathsf{inst}) \\rangle \\end{bmatrix}</span>$</p>
+
+      <h4 id="sec-5.2.2" class="text-lg font-semibold mt-6">5.2.2 Our Concrete CSS Relation</h4>
+
+    <p class="text-gray-300">Commit Phase: Similar to [RZ21], we encode matrix M following Marlin [CHM<sup>+</sup>20], through the bivariate polynomial (Eq. 3, Section 4.2)</p>
+
+    <p class="text-gray-300"><span class="math">$M(X,Y) = \\sum\\nolimits_{j=1}^{m} \\tau_{\\mathsf{col}(j)}(0)^{-1} \\tau_{\\mathsf{col}(j)}(X) \\mu_{j}(Y),</span>$</p>
+
+    <p class="text-gray-300">where  <span class="math">\\operatorname{col}: [m] \\mapsto [k]</span>  is such that  <span class="math">\\operatorname{col}(j) = i</span>  if and only if  <span class="math">M_{j,i}</span>  is the only non-zero element in row j of  <span class="math">\\mathbf{M}</span> , and  <span class="math">\\{\\mu_j(X)\\}_{j=1}^m</span> ,  <span class="math">\\{\\tau_i(X)\\}_{i=1}^k</span>  are the Lagrange interpolation polynomials of some set  <span class="math">\\mathbb{V}</span>  of size m and  <span class="math">\\mathbb{H}_I</span>  of size k, respectively. Note that M(X,Y) is naturally an encoding of  <span class="math">\\vec{M}(X)</span>  as well.</p>
+
+    <p class="text-gray-300">We will use the set of polynomials  <span class="math">\\{\\hat{\\tau}_i(X) = \\frac{\\tau_i(X)}{\\tau_i(0)}\\}_{i=1}^k</span>  instead of simply  <span class="math">\\tau_i(X)</span> , to later implement the Generalized Sumcheck of Section 3.7.</p>
+
+    <p class="text-gray-300">Therefore, we define the allowed set of vectors of polynomials that define lookup matrices for which we can design a CSS as:</p>
+
+    <p class="text-gray-300"><span class="math">$\\mathcal{M}(X) = \\left\\{ (\\hat{\\tau}_{\\mathsf{col}(1)}(X), \\dots, \\hat{\\tau}_{\\mathsf{col}(m)}(X)) : \\text{ for some } \\mathsf{col} : [m] \\mapsto [k] \\text{ and } \\mathbb{H}_I \\subset \\mathbb{H} \\right\\}.</span>$</p>
+
+    <p class="text-gray-300">The succinct representation of  <span class="math">\\vec{M}(X)</span>  is a polynomial v(X) where  <span class="math">v(\\nu_j) = \\xi_{\\operatorname{col}(j)}^{-1}</span>  for all  <span class="math">\\nu_j \\in \\mathbb{V}</span> . Recall that all  <span class="math">\\xi_i</span>  equal some  <span class="math">\\omega^s \\in \\mathbb{H}_I</span> . This polynomial declares for each row in  <span class="math">\\mathbf{M}</span>  which is the column that takes value 1. As  <span class="math">\\mathbb{H}_I</span>  is unknown to the verifier, the representation of  <span class="math">\\vec{M}(X)</span>  must include information about it, and so includes the vanishing polynomial of  <span class="math">\\mathbb{H}_I z_I(X) = \\prod_{\\xi \\in \\mathbb{H}_I} (X - \\xi)</span></p>
+
+    <p class="text-gray-300"><strong>Sampling Phase:</strong> As in [CHM<sup>+</sup>20], computing an encoding of a vector sampled in the row space of <strong>M</strong> using verifier's coin  <span class="math">\\alpha</span> , is done through a partial evaluation  <span class="math">M(X, \\alpha)</span> . That is,</p>
+
+    <p class="text-gray-300"><span class="math">$D(X) = M(X, \\alpha) = \\sum_{j=1}^{m} \\tau_{\\mathsf{col}(j)}(0)^{-1} \\tau_{\\mathsf{col}(j)}(X) \\mu_{j}(\\alpha)</span>$</p>
+
+    <p class="text-gray-300">is an encoding of  <span class="math">\\vec{d} = \\sum_{j=1}^{m} \\mu_j(\\alpha) \\vec{M}_j</span> , where  <span class="math">\\vec{M}_j</span>  is the jth row of  <span class="math">\\mathbf{M}</span>  and is a unit vector in  <span class="math">\\mathbb{F}^k</span> . Proving well-formedness of D(X) can be thought now as proving that  <span class="math">D(X) = \\vec{s}^{\\top} \\vec{M}(X)</span>  for some  <span class="math">\\vec{M}(X) \\in \\mathcal{M}(X)</span>  and  <span class="math">\\vec{s} = (\\mu_1(\\alpha), \\dots, \\mu_m(\\alpha))</span> . That is,  <span class="math">\\mathsf{cns} = \\alpha</span>  and  <span class="math">\\mathsf{Samp}(X) = \\vec{\\mu}(X)</span> .</p>
+
+    <p class="text-gray-300"><strong>Proving Phase:</strong> Then the proving phase is run with respect to  <span class="math">R_{I,\\vec{M}} \\in R_{CSS}</span> :</p>
+
+    <p class="text-gray-300"><span class="math">$\\mathsf{R}_{I,\\vec{M}} = \\left\\{ \\begin{aligned} &amp;(v(X), z_I(X), \\alpha, D(X)), \\vec{M}(X)) \\\\ &amp;(v_J) = \\xi_{\\mathsf{col}(j)}^{-1} \\text{ for all } \\nu_j \\in \\mathbb{V} \\\\ &amp;z_I(X) = \\prod_{\\xi \\in \\mathbb{H}_I} (X - \\xi) \\\\ &amp;\\vec{s} = (\\mu_j(\\alpha))_{j=1}^m, \\\\ &amp;D(X) = \\vec{s}^\\intercal \\vec{M}(X) = \\sum_{j=1}^m \\mu_j(\\alpha) \\hat{\\tau}_{\\mathsf{col}(j)}(X) \\end{aligned} \\right\\}</span>$</p>
+
+      <h4 id="sec-5.2.3" class="text-lg font-semibold mt-6">5.2.3 The CSS Scheme</h4>
+
+    <p class="text-gray-300">In Fig. 4 we provide a commit-and-prove CSS for the relation defined above. During the committing and sampling phase the prover and verifier agree on an instance</p>
+
+    <p class="text-gray-300">Commit Phase:  <span class="math">\\mathcal{P}_{CSS}</span>  computes and outputs  <span class="math">z_I(X) = \\prod_{i=1}^k (X - \\xi_i)</span>  and  <span class="math">v(X) = \\sum_{j=1}^m \\xi_{\\mathsf{col}(j)}^{-1} \\mu_j(X)</span> .</p>
+
+    <p class="text-gray-300">Sampling Phase:  <span class="math">V(z_I(X), v(X))</span>  sends  <span class="math">\\alpha \\in \\mathbb{F}</span>  and  <span class="math">\\mathcal{P}((z_I(X), v(X)), \\vec{M}(X))</span> computes and outputs</p>
+
+    <p class="text-gray-300"><span class="math">\\begin{array}{l} D(\\vec{X}) = M(X,\\alpha) = \\vec{\\mu}(\\alpha)\\vec{M}(X) = \\sum_{j=1}^{m} \\mu_{j}(\\alpha)\\tau_{\\mathsf{col}(j)}(X)(\\tau_{\\mathsf{col}(j)}(0))^{-1}. \\\\ \\mathbf{Proving \\ Phase:} \\ \\mathcal{V}_{\\mathsf{CSS}}(z_{I}(X),v(X),\\alpha,D(X)) \\ \\mathrm{sends} \\ \\beta \\in \\mathbb{F} \\setminus \\mathbb{H}. \\end{array}</span></p>
+
+    <p class="text-gray-300"><span class="math">\\mathcal{P}((z_I(X), v(X), \\alpha, D(X)), \\vec{M}(X))</span>  computes  <span class="math">E(X) = M(\\beta, X) = \\sum_{j=1}^m \\mu_j(X) \\tau_{\\mathsf{col}(j)}(\\beta) (\\tau_{\\mathsf{col}(j)}(0))^{-1}</span>  and  <span class="math">Q_1(X)</span>  such that</p>
+
+    <p class="text-gray-300"><span class="math">$E(X)(\\beta v(X) - 1) + z_I(\\beta)z_I(0)^{-1} = z_V(X)Q_1(X).</span>$</p>
+
+    <p class="text-gray-300">It outputs  <span class="math">(E(X), Q_1(X))</span> , a proof that  <span class="math">\\deg(E) &lt; m</span> , and a proof that  <span class="math">z_I(X)</span>  is a commitment to k distinct elements of  <span class="math">\\mathbb{H}</span> .</p>
+
+    <p class="text-gray-300"><strong>Decision Phase:</strong>  <span class="math">\\mathcal{V}_{CSS}(z_I(X), v(X), \\alpha, D(X), \\beta, E(X), Q_1(X))</span>  accepts if and only if  <span class="math">(i) \\deg(E) &lt; m,</span></p>
+
+    <p class="text-gray-300">(ii)
+<span class="math">$E(X)(\\beta v(X) - 1) + z_I(\\beta)z_I(0)^{-1} = z_V(X)Q_1(X)</span>$</p>
+
+    <p class="text-gray-300">(iii)  <span class="math">D(\\beta) = E(\\alpha)</span></p>
+
+    <p class="text-gray-300">(iv)  <span class="math">z_I(X)</span>  is a commitment to k distinct roots<sup>4</sup></p>
+
+    <p class="text-gray-300">Figure 4: Commit-and-Prove CSS for  <span class="math">\\vec{M}(X) \\in \\mathcal{M}(X)</span> .</p>
+
+    <p class="text-gray-300"><span class="math">(z_I(X), v(X), \\alpha, D(X))</span>  where  <span class="math">z_I(X) = \\prod_{i=1}^k (X - \\xi_i)</span> . Note that  <span class="math">z_I(X)</span>  is proven to be correctly formed in the Caulk+ core protocol (see Section 5.1).</p>
+
+    <p class="text-gray-300">To prove well-formedness of D(X), we first recall that every lookup matrix is a transpose of a basic matrix, as defined in [RZ21]. Indeed, lookup matrices have only one non-zero element per row, while basic matrices have just one non-zero element per column. What is more, the rowspace of matrix M is the column space of  <span class="math">\\mathbf{M}^{\\top}</span> . Then, it is the same to</p>
+
+    <p class="text-gray-300">sample an element in the column space of  <span class="math">\\mathbf{M}^{\\top}</span>  or in the row space of  <span class="math">\\mathbf{M}</span> . What is more,  <span class="math">M(X,Y) = \\sum_{i=1}^{k} \\sum_{j=1}^{m} M_{i,j} \\tau_i(X) \\mu_j(Y)</span>  is an encoding of both  <span class="math">\\mathbf{M}</span>  and  <span class="math">\\mathbf{M}^{\\top}</span> . Thus, we observe that  <span class="math">E(X) = M(\\beta, X)</span>  encodes a vector sampled in the column space of  <span class="math">\\mathbf{M}^{\\top}</span>  and a vector sampled in the row space of its transpose  <span class="math">\\mathbf{M}</span>  using the same coin  <span class="math">\\beta</span> . So we use the argument in [RZ21] to prove correct computation of the polynomial E(X) that encodes a basic matrix, and then use the fact that if for a uniformly sampled  <span class="math">\\alpha \\in \\mathbb{F} E(\\alpha) = D(\\beta)</span> , it must be the case that  <span class="math">D(X) = M(X, \\alpha)</span> , i.e., D(X) encodes a vector in the row space of M sampled with coins  <span class="math">\\alpha</span> . So during the proving phase, the prover first sends a commitment to the polynomial</p>
+
+    <p class="text-gray-300"><span class="math">$E(X) = M(X, \\beta) = \\sum_{j=1}^{m} \\tau_{\\mathsf{col}(j)}(0)^{-1} \\tau_{\\mathsf{col}(j)}(\\beta) \\mu_{j}(X).</span>$</p>
+
+    <p class="text-gray-300">They prove that E(X) has exactly this form by showing that (i) E(X) has degree less than m and (ii)  <span class="math">E(\\nu_j) = \\tau_{\\mathsf{col}(j)}(0)^{-1}\\tau_{\\mathsf{col}(j)}(\\beta)</span>  for all  <span class="math">\\nu_j \\in V</span> . Below, we prove that point (ii) holds if and only if there exists  <span class="math">Q_1(X)</span>  such that</p>
+
+    <p class="text-gray-300"><span class="math">$E(X)(\\beta v(X) - 1) + z_I(\\beta)z_I(0)^{-1} = z_V(X)Q_1(X).</span>$</p>
+
+    <p class="text-gray-300"><sup>&amp;</sup>lt;sup&gt;4</sup>In our protocol, well-formedness of  <span class="math">z_I(X)</span>  is given by Caulk+ core.</p>
+
+    <p class="text-gray-300"><strong>Theorem 3.</strong> The protocol in Fig 4 satisfies completeness.</p>
+
+    <p class="text-gray-300"><em>Proof.</em> To prove that equation (ii) in the verifier check is satisfied, first recall that  <span class="math">\\sum_{j=1}^{m} \\mu_j(X) = 1</span>  (Section 3.2) and note:</p>
+
+    <p class="text-gray-300"><span class="math">$\\begin{split} E(X)(\\beta v(X) - 1) &amp;= \\left(\\sum_{j=1}^{m} \\tau_{\\operatorname{col}(j)}(\\beta)(\\tau_{\\operatorname{col}(j)}(0))^{-1} \\mu_{j}(X)\\right) \\left(\\beta \\sum_{j=1}^{m} \\xi_{\\operatorname{col}(j)}^{-1} \\mu_{j}(X) - \\sum_{j=1}^{m} \\mu_{j}(X)\\right) \\\\ &amp;= \\left(\\sum_{j=1}^{m} \\tau_{\\operatorname{col}(j)}(\\beta)(\\tau_{\\operatorname{col}(j)}(0))^{-1} \\mu_{j}(X)\\right) \\left(\\sum_{j=1}^{m} (\\beta \\xi_{\\operatorname{col}(j)}^{-1} - 1) \\mu_{j}(X)\\right) \\\\ &amp;= \\sum_{j=1}^{m} \\tau_{\\operatorname{col}(j)}(\\beta)(\\tau_{\\operatorname{col}(j)}(0))^{-1} (\\beta \\xi_{\\operatorname{col}(j)}^{-1} - 1) \\mu_{j}^{2}(X) \\\\ &amp;+ \\sum_{j=1}^{m} \\sum_{r \\neq j} \\tau_{\\operatorname{col}(j)}(\\beta)(\\tau_{\\operatorname{col}(j)}(0))^{-1} (\\beta \\xi_{\\operatorname{col}(j)}^{-1} - 1) \\mu_{j}(X) \\mu_{j}(X) \\mu_{j}(X) \\\\ &amp;\\operatorname{Since} \\ \\mu_{j}^{2}(X) \\equiv \\mu_{j}(X) \\mod z_{V}(X) \\operatorname{and} z_{V}(X) |\\mu_{j}(X) \\mu_{r}(X) : \\\\ &amp;= \\sum_{j=1}^{m} \\tau_{\\operatorname{col}(j)}(\\beta)(\\tau_{\\operatorname{col}(j)}(0))^{-1} (\\beta \\xi_{\\operatorname{col}(j)}^{-1} - 1) \\mu_{j}(X) \\mod z_{V}(X) \\\\ &amp;\\operatorname{Expanding} \\ \\operatorname{the} \\ \\operatorname{definition} \\ \\operatorname{of} \\ \\tau_{\\operatorname{col}(j)}(\\beta) \\ \\operatorname{and} \\ \\tau_{\\operatorname{col}(j)}^{-1}(0) : \\\\ &amp;= \\sum_{j=1}^{m} \\left(\\prod_{i \\neq \\operatorname{col}(j)} \\frac{\\beta - \\xi_{i}}{\\xi_{j} - \\xi_{i}} - \\xi_{i} - \\xi_{i} \\right) \\left(\\beta \\xi_{\\operatorname{col}(j)}^{-1} - 1 \\right) \\mu_{j}(X) \\mod z_{V}(X) \\\\ &amp;= \\sum_{j=1}^{m} \\left(\\prod_{i \\neq \\operatorname{col}(j)} \\frac{\\beta - \\xi_{i}}{-\\xi_{i}} \\right) \\left(\\beta \\xi_{\\operatorname{col}(j)}^{-1} - 1 \\right) \\mu_{j}(X) \\mod z_{V}(X) \\\\ &amp;= z_{I}(\\beta) \\sum_{j=1}^{m} \\left(\\prod_{i \\neq \\operatorname{col}(j)} \\frac{1}{-\\xi_{i}} \\right) \\xi_{\\operatorname{col}(j)}^{-1} \\mu_{j}(X) \\mod z_{V}(X) \\\\ &amp;= z_{I}(\\beta) z_{I}(0)^{-1} \\sum_{i \\neq \\operatorname{col}(j)} \\pi_{j}(X) = -z_{I}(\\beta) z_{I}(0)^{-1} \\mod z_{V}(X) \\end{split}</span>$</p>
+
+    <p class="text-gray-300">Thus, there exists  <span class="math">Q_1(X)</span>  such that  <span class="math">E(X)(\\beta v(X) - 1) + z_I(\\beta)z_I(0)^{-1} = Q_1(X)z_V(X)</span> Equation (iii) follows as  <span class="math">D(X) = M(X, \\alpha)</span>  and  <span class="math">E(X) = M(\\beta, X)</span> .</p>
+
+    <p class="text-gray-300"><strong>Theorem 4.</strong> If  <span class="math">z_I(X) = \\prod_{i=1}^k (X - \\xi_i)</span>  for unique roots  <span class="math">\\xi_i</span>  then the CSS protocol in Fig. 4 is sound.</p>
+
+    <p class="text-gray-300">Proof. Set  <span class="math">v_j = v(\\nu_j)</span>  for all  <span class="math">j \\in [m]</span> , then there exists  <span class="math">q(X) \\in \\mathbb{F}[X]</span>  such that  <span class="math">v(X) = \\sum_{j=1}^m v_j \\mu_j(X) + z_V(X) q(X)</span> . We first argue that the PHP enforces the form of E(X) with respect to the evaluations  <span class="math">\\{v_j\\}_{j \\in [m]}</span> . We then argue that given this E(X), the form of D(X) is determined by v(X) and  <span class="math">z_I(X)</span>  except with negligible probability. Third we will show that  <span class="math">v_j^{-1}</span>  is a root of  <span class="math">z_I(X)</span>  for all  <span class="math">j \\in [m]</span> . Finally we will show that D(X) is exactly in our allowed set of matrices.</p>
+
+    <p class="text-gray-300">Form of E(X): We show  <span class="math">E(X) = \\sum_{j=1}^{m} \\left(\\frac{-z_I(\\beta)}{z_I(0)(\\beta v_j - 1)}\\right) \\mu_j(X)</span>  except with negligible probability over the choice of  <span class="math">\\beta</span> . Since  <span class="math">\\deg(E) &lt; m</span> , there exist coefficients  <span class="math">\\{e_j\\}_{j=1}^m</span>  such</p>
+
+    <p class="text-gray-300">that  <span class="math">E(X) = \\sum_{j=1}^{m} e_j \\mu_j(X)</span> . So we have:</p>
+
+    <p class="text-gray-300"><span class="math">$E(X)(\\beta v(X) - 1) = \\left(\\sum_{j=1}^{m} e_{j}\\mu_{j}(X)\\right) \\left(\\beta \\sum_{j=1}^{m} v_{j}\\mu_{j}(X) + \\beta z_{V}(X)q(X) - \\sum_{j=1}^{m} \\mu_{j}(X)\\right)</span>$
+<span class="math">$= \\sum_{j=1}^{m} e_{j}(\\beta v_{j} - 1)\\mu_{j}(X) \\mod z_{V}(X).</span>$</p>
+
+    <p class="text-gray-300">Since  <span class="math">\\beta \\notin \\mathbb{H}_I</span> ,  <span class="math">z_I(\\beta) \\neq 0</span>  and equation (ii) says that for all  <span class="math">\\nu_j \\in \\mathbb{V}</span> ,  <span class="math">\\sum_{j=1}^m e_j(\\beta v_j - 1)\\mu_j(\\nu_j) + z_I(\\beta)z_I(0)^{-1} = 0</span> , and then for all  <span class="math">j \\in [m]</span> ,  <span class="math">e_j(\\beta v_j - 1) = -z_I(\\beta)z_I(0)^{-1}</span> . Thus for all j,  <span class="math">\\beta v_j - 1 \\neq 0</span>  and it follows that  <span class="math">e_j = \\frac{-z_I(\\beta)}{z_I(0)(\\beta v_j - 1)}</span> .</p>
+
+    <p class="text-gray-300">Form of D(X): We show that  <span class="math">D(X) = -\\sum_{j=1}^{m} \\frac{z_I(X)\\mu_j(\\alpha)}{z_I(0)v_j(X-v_j^{-1})}</span>  except with negligible probability. Let</p>
+
+    <p class="text-gray-300"><span class="math">$f(X) = \\sum_{j=1}^{m} \\left( \\prod_{s=1, s \\neq j}^{m} (Xv_s - 1) \\right) z_I(0)^{-1} z_I(X) \\mu_j(\\alpha) + D(X) \\prod_{j=1}^{m} (Xv_j - 1)</span>$</p>
+
+    <p class="text-gray-300">Then at random  <span class="math">\\beta</span>  we have that</p>
+
+    <p class="text-gray-300"><span class="math">$f(\\beta) = \\sum_{j=1}^{m} \\left( \\prod_{s=1, s \\neq j}^{m} (\\beta v_s - 1) \\right) z_I(0)^{-1} z_I(\\beta) \\mu_j(\\alpha) + D(\\beta) \\prod_{j=1}^{m} (\\beta v_j - 1)</span>$</p>
+
+    <p class="text-gray-300"><span class="math">$\\Rightarrow \\frac{f(\\beta)}{\\prod_{j=1}^{m} (\\beta v_j - 1)} = \\sum_{j=1}^{m} \\frac{z_I(\\beta)}{z_I(0)(\\beta v_j - 1)} \\mu_j(\\alpha) + D(\\beta)</span>$</p>
+
+    <p class="text-gray-300"><span class="math">$\\Rightarrow \\frac{f(\\beta)}{\\prod_{j=1}^{m} (\\beta v_j - 1)} = -E(\\alpha) + D(\\beta)</span>$</p>
+
+    <p class="text-gray-300">provided that  <span class="math">\\prod_{j=1}^{m} (\\beta v_j - 1) \\neq 0</span> , which is the case as explained above. Now by the verifier's check (iii) we have  <span class="math">-E(\\alpha) + D(\\beta) = 0</span>  and hence that  <span class="math">f(\\beta) = 0</span> . If  <span class="math">f(X) \\neq 0</span>  then  <span class="math">f(\\beta) \\neq 0</span>  except with negligible probability because  <span class="math">v(X), z_I(X), D(X)</span>  are chosen before  <span class="math">\\beta</span> . Thus</p>
+
+    <p class="text-gray-300"><span class="math">$D(X) = -\\sum_{j=1}^{m} \\frac{\\left(\\prod_{s=1, s \\neq j}^{m} (Xv_s - 1)\\right) z_I(0)^{-1} z_I(X) \\mu_j(\\alpha)}{\\prod_{j=1}^{m} (Xv_j - 1)} = -\\sum_{j=1}^{m} \\frac{z_I(X) \\mu_j(\\alpha)}{z_I(0) v_j(X - v_j^{-1})}</span>$
+(4)</p>
+
+    <p class="text-gray-300">Form of v(X): We show that for all  <span class="math">j \\in [m]</span> ,  <span class="math">v_j^{-1}</span>  is a root of  <span class="math">z_I(X)</span> . In other words, there exists a map col:  <span class="math">[m] \\mapsto [k]</span>  such that for all  <span class="math">j \\in [m]</span> ,  <span class="math">v_j^{-1} = \\xi_{\\operatorname{col}(j)}</span> . Indeed, define  <span class="math">J = \\{j : v_j^{-1} \\notin \\mathbb{H}_I\\}</span> , and the set  <span class="math">V = \\{v_j : j \\in J\\}</span> . We assume for contradiction that there is some  <span class="math">v_j^{-1}</span>  that is not a root of  <span class="math">z_I(X)</span> , which means that V is not empty. Then,</p>
+
+    <p class="text-gray-300">
+<span class="math">$D_{J^c}(X) = -\\sum\\nolimits_{j \\in [m] \\backslash J} \\frac{z_I(X)\\mu_j(\\alpha)}{z_I(0)v_j(X - v_i^{-1})}</span>$</p>
+
+    <p class="text-gray-300">is a polynomial, and following the definition of D(X) in Eq. 4 we can write:</p>
+
+    <p class="text-gray-300"><span class="math">$D(X) - D_{J^c}(X) = -\\sum_{i \\in J} \\frac{z_I(X)\\mu_j(\\alpha)}{z_I(0)v_j(X - v_j^{-1})} =</span>$</p>
+
+    <p class="text-gray-300"><span class="math">$-\\frac{z_I(X)}{z_I(0)} \\sum_{v \\in V} \\frac{1}{v(X - v^{-1})} \\left( \\sum_{j: v_j = v} \\mu_j(\\alpha) \\right) - \\frac{z_I(X)}{z_I(0)} \\sum_{v \\in V} \\frac{P_v(\\alpha)}{v(X - v^{-1})}</span>$</p>
+
+    <p class="text-gray-300">where, for any  <span class="math">v \\in V</span> ,  <span class="math">P_v(X) = \\sum_{j:v_j=v} \\mu_j(X)</span> . Regardless of  <span class="math">\\alpha</span> , this identity can only hold if, for all  <span class="math">v \\in V</span> ,  <span class="math">P_v(\\alpha) = 0</span> . Indeed, the left side is a polynomial because the prover sent D(X) and  <span class="math">D_{J^c}(X)</span>  is a polynomial by definition of J, but a polynomial cannot be equal to a sum of non-trivial rational functions with different poles. The probability that  <span class="math">P_v(\\alpha) = 0</span>  for all  <span class="math">v \\in V</span>  can be bounded by the probability that  <span class="math">P_v(\\alpha) = 0</span>  for any single  <span class="math">v \\in V</span> . But this probability is at most  <span class="math">\\frac{m-1}{|\\mathbb{F}|}</span> , because all these polynomials were defined independently of  <span class="math">\\alpha</span> . We conclude that the probability that V is not empty is negligible.</p>
+
+    <p class="text-gray-300">D(X) is in the space of allowed matrices: Let us substitute our mapping col from  <span class="math">v_i^{-1}</span>  to the roots of  <span class="math">z_I(X)</span>  into our expression for D(X) in Eq. 4:</p>
+
+    <p class="text-gray-300"><span class="math">$D(X) = -\\sum_{j=1}^m \\frac{z_I(X)\\mu_j(\\alpha)}{z_I(0)\\xi_{\\mathsf{col}(j)}^{-1}(X - \\xi_{\\mathsf{col}(j)})} = \\sum_{j=1}^m \\frac{-\\xi_{\\mathsf{col}(j)}z_I(X)\\mu_j(\\alpha)}{z_I(0)(X - \\xi_{\\mathsf{col}(j)})}</span>$</p>
+
+    <p class="text-gray-300">Now the lagrange polynomials for the set  <span class="math">\\{\\xi_i\\}_{i=1}^k</span>  are given by</p>
+
+    <p class="text-gray-300"><span class="math">$\\tau_i(X) = \\prod_{s=1, s \\neq i}^k \\frac{X - \\xi_s}{\\xi_i - \\xi_s} = \\prod_{s=1, s \\neq i}^k (X - \\xi_s) \\prod_{s=1, s \\neq i}^k \\frac{1}{\\xi_i - \\xi_s} = \\frac{z_I(X)}{(X - \\xi_i)} \\prod_{s=1, s \\neq i}^k \\frac{1}{(\\xi_i - \\xi_s)}.</span>$</p>
+
+    <p class="text-gray-300">Evaluating in
+<span class="math">$X = 0</span>$
+,  <span class="math">\\tau_{\\mathsf{col}(j)}(0) = \\frac{z_I(0)}{-\\xi_{\\mathsf{col}(j)}} \\prod_{s=1, s \\neq \\mathsf{col}(j)}^k \\frac{1}{(\\xi_{\\mathsf{col}(j)} - \\xi_s)}</span>  and</p>
+
+    <p class="text-gray-300"><span class="math">$\\begin{split} &amp;\\tau_{\\operatorname{col}(j)}(0)^{-1}\\tau_{\\operatorname{col}(j)}(X) = \\\\ &amp;= \\left(\\frac{-\\xi_{\\operatorname{col}(j)}}{z_I(0)} \\prod_{s=1, s \\neq \\operatorname{col}(j)}^k (\\xi_{\\operatorname{col}(j)} - \\xi_s)\\right) \\left(\\frac{z_I(X)}{(X - \\xi_{\\operatorname{col}(j)})} \\prod_{s=1, s \\neq \\operatorname{col}(j)}^k \\frac{1}{(\\xi_{\\operatorname{col}(j)} - \\xi_s)}\\right) \\\\ &amp;= \\frac{-\\xi_{\\operatorname{col}(j)}}{z_I(0)} \\frac{z_I(X)}{(X - \\xi_{\\operatorname{col}(j)})} \\end{split}</span>$</p>
+
+    <p class="text-gray-300">Substituting these into our expression for D(X) yields our result:</p>
+
+    <p class="text-gray-300"><span class="math">$D(X) = \\sum_{j=1}^{m} \\tau_{\\mathsf{col}(j)}(0)^{-1} \\tau_{\\mathsf{col}(j)}(X) \\mu_{j}(\\alpha) = \\sum_{j=1}^{m} \\mu_{j}(\\alpha) \\hat{\\tau}_{\\mathsf{col}(j)}(X)</span>$</p>
+
+      <h4 id="sec-5.2.4" class="text-lg font-semibold mt-6">5.2.4 Inner products from Generalized Sumcheck</h4>
+
+    <p class="text-gray-300">In Fig. 5, we introduce a PHP for proving that for two vectors  <span class="math">\\vec{a}, \\vec{b} \\in \\mathbb{F}^k</span>  encoded as polynomials a(X), b(X) and an element  <span class="math">\\sigma \\in \\mathbb{F}</span>  it is true that  <span class="math">\\vec{a} \\cdot \\vec{b} = \\sigma</span> . Formally, we build a PHP for the following relation:</p>
+
+    <p class="text-gray-300"><span class="math">$\\mathsf{R}_{\\mathsf{gIP}} = \\left\\{ \\begin{array}{c|c} (a(X), b(X), \\sigma, z_I(X)) \\; ; \\; a_i = a(\\xi_i)\\tau_i(0)^{-1}, \\; b_i = b(\\xi_i) \\\\ (\\vec{a}, \\; \\vec{b}, \\; \\mathbb{H}_I) &amp; \\text{and } \\sum_{i=1}^k a_i b_i = \\sigma \\end{array} \\right\\}</span>$</p>
+
+    <p class="text-gray-300">for  <span class="math">\\mathbb{H}_I = \\{\\xi_i\\}_{i=1}^k</span>  some fixed set of known size k,  <span class="math">\\{\\tau_i(X)\\}_{i=1}^k</span>  its Lagrange interpolation polynomials, and  <span class="math">z_I(X)</span>  its vanishing polynomial.</p>
+
+    <p class="text-gray-300">Importantly, our scheme uses polynomial encodings of both vectors, but in the case of vector  <span class="math">\\vec{a}</span>  the encoding is normalized, in particular,  <span class="math">a(X) = \\sum_{i=1}^k a_i \\hat{\\tau}_i(X) = \\sum_{i=1}^k a_i \\frac{\\tau_i(X)}{\\tau_i(0)}</span> . This is because we will instantiate our inner product argument setting a(X) to be polynomial D(X) from the previous section and  <span class="math">D(X) = \\sum_{i=1}^k \\frac{d_i}{\\tau_i(0)} \\tau_i(X)</span> . Let  <span class="math">z_I(X)</span>  be the vanishing polynomial of  <span class="math">\\mathbb{H}_I</span> . Inspired by the linear check of Aurora [BCR<sup>+</sup>19], we compute an encoding  <span class="math">\\sum_{i=1}^k a_i b_i \\hat{\\tau}_i(X)</span>  of the Hadamard product between</p>
+
+    <p class="text-gray-300">Let  <span class="math">z_I(X)</span>  be the vanishing polynomial of  <span class="math">\\mathbb{H}_I</span> . Inspired by the linear check of Aurora [BCR<sup>+</sup>19], we compute an encoding  <span class="math">\\sum_{i=i}^k a_i b_i \\hat{\\tau}_i(X)</span>  of the Hadamard product between  <span class="math">\\vec{a}, \\vec{b}</span>  and use a univariate sumcheck argument to obtain the inner product from it. Importantly, since  <span class="math">\\mathbb{H}_I</span>  may contain any set of distinct points that do not necessarily form a multiplicative group, we instantiate our inner product argument with the generalized sumcheck in Section 3.7.</p>
+
+    <p class="text-gray-300">Offline Phase: On input  <span class="math">R_{g|P}</span> ,  <span class="math">\\mathcal{I}_{IP}</span>  outputs the polynomial  <span class="math">z_I(X) = \\prod_{\\xi \\in \\mathbb{H}_I} (X - \\xi)</span> Online Phase:  <span class="math">\\mathcal{P}_{IP}(z_I(X), a(X), b(X))</span>  computes R(X), Q(X) such that</p>
+
+    <p class="text-gray-300"><span class="math">$a(X)b(X) - \\sigma = XR(X) + z_I(X)Q(X).</span>$</p>
+
+    <p class="text-gray-300">It outputs (R(X), Q(X)) and a proof that  <span class="math">z_I(X)</span>  has distinct k roots. <strong>Decision Phase:</strong>  <span class="math">\\mathcal{V}_{\\mathsf{IP}}(z_I(X), a(X), b(X), R(X), Q(X))</span>  accepts if and only if (i)  <span class="math">\\deg(R(X)) &lt; k - 1</span> , (ii)</p>
+
+    <p class="text-gray-300"><span class="math">$a(X)b(X) - \\sigma = XR(X) + z_I(X)Q(X)</span>$
+.</p>
+
+    <p class="text-gray-300">and (iii)  <span class="math">z_I(X)</span>  has distinct k roots.</p>
+
+    <p class="text-gray-300"><strong>Figure 5:</strong> PHP for a generalised inner product argument. As before, well-formedness of  <span class="math">z_I(X)</span>  is given by Caulk+ core.</p>
+
+    <p class="text-gray-300"><strong>Theorem 5</strong> (Inner Product Polynomial Relation). The argument in Fig. 5 is a sound PHP for the relation  <span class="math">R_{glP}</span> , as defined in Definition 4.</p>
+
+    <p class="text-gray-300"><em>Proof.</em> Let  <span class="math">\\xi_i</span> ,  <span class="math">i=1,\\ldots,k</span>  be the roots of  <span class="math">z_I(X)</span> . If we define  <span class="math">a_i=a(\\xi_i)\\tau_i(0)^{-1}</span>  and  <span class="math">b_i=b(\\xi_i)</span> , we can represent  <span class="math">a(X)=\\sum_{i=1}^k a_i\\tau_i(0)^{-1}\\tau_i(X)+z_I(X)q_1(X)</span>  and  <span class="math">b(X)=\\sum_{i=1}^k b_j\\tau_j(X)+z_I(X)q_2(X)</span> . Then there exists  <span class="math">q_3(X)</span>  such that</p>
+
+    <p class="text-gray-300"><span class="math">$a(X)b(X) = \\left(\\sum_{i=1}^{k} a_i \\tau_i(0)^{-1} \\tau_i(X)\\right) \\left(\\sum_{j=1}^{k} b_j \\tau_j(X)\\right) + z_I(X)q_3(X).</span>$</p>
+
+    <p class="text-gray-300">We recall that for  <span class="math">i \\neq j</span> ,  <span class="math">z_I(X)|(\\tau_i(X)\\tau_j(X))</span>  and also  <span class="math">z_I(X)|\\tau_i^2(X) - \\tau_i(X)</span>  for all  <span class="math">i \\in [k]</span>  (Section 3.2). Hence, there exists  <span class="math">q_4(X)</span>  such that  <span class="math">a(X)b(X) = \\sum_i a_i b_i \\tau_i(0)^{-1} \\tau_i(X) + z_I(X)q_4(X)</span>  Finally observe that  <span class="math">\\sum_i a_i b_i \\tau_i(0)^{-1} \\tau_i(X) = \\sum_i a_i b_i + XR(X)</span> . This is because the left hand side evaluated at 0 is  <span class="math">\\sum_i a_i b_i \\tau_i(0)^{-1} \\tau_i(0) = \\sum_i a_i b_i</span> . for some XR(X) of degree strictly smaller than  <span class="math">z_I(X)</span> . Putting this together we have that</p>
+
+    <p class="text-gray-300"><span class="math">$a(X)b(X) = \\sum_{i} a_i b_i + XR(X) + z_I(X)q_4(X)</span>$</p>
+
+    <p class="text-gray-300">and therefore  <span class="math">\\sum_i a_i b_i = \\sigma</span>  if and only if  <span class="math">a(X)b(X) - \\sigma = XR(X) + z_I(X)Q(X)</span>  for some R(X), Q(X) for R(X) of degree k-2.</p>
+
+    </section>
+
+    <section id="sec-6" class="mb-10">
+      <h2 class="text-2xl font-bold">6 Baloo Full Construction</h2>
+
+    <p class="text-gray-300">In Section 6.1, we compile the CCS of Fig. 4 and PHP of Fig. 5 into a non-interactive argument of knowledge cp-expansion, following the compiler in [CFF <span class="math">^+</span> 21], and obtain the protocol in Fig. 6. The result in [CFF <span class="math">^+</span> 21] proves Theorem 6 and thus soundness of our scheme in the AGM, under the q-dlog assumption. In Section 6.2, in Fig. 7 and 8, we fully described Baloo, which is the result of combining the protocol for  <span class="math">R_{cp-expansion}</span>  below and the Caulk+ core protocol in Section 5.1 that proves  <span class="math">R_{subtable}</span> . Importantly, the numbers expressed in Table 1 are explained in the rolled-out protocol in Section 6.2, after we apply some efficiency improvements.</p>
+
+      <h3 id="sec-6.1" class="text-xl font-semibold mt-8">6.1 Compilation of the cp-expansion Subprotocol</h3>
+
+    <p class="text-gray-300">In Fig. 6 we describe a protocol for proving the relation</p>
+
+    <p class="text-gray-300"><span class="math">$\\mathsf{R}_{\\mathsf{cp\\text{-}expansion}} = \\left\\{ \\begin{pmatrix} (\\mathsf{cm}_{\\mathsf{a}}, \\mathsf{cm}_{\\mathsf{t}}, \\mathbb{H}_I, \\mathbb{V}), (A(X), T(X)) \\end{pmatrix} \\middle| \\begin{array}{l} \\mathsf{cm}_{\\mathsf{t}} = \\mathsf{KZG}.\\mathsf{Commit}(\\mathsf{srs}, T(X)) \\\\ \\mathsf{cm}_{\\mathsf{a}} = \\mathsf{KZG}.\\mathsf{Commit}(\\mathsf{srs}, A(X)) \\\\ \\forall \\nu \\in \\mathbb{V}, \\ A(\\nu) \\in \\{T(\\xi_i) : \\xi_i \\in \\mathbb{H}\\} \\end{pmatrix} \\right\\}</span>$</p>
+
+    <p class="text-gray-300">The commit and prove lookup takes as input commitments  <span class="math">\\mathsf{cm}_\\mathsf{t}</span> ,  <span class="math">\\mathsf{cm}_\\mathsf{a}</span>  to vectors  <span class="math">\\vec{t} \\in \\mathbb{F}^k</span> ,  <span class="math">\\vec{a} \\in \\mathbb{F}^m</span>  encoded as polynomials T(X), A(X). It also takes as input  <span class="math">[z_I]_2</span>  a commitment to the vanishing polynomial respect to a set  <span class="math">\\mathbb{H}_I = \\{\\xi_1, \\dots, \\xi_k\\}</span> . The polynomial T(X) is computed using the Lagrange interpolation basis  <span class="math">\\{\\tau_i(X)\\}_{i=1}^k</span>  corresponding to set  <span class="math">\\mathbb{H}_I</span> . The polynomial A(X) is computed using the Lagrange interpolation basis  <span class="math">\\{\\mu_j(X)\\}_{j=1}^m</span>  corresponding to subgroup  <span class="math">\\mathbb{V} = \\{\\nu, \\dots, \\nu^m = 1\\}</span> .</p>
+
+    <p class="text-gray-300">The prover aims to convince the verifier that there exists some mapping col:  <span class="math">[m] \\mapsto [k]</span>  such that  <span class="math">a_j = t_{\\mathsf{col}(j)}</span>  for all  <span class="math">j \\in [m]</span> . The prover and verifier use as subroutine the CSS from Fig. 4 to agree on an encoding D(X) such that for  <span class="math">\\hat{\\tau}_i(X) = (\\tau_i(X))/(\\tau_i(0))</span> ,</p>
+
+    <p class="text-gray-300"><span class="math">$D(X) = \\sum\\nolimits_{j=1}^m \\mu_j(\\alpha) \\hat{\\tau}_{\\mathsf{col}(j)}(X)</span>$</p>
+
+    <p class="text-gray-300">at a random point  <span class="math">\\alpha</span> . Then the prover and verifier engage in the generalised inner product argument from Fig. 5 so show that, if  <span class="math">d_i = D(\\xi_i)\\tau_i(0)</span> , and  <span class="math">T(\\xi_i) = t_i</span> , then  <span class="math">\\sum_{i=1}^k d_i t_i = A(\\alpha)</span> . Since  <span class="math">d_i = \\sum_{j \\in \\mathsf{col}^{-1}(i)} \\mu_j(\\alpha)</span> ,</p>
+
+    <p class="text-gray-300"><span class="math">$A(\\alpha) = \\sum_{i=1}^k d_i t_i = \\sum_{i=1}^k t_i \\sum_{j \\in \\mathsf{col}^{-1}(i)} \\mu_j(\\alpha) = \\sum_{j=1}^m \\mu_j(\\alpha) t_{\\mathsf{col}(j)}</span>$</p>
+
+    <p class="text-gray-300">we thus have that  <span class="math">a_j = A(\\nu_j) = t_{\\mathsf{col}(j)}</span>  with overwhelming probability, as required.</p>
+
+    <p class="text-gray-300">Recall that this protocol is a subroutine of Baloo in Fig. 7 and thus the common inputs to the systems are the KZG commitments to  <span class="math">z_I(X)</span> , C(X) and T(X). The srs of the full scheme is  <span class="math">(\\{[x^s]_{1,2}\\}_{s=1}^N)</span> , where N is the maximum degree among all polynomials and  <span class="math">x \\leftarrow \\mathbb{F}</span> . Prover and Verifier instantiate  <span class="math">\\mathcal{P}_{\\mathsf{IP}}</span>  and  <span class="math">\\mathcal{V}_{\\mathsf{IP}}</span>  for the PHP of Fig. 5. All oracle polynomials sent by  <span class="math">\\mathcal{P}_{\\mathsf{IP}}</span>  are translated into polynomials evaluated (in the source groups) at x. Polynomial equations are checked by the verifier from group elements using pairings. For quadratic checks, the prover must send the commitments to the polynomials in different source groups.</p>
+
+    <p class="text-gray-300">All the openings at any point, as well as the degrees of the opened polynomials, are proven using the KZG polynomial commitment. For degree checks with  <span class="math">\\deg(p) = d &lt; N</span>  and p(X) a polynomial that is never opened, the prover sends a single extra polynomial  <span class="math">\\hat{p}(X) = X^{N-d}p(X)</span> , and the verifier checks one extra pairing equation as explained in Section 3.5.</p>
+
+    <p class="text-gray-300"><strong>Theorem 6.</strong> The protocol in Fig. 6 is a non-interactive argument of knowledge for the relation  <span class="math">R_{cp-expansion}</span>  satisfying knowledge soundness and completeness as in Definition 3.</p>
+
+    <pre><code class="language-text">Common input x = (cm_t = [T(x)]_1, cm_a = [A(x)]_1, [z_I]_2 = [z_I(x)]_2, \\mathbb{H}_I, \\mathbb{V}) and
+srs = \\left\\{ \\{ [x^s]_{1,2} \\}_{s=1}^N \\right\\}
+\\mathsf{Prover}_{\\mathsf{cp-e}}(\\mathsf{srs},\\mathsf{x},A(X),T(X)):
+     &bull; Compute v(X) = \\sum_{i=1}^{m} \\xi_{col(i)}^{-1} \\mu_{i}(X),
+     &bull; Output \\pi_1 = ([v]_2 = [v(x)]_2,).
+Verifier&lt;sub&gt;cp-e&lt;/sub&gt;(srs, x, \\pi_1): Send \\alpha \\in \\mathbb{F}
+Prover&lt;sub&gt;cp-e&lt;/sub&gt;(srs, x, A(X), T(X), \\alpha):
+     &bull; Compute D(X) = M(X, \\alpha) = \\sum_{j=1}^{m} \\mu_j(\\alpha) \\hat{\\tau}_{\\mathsf{col}(j)}(X) and find R(X), Q_2(X) such
+                                    D(X)T(X) - A(\\alpha) = XR(X) + z_I(X)Q_2(X)
+     &bull; Set \\hat{R}(X) = X^{N-m+2}
+     &bull; Output \\pi_2 = ([D]_2 = [D(x)]_2, [R]_1 = [R(x)]_1, [\\hat{R}]_1 = [\\hat{R}(x)]_1, [Q_2]_1 = [Q_2(x)]_1).
+Verifier&lt;sub&gt;cp-e&lt;/sub&gt;(srs, x, \\pi_1, \\pi_2): Send \\beta \\in \\mathbb{F}
+Prover&lt;sub&gt;cp-e&lt;/sub&gt;(srs, x, A(X), T(X), \\alpha, \\beta):
+     &bull; Compute E(X) = M(\\beta, X) = \\sum_{i=1}^{m} \\mu_j(X) \\hat{\\tau}_{\\mathsf{col}(j)}(\\beta) and Q_1(X) such that
+                                E(X)(\\beta v(X) - 1) + z_I(\\beta)z_I(0)^{-1} = z_V(X)Q_1(X)
+     &bull; (u_1, [w_1]_1) \\leftarrow \\mathsf{Open}.\\mathsf{KZG}(\\mathsf{srs}_{\\mathsf{KZG}}, [E]_1, \\deg = m-1, \\alpha)
+     &bull; (u_2, [w_2]_1) \\leftarrow \\mathsf{Open}.\\mathsf{KZG}(\\mathsf{srs}_{\\mathsf{KZG}}, \\mathsf{cm}_{\\mathsf{a}}, \\deg = \\bot, \\alpha)
+     &bull; (u_3, u_4, [w_3]_1) \\leftarrow \\mathsf{Open.KZG}(\\mathsf{srs}_{\\mathsf{KZG}}, [z_I]_2, \\deg = \\bot, (0, \\beta))
+     &bull; (u_5, [w_4]_1) \\leftarrow \\mathsf{Open.KZG}(\\mathsf{srs}_{\\mathsf{KZG}}, [D]_2, \\deg = \\bot, \\beta)
+     &bull; Output \\pi_3 = ([E]_1 = [E(x)]_1, [Q_1]_1 = [Q_1(x)]_1,
+        (u_1, [w_1]_1), (u_2, [w_2]_1), (u_3, u_4, [w_3]_1), (u_5, [w_4]_1)
+Verifier&lt;sub&gt;cp-e&lt;/sub&gt;(srs, x, \\pi_1, \\pi_2, \\pi_3): Accept if and only if
+(i) e(\\mathsf{cm}_\\mathsf{t}, [D]_2) - e(u_2[1]_1, [1]_2) = e([R]_1, [x]_2) + e([Q_2]_1, [z_I]_2) \\# \\mathsf{Cond} (ii) Fig. 5
+(ii)e([E]_1,(\\beta[v]_2-1))+e(u_3^{-1}u_4[1]_1,[1]_2)=e([Q_1]_1,[z_V(x)]_2) \\# \\text{Cond (ii) Fig. 4}
+                    (iii) e([R]_1, [x^{N-m+2}]_2) = e([\\hat{R}]_1, [1]_2) \\# \\text{Cond (i) Fig. 5}
+                                      (iv) u_1 = u_5. # Cond (iii) in Fig. 4
+                     (v) 1 \\leftarrow \\mathsf{KZG.Verify}(\\mathsf{srs}_{\\mathsf{KZG}}, [E]_1, \\deg = m - 1, \\alpha, u_1, [w_1]_1)
+                        (vi) 1 \\leftarrow \\mathsf{KZG.Verify}(\\mathsf{srs}_{\\mathsf{KZG}}, \\mathsf{cm_a}, \\deg = \\bot, \\alpha, u_2, [w_2]_1)
+               (vii)1 \\leftarrow \\mathsf{KZG}.\\mathsf{Verify}(\\mathsf{srs}_{\\mathsf{KZG}}, [z_I]_2, \\deg = \\bot, (0, \\beta), (u_3, u_4), [w_3]_1)
+                       (viii) 1 \\leftarrow \\mathsf{KZG.Verify}(\\mathsf{srs}_{\\mathsf{KZG}}, [D]_2, \\deg = \\bot, \\beta, u_5, [w_4]_1)
+</code></pre>
+
+    <p class="text-gray-300"><strong>Figure 6:</strong> cp-expansion argument for proving A(X) has entries in a (potentially unknown) subtable T(X).</p>
+
+      <h3 id="sec-6.2" class="text-xl font-semibold mt-8">6.2 The Full Baloo Construction</h3>
+
+    <p class="text-gray-300">In this section, we provide our full Baloo construction for proving the relation</p>
+
+    <p class="text-gray-300"><span class="math">$\\mathsf{R}_{\\mathsf{lookup}} = \\left\\{ \\begin{array}{l} ((\\mathsf{cm}_\\mathsf{c}, \\mathsf{cm}_\\mathsf{a}, \\mathbb{H}, \\mathbb{V}), (A(X), C(X)) \\\\ (\\mathsf{cm}_\\mathsf{a} = \\mathsf{KZG}.\\mathsf{Commit}(\\mathsf{srs}, C(X)) \\\\ \\forall \\nu \\in \\mathbb{V}, \\ A(\\nu) \\in \\{C(\\omega^s) : \\omega^s \\in \\mathbb{H}\\} \\end{array} \\right\\}</span>$</p>
+
+    <p class="text-gray-300">where  <span class="math">\\mathbb{V}</span>  is a set of roots of unity that is <em>independent</em> from N, the size of the lookup table  <span class="math">\\vec{c}</span> . For simplicity we omit  <span class="math">\\vec{c}</span>  and  <span class="math">\\mathbb{V}</span>  from the relation description. The prover for the full construction is formally given in Fig. 7 and the verifier is given in Fig. 8. We also apply several efficiency optimizations which are specified in Appendix B.</p>
+
+    <pre><code class="language-text">Common input: \\operatorname{cm}_{\\mathsf{c}} = [C(x)]_1, [z_H(x)]_1 = [\\prod_{i=0}^{N-1} (x - \\omega^s)]_1, \\operatorname{srs} = \\{[x^i]_{1,2}\\}_{i=1}^d
+Take cm_a as input.
+Receive \\pi_1 = ([z_I]_2, [v]_1, [\\mathsf{cm}_\\mathsf{t}]_1) and send \\alpha \\in \\mathbb{F}
+Receive \\pi_2 = ([D]_1, [R]_1, [Q_2]_1) and send \\beta \\in \\mathbb{F}
+Receive \\pi_3 = ([E]_1, [Q_1]_1) and send \\rho, \\gamma \\in \\mathbb{F}
+Receive \\pi_4 = (u_1, u_2, u_3, u_4, u_5, [a]_1, [w_1]_1, [w_2]_1, [w_3]_1, [w_4]_1)
+Compute
+                                [P_1]_1 = u_1[\\mathsf{cm_t}] - u_2[1]_1 - [R]_1 - u_4[Q_2]_1
+ # [P_1]_1 = [T(x)D(\\beta) - A(\\alpha) - R(x) - z_I(\\beta)Q_2(x)]_1
+                              [P_2]_1 = u_5(\\beta[v]_1 - 1) + u_3^{-1}u_4 - z_V(\\rho)[Q_1]_1
+ \\# [P_2]_1 = [E(\\rho)(\\beta v(x) - 1) + z_I(\\beta)z_I(0)^{-1} - z_V(\\rho)Q_1(x)]_1
+Set s = d - m + 1 for d the maximum power of x in srs and accept if and only if
+    1. e((\\mathsf{cm}_{\\mathsf{c}} - \\mathsf{cm}_{\\mathsf{t}}) + \\gamma[z_H(x)]_1, [1]_2) - e([a]_1, [z_I]_2) = 0
+        # Check that C+ elements [a_1]_1 and [a_2]_1 verify
+    2. e(\\alpha[w_1]_1, [1]_2) - e([w_1]_1, [x]_2) + e([E]_1 + \\gamma \\mathsf{cm}_\\mathsf{a} - [u_1 + \\gamma u_2]_1, [x^s]_2) = 0
+# Check that E(\\alpha) = u_1, A(\\alpha) = u_2, \\deg(E(X)) &lt; m
+    3. e(-[u_3]_1 + \\gamma[R]_1, [1]_2) - e([w_2]_1, [x]_2) + e([1 + \\gamma^2 x^{s+1}]_1, [z_I]_2) + e(-\\gamma^2 [x^m]_1 + \\gamma^3 [R]_1, [x^{s+1}]_2) = 0
+        # Check that z_I(0) = u_3, R(0) = 0, \\deg(z_I(X)) = m and \\deg(R(X)) &lt; m
+    4. e(\\beta[w_3]_1 + [D]_1 + \\gamma^2[P_1]_1 - [u_1 + \\gamma u_4]_1, [1]_2) - e([w_3]_1, [x]_2) + e([\\gamma]_1, [z_I]_2) = 0
+        # Check that D(\\beta) = E(\\alpha), z_I(\\beta) = u_4,
+        T(X)D(X) - A(\\alpha) = R(X) + z_I(X)Q_2(X)
+    5. e(\\rho[w_4]_1 + [E]_1 + \\gamma[P_2]_1 - [u_5]_1, [1]_2) - e([w_4]_1, [x]_2) = 0
+        # Check that E(\\rho) = u_5 and E(X)(\\beta v(X) - 1) + z_I(\\beta)z_I(0)^{-1} = z_V(X)Q_1(X)
+These checks can be batched into 1 equation with 5 pairings.
+</code></pre>
+
+    <p class="text-gray-300">Figure 8: Optimized Baloo verifier.</p>
+
+    <p class="text-gray-300">Common input:
+<span class="math">$cm_c = [C(x)]_1, [z_H(x)]_1 = [\\prod_{i=0}^{N-1} (x-\\omega^i)]_1, srs = \\{[x^i]_{1,2}\\}_{i=1}^d</span>$</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Take as input  <span class="math">\\{[Q_i(x)]_1, [H_i(x)]_1\\}_{i=1}^N</span>  and A(X)</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Choose  <span class="math">I \\subset [N]</span>  such that |I| = k and  <span class="math">\\forall \\nu \\in \\mathbb{V}, \\exists \\xi \\in \\mathbb{H}_I</span>  s.t.  <span class="math">A(\\nu) = C(\\xi)</span></li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Compute  <span class="math">T(X) = \\sum_{i=1}^k t_i \\tau_i(X)</span>  for  <span class="math">\\tau_i(X) = \\prod_{s \\in I, s \\neq i} \\frac{X \\xi_s}{\\xi_i \\xi_s}</span> , and  <span class="math">v(X) = \\sum_{j=1}^m \\xi_{col(j)}^{-1} \\mu_j(X)</span></li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Output  <span class="math">\\pi_1 = ([z_I]_2 = [z_I(x)]_2, [v]_1 = [v(x)]_1, \\mathsf{cm_t} = [T(x)]_1).</span></li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Receive  <span class="math">\\alpha \\in \\mathbb{F}</span></li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Compute  <span class="math">D(X) = M(X, \\alpha) = \\sum_{j=1}^m \\mu_j(\\alpha) \\hat{\\tau}_{\\mathsf{col}(j)}(X)</span> , where  <span class="math">\\hat{\\tau}_{\\mathsf{col}(j)}(X) = \\tau_{\\mathsf{col}(j)}(X) \\tau_{\\mathsf{col}(j)}^{-1}(0)</span></li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Find  <span class="math">R(X), Q_2(X)</span>  such that  <span class="math">\\deg(R(X)) &lt; m-1, R(0) = 0</span> , and</li>
+    </ol></li>
+    </ul>
+
+    <p class="text-gray-300"><span class="math">$D(X)T(X) - A(\\alpha) = R(X) + z_I(X)Q_2(X)</span>$</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Output  <span class="math">\\pi_2 = ([D]_1 = [D(x)]_1, [R]_1 = [R(x)]_1, [Q_2]_1 = [Q_2(x)]_1,)</span> .</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Receive  <span class="math">\\beta \\in \\mathbb{F}</span></li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Compute  <span class="math">E(X) = M(\\beta, X) = \\sum_{j=1}^{m} \\mu_j(X) \\hat{\\tau}_{\\mathsf{col}(j)}(\\beta)</span>  and  <span class="math">Q_1(X)</span>  such that</li>
+    </ol></li>
+    </ul>
+
+    <p class="text-gray-300"><span class="math">$E(X)(\\beta v(X) - 1) + z_I(\\beta)z_I(0)^{-1} = z_V(X)Q_1(X)</span>$</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Output  <span class="math">\\pi_3 = ([E]_1 = [E(x)]_1, [Q_1]_1 = [Q_1(x)]_1)</span></li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Receive  <span class="math">\\rho, \\gamma \\in \\mathbb{F}</span></li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Compute  <span class="math">([a_1]_1, [a_2]_1, \\_) \\leftarrow \\mathsf{Prover}_{\\mathsf{C}+}(T(X), \\mathbb{H}_I)</span>  and set  <span class="math">[a]_1 = [a_1]_1 + \\gamma[a_2]_2</span>  # Compress Caulk+ proof.</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Set  <span class="math">u_1 = E(\\alpha), u_2 = A(\\alpha),</span></li>
+    </ol></li>
+    </ul>
+
+    <p class="text-gray-300"><span class="math">$\\hat{w}_1(X) = \\frac{E(X) - u_1}{X - \\alpha} + \\gamma \\frac{A(X) - u_2}{X - \\alpha}</span>$</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Set  <span class="math">u_3 = z_I(0)</span>  and</li>
+    </ol>
+
+    <p class="text-gray-300"><span class="math">$w_2(X) = \\frac{z_I(X) - u_3}{X} + \\gamma \\frac{R(X)}{X} + \\gamma^2 X^{d-m+1} (z_I(X) - X^m) + \\gamma^3 X^{d-m+1} R(X)</span>$</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Set  <span class="math">P_1(X) = T(X)D(\\beta) - A(\\alpha) - R(X) - z_I(\\beta)Q_2(X)</span> ,  <span class="math">u_4 = z_I(\\beta)</span>  and</li>
+    </ol>
+
+    <p class="text-gray-300"><span class="math">$w_3(X) = \\frac{D(X) - u_1}{X - \\beta} + \\gamma \\frac{z_I(X) - u_4}{X - \\beta} + \\gamma^2 \\frac{P_1(X)}{X - \\beta}</span>$</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Set  <span class="math">u_5 = E(\\rho)</span> ,  <span class="math">P_2(X) = E(\\rho)(\\beta v(X) - 1) + z_I(\\beta)z_I(0)^{-1} - z_V(\\rho)Q_1(X)</span> ,</li>
+    </ol>
+
+    <p class="text-gray-300"><span class="math">$w_4(X) = \\frac{E(X) - u_5}{(X - \\rho)} + \\gamma \\frac{P_2(X)}{X - \\rho}</span>$</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Set s = d - m + 1 for d the maximum power of x in srs and output</li>
+    </ol>
+
+    <p class="text-gray-300"><span class="math">$\\pi_3 = (u_1, u_2, u_3, u_4, u_5, [a]_1, [w_1]_1 = [\\hat{w}_1(x)x^s]_1, [w_2]_1 = [w_2(x)]_1, [w_3]_1 = [w_3(x)]_1, [w_4]_1 = [w_4(x)]_1).</span>$</p>
+
+    <p class="text-gray-300">Figure 7: Optimized Baloo prover. Underlined steps are messages from Verifier (Fig. 8).</p>
+
+    <p class="text-gray-300"><strong>Acknowledgments</strong> We thank the anonymous reviewers of <em>Communications in Cryptology</em> for their valuable feedback, which greatly improved the quality of this work.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><p class="text-gray-300">[ac22] arkworks contributors. arkworks zksnark ecosystem, 2022. URL: <a href="https://arkworks.rs" target="_blank" rel="noopener noreferrer">https://arkworks.rs</a>.</p></li>
+      <li><p class="text-gray-300">[AR20] Shashank Agrawal and Srinivasan Raghuraman. KVaC: Key-Value Commitments for blockchains and beyond. In Shiho Moriai and Huaxiong Wang, editors, <em>ASIACRYPT 2020, Part III</em>, volume 12493 of <em>LNCS</em>, pages 839&ndash;869. Springer, Cham, December 2020. <a href="https://doi.org/10.1007/978-3-030-64840-4_28" target="_blank" rel="noopener noreferrer">doi:10.1007/978-3-030-64840-4\\_28</a>.</p></li>
+      <li><p class="text-gray-300">[AST24] Arasu Arun, Srinath T. V. Setty, and Justin Thaler. Jolt: SNARKs for virtual machines via lookups. In Marc Joye and Gregor Leander, editors, <em>EUROCRYPT 2024, Part VI</em>, volume 14656 of <em>LNCS</em>, pages 3&ndash;33. Springer, Cham, May 2024. <a href="https://doi.org/10.1007/978-3-031-58751-1_1" target="_blank" rel="noopener noreferrer">doi:</a> <a href="https://doi.org/10.1007/978-3-031-58751-1_1" target="_blank" rel="noopener noreferrer">10.1007/978-3-031-58751-1\\_1</a>.</p></li>
+      <li><p class="text-gray-300">[BB04] Dan Boneh and Xavier Boyen. Short signatures without random oracles. In Christian Cachin and Jan Camenisch, editors, <em>EU-ROCRYPT 2004</em>, volume 3027 of <em>LNCS</em>, pages 56&ndash;73. Springer, Berlin, Heidelberg, May 2004. <a href="https://doi.org/10.1007/978-3-540-24676-3_4" target="_blank" rel="noopener noreferrer">doi:10.1007/978-3-540-24676</a> <a href="https://doi.org/10.1007/978-3-540-24676-3_4" target="_blank" rel="noopener noreferrer">-3\\_4</a>.</p></li>
+      <li><p class="text-gray-300">[BBCCL21] Olivier B&eacute;gassat, Alexandre Belling, Th&eacute;odore Chapuis-Chkaiban, and Nicolas Liochon1. A specification for a zk-evm, 2021. <a href="https://ethresear.ch/t/a-zk-evm-specification/11549" target="_blank" rel="noopener noreferrer">https://ethresear.ch/t/a-zk-evm-specification/1</a> <a href="https://ethresear.ch/t/a-zk-evm-specification/11549" target="_blank" rel="noopener noreferrer">1549</a>.</p></li>
+      <li><p class="text-gray-300">[BCC<sup>+</sup>15] Jonathan Bootle, Andrea Cerulli, Pyrros Chaidos, Essam Ghadafi, Jens Groth, and Christophe Petit. Short accountable ring signatures based on DDH. In G&uuml;nther Pernul, Peter Y. A. Ryan, and Edgar R. Weippl, editors, <em>ESORICS 2015, Part I</em>, volume 9326 of <em>LNCS</em>, pages 243&ndash;265. Springer, Cham, September 2015. <a href="https://doi.org/10.1007/978-3-319-24174-6_13" target="_blank" rel="noopener noreferrer">doi:10.1007/978-3-319-24174-6\\_13</a>.</p></li>
+      <li><p class="text-gray-300">[BCF<sup>+</sup>21] Daniel Benarroch, Matteo Campanelli, Dario Fiore, Kobi Gurkan, and Dimitris Kolonelos. Zero-knowledge proofs for set membership: Efficient, succinct, modular. In Nikita Borisov and Claudia D&iacute;az, editors, <em>FC 2021, Part I</em>, volume 12674 of <em>LNCS</em>, pages 393&ndash;414. Springer, Berlin, Heidelberg, March 2021. <a href="https://doi.org/10.1007/978-3-662-64322-8_19" target="_blank" rel="noopener noreferrer">doi:10.1007/978-3-662-64322-8\\_19</a>.</p></li>
+      <li><p class="text-gray-300">[BCG<sup>+</sup>13] Eli Ben-Sasson, Alessandro Chiesa, Daniel Genkin, Eran Tromer, and Madars Virza. SNARKs for C: Verifying program executions</p></li>
+      <li><p class="text-gray-300">succinctly and in zero knowledge. In Ran Canetti and Juan A. Garay, editors, <em>CRYPTO 2013, Part II</em>, volume 8043 of <em>LNCS</em>, pages 90&ndash;108. Springer, Berlin, Heidelberg, August 2013. <a href="https://doi.org/10.1007/978-3-642-40084-1_6" target="_blank" rel="noopener noreferrer">doi:</a> <a href="https://doi.org/10.1007/978-3-642-40084-1_6" target="_blank" rel="noopener noreferrer">10.1007/978-3-642-40084-1\\_6</a>.</p></li>
+      <li><p class="text-gray-300">[BCG<sup>+</sup>18] Jonathan Bootle, Andrea Cerulli, Jens Groth, Sune K. Jakobsen, and Mary Maller. Arya: Nearly linear-time zero-knowledge proofs for correct program execution. In Thomas Peyrin and Steven Galbraith, editors, <em>ASIACRYPT 2018, Part I</em>, volume 11272 of <em>LNCS</em>, pages 595&ndash;626. Springer, Cham, December 2018. <a href="https://doi.org/10.1007/978-3-030-03326-2_20" target="_blank" rel="noopener noreferrer">doi:10.1007/978-3-030-03326-2\\_20</a>.</p></li>
+      <li><p class="text-gray-300">[BCR<sup>+</sup>19] Eli Ben-Sasson, Alessandro Chiesa, Michael Riabzev, Nicholas Spooner, Madars Virza, and Nicholas P. Ward. Aurora: Transparent succinct arguments for R1CS. In Yuval Ishai and Vincent Rijmen, editors, <em>EUROCRYPT 2019, Part I</em>, volume 11476 of <em>LNCS</em>, pages 103&ndash;128. Springer, Cham, May 2019. <a href="https://doi.org/10.1007/978-3-030-17653-2_4" target="_blank" rel="noopener noreferrer">doi:10.1007/978-3-030-17653-2\\_4</a>.</p></li>
+      <li><p class="text-gray-300">[BG13] Stephanie Bayer and Jens Groth. Zero-knowledge argument for polynomial evaluation with application to blacklists. In Thomas Johansson and Phong Q. Nguyen, editors, <em>EUROCRYPT 2013</em>, volume 7881 of <em>LNCS</em>, pages 646&ndash;663. Springer, Berlin, Heidelberg, May 2013. <a href="https://doi.org/10.1007/978-3-642-38348-9_38" target="_blank" rel="noopener noreferrer">doi:10.1007/978-3-642-38348-9\\_38</a>.</p></li>
+      <li><p class="text-gray-300">[BGH19] Sean Bowe, Jack Grigg, and Daira Hopwood. Halo: Recursive proof composition without a trusted setup. Cryptology ePrint Archive, Report 2019/1021, 2019. URL: <a href="https://eprint.iacr.org/2019/1021" target="_blank" rel="noopener noreferrer">https://eprint.iacr.</a> <a href="https://eprint.iacr.org/2019/1021" target="_blank" rel="noopener noreferrer">org/2019/1021</a>.</p></li>
+      <li><p class="text-gray-300">[CDGM19] Melissa Chase, Apoorvaa Deshpande, Esha Ghosh, and Harjasleen Malvai. SEEMless: Secure end-to-end encrypted messaging with less trust. In Lorenzo Cavallaro, Johannes Kinder, XiaoFeng Wang, and Jonathan Katz, editors, <em>ACM CCS 2019</em>, pages 1639&ndash;1656. ACM Press, November 2019. <a href="https://doi.org/10.1145/3319535.3363202" target="_blank" rel="noopener noreferrer">doi:10.1145/</a> <a href="https://doi.org/10.1145/3319535.3363202" target="_blank" rel="noopener noreferrer">3319535.3363202</a>.</p></li>
+      <li><p class="text-gray-300">[CEO22] Matteo Campanelli, Felix Engelmann, and Claudio Orlandi. Zero-knowledge for homomorphic key-value commitments with applications to privacy-preserving ledgers. In Clemente Galdi and Stanislaw Jarecki, editors, <em>SCN 22</em>, volume 13409 of <em>LNCS</em>, pages 761&ndash;784. Springer, Cham, September 2022. <a href="https://doi.org/10.1007/978-3-031-14791-3_33" target="_blank" rel="noopener noreferrer">doi:10.100</a> <a href="https://doi.org/10.1007/978-3-031-14791-3_33" target="_blank" rel="noopener noreferrer">7/978-3-031-14791-3\\_33</a>.</p></li>
+      <li><p class="text-gray-300">[CFF<sup>+</sup>21] Matteo Campanelli, Antonio Faonio, Dario Fiore, Ana&iuml;s Querol, and Hadri&aacute;n Rodr&iacute;guez. Lunar: A toolbox for more efficient universal and updatable zkSNARKs and commit-and-prove extensions. In Mehdi Tibouchi and Huaxiong Wang, editors, <em>ASI-ACRYPT 2021, Part III</em>, volume 13092 of <em>LNCS</em>, pages 3&ndash;33.</p></li>
+      <li><p class="text-gray-300">Springer, Cham, December 2021. <a href="https://doi.org/10.1007/978-3-030-92078-4_1" target="_blank" rel="noopener noreferrer">doi:10.1007/978-3-030-9</a> <a href="https://doi.org/10.1007/978-3-030-92078-4_1" target="_blank" rel="noopener noreferrer">2078-4\\_1</a>.</p></li>
+      <li><p class="text-gray-300">[CFF<sup>+</sup>24] Matteo Campanelli, Antonio Faonio, Dario Fiore, Tianyu Li, and Helger Lipmaa. Lookup arguments: Improvements, extensions and applications to zero-knowledge decision trees. In Qiang Tang and Vanessa Teague, editors, <em>PKC 2024, Part II</em>, volume 14602 of <em>LNCS</em>, pages 337&ndash;369. Springer, Cham, April 2024. <a href="https://doi.org/10.1007/978-3-031-57722-2_11" target="_blank" rel="noopener noreferrer">doi:10.1007/978-3-031-57722-2\\_11</a>.</p></li>
+      <li><p class="text-gray-300">[CFG<sup>+</sup>20] Matteo Campanelli, Dario Fiore, Nicola Greco, Dimitris Kolonelos, and Luca Nizzardo. Incrementally aggregatable vector commitments and applications to verifiable decentralized storage. In Shiho Moriai and Huaxiong Wang, editors, <em>ASIACRYPT 2020, Part II</em>, volume 12492 of <em>LNCS</em>, pages 3&ndash;35. Springer, Cham, December 2020. <a href="https://doi.org/10.1007/978-3-030-64834-3_1" target="_blank" rel="noopener noreferrer">doi:10.1007/978-3-030-64834-3\\_1</a>.</p></li>
+      <li><p class="text-gray-300">[CFH<sup>+</sup>22] Matteo Campanelli, Dario Fiore, Semin Han, Jihye Kim, Dimitris Kolonelos, and Hyunok Oh. Succinct zero-knowledge batch proofs for set accumulators. In Heng Yin, Angelos Stavrou, Cas Cremers, and Elaine Shi, editors, <em>ACM CCS 2022</em>, pages 455&ndash;469. ACM Press, November 2022. <a href="https://doi.org/10.1145/3548606.3560677" target="_blank" rel="noopener noreferrer">doi:10.1145/3548606.3560677</a>.</p></li>
+      <li><p class="text-gray-300">[CFQ19] Matteo Campanelli, Dario Fiore, and Ana&iuml;s Querol. LegoSNARK: Modular design and composition of succinct zero-knowledge proofs. In Lorenzo Cavallaro, Johannes Kinder, XiaoFeng Wang, and Jonathan Katz, editors, <em>ACM CCS 2019</em>, pages 2075&ndash;2092. ACM Press, November 2019. <a href="https://doi.org/10.1145/3319535.3339820" target="_blank" rel="noopener noreferrer">doi:10.1145/3319535.3339820</a>.</p></li>
+      <li><p class="text-gray-300">[CHM<sup>+</sup>20] Alessandro Chiesa, Yuncong Hu, Mary Maller, Pratyush Mishra, Psi Vesely, and Nicholas P. Ward. Marlin: Preprocessing zk-SNARKs with universal and updatable SRS. In Anne Canteaut and Yuval Ishai, editors, <em>EUROCRYPT 2020, Part I</em>, volume 12105 of <em>LNCS</em>, pages 738&ndash;768. Springer, Cham, May 2020. <a href="https://doi.org/10.1007/978-3-030-45721-1_26" target="_blank" rel="noopener noreferrer">doi:10.1007/978-3-030-45721-1\\_26</a>.</p></li>
+      <li><p class="text-gray-300">[DP25] Benjamin E. Diamond and Jim Posen. Succinct arguments over towers of binary fields. LNCS, pages 93&ndash;122. Springer, Cham, June 2025. <a href="https://doi.org/10.1007/978-3-031-91134-7_4" target="_blank" rel="noopener noreferrer">doi:10.1007/978-3-031-91134-7\\_4</a>.</p></li>
+      <li><p class="text-gray-300">[EFG22] Liam Eagen, Dario Fiore, and Ariel Gabizon. cq: Cached quotients for fast lookups. Cryptology ePrint Archive, Report 2022/1763, 2022. URL: <a href="https://eprint.iacr.org/2022/1763" target="_blank" rel="noopener noreferrer">https://eprint.iacr.org/2022/1763</a>.</p></li>
+      <li><p class="text-gray-300">[Eth22] Zkevm introduction, 2022. <a href="https://github.com/privacy-scaling-explorations/zkevm-specs/blob/master/specs/introduction.md" target="_blank" rel="noopener noreferrer">https://github.com/privacy-sca</a> <a href="https://github.com/privacy-scaling-explorations/zkevm-specs/blob/master/specs/introduction.md" target="_blank" rel="noopener noreferrer">ling-explorations/zkevm-specs/blob/master/specs/int</a> <a href="https://github.com/privacy-scaling-explorations/zkevm-specs/blob/master/specs/introduction.md" target="_blank" rel="noopener noreferrer">roduction.md</a>.</p></li>
+      <li><p class="text-gray-300">[FK23] Dankrad Feist and Dmitry Khovratovich. Fast amortized kzg proofs, 2023. URL: <a href="https://eprint.iacr.org/2023/033" target="_blank" rel="noopener noreferrer">https://eprint.iacr.org/2023/033</a>.</p></li>
+      <li><p class="text-gray-300">[FKL18] Georg Fuchsbauer, Eike Kiltz, and Julian Loss. The algebraic group model and its applications. In Hovav Shacham and Alexandra Boldyreva, editors, <em>CRYPTO 2018, Part II</em>, volume 10992 of <em>LNCS</em>, pages 33&ndash;62. Springer, Cham, August 2018. <a href="https://doi.org/10.1007/978-3-319-96881-0_2" target="_blank" rel="noopener noreferrer">doi:10.1007/978-3-319-96881-0\\_2</a>.</p></li>
+      <li><p class="text-gray-300">[GG17] Essam Ghadafi and Jens Groth. Towards a classification of non-interactive computational assumptions in cyclic groups. In Tsuyoshi Takagi and Thomas Peyrin, editors, <em>ASIACRYPT 2017, Part II</em>, volume 10625 of <em>LNCS</em>, pages 66&ndash;96. Springer, Cham, December 2017. <a href="https://doi.org/10.1007/978-3-319-70697-9_3" target="_blank" rel="noopener noreferrer">doi:10.1007/978-3-319-70697-9\\_3</a>.</p></li>
+      <li><p class="text-gray-300">[GK15] Jens Groth and Markulf Kohlweiss. One-out-of-many proofs: Or how to leak a secret and spend a coin. In Elisabeth Oswald and Marc Fischlin, editors, <em>EUROCRYPT 2015, Part II</em>, volume 9057 of <em>LNCS</em>, pages 253&ndash;280. Springer, Berlin, Heidelberg, April 2015. <a href="https://doi.org/10.1007/978-3-662-46803-6_9" target="_blank" rel="noopener noreferrer">doi:10.1007/978-3-662-46803-6\\_9</a>.</p></li>
+      <li><p class="text-gray-300">[GK22] Ariel Gabizon and Dmitry Khovratovich. flookup: Fractional decomposition-based lookups in quasi-linear time independent of table size. Cryptology ePrint Archive, Report 2022/1447, 2022. URL: <a href="https://eprint.iacr.org/2022/1447" target="_blank" rel="noopener noreferrer">https://eprint.iacr.org/2022/1447</a>.</p></li>
+      <li><p class="text-gray-300">[GKL<sup>+</sup>22] Lorenzo Grassi, Dmitry Khovratovich, Reinhard L&uuml;ftenegger, Christian Rechberger, Markus Schofnegger, and Roman Walch. Reinforced concrete: A fast hash function for verifiable computation. In Heng Yin, Angelos Stavrou, Cas Cremers, and Elaine Shi, editors, <em>ACM CCS 2022</em>, pages 1323&ndash;1335. ACM Press, November 2022. <a href="https://doi.org/10.1145/3548606.3560686" target="_blank" rel="noopener noreferrer">doi:10.1145/3548606.3560686</a>.</p></li>
+      <li><p class="text-gray-300">[GM24] Albert Garreta and Ignacio Manzur. FLI: Folding lookup instances. In Kai-Min Chung and Yu Sasaki, editors, <em>ASI-ACRYPT 2024, Part V</em>, volume 15488 of <em>LNCS</em>, pages 402&ndash;435. Springer, Singapore, December 2024. <a href="https://doi.org/10.1007/978-981-96-0935-2_13" target="_blank" rel="noopener noreferrer">doi:10.1007/978-981-9</a> <a href="https://doi.org/10.1007/978-981-96-0935-2_13" target="_blank" rel="noopener noreferrer">6-0935-2\\_13</a>.</p></li>
+      <li><p class="text-gray-300">[GW20] Ariel Gabizon and Zachary J. Williamson. plookup: A simplified polynomial protocol for lookup tables. Cryptology ePrint Archive, Report 2020/315, 2020. URL: <a href="https://eprint.iacr.org/2020/315" target="_blank" rel="noopener noreferrer">https://eprint.iacr.org/20</a> <a href="https://eprint.iacr.org/2020/315" target="_blank" rel="noopener noreferrer">20/315</a>.</p></li>
+      <li><p class="text-gray-300">[GWC19] Ariel Gabizon, Zachary J. Williamson, and Oana Ciobotaru. PLONK: Permutations over Lagrange-bases for oecumenical noninteractive arguments of knowledge. Cryptology ePrint Archive, Report 2019/953, 2019. URL: <a href="https://eprint.iacr.org/2019/953" target="_blank" rel="noopener noreferrer">https://eprint.iacr.org/20</a> <a href="https://eprint.iacr.org/2019/953" target="_blank" rel="noopener noreferrer">19/953</a>.</p></li>
+      <li><p class="text-gray-300">[Hab22] Ulrich Hab&ouml;ck. Multivariate lookups based on logarithmic derivatives. Cryptology ePrint Archive, Report 2022/1530, 2022. URL: <a href="https://eprint.iacr.org/2022/1530" target="_blank" rel="noopener noreferrer">https://eprint.iacr.org/2022/1530</a>.</p></li>
+    </ul>
+
+    <p class="text-gray-300">[HHK<sup>+</sup>21] Yuncong Hu, Kian Hooshmand, Harika Kalidhindi, Seung Jin Yang, and Raluca Ada Popa. Merkle<sup>2</sup> : A low-latency transparency log system. In <em>2021 IEEE Symposium on Security and Privacy</em>, pages 285&ndash;303. IEEE Computer Society Press, May 2021. <a href="https://doi.org/10.1109/SP40001.2021.00088" target="_blank" rel="noopener noreferrer">doi:10.1109/SP40001.2021.00088</a>.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><p class="text-gray-300">[KST22] Abhiram Kothapalli, Srinath Setty, and Ioanna Tzialla. Nova: Recursive zero-knowledge arguments from folding schemes. In Yevgeniy Dodis and Thomas Shrimpton, editors, <em>CRYPTO 2022, Part IV</em>, volume 13510 of <em>LNCS</em>, pages 359&ndash;388. Springer, Cham, August 2022. <a href="https://doi.org/10.1007/978-3-031-15985-5_13" target="_blank" rel="noopener noreferrer">doi:10.1007/978-3-031-15985-5\\_13</a>.</p></li>
+      <li><p class="text-gray-300">[KZG10] Aniket Kate, Gregory M. Zaverucha, and Ian Goldberg. Constantsize commitments to polynomials and their applications. In Masayuki Abe, editor, <em>ASIACRYPT 2010</em>, volume 6477 of <em>LNCS</em>, pages 177&ndash;194. Springer, Berlin, Heidelberg, December 2010. <a href="https://doi.org/10.1007/978-3-642-17373-8_11" target="_blank" rel="noopener noreferrer">doi:10.1007/978-3-642-17373-8\\_11</a>.</p></li>
+      <li><p class="text-gray-300">[MKL<sup>+</sup>20] Sarah Meiklejohn, Pavel Kalinnikov, Cindy S. Lin, Martin Hutchinson, Gary Belvin, Mariana Raykova, and Al Cutter. Think global, act local: Gossip and client audits in verifiable data structures. <em>CoRR</em>, abs/2011.04551, 2020. URL: <a href="https://arxiv.org/abs/2011.04551" target="_blank" rel="noopener noreferrer">https://arxiv.org/abs/2011.04551</a>.</p></li>
+      <li><p class="text-gray-300">[PH23] Shahar Papini and Ulrich Hab&ouml;ck. Improving logarithmic derivative lookups using GKR. Cryptology ePrint Archive, Report 2023/1284, 2023. URL: <a href="https://eprint.iacr.org/2023/1284" target="_blank" rel="noopener noreferrer">https://eprint.iacr.org/2023/1284</a>.</p></li>
+      <li><p class="text-gray-300">[PK22] Jim Posen and Assimakis A. Kattis. Caulk+: Table-independent lookup arguments. Cryptology ePrint Archive, Report 2022/957, 2022. URL: <a href="https://eprint.iacr.org/2022/957" target="_blank" rel="noopener noreferrer">https://eprint.iacr.org/2022/957</a>.</p></li>
+      <li><p class="text-gray-300">[Pol22] Polygon zkevm documentation, 2022. <a href="https://docs.hermez.io/zkEVM/Overview/Overview/" target="_blank" rel="noopener noreferrer">https://docs.hermez.</a> <a href="https://docs.hermez.io/zkEVM/Overview/Overview/" target="_blank" rel="noopener noreferrer">io/zkEVM/Overview/Overview/</a>.</p></li>
+      <li><p class="text-gray-300">[PZ22] Team Polygon Zero. Plonky2: Fast recursive arguments with plonk and frio, 2022. URL: <a href="https://github.com/mir-protocol/plonky2/blob/main/plonky2/plonky2.pdf" target="_blank" rel="noopener noreferrer">https://github.com/mir-proto</a> <a href="https://github.com/mir-protocol/plonky2/blob/main/plonky2/plonky2.pdf" target="_blank" rel="noopener noreferrer">col/plonky2/blob/main/plonky2/plonky2.pdf</a>.</p></li>
+      <li><p class="text-gray-300">[RZ21] Carla R&agrave;fols and Arantxa Zapico. An algebraic framework for universal and updatable SNARKs. In Tal Malkin and Chris Peikert, editors, <em>CRYPTO 2021, Part I</em>, volume 12825 of <em>LNCS</em>, pages 774&ndash;804, Virtual Event, August 2021. Springer, Cham. <a href="https://doi.org/10.1007/978-3-030-84242-0_27" target="_blank" rel="noopener noreferrer">doi:10.1007/978-3-030-84242-0\\_27</a>.</p></li>
+      <li><p class="text-gray-300">[Sal23] Robin Salen. Two additional instantiations from the tip5 hash function construction, 2023. URL: <a href="https://toposware.com/paper_tip5.pdf" target="_blank" rel="noopener noreferrer">https://toposware.com/pa</a> <a href="https://toposware.com/paper_tip5.pdf" target="_blank" rel="noopener noreferrer">per\\_tip5.pdf</a>.</p></li>
+      <li><p class="text-gray-300">[Set20] Srinath Setty. Spartan: Efficient and general-purpose zk-SNARKs without trusted setup. In Daniele Micciancio and Thomas Ristenpart, editors, <em>CRYPTO 2020, Part III</em>, volume 12172 of <em>LNCS</em>, pages 704&ndash;737. Springer, Cham, August 2020. <a href="https://doi.org/10.1007/978-3-030-56877-1_25" target="_blank" rel="noopener noreferrer">doi:10.1007/978-3-030-56877-1\\_25</a>.</p></li>
+      <li><p class="text-gray-300">[SLST23] Alan Szepieniec, Alexander Lemmens, Jan Ferdinand Sauer, and Bobbin Threadbare. The Tip5 hash function for recursive STARKs. Cryptology ePrint Archive, Report 2023/107, 2023. URL: <a href="https://eprint.iacr.org/2023/107" target="_blank" rel="noopener noreferrer">https://eprint.iacr.org/2023/107</a>.</p></li>
+      <li><p class="text-gray-300">[Sta22] Starknet, 2022. <a href="https://starkware.co/starknet/" target="_blank" rel="noopener noreferrer">https://starkware.co/starknet/</a>.</p></li>
+      <li><p class="text-gray-300">[STW24] Srinath T. V. Setty, Justin Thaler, and Riad S. Wahby. Unlocking the lookup singularity with Lasso. In Marc Joye and Gregor Leander, editors, <em>EUROCRYPT 2024, Part VI</em>, volume 14656 of <em>LNCS</em>, pages 180&ndash;209. Springer, Cham, May 2024. <a href="https://doi.org/10.1007/978-3-031-58751-1_7" target="_blank" rel="noopener noreferrer">doi:</a> <a href="https://doi.org/10.1007/978-3-031-58751-1_7" target="_blank" rel="noopener noreferrer">10.1007/978-3-031-58751-1\\_7</a>.</p></li>
+      <li><p class="text-gray-300">[TAB<sup>+</sup>20] Alin Tomescu, Ittai Abraham, Vitalik Buterin, Justin Drake, Dankrad Feist, and Dmitry Khovratovich. Aggregatable subvector commitments for stateless cryptocurrencies. In Clemente Galdi and Vladimir Kolesnikov, editors, <em>SCN 20</em>, volume 12238 of <em>LNCS</em>, pages 45&ndash;64. Springer, Cham, September 2020. <a href="https://doi.org/10.1007/978-3-030-57990-6_3" target="_blank" rel="noopener noreferrer">doi:</a> <a href="https://doi.org/10.1007/978-3-030-57990-6_3" target="_blank" rel="noopener noreferrer">10.1007/978-3-030-57990-6\\_3</a>.</p></li>
+      <li><p class="text-gray-300">[TBP<sup>+</sup>19] Alin Tomescu, Vivek Bhupatiraju, Dimitrios Papadopoulos, Charalampos Papamanthou, Nikos Triandopoulos, and Srinivas Devadas. Transparency logs via append-only authenticated dictionaries. In Lorenzo Cavallaro, Johannes Kinder, XiaoFeng Wang, and Jonathan Katz, editors, <em>ACM CCS 2019</em>, pages 1299&ndash; 1316. ACM Press, November 2019. <a href="https://doi.org/10.1145/3319535.3345652" target="_blank" rel="noopener noreferrer">doi:10.1145/3319535.33</a> <a href="https://doi.org/10.1145/3319535.3345652" target="_blank" rel="noopener noreferrer">45652</a>.</p></li>
+      <li><p class="text-gray-300">[TFBT21] Nirvan Tyagi, Ben Fisch, Joseph Bonneau, and Stefano Tessaro. Client-auditable verifiable registries. Cryptology ePrint Archive, Report 2021/627, 2021. URL: <a href="https://eprint.iacr.org/2021/627" target="_blank" rel="noopener noreferrer">https://eprint.iacr.org/20</a> <a href="https://eprint.iacr.org/2021/627" target="_blank" rel="noopener noreferrer">21/627</a>.</p></li>
+      <li><p class="text-gray-300">[vzGG13] Joachim von zur Gathen and J&uuml;rgen Gerhard. <em>Modern Computer Algebra (3. ed.)</em>. Cambridge University Press, 2013. <a href="https://doi.org/https://doi.org/10.1017/CBO9781139856065" target="_blank" rel="noopener noreferrer">doi:https:</a> <a href="https://doi.org/https://doi.org/10.1017/CBO9781139856065" target="_blank" rel="noopener noreferrer">//doi.org/10.1017/CBO9781139856065</a>.</p></li>
+      <li><p class="text-gray-300">[ZBK<sup>+</sup>22] Arantxa Zapico, Vitalik Buterin, Dmitry Khovratovich, Mary Maller, Anca Nitulescu, and Mark Simkin. Caulk: Lookup arguments in sublinear time. In Heng Yin, Angelos Stavrou, Cas Cremers, and Elaine Shi, editors, <em>ACM CCS 2022</em>, pages 3121&ndash;3134. ACM Press, November 2022. <a href="https://doi.org/10.1145/3548606.3560646" target="_blank" rel="noopener noreferrer">doi:10.1145/354860</a> <a href="https://doi.org/10.1145/3548606.3560646" target="_blank" rel="noopener noreferrer">6.3560646</a>.</p></li>
+    </ul>
+
+    <p class="text-gray-300">[Zha22] Ye Zhang. Introducing zkevm, 2022. https://scroll.io/blog/zkEVM.</p>
+
+    <p class="text-gray-300">[zks22] zkevm faq, 2022. https://docs.zksync.io/zkevm/.</p>
+
+    </section>
+
+    <section id="app-a" class="mb-10">
+      <h2 class="text-2xl font-bold">A Proof of Theorem 2</h2>
+
+    <p class="text-gray-300"><em>Proof.</em> Let  <span class="math">\\mathcal{A}</span>  be an algebraic adversary attempting to break knowledge soundness. We design an extractor  <span class="math">\\mathcal{E}</span>  that behaves as follows. When the adversary  <span class="math">(C(X), \\mathsf{cm_t}, [z_I]_2, \\pi) \\leftarrow \\mathcal{A}(\\mathsf{srs})</span>  outputs a proof  <span class="math">\\pi = (W_1, W_2, W_3)</span> , then it also outputs the representations  <span class="math">w_1(X), w_3(X)</span>  of maximum degree N such that</p>
+
+    <p class="text-gray-300"><span class="math">$W_1 = [w_1(x)]_1, W_3 = [w_3(x)]_1</span>$</p>
+
+    <p class="text-gray-300">The extractor  <span class="math">\\mathcal{E}</span>  computes</p>
+
+    <p class="text-gray-300"><span class="math">$z_I(X) = w_3(X)X^{-(N-k+1)} + X^k, T(X) = C(X) - w_1(X)z_I(X)</span>$</p>
+
+    <p class="text-gray-300">and returns  <span class="math">\\mathbb{H}_I</span> , T(X) where  <span class="math">\\mathbb{H}_I</span>  consists of the roots of  <span class="math">z_I(X)</span> .</p>
+
+    <p class="text-gray-300">We show that either  <span class="math">\\mathcal{E}</span>  succeeds with overwhelming probability or we can construct a reductions  <span class="math">\\mathcal{B}_1</span>  and  <span class="math">\\mathcal{B}_2</span>  such that</p>
+
+    <p class="text-gray-300"><span class="math">$\\mathcal{A}_{\\mathcal{A},\\mathcal{E}}^{0}(\\lambda) \\leq \\mathcal{A}_{\\mathcal{B}_{1}}^{\\mathsf{q-sfrac}}(\\lambda) + \\mathcal{A}_{\\mathcal{B}_{2}}^{\\mathsf{q-dlog}}(\\lambda)</span>$</p>
+
+    <p class="text-gray-300"><span class="math">\\underline{\\mathsf{Game}^0} \\mapsto \\underline{\\mathsf{Game}^1}</span> : Let  <span class="math">\\mathsf{Game}^0</span>  be the original knowledge soundness game. We first transition to a game  <span class="math">\\mathsf{Game}^1</span>  that behaves identically to  <span class="math">\\mathsf{Game}^0</span>  except that, when  <span class="math">\\mathcal{A}</span>  outputs the representation  <span class="math">w_3(X)</span> , if  <span class="math">z_I(X) = w_3(X)X^{-(N-k+1)} + X^k</span>  is not a degree k polynomial (with positive degree monomials only) then  <span class="math">\\mathsf{Game}^1</span>  aborts.</p>
+
+    <p class="text-gray-300">We show the existence of a reduction  <span class="math">\\mathcal{B}_1</span>  such that</p>
+
+    <p class="text-gray-300"><span class="math">$\\mathcal{A}^0_{\\mathcal{A},\\mathcal{E}}(\\lambda) \\leq \\mathcal{A}^1_{\\mathcal{A},\\mathcal{E}}(\\lambda) + \\mathcal{A}^{\\mathsf{q-sfrac}}_{\\mathcal{B}_1}(\\lambda)</span>$</p>
+
+    <p class="text-gray-300">The reduction  <span class="math">\\mathcal{B}_1</span>  gets as input srs and forwards this reference string to run  <span class="math">(C(X), \\mathsf{cm_t}, [z_I]_2, \\pi) \\leftarrow \\mathcal{A}(\\mathsf{srs})</span> . When  <span class="math">\\mathcal{A}</span>  outputs a proof  <span class="math">\\pi = (W_1, W_2, W_3)</span> , then it also outputs the representation  <span class="math">w_3(X)</span>  of maximum degree N such that</p>
+
+    <p class="text-gray-300"><span class="math">$z_I = [w_3(x)x^{-N+k-1} + x^k]_2</span>$</p>
+
+    <p class="text-gray-300">Write  <span class="math">w_3(X) = \\sum_{s=0}^{N} a_s X^s</span>  Then  <span class="math">\\mathcal{B}_1</span>  returns</p>
+
+    <p class="text-gray-300"><span class="math">$\\sum_{s=0}^{N-k} a_s X^s, X^{N-k+1}, [z_I]_2 - [x^k]_2 - [\\sum_{s=N-k+1}^{N} a_s x^s]_2</span>$</p>
+
+    <p class="text-gray-300">If  <span class="math">a_s \\neq 0</span>  for  <span class="math">0 \\leq s \\leq N-k</span> , then the degree of  <span class="math">\\sum_{s=0}^{N-k} a_s X^s</span>  is less than N-k+1 and hence  <span class="math">\\mathcal{B}_1</span>  breaks the <strong>q-sfrac</strong> assumption.</p>
+
+    <p class="text-gray-300">If  <span class="math">a_s = 0</span>  for all  <span class="math">0 \\le s \\le N - k</span>  then</p>
+
+    <p class="text-gray-300"><span class="math">$z_I(X) = w_3(X)X^{-(N-k+1)} + X^k = \\sum_{s=0}^{k-1} a_{N-k+1+s}X^s + X^k</span>$</p>
+
+    <p class="text-gray-300">which is a degree k polynomial.</p>
+
+    <p class="text-gray-300"><span class="math">\\underline{\\mathsf{Game}^1 \\mapsto \\mathsf{Game}^2}</span>  We second transition to a game  <span class="math">\\mathsf{Game}^2</span>  that behaves identically to  <span class="math">\\mathsf{Game}^1</span>  except that, when  <span class="math">\\mathcal{A}</span>  outputs the representation  <span class="math">w_3(X)</span> , if  <span class="math">z_I(X) = w_3(X)X^{-(N-k+1)} + X^k</span>  does not divide  <span class="math">z_H(X)</span> , then  <span class="math">\\mathsf{Game}^2</span>  aborts. We show the existence of a reduction  <span class="math">\\mathcal{B}_2</span>  such that</p>
+
+    <p class="text-gray-300"><span class="math">$\\mathcal{A}^1_{\\mathcal{A},\\mathcal{E}}(\\lambda) \\leq \\mathcal{A}^2_{\\mathcal{A},\\mathcal{E}}(\\lambda) + \\mathcal{A}^{\\mathsf{q-dlog}}_{\\mathcal{B}_1}(\\lambda)</span>$</p>
+
+    <p class="text-gray-300">See that if  <span class="math">\\mathsf{Game}^2</span>  does not abort, then  <span class="math">z_I = [f(X)]</span>  for some f(X) of degree k that divides  <span class="math">z_H(X)</span> . This means that  <span class="math">z_I(X) = \\prod_{i=1}^k (X - \\xi_i)</span>  for  <span class="math">\\mathbb{H}_I</span>  some subset of  <span class="math">\\mathbb{H}</span>  of size k.</p>
+
+    <p class="text-gray-300">The reduction  <span class="math">\\mathcal{B}_2</span>  gets as input srs and forwards this reference string to run  <span class="math">(C(X), \\mathsf{cm_t}, [z_I]_2, \\pi) \\leftarrow \\mathcal{A}(\\mathsf{srs})</span> . When  <span class="math">\\mathcal{A}</span>  outputs a proof  <span class="math">\\pi = (W_1, W_2, W_3)</span> , then it also outputs the representation  <span class="math">w_3(X), w_2(X)</span>  of maximum degree d such that</p>
+
+    <p class="text-gray-300"><span class="math">$z_I = [f(x)]_2 = [w_3(x)x^{-N+k-1} + x^k]_2, W_2 = [w_2(x)]_1</span>$</p>
+
+    <p class="text-gray-300">Then  <span class="math">\\mathcal{B}_2</span>  computes the degree N polynomial  <span class="math">g(X) = Z_H(X) - z_I(X)w_2(X)</span>  and solves to find the N roots. It checks amongst these roots whether any solution x corresponds to the  <span class="math">\\mathsf{qdlog}</span>  challenge and if yes it returns x. Else it aborts.</p>
+
+    <p class="text-gray-300">By the second verification equation we have that  <span class="math">Z_H(x) - g(x)w_2(x) = 0</span>  whenever  <span class="math">\\mathcal{A}</span>  convinces the verifier. See that if g(X) does not divide  <span class="math">Z_H(X)</span> , then  <span class="math">Z_H(X) - g(X)w_2(X) \\neq 0</span> . But then x must lie in the roots and  <span class="math">\\mathcal{B}_2</span>  succeeds.</p>
+
+    <p class="text-gray-300"><span class="math">\\underline{\\mathsf{Game}^2 \\mapsto 0}</span>  We finally show that for any adversary  <span class="math">\\mathcal{A}</span></p>
+
+    <p class="text-gray-300"><span class="math">$\\mathcal{A}^2_{\\mathcal{A},\\mathcal{E}}(\\lambda) = 0</span>$</p>
+
+    <p class="text-gray-300">Indeed, when  <span class="math">\\mathcal{A}</span>  also outputs the representation  <span class="math">w_3(X)</span> , we have that either  <span class="math">[z_I]_2 = [z_I(x)]_2</span>  for  <span class="math">z_I(X) = w_3(X)X^{-(N-k+1)} + X^k</span>  a degree N polynomial dividing  <span class="math">z_H(X)</span> , or  <span class="math">\\mathsf{Game}^2</span>  aborts. The adversary  <span class="math">\\mathcal{A}</span>  also outputs a representation  <span class="math">w_1(X)</span>  of maximum degree N such that  <span class="math">[W]_1 = [w_1(x)]_1</span> . By the first verification equation we have that  <span class="math">T(X) = C(X) - w_1(X)z_I(X)</span>  is such that  <span class="math">\\mathsf{cm}_t = [T(X)]_1</span> . Further  <span class="math">T(\\xi_i) = C(\\xi_i) + 0</span>  for all  <span class="math">i \\in [k]</span> , making  <span class="math">z_I(X)</span>  and T(X) a correct witness.</p>
+
+    </section>
+
+    <section id="app-b" class="mb-10">
+      <h2 class="text-2xl font-bold">B Baloo Prover Cost</h2>
+
+    <p class="text-gray-300">In this section we elaborate on the Prover's computational costs while showing that those are quasi-linear in m.</p>
+
+      <h3 id="app-b.1" class="text-xl font-semibold mt-8"><strong>B.1 Optimizations for</strong> cp<strong>-</strong>expansion</h3>
+
+    <p class="text-gray-300">In this section we describe some optimizations that can be applied to the protocol in Fig. <a href="#page-20-0">6</a> in order to achieve a construction with smaller proof size and that requires less work from the verifier.</p>
+
+    <p class="text-gray-300"><strong>Opening</strong> <em>t</em> <strong>polynomials in one point.</strong> As noted in <a href="#page-26-4">[GWC19]</a>,<a href="#page-25-5">[CHM</a><sup>+</sup>20], whenever we have many openings of different polynomials at the same point, the prover can provide a joint proof after receiving a random element <em>&gamma;</em> &isin; F from the verifier, i.e., if</p>
+
+    <p class="text-gray-300"><span class="math">$(u_1, [w_1]_1) \\leftarrow \\mathsf{KZG.Open}(\\mathsf{srs}_{\\mathsf{KZG}}, f_1(X), \\deg = d, \\alpha)</span>$</p>
+
+    <p class="text-gray-300"><span class="math">(u_2, [w_2]_1) \\leftarrow \\mathsf{KZG.Open}(\\mathsf{srs}_{\\mathsf{KZG}}, f_2(X), \\deg = d, \\alpha)</span></p>
+
+    <p class="text-gray-300">then [<em>w</em>]<sup>1</sup> = [<em>w</em>1]<sup>1</sup> + <em>&gamma;</em>[<em>w</em>2]<sup>2</sup> is a proof that <em>f</em>1(<em>X</em>) + <em>&gamma;f</em>2(<em>X</em>) opens to <em>u</em><sup>1</sup> + <em>&gamma;u</em><sup>2</sup> at <em>&alpha;</em>.</p>
+
+    <p class="text-gray-300"><strong>Openings for Pairings.</strong> To save the verifier some work, we use a technique introduced in <a href="#page-26-4">[GWC19]</a> and attributed to M. Maller. In order to verify that <em>a</em>(<em>X</em>)<em>b</em>(<em>X</em>) = <em>c</em>(<em>X</em>)<em>d</em>(<em>X</em>) for <em>a</em>(<em>X</em>)<em>, b</em>(<em>X</em>)<em>, c</em>(<em>X</em>)<em>, d</em>(<em>X</em>) the algebraic representations of [<em>a</em>]1<em>,</em> [<em>b</em>]2<em>,</em> [<em>c</em>]1<em>,</em> [<em>d</em>]2, instead of asking the verifier to check that</p>
+
+    <p class="text-gray-300"><span class="math">$e([a]_1, [b]_2) = e([c]_1, [d]_2),</span>$</p>
+
+    <p class="text-gray-300">we ask the prover to show that [<em>b</em>]2<em>,</em> [<em>d</em>]<sup>2</sup> open to <em>u</em>1<em>, u</em><sup>2</sup> at <em>&beta;</em> and that <em>u</em>1[<em>a</em>]<sup>1</sup> &minus; <em>u</em>2[<em>c</em>]<sup>1</sup> opens to zero at <em>&beta;</em>. Note that now the prover can also commit to <em>b</em>(<em>X</em>) and <em>d</em>(<em>X</em>) in G<sup>1</sup> instead of G2. We apply this technique to the equations that verify the inner product relation and the well-formedness of [<em>E</em>]1; that is, equations (<em>i</em>) and (<em>ii</em>). Note that we can open this equations together with other elements. Indeed, we will check equation (<em>i</em>) by opening a polynomial [<em>P</em>1]<sup>1</sup> at <em>&beta;</em>, and batch that KZG opening together with the one for [<em>D</em>]1.</p>
+
+    <p class="text-gray-300"><strong>Degree checks.</strong> Degree checks as deg(<em>f</em>) &le; <em>k &lt; d</em> can be included in a KZG proof that <em>f</em>(<em>&alpha;</em>) = <em>u</em> if the prover sets <em>w</em>&circ;(<em>X</em>) = <em><sup>f</sup></em>(<em>X</em>)&minus;<em>f</em>(<em>&alpha;</em>) <em>X</em>&minus;<em>&alpha;</em> , outputs (<em>u,</em> [<em>w</em>]<sup>1</sup> = [ &circ;<em>w</em>(<em>x</em>)<em>x <sup>d</sup></em>&minus;<em>k</em>+1]) and the verifier checks</p>
+
+    <p class="text-gray-300"><span class="math">$e([f]_1 - [u]_1, [x^{d-k+1}]_2) = e([w]_1, [x - \\alpha]_2),</span>$</p>
+
+    <p class="text-gray-300">as explained in Section <a href="#page-5-0">3.5.</a> This is conditional on <em>&alpha;</em> being randomly chosen after <em>f</em>(<em>X</em>).</p>
+
+    <p class="text-gray-300">Throughout Ba<em>loo</em> we require 3 degree checks: (<em>i</em>) that deg(<em>E</em>(<em>X</em>)) <em>&lt; m</em>&minus;1, (<em>ii</em>) that deg(<em>z<sup>I</sup></em> (<em>X</em>)) = <em>m</em>, and (<em>iii</em>) that deg(<em>R</em>(<em>X</em>)) = <em>m</em> &minus; 2. For (<em>i</em>) we check via a KZG opening that <em>E</em>(<em>X</em>) has bounded degree. For (<em>ii</em>) we check that <em>z<sup>I</sup></em> (<em>X</em>) &minus; <em>X<sup>m</sup></em> has degree bounded by <em>m</em> &minus; 1 during our opening check that <em>z<sup>I</sup></em> (0) is correct. Degree bounding <em>f</em>(<em>X</em>) <em>&lt; k</em> via an opening at 0 checks that</p>
+
+    <p class="text-gray-300"><span class="math">$e([f]_1 - [u]_1, [1]_2) = e([w]_1, [x]_2),</span>$</p>
+
+    <p class="text-gray-300">and
+<span class="math">$e([f]_1, [x^{d-k+2}]_2) = e([w]_2, [x]_2),</span>$</p>
+
+    <p class="text-gray-300">because 0 is not a random point.</p>
+
+    <p class="text-gray-300">For (iii) we recall that the polynomial R(X) is sent for the inner product relation to show that  <span class="math">a(X)b(X)-\\sigma=XR(X)+z_I(X)Q(X)</span> . In our optimised protocol we instead send  <span class="math">\\bar{R}(X)=XR(X)</span>  and show that  <span class="math">\\bar{R}(0)=0</span>  and that  <span class="math">\\bar{R}(X)</span>  has degree bounded by m-1. We then show that  <span class="math">a(X)b(X)-\\sigma=\\bar{R}(X)+z_I(X)Q(X)</span> . This is equivalent because  <span class="math">\\bar{R}(0)=0</span>  if and only if  <span class="math">\\bar{R}(X)=XR(X)</span> . Where we can batch this check with opening and degree bounding  <span class="math">z_I(X)</span>  at the same point (namely 0) and with the same degree (m-1), this check is essentially free.</p>
+
+    <p class="text-gray-300">Batching Pairings. We also apply standard techniques to batch pairings that share the same elements in one of the two groups. Namely, upon sampling a uniform  <span class="math">\\gamma_2 \\in \\mathbb{F}</span> , the verifier can aggregate the equations</p>
+
+    <p class="text-gray-300"><span class="math">$e([a]_1, [b_1]_2) = e([c_1]_1, [d]_2)</span>$
+and  <span class="math">e([a]_1, [b_2]_2) = e([c_2]_1, [d]_2),</span>
+as  <span class="math">e([a]_1, [b_1 + \\gamma b_2]_2) = e([c_1 + \\gamma c_2]_1, [d]_2)</span></p>
+
+    <p class="text-gray-300">Note that we can adapt KZG openings equations so they can be batched further, namely if we parse the verification pairing as  <span class="math">e([f]_1-u+[w]_1\\alpha,[1]_2)=e([w]_1,[x]_2)</span> , then two openings of different polynomials at different points can be verified by two pairings.</p>
+
+    <p class="text-gray-300">Finally, note that in order to check  <span class="math">E(\\alpha) = D(\\beta)</span> , the proves needs to provide proof of both openings but can only send  <span class="math">u_2 = E(\\alpha)</span>  and the verifier checks  <span class="math">D(\\beta)</span>  opens to  <span class="math">u_2</span>  as well.</p>
+
+      <h3 id="app-b.2" class="text-xl font-semibold mt-8">B.2 Generic algorithms</h3>
+
+    <p class="text-gray-300">An excellent survey of various algorithms for polynomials with pseudocode is given in [vzGG13]. Let  <span class="math">\\mathbb{F}</span>  be a domain with Fast Fourier Transform of size N. Polynomials in  <span class="math">\\mathbb{F}[X]</span>  are considered as vectors of coefficients in the standard basis  <span class="math">\\{1, X, X^2, \\ldots, X^N\\}</span>  unless stated otherwise. The set I does not support FFTs. The computational costs are counted in operations in  <span class="math">\\mathbb{F}</span> . We are using the following basic results (everywhere d &lt; N):</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Multiplication: two polynomials of degree d can be multiplied in  <span class="math">O(d \\log d)</span>  time.</li>
+      <li>Inversion: given a polynomial f of degree d can be inverted modulo  <span class="math">X^{\\ell}</span> ,  <span class="math">\\ell &gt; d</span> , in  <span class="math">O(d \\log d)</span>  time.</li>
+      <li>Division: a polynomial f of degree d can be divided with a remainder by a polynomial g of degree d' &lt; d in  <span class="math">O(d \\log d)</span>  time, i.e. we can find q(X), r(X) of degree d'' &lt; d such that</li>
+    </ul>
+
+    <p class="text-gray-300"><span class="math">$f(X) = q(X)q(X) + r(X)</span>$</p>
+
+    <p class="text-gray-300">&bull; Vanishing polynomial: a polynomial  <span class="math">z_I(X)</span>  that vanishes on set I of size d can be computed in  <span class="math">O(d \\log^2 d)</span>  time.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Evaluation: a polynomial f of degree d can be evaluated in d points in  <span class="math">O(d \\log^2 d)</span>  time.</li>
+      <li>Interpolation: a polynomial f of degree d with values  <span class="math">c_i</span>  at points  <span class="math">x_i</span> ,  <span class="math">0 \\le i \\le d</span> , can be computed (interpolated) in  <span class="math">O(d \\log^2 d)</span>  time.</li>
+    </ul>
+
+      <h3 id="app-b.3" class="text-xl font-semibold mt-8">B.3 Costs analysis</h3>
+
+    <p class="text-gray-300">For simplicity we assume that m = k.</p>
+
+    <p class="text-gray-300">Aggregation of individual proofs. The subset opening proofs for the set of points  <span class="math">\\mathbb{H}_I \\subseteq \\mathbb{H}</span>  are computed as  <span class="math">[H]_1 = \\sum_{i \\in I} r_i [H_i]_1</span>  The coefficients  <span class="math">r_i = \\prod_{s \\in I, s \\neq i} \\frac{1}{(\\omega^i - \\omega^s)}</span>  are altogether computed in  <span class="math">O(m \\log^2 m)</span>  time as follows. Let  <span class="math">Z_I&#x27;(X)</span>  be the derivative of  <span class="math">Z_I(X)</span>  then we have  <span class="math">r_i = \\frac{1}{Z_I&#x27;(\\omega^i)}</span>  [vzGG13, p. 300]. We use a vanishing polynomial reconstruction algorithm (see above) and symbolically compute  <span class="math">Z_I&#x27;(X)</span>  in  <span class="math">O(m \\log^2 m)</span>  time. Then we evaluate  <span class="math">Z_I&#x27;(X)</span>  over I also in  <span class="math">O(m \\log^2 m)</span>  time. Thus  <span class="math">[H]_1</span>  can be computed in m group operations.</p>
+
+    <p class="text-gray-300">Running time of Caulk+ core. The costs of Fig. 7 break down as follows:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Polynomial  <span class="math">\\frac{C(x)-T(x)}{z_I(x)}</span>  similarly to  <span class="math">[H]_1</span>  using  <span class="math">O(m\\log^2 m)</span>  field operations. Then it takes m group operations to compute  <span class="math">W_1</span> .</li>
+      <li>The group element  <span class="math">W_2</span>  is computed as a linear combination of  <span class="math">[H_i(x)]_1</span>  as in  <span class="math">[ZBK^+22]</span>  in time m group and  <span class="math">O(k \\log^2 k)</span>  field operations (see above).</li>
+      <li>The polynomial in  <span class="math">W_3</span>  has O(m) nonzero coefficients and thus needs at most m group operations to be computed.</li>
+    </ul>
+
+    <p class="text-gray-300">In Fig. 7 the element  <span class="math">W_3</span>  is unused and this computation can be omitted. Overall we need 2m group operations and  <span class="math">O(m \\log^2 m)</span>  field operations.</p>
+
+    <p class="text-gray-300">Running time of cp-expansion argument Fig. 6 We first note that Lagrange polynomials  <span class="math">\\mu_j(X)</span>  and  <span class="math">\\tau_i(X)</span>  have succinct form. Concretely we have, assuming |V| = m:</p>
+
+    <p class="text-gray-300"><span class="math">$\\mu_j(X) = \\frac{X^m - 1}{m\\nu^{-j}(X - \\nu^j)}, \\quad \\tau_i(X) = \\frac{z_I(X)}{z_I&#x27;(\\xi_i)(X - \\xi_i)} = \\frac{r_i z_I(X)}{(X - \\xi_i)}</span>$</p>
+
+    <p class="text-gray-300">where  <span class="math">z&#x27;_I(X)</span>  is the derivative of  <span class="math">z_I(X)</span> . All  <span class="math">\\mu_j(X)</span>  can be batch-evaluated in m points in  <span class="math">m \\log m</span>  time as one evaluation is  <span class="math">\\log m</span>  time. For  <span class="math">\\tau_i(X)</span>  we compute  <span class="math">r_i = \\frac{1}{z&#x27;_I(\\xi_i)}</span>  using the evaluation algorithm for  <span class="math">z_I(X)</span>  in  <span class="math">O(m \\log^2 m)</span>  time, and then inverting in  <span class="math">m \\log(m)</span>  time. Then in order to batch-evaluate all  <span class="math">\\tau_i(X)</span>  at some point  <span class="math">\\beta</span> , we evaluate  <span class="math">z_I(X)</span>  at  <span class="math">\\beta</span>  in m time and each  <span class="math">\\frac{r_i}{\\beta - \\xi_i}</span>  in  <span class="math">\\log m</span>  time. These costs are all in  <span class="math">\\mathbb{F}</span> .</p>
+
+    <p class="text-gray-300">The field operation costs of Fig. 3 break down as follows:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Polynomial v(X) has degree m and can be computed via interpolation in  <span class="math">O(m \\log^2 m)</span> .</li>
+      <li>Polynomial D(X) is computed by interpolation as follows. We first batch-evaluate  <span class="math">\\mu_j(X)</span>  at  <span class="math">\\alpha</span>  in  <span class="math">O(m \\log m)</span>  time. Then we batch-evaluate  <span class="math">\\tau_i(X)</span>  at 0 in  <span class="math">O(m \\log^2 m)</span>  time, so that we know all coefficients of  <span class="math">\\tau_{\\operatorname{col}(j)}(X)</span>  in the sum. Those coefficients are exactly values of D(X) at  <span class="math">\\xi_i</span> . From those we interpolate D(X) in  <span class="math">O(m \\log^2 m)</span>  time.</li>
+      <li>Polynomials  <span class="math">R(X), Q_1(X), Q_2(X)</span>  can be computed using the division algorithm (above) in  <span class="math">O(m \\log^2 m)</span>  time</li>
+      <li>Polynomial E(X) is computed by interpolation again. As for D(X) we batch-evaluate all  <span class="math">\\tau_i(X)</span>  at  <span class="math">\\beta</span>  so that we know all coefficients of  <span class="math">\\mu_j(X)</span>  in  <span class="math">O(m \\log^2 m)</span>  time. As  <span class="math">\\mu_j(X)</span>  are defined over a subgroup of roots of unity, the interpolation of E(X) is in  <span class="math">O(m \\log m)</span>  time.</li>
+    </ul>
+
+    <p class="text-gray-300">Computing  <span class="math">[z_I(x)]_2</span>  takes  <span class="math">m \\, \\mathbb{G}_2</span>  operations. Computing the 12  <span class="math">\\mathbb{G}_1</span>  elements that Prover sends takes  <span class="math">11m \\, \\mathbb{G}_1</span>  operations as those commitments are either to polynomials of degree m (those are  <span class="math">t, v, D, E, Q_1, R, Q_2, w_3, w_4</span> ) or have at most m non-zero coefficients  <span class="math">([w_1]_1, [w_2]_1)</span> , or need constant time  <span class="math">([a]_1)</span> . Overall we need  <span class="math">11m \\, \\mathbb{G}_1</span>  operations,  <span class="math">m \\, \\mathbb{G}_2</span>  operations, and  <span class="math">O(m \\log^2 m)</span>  field operations.</p>
+
+    <p class="text-gray-300">Full running cost By summing up the prover costs for Caulk+ core and cp-expansion we get that the total Prover cost in Baloo is  <span class="math">13m \\, \\mathbb{G}_1</span>  operations,  <span class="math">m \\, \\mathbb{G}_2</span>  operations and  <span class="math">O(m \\log^2 m)</span>  field operations.</p>
+
+    <p class="text-gray-300"></p>
+
+    <div class="overflow-x-auto my-4">
+      <table class="min-w-full text-sm text-gray-300">
+        <thead>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left"></th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">Prover Time (s)</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left"></th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left"></th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left"></th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">Verifier Time (s)</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left"></th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left"></th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left"></th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">Proof Size</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left"></th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left"></th>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">m =</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">10</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">16</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">20</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">32</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">50</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">10</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">16</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">20</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">32</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">50</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(KB)</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">MTPos</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">69.715</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">102.607</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">128.766</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">200.975</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">271.400</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0.029</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0.033</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0.032</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0.027</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0.028</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0.290</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Harisa</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">1.228</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">2.014</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">2.374</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">3.939</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">6.011</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0.011</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0.011</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0.012</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0.012</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0.013</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">1.170</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Caulk</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0.565</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0.803</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0.991</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">1.468</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">2.767</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0.045</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0.046</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0.041</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0.043</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0.0483</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0.890</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Baloo</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0.097</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0.105</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0.096</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0.101</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0.101</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0.020</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0.021</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0.019</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0.021</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0.020</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">0.794</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p class="text-gray-300"><strong>Table 2:</strong> Comparison table for lookups</p>
+
+    <p class="text-gray-300">Commit-and-prove lookup tables are especially suitable for the Ethereum Foundation's zero-knowledge Ethereum Virtual Machine (zkEVM), which nowadays uses Halo2 with KZG commitments as a backend. In this section we describe an overview of how lookups are currently used in the Halo2 proving system [BGH19] and claim Baloo can be used as a drop-in replacement to</p>
+
+    <p class="text-gray-300">the Halo2 lookup argument with better prover efficiency. In other words Ba<em>loo</em> is backwards-compatible with instantiations of Halo2 that use KZG commitments.</p>
+
+    <p class="text-gray-300">Baloo is a proving system for the relation that</p>
+
+    <p class="text-gray-300"><span class="math">$\\mathsf{R}_{\\mathsf{lookup}} = \\left\\{ \\begin{array}{c|c} \\mathsf{cm_a}; \\ A(X) &amp; \\mathsf{cm_a} = \\mathsf{Commit}(\\mathsf{srs}, A(X)) \\\\ \\forall \\nu \\in \\mathbb{V}, \\ A(\\nu) \\in \\{c_s\\}_{s=1}^N \\end{array} \\right\\}</span>$</p>
+
+    <p class="text-gray-300">where  <span class="math">\\mathbb{V}</span>  is a set of roots of unity that is <em>independent</em> from N (the size of the lookup table  <span class="math">\\mathsf{cm}_{\\mathsf{c}}</span> ) and Commit is the KZG commitment algorithm [KZG10]. This lookup argument only handles a single column. Suppose instead that we want to prove f(x) = y by precomputing all possible values  <span class="math">T = \\{(x_s, f(x_s))\\}_{s=1}^N</span>  and looking up whether  <span class="math">(x, y) \\in T</span> . To achieve this we require more functionality from our lookup argument. In particular we need to be able to prove a lookup argument over <em>multicolumned</em> tables.</p>
+
+    <p class="text-gray-300">Multi-column Baloo We build on the Halo2 approach <sup>5</sup>. Given a lookup with input column polynomials  <span class="math">[A_0(X), \\ldots, A_{k-1}(X)]</span>  and a multi-columned table of the form  <span class="math">C = \\{c_{i,s}\\}_{i,s=1}^{k,N}</span> , their prover shows that for all  <span class="math">\\nu \\in \\mathbb{V}</span> , there exists some s such that  <span class="math">(A_0(\\nu), \\ldots, A_{k-1}(\\nu)) = (c_{0,s}, \\ldots, c_{k-1,s})</span> . It does this by taking a random linear combination of the input column polynomials and the table columns and then running a lookup argument over the compressed values. We present a similar compression for Baloo such that we can run lookups over multi-columned tables.</p>
+
+    <p class="text-gray-300">Similarly than in Caulk+, described in Section 5.1, the pre-processing phase commits to the table  <span class="math">\\{c_{i,s}\\}_{i,s=1}^{k,N}</span>  by committing to the column polynomials</p>
+
+    <p class="text-gray-300"><span class="math">$C_s(X) = \\sum_{s=1}^{N} c_s \\lambda_s(X)</span>$</p>
+
+    <p class="text-gray-300">for  <span class="math">\\{\\lambda_s(X)\\}_{s=1}^N</span>  the Lagrange interpolation polynomials of a set of roots of unity  <span class="math">H = \\{\\omega^s\\}_{s=1}^N</span>  of size N. The pre-processing phase also computes auxiliary information for the prover, namely it computes commitments to the polynomials</p>
+
+    <p class="text-gray-300"><span class="math">$\\{Q_{i,s}(X) = (C_s(X) - C_s(\\omega_j))/(X - \\omega^s)\\}_{i,s=1}^{k,N},</span>$</p>
+
+    <p class="text-gray-300"><span class="math">$H_s(X) = \\{z_H(X)/(X - \\omega^s)\\}_{s=1}^N,</span>$</p>
+
+    <p class="text-gray-300">in time  <span class="math">kN \\log_2(N)</span> .</p>
+
+    <p class="text-gray-300">Given the input column polynomials  <span class="math">[A_0(X), \\ldots, A_{k-1}(X)]</span>  we sample a random value  <span class="math">\\theta</span> . Suppose that I is the set of points such that  <span class="math">j \\in I</span>  if and only if  <span class="math">(c_{0,s}, \\ldots, c_{k-1,s})</span>  appears in the input columns i.e.  <span class="math">(c_{0,s}, \\ldots, c_{k-1,s}) \\in \\{(A_0(\\nu), \\ldots, A_{k-1}(\\nu))\\}_{\\nu \\in \\mathbb{V}}</span> . Then the prover commitments to the compressed polynomials</p>
+
+    <p class="text-gray-300"><span class="math">$A_{\\text{comp}}(X) = A_0(X) + \\ldots + \\theta^{k-1} A_{k-1}(X) = \\sum_{j=1}^m \\left( \\sum_{i=0}^k \\theta^i A_i(\\nu_j) \\right) \\mu_j(X)</span>$</p>
+
+    <p class="text-gray-300"> <span class="math">&lt;sup&gt;^5 \\&lt;/sup&gt;mathrm{https://zcash.github.io/halo2/design/proving-system/circuit-commitments.html}</span></p>
+
+    <p class="text-gray-300"><span class="math">$C_{\\text{comp}}(X) = C_0(X) + \\ldots + \\theta^{k-1} C_{k-1}(X) = \\sum_{s=1}^{N} \\left( \\sum_{i=0}^{k} \\theta^i c_{i,s} \\right) \\lambda_s(X)</span>$
+for  <span class="math">s \\in I</span> ,  <span class="math">Q_{\\text{comp},j} = Q_{0,s}(X) + \\ldots + \\theta^{k-1} Q_{k-1,s}(X)</span></p>
+
+    <p class="text-gray-300"><span class="math">$= \\left( \\sum_{i=0}^{k-1} \\theta^i C_i(X) - \\theta^i C_i(\\omega^s) \\right) / (X - \\omega^s)</span>$</p>
+
+    <p class="text-gray-300">Then,  <span class="math">C_{\\mathsf{comp}}(X)</span>  describes table  <span class="math">C_{\\mathsf{comp}} = \\{\\sum_{i=0}^{k-1} \\theta^i c_{i,s}\\}_{s=1}^N</span> . The randomiser  <span class="math">\\theta</span>  is sampled from a large field. Thus the probability that  <span class="math">\\sum_{i=0}^k \\theta^i A_i(\\nu) \\in C_{\\mathsf{comp}}</span>  is negligible unless there exists some s such that  <span class="math">(A_0(\\nu), \\ldots, A_{k-1}(\\nu)) = (c_{0,s}, \\ldots, c_{k-1,s})</span> . The auxiliary information that the prover requires for efficiency, namely commitments to  <span class="math">\\{H_s(X), Q_{\\mathsf{comp},s}(X)\\}_{s \\in I}</span> , can be computed in km time where  <span class="math">m = |\\mathbb{V}|</span>  is the number of lookups.</p>
+
+    <p class="text-gray-300">Thus for  <span class="math">\\mathsf{cm}_{\\mathsf{comp}}</span>  a commitment to  <span class="math">A_{\\mathsf{comp}}(X)</span> , the prover demonstrates that  <span class="math">\\mathsf{cm}_{\\mathsf{comp}} \\in R_{\\mathsf{lookup}}</span>  with respect to the table  <span class="math">C_{\\mathsf{comp}}</span> .</p>
+
+    <p class="text-gray-300">In this section, we compare Baloo's performance with its most direct competitors: Caulk, Harisa and Merkle Trees with Poseidon Hases. Baloo has been implemented<sup>6</sup> in Rust using the arkworks library [ac22]. We use Caulk's implementation<sup>7</sup> to measure its performance and run Harisa and Merkle Trees using the Legosnark code<sup>8</sup>. We instantiate Baloo, Caulk and Merkle Trees for tables of size  <span class="math">2^{20}</span>  (recall that in RSA based systems performance is independent of table size), and consider  <span class="math">m = 10, 16, 20, 50^9</span> . Benchmarks were obtained by running the respective codes in a laptop with CPU i7-8565U and 8GB of RAM.</p>
+
+    <p class="text-gray-300">We highlight prover work in Fig. 9, where y axis represent prover time, and x axis represent the value of m. We specify running numbers of the provers, as well as verifiers and proof size in Table 2.</p>
+
+    <p class="text-gray-300"> <span class="math">&lt;sup&gt;^6&lt;/sup&gt;</span> https://github.com/anonshidf7seifh/baloo</p>
+
+    <p class="text-gray-300"><sup>7</sup>https://github.com/caulk-crypto/caulk</p>
+
+    <p class="text-gray-300"><sup>8</sup>https://github.com/matteocam/libsnark-lego/</p>
+
+    <p class="text-gray-300"><sup>&amp;</sup>lt;sup&gt;9</sup>Chosen over the available numbers for RSA accumulators in the Legosnark codebase.</p>
+
+    <p class="text-gray-300">    <img src="_page_37_Figure_1.jpeg" alt="" class="my-4 max-w-full" />
+</p>
+
+    <p class="text-gray-300"><strong>Figure 9:</strong> Comparison for lookup tables</p>
+
+    </section>
+`;
+---
+
+<BaseLayout title="Baloo: Nearly Optimal Lookup Arguments (2022/1565)">
+  <article class="max-w-4xl mx-auto article-prose">
+    <nav class="mb-8">
+      <a href="/papers" class="text-blue-400 hover:text-blue-300">
+        &larr; Back to Papers
+      </a>
+    </nav>
+
+    <header class="mb-12">
+      <h1 class="text-3xl font-bold mb-4"
+        set:html={TITLE_HTML} />
+      <p class="text-gray-400 mb-2"
+        set:html={AUTHORS_HTML} />
+      <p class="text-gray-500 text-sm mb-4">
+        2022 &middot; eprint 2022/1565
+      </p>
+      <div class="flex gap-4 text-sm">
+        <a
+          href={EPRINT_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          class="text-blue-400 hover:text-blue-300"
+        >
+          Paper (eprint) &rarr;
+        </a>
+      </div>
+      <PaperDisclaimer eprintUrl={EPRINT_URL} />
+      <p class="mt-1 text-xs text-gray-600">
+        Converted with: {CRAWLER} &middot; {CONVERTED_DATE}
+      </p>
+    </header>
+
+    <Fragment set:html={CONTENT} />
+
+    <PaperHistory slug="baloo-algebraic-lookup-arguments-2022" />
+  </article>
+</BaseLayout>

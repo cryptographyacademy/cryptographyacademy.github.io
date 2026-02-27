@@ -1,0 +1,1311 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import PaperDisclaimer from '../../components/PaperDisclaimer.astro';
+import PaperHistory from '../../components/PaperHistory.astro';
+
+const EPRINT_URL = 'https://eprint.iacr.org/2022/1487';
+const CRAWLER = 'marker';
+const CONVERTED_DATE = '2026-02-16';
+const TITLE_HTML = 'An efficient verifiable state for zk-EVM and beyond from the Anemoi hash function';
+const AUTHORS_HTML = 'Jianwei Liu, Harshad Patil, Akhil Sai Peddireddy, Kevin Singh, Haifeng Sun, Huachuang Sun, Weikeng Chen';
+
+const CONTENT = `    <section id="abstract" class="mb-10">
+      <h2 class="text-2xl font-bold">Abstract</h2>
+      <p class="text-gray-300">In our survey of the various zk-EVM constructions, it becomes apparent that verifiable storage of the EVM state starts to be one of the dominating costs. This is not surprising because a big differentiator of EVM from UTXO is exactly the ability to carry states and, most importantly, their transitions; i.e., EVM is a **state** machine.
+    
+In other words, to build an efficient zk-EVM, one must first build an efficient verifiable state. The common approach, which has been used in production, is a Merkle forest to authenticate the memory that would be randomly accessed within zk-SNARK, and optimize the verification of such memory accesses.
+
+In this note, we describe a way to instantiate a Merkle tree with very few gates in TurboPlonk. We use customized gates in TurboPlonk to implement a SNARK-friendly hash function called Anemoi and its Jive mode of operation, by Cl&eacute;mence Bouvier, Pierre Briaud, Pyrros Chaidos, L&eacute;o Perrin, Robin Salen, Vesselin Velichkov, and Danny Willems.
+    
+We demonstrate that with $16$ gates ($\\approx1$ gate per round in a 14-round Amenoi hash), one can verify a 3-to-1 compression in a 3-ary Merkle tree. Before this, prior implementations would often require hundreds of gates. We anticipate this technique to benefit a large number of applications built off zk-SNARK. 
+  
+Our code can be found in $\\mathtt{noah}$:  https://github.com/FindoraNetwork/noah</p>
+      <p class="text-gray-300"><strong>Keywords:</strong> SNARK-friendly hash function &middot; Zerocash &middot; authentication &middot; zk-SNARK</p>
+    </section>
+
+      <h3 id="sec-1.1" class="text-xl font-semibold mt-8">1.1 Our approach: use the standard TurboPlonk recipe on Anemoi</h3>
+
+    <p class="text-gray-300">Our approach is to leverage a recent algebraic hash function&mdash;Anemoi <a href="#page-46-0">[Bou+22]</a>&mdash;by Clemence &acute; Bouvier, Pierre Briaud, Pyrros Chaidos, Leo Perrin, Robin Salen, Vesselin Velichkov, and Danny &acute; Willems and tweak an existing TurboPlonk implementation<a href="#page-0-0">1</a> to inline Anemoi as part of the proof system. We do not claim novelty for our work of tweaking, as it follows the standard recipe of TurboPlonk, and we expect many practitioners in zk-SNARK can independently come up with the exact same implementation without reading the rest of this note.</p>
+
+    <p class="text-gray-300">We now turn our attention to the main enabler&mdash;Anemoi hash, which explores the CCZ equivalence <a href="#page-46-7">[CCZ98]</a> between a high-degree polynomial, which is used for computation of the hash, and a lowdegree polynomial, which is used for verification of the hash. Readers are encouraged to read the original Anemoi paper <a href="#page-46-0">[Bou+22]</a>, as we will only be providing the necessary background.</p>
+
+    <p class="text-gray-300">Our approach: inline Anemoi in TurboPlonk. The Anemoi hash follows the substitutionpermutation network (SPN). It consists of four steps: constant additions, MDS diffusion (here, MDS means &quot;maximum distance separable&quot;), pseudo-Hadamard transform, and S-box. We can also understand such a construction as a combination of a linear layer, consisting of constant additions and MDS diffusion, and a nonlinear layer with an S-box. We already know how to inline the linear layer: one only needs to represent the linear combination explicitly in the quotient polynomial. Many TurboPlonk implementations used in the industry have already created customized gates for some of the heavy operations in a SNARK-friendly hash function, such as a power-5 gate that computes x &rarr; x 5 .</p>
+
+    <p class="text-gray-300">A round with input (a, b, c, d) is being processed correctly resulting in output (a &prime;&prime;, b&prime;&prime;, c&prime;&prime;, d&prime;&prime;) if and only if the following equations are satisfied.</p>
+
+    <p class="text-gray-300"><span class="math">$(c&#x27; - c&#x27;&#x27;)^5 + g \\cdot (c&#x27;)^2 = a&#x27;</span>$</p>
+
+    <p class="text-gray-300"><span class="math">$(d&#x27; - d&#x27;&#x27;)^5 + g \\cdot (d&#x27;)^2 = b&#x27;</span>$</p>
+
+    <p class="text-gray-300"><span class="math">$(c&#x27; - c&#x27;&#x27;)^5 + g \\cdot (c&#x27;&#x27;)^2 + g^{-1} = a&#x27;&#x27;</span>$</p>
+
+    <p class="text-gray-300"><span class="math">$(d&#x27; - d&#x27;&#x27;)^5 + g \\cdot (d&#x27;&#x27;)^2 + g^{-1} = b&#x27;&#x27;</span>$</p>
+
+    <p class="text-gray-300">where g is a generator of the field F, (a &prime; , b&prime; , c&prime; , d&prime; ) is the result of applying the linear layer and the pseudo Hadamard transform to (a, b, c, d), defined as follows:</p>
+
+    <p class="text-gray-300"><span class="math">$a&#x27; = (2a+d) + g \\cdot (2b+c) + prk_1[i] \\quad b&#x27; = g \\cdot (2a+d) + (g^2+1) \\cdot (2b+c) + prk_2[i]</span>$</p>
+
+    <p class="text-gray-300"><span class="math">$c&#x27; = (a+d) + g \\cdot (b+c) + prk_3[i] \\qquad d&#x27; = g \\cdot (a+d) + (g^2+1) \\cdot (b+c) + prk_4[i]</span>$</p>
+
+    <p class="text-gray-300">Here, prk<sup>1</sup> to prk<sup>4</sup> are <em>processed</em> round key vectors, described later in the notes. For an SPN with r rounds, there will be four vectors each containing r processed round key constants, and prk1[i] means the first processed round key constant for the i-th round.</p>
+
+    <p class="text-gray-300"><sup>1</sup> In this note, we refer to TurboPlonk as a large family of protocols improved upon the textbook Plonk with customized gates but without lookups, rather than a specific proof system.</p>
+
+    <p class="text-gray-300">We observe, however, if we use a TurboPlonk with four input wires (i.e.,  <span class="math">w_1</span> ,  <span class="math">w_2</span> ,  <span class="math">w_3</span> ,  <span class="math">w_4</span> ), we can replace (a, b, c, d) and (a'', b'', c'', d'') as the input for the j-th gate and the (j + 1)-th gate. That is,</p>
+
+    <p class="text-gray-300"><span class="math">$\\begin{array}{lll} \\text{gate } j \\colon &amp; w_1[j] = a &amp; w_2[j] = b &amp; w_3[j] = c &amp; w_4[j] = d \\\\ \\text{gate } j + 1 \\colon &amp; w_1[j+1] = a&#x27;&#x27; &amp; w_2[j+1] = b&#x27;&#x27; &amp; w_3[j+1] = c&#x27;&#x27; &amp; w_4[j+1] = d&#x27;&#x27; \\end{array}</span>$</p>
+
+    <p class="text-gray-300">In TurboPlonk, the input wire vectors are arithmetized as witness polynomials. Let  <span class="math">\\omega</span>  be the generator of a suitable domain. We have:</p>
+
+    <p class="text-gray-300"><span class="math">$\\begin{array}{lll} \\text{gate } j \\colon &amp; w_1(\\omega^{j-1}) = a &amp; w_2(\\omega^{j-1}) = b &amp; w_3(\\omega^{j-1}) = c &amp; w_4(\\omega^{j-1}) = d \\\\ \\text{gate } j + 1 \\colon &amp; w_1(\\omega^j) = a&#x27;&#x27; &amp; w_2(\\omega^j) = b&#x27;&#x27; &amp; w_3(\\omega^j) = c&#x27;&#x27; &amp; w_4(\\omega^j) = d&#x27;&#x27; \\end{array}</span>$</p>
+
+    <p class="text-gray-300">which allows us to express the equations as a constraint system between the input wires in the two gates. For example,  <span class="math">(c&#x27;-c&#x27;&#x27;)^5+g\\cdot(c&#x27;)^2=a&#x27;</span>  can be represented as:</p>
+
+    <p class="text-gray-300"><span class="math">$\\begin{split} &amp;(w_1(\\omega^{j-1}) + w_4(\\omega^{j-1}) + g \\cdot (w_2(\\omega^{j-1}) + w_3(\\omega^{j-1})) + q_{prk3}(\\omega^{j-1}) - w_3(\\omega^j))^5 \\\\ &amp;+ g \\cdot (w_1(\\omega^{j-1}) + w_4(\\omega^{j-1}) + g \\cdot (w_2(\\omega^{j-1}) + w_3(\\omega^{j-1})) + q_{prk3}(\\omega^{j-1}))^2 \\\\ &amp;= 2w_1(\\omega^{j-1}) + w_4(\\omega^{j-1}) + g \\cdot (2w_2(\\omega^{j-1}) + w_3(\\omega^{j-1})) + q_{prk1}(\\omega^{j-1}) \\end{split}</span>$</p>
+
+    <p class="text-gray-300">This equation, and other equations of this kind, can be easily represented in TurboPlonk. Note that not all the gates in the constraint system need to satisfy this equation: for example, those gates that are not relevant to the Anemoi hash. Therefore, to express such a constraint more precisely, we use an additional selector polynomial  <span class="math">q_{sel1}(X)</span> , defined as follows. For the j-th gate, if  <span class="math">q_{sel1}(\\omega^{j-1}) = 0</span> , then this gate is not related to  <span class="math">(c&#x27;-c&#x27;&#x27;)^5 + g \\cdot (c&#x27;)^2 = a&#x27;</span> , and if  <span class="math">q_{sel1}(\\omega^{j-1}) \\neq 0</span> , then this gate must satisfy  <span class="math">(c&#x27;-c&#x27;&#x27;)^5 + g \\cdot (c&#x27;)^2 = a&#x27;</span> . Without loss of generality, we can let  <span class="math">q_{sel1}(\\omega^{j-1}) = 1</span> . This gives the following equation that all the gates can satisfy.</p>
+
+    <p class="text-gray-300"><span class="math">$\\begin{split} q_{sel1}(\\omega^{j-1}) \\\\ &amp; \\cdot \\left( \\begin{array}{l} (w_1(\\omega^{j-1}) + w_4(\\omega^{j-1}) + g \\cdot (w_2(\\omega^{j-1}) + w_3(\\omega^{j-1})) + q_{prk3}(\\omega^{j-1}) - w_3(\\omega^j))^5 \\\\ + g \\cdot ((w_1(\\omega^{j-1}) + w_4(\\omega^{j-1})) + g \\cdot (w_2(\\omega^{j-1}) + w_3(\\omega^{j-1})) + q_{prk3}(\\omega^{j-1}))^2 \\\\ -2w_1(\\omega^{j-1}) - w_4(\\omega^{j-1}) - g \\cdot (2w_2(\\omega^{j-1}) + w_3(\\omega^{j-1})) - q_{prk1}(\\omega^{j-1}) \\\\ = 0 \\\\ \\end{split} \\right) \\\\ = 0 \\end{split}</span>$</p>
+
+    <p class="text-gray-300">We can represent this in TurboPlonk by adding a term in the quotient polynomial t(X). We use the following polynomial in our initial construction discussed in Section 4.</p>
+
+    <p class="text-gray-300"><span class="math">$\\frac{-\\alpha^{6}}{Z_{H}(X)} \\cdot q_{sel1}(X) \\cdot \\left(\\begin{array}{c} (\\widetilde{w_{1}}(X) + \\widetilde{w_{4}}(X) + g \\cdot (\\widetilde{w_{2}}(X) + \\widetilde{w_{3}}(X)) + q_{prk3}(X) - \\widetilde{w_{3}}(X\\omega))^{5} \\\\ +g \\cdot (\\widetilde{w_{1}}(X) + \\widetilde{w_{4}}(X) + g \\cdot (\\widetilde{w_{2}}(X) + \\widetilde{w_{3}}(X)) + q_{prk3}(X))^{2} \\\\ -2\\widetilde{w_{1}}(X) - \\widetilde{w_{4}}(X) - g \\cdot (2\\widetilde{w_{2}}(X) + \\widetilde{w_{3}}(X)) - q_{prk1}(X) \\end{array}\\right)</span>$</p>
+
+    <p class="text-gray-300">The prover convinces the verifier by committing the witness polynomials  <span class="math">\\widetilde{w_1}(X)</span> ,  <span class="math">\\widetilde{w_2}(X)</span> ,  <span class="math">\\widetilde{w_3}(X)</span> , and  <span class="math">\\widetilde{w_4}(X)</span>  and opening the polynomials  <span class="math">\\widetilde{w_1}(X)</span> ,  <span class="math">\\widetilde{w_2}(X)</span> ,  <span class="math">\\widetilde{w_3}(X)</span> ,  <span class="math">\\widetilde{w_4}(X)</span> ,  <span class="math">q_{sel1}(X)</span> ,  <span class="math">q_{prk1}(X)</span> , and  <span class="math">q_{prk3}(X)</span>  at a random point  <span class="math">\\zeta</span>  as well as opening  <span class="math">\\widetilde{w_3}(X)</span>  at  <span class="math">\\zeta \\omega</span> . The verifier can use such information to check if  <span class="math">(c&#x27;-c&#x27;&#x27;)^5+g\\cdot(c&#x27;)^2=a&#x27;</span>  is satisfied.</p>
+
+    <p class="text-gray-300">We apply the same approach to the other three equations. In the end, we have four more such terms to the quotient polynomial t(X) in TurboPlonk. This construction is not without cost: we need to add 12 field elements in F in the TurboPlonk proof. With subsequent optimization (described in Section <a href="#page-23-1">5.1,</a> Section <a href="#page-24-0">5.2,</a> Section <a href="#page-25-0">5.3)</a>, we can reduce the number of additional field elements to 5.</p>
+
+    <p class="text-gray-300">Experiment results. To demonstrate the efficiency of using Anemoi hash function, we measure the number of gates, indexer time, re-indexer time, prover time, proof size, and verifier time of each invocation of a Jive compression with four inputs, over our TurboPlonk system and over the BN254 curve. We run the benchmark in a batch of 500. We run our experiment on a c6i.xlarge instance on AWS, with 4 virtual CPU cores and 8GB of memory, with an all-core Turbo frequency of up to 3.5 GHz. We argue that this setup would be considered as a very weak consumer laptop today. The operating system is Ubuntu 22.04, and Rust is 1.70.0, with the following results.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Number of gates: 16 per Jive compression, averaged from 8000 for a batch of 500.</li>
+      <li>Indexer time: 2.51 ms per Jive compression, averaged from 1.26 s for a batch of 500.</li>
+      <li>Re-indexer time: 1.25 ms per Jive compression, averaged from 623 ms for a batch of 500.</li>
+      <li>Prover time: 1.61 ms per Jive compression, averaged from 807 ms for a batch of 500.</li>
+    </ul>
+
+    <p class="text-gray-300">in many applications, which we will discuss in Section <a href="#page-6-0">1.2</a> and Section <a href="#page-9-0">1.3.</a></p>
+
+    <p class="text-gray-300">practice often reduces the prover cost.</p>
+
+    <p class="text-gray-300">&bull; Verifier time: 4.55 ms for everything, without relying on batch proof verification, since Turbo-Plonk has a constant verification cost.</p>
+
+    <p class="text-gray-300">Compared with previous techniques that take hundreds of gates, using Anemoi reduces the number of gates needed for a Merkle tree membership proof by about 7&times;. As a result, it reduces the indexer time, re-indexer time,<a href="#page-0-0">2</a> prover time, and in some situations the required SRS length in TurboPlonk. The experiment result is encouraging as it shows that using the Anemoi hash function is able to reduce the cost of verifying a membership proof of a Merkle tree in zk-SNARK, and can be used</p>
+
+    <p class="text-gray-300">Trend: proof systems with a complex lexicon and concise witnesses. Our work in this note is consistent with a trend in modern proof systems to explore the <em>sparsity</em> in a zero-knowledge proof system, in which we prefer to put more logic in the proof system (i.e., having a complex lexicon) in order to reduce the size of the witness representation (i.e., having concise witnesses), which in</p>
+
+    <p class="text-gray-300">For example, in TurboPlonk, one can enable customized gates and represent the same program in zk-SNARK with fewer gates. When the number of gates is lower, the TurboPlonk proof system can work on shorter polynomials, and sometimes polynomials with a lower density (or weight).</p>
+
+    <p class="text-gray-300">We expect a more systematic study on the sparsity theory to appear soon as the different varieties of open-sourced industry implementations of TurboPlonk are sufficient for us to do experiments and collect empirical evidence. Through such a study, we can then have a better understanding and eventually define the lexicon and conciseness here regarding a proof system.</p>
+
+    <p class="text-gray-300">Mic drop. We have the feeling that the endgame of the algebraic hash may be coming soon, as it does not seem to be easy to further reduce the number of gates per invocation. This has something</p>
+
+    <p class="text-gray-300"><sup>2</sup>We define <em>re-indexing</em> as the process of running the indexer without recomputing the polynomial commitments of the selectors. Those polynomial commitments may have been computed and stored somewhere.</p>
+
+    <p class="text-gray-300">to do with the security analysis of the several design strategies for algebraic hash&mdash;the number of rounds in a substitution-permutation network is unlikely to be small. An informal example to help readers understand the issue is that, if the algebraic hash can be expressed with only a few polynomial identity relations in the TurboPlonk, it seems to suggest the possibility of being vulnerable to Grobner basis attacks. Nevertheless, the authors are not experts in this area, and we &uml; would like to see this discussion above to be false.</p>
+
+    <p class="text-gray-300">Another reason for the endgame is that the algebraic hash that can be instantiated with very few gates in TurboPlonk is already good enough for many ZK applications. To explain why, we evaluate a privacy token transfer protocol based on Zerocash. It shows that the portion of the prover overhead due to the Merkle tree has dropped significantly. This suggests that the use of a Merkle tree will unlikely continue being the performance bottleneck in many applications as time goes on. Therefore, the priorities today are to optimize other building blocks in various ZK applications, including zk-EVM, zk-DID, and zk-BatchVerify.</p>
+
+    <p class="text-gray-300">The semifinal with table lookup. Recently we have seen a lot of work in table lookup, including Caulk <a href="#page-49-1">[ZBKMNS22]</a>, Caulk+ <a href="#page-48-2">[PK22]</a>, and flookup <a href="#page-47-4">[GK22]</a>. Compared with the Merkle tree, table lookup requires a very long SRS and has a concretely large table construction time, but it is known to be concretely more efficient than a construction that uses a Merkle tree in zk-SNARK to perform a lookup. The original Caulk <a href="#page-49-1">[ZBKMNS22]</a> paper estimates that Caulk is 100&times; faster than proving the Merkle tree in Groth16 <a href="#page-47-5">[Gro16]</a> using the Poseidon hash function <a href="#page-47-1">[GKRRS21]</a>&ndash;this is impressive because Groth16 requires circuit-specific setup, while Caulk only requires universal (and updatable) setup.</p>
+
+    <p class="text-gray-300">We feel that it is time to revisit the Merkle tree, as it has various benefits that are important for real-world deployment. Table lookup's requirement of a very long SRS is hard to meet through a setup ceremony, and the table construction also takes a significant amount of time, while the Merkle tree has sublinear overhead and is easily updatable. Our preliminary estimations show that with tree-top caching, the gap between Merkle tree (with TurboPlonk in this note and Anemoi) and Caulk in terms of proving time is narrowed down to 1.5&times; to 2&times;, instead of 100&times;. We expect future improvements in these two directions, SNARK-friendly hash functions in proof systems and table lookup, will be an <em>exciting</em> competition.</p>
+
+    <p class="text-gray-300">An efficient SNARK-friendly hash implementation benefits applications that seek for improving blockchain efficiency: zk-Rollup, zk-EVM, and zk-BatchVerify.</p>
+
+    <p class="text-gray-300">zk-Rollup: a succinct proof for a batch of transactions. We start with the simple example of rolling up a number of coin transfer operations, where a user in layer 2 can transfer coins to another user. This is often done by maintaining and updating a Merkle tree of all the accounts and their associated balances, and a (zero-knowledge) proof shows that all operations on the Merkle tree are legitimate, in that coins are correctly transmitted between the users. This proof is then provided to a smart contract in layer 1 which keeps track of the root hash of the Merkle tree and only approves updates to the root hash when a valid proof is present. This smart contract on layer 1, additionally, facilitates the transfer of tokens between layer 1 and layer 2.</p>
+
+    <p class="text-gray-300">    <img src="_page_7_Figure_0.jpeg" alt="" class="my-4 max-w-full" />
+</p>
+
+    <p class="text-gray-300">Figure 1: System architecture of zk-BatchVerify.</p>
+
+    <p class="text-gray-300">By making the proving cost for such a membership proof in the Merkle tree cheaper, we are able to reduce the overhead to maintain and update the account balances. This improvement makes it easier for layer 2 to support more users and more types of tokens.</p>
+
+    <p class="text-gray-300">zk-EVM: a succinct proof for a virtual random access machine. As an extension to traditional zk-Rollup, in zk-EVM layer 2 rolls up not only simple transactions, but also smart contract executions. Many important EVM applications are memory-heavy, such as Uniswap, ERC-20, and ERC-721, as their logic is generally simple, but they need to work with an ever-growing state. Moreover, the access to this state is often &quot;random access&quot;, in which the EVM may access a few locations in a large memory, and the locations, which depend on the current state and the contract call, cannot be easily predicted without knowing the information in the contract call. That is, a more pressing and inherent challenge for zk-EVM may be about the &quot;random access&quot; part, which has not received enough attention.</p>
+
+    <p class="text-gray-300">For a given smart contract, one can build an application-specific and SNARK-friendly state representation through a Merkle forest, which consists of many Merkle trees. The Merkle trees can be instantiated with a SNARK-friendly collision-resistant hash (CRH) function. This note shows that with the Anemoi hash function as well as a TurboPlonk variant that is tailored for the Anemoi hash function, one can instantiate such a Merkle forest efficiently.</p>
+
+    <p class="text-gray-300">zk-BatchVerify: a substitute for layer-1 on-chain proof verification. We anticipate more layer-1 applications to use zero-knowledge proofs. In more detail, the smart contracts of these layer-1 applications may receive a proof (if privacy is needed, this proof can be zero-knowledge) from the user through the contract call and then run the verifier on this proof. One concern with this design is that proof verification on layer 1 is expensive. According to Matter Labs <a href="#page-49-2">[Zks]</a>, the verification cost of a Groth16 proof can be 300 k, the verification cost of a TurboPlonk proof can be 600 k, and the verification of a STARK proof can be 5000 k. Though the transaction fee in USD is changing, at the time of writing it is at least $50, which is already expensive for many dApps. One solution to solve this problem, we call it zk-BatchVerify, is to verify the proofs on layer 2 and return the verification results to layer 1, as shown in Figure <a href="#page-7-0">1.</a> Since this is a new application, we provide a brief description as follows.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Layer 2: The sequencer on layer 2 maintains a table as shown in Figure <a href="#page-7-0">1.</a> Each row consists of the verifying key hash, the input hash, the proof, and the verification result. If the verification result is true, it means that given a verification key and an input with the corresponding hash values as well as a proof as input, a verifier will accept this proof. Otherwise, the result will be false. Note that layer 2 does not need to be restricted to a particular proof system&mdash;it can support different variants of TurboPlonk, Groth16, and STARK, and it can be curve-agnostic&mdash;it can support BLS12-381, BN254, and other application-specific curves. A SNARK-friendly hash function can be used to hash the verifying key and the input, while the L1 dApp contracts store the verifying key hash as a hard-coded parameter.</li>
+      <li>Merkle tree: Layer 2 then arranges the list of verifying key hashes and the input hashes of those rows that pass the verification on layer 2 to a Merkle tree. There may be more than one hash functions: one SNARK-friendly, one EVM-friendly, and to reduce the overhead of opening this Merkle tree in EVM, one may use the cap hash optimization <a href="#page-49-3">[Wu21]</a>. The root hash (or the cap hash) is then passed to the verifier oracle contract on layer 1.</li>
+      <li>Aggregated proof: A zk-Rollup, or an optimistic zk-Rollup, will be used to convince the layer-1 verifier oracle contract that the Merkle tree consists of only valid verifying key-input hash pairs. The use of SNARK-friendly hash function in the Merkle tree may help with proof generation.</li>
+      <li>Verifier oracle contract: The verifier oracle contract is a smart contract on layer 1, and it supports two operations: (1) it can accept the Merkle root hash (or cap hash) and the corresponding aggregated proof from the sequencer and update its content once the proof is validated and (2) it can respond to contract calls from other L1 contracts asking if a particular pair of verifying key and input (given as hashes) is included in the Merkle tree, given a Merkle tree membership proof. It is useful that the verifier oracle contract can make the Merkle tree root hash (or cap hash) private, so it can enforce that other L1 contracts must make an explicit contract call, and the verifier oracle contract can charge a fee in this process. This provides a revenue model for zk-BatchVerify in addition to charging for each proof verification on layer 2.</li>
+      <li>Other L1 contracts: Other contracts on layer 1 are clients of zk-BatchVerify. They have the hash of the verifying key hardcoded (or, if needed, computed on the fly). To see if a particular input should be accepted, it computes the hash of the input (probably through a different hash function), and makes a contract call to the verifier oracle contract.</li>
+    </ul>
+
+    <p class="text-gray-300">One can see that the SNARK-friendly hash function is being used in various places in the system of zk-BatchVerify. Improvement on the hash function can reduce the overhead of the construction of the Merkle tree as well as the hashing of verifying keys and inputs. For proof systems that use a SNARK-friendly hash function as the Fiat-Shamir sponge, an efficient SNARK-friendly hash function also helps with the cost.</p>
+
+      <h3 id="sec-1.3" class="text-xl font-semibold mt-8">1.3 Applications on security: Zerocash, zk-DID, and zk-Bridge</h3>
+
+    <p class="text-gray-300">An efficient SNARK-friendly hash implementation also benefits various applications that offer security: Zerocash, zk-DID, and zk-Bridge. It is important to realize that efficiency is a crucial limiting factor for the adoption of these applications.</p>
+
+    <p class="text-gray-300">Zerocash. In order to create a privacy token transfer transaction in Zerocash, a user may need to download a structured reference string (SRS, often at the scale of 1 GB for Groth16) and run a prover on the user's device. In many dApps, the prover will be running in WebAssembly (which is the case of a browser prover), the use of WebAssembly leads to a performance penalty of 10&times;, according to an experiment by the Manta Network <a href="#page-48-3">[Man]</a>.</p>
+
+    <p class="text-gray-300">zk-DID. Privacy ensures that a user only discloses minimal information about the DID necessary for the dApp. For example, a user may need to convince a smart contract that the user meets the age requirement, without revealing the age as well as other identity information. This can be done using zk-SNARK. However, the same issue arises that the user needs to generate the proof on the user's device. It is difficult for the user to download a long SRS as well as run an expensive prover. With a SNARK-friendly hash implementation, the SRS can be shorter, and the prover is lighter, which helps the user to generate the zero-knowledge proof used in zk-DID.</p>
+
+    <p class="text-gray-300">zk-Bridge (or more generally, a redundancy bridge). There have been a number of incidents of cross-chain bridges being compromised, and hackers have been able to steal a large number of coins. There are many distinct reasons why a cross-chain bridge was compromised, and a universal solution that can prevent all these attacks and is trustless would be very unlikely to exist. For this reason, a trend in the industry is a new concept called <em>the redundancy bridge</em>, in which we rely on more than one mechanism to secure the bridge, even if these mechanisms have some overlapping. This is closely related to the concept of <em>N-version programming</em> mentioned in the original practical Byzantine fault tolerance (PBFT) paper <a href="#page-47-6">[CL99;</a> <a href="#page-48-4">PBCWC96]</a>. One of the tools that can be used in building a redundancy bridge is zero-knowledge proofs <a href="#page-49-4">[Xie+22]</a>, in the following ways:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Proof of source chain consensus: Traditional cross-chain bridge uses a small committee to vote on the latest block header, and if this small committee is compromised, an attacker can cause the destination chain smart contract to accept a forged block header, which may enable the attacker to withdraw tokens that do not belong to the attacker. To make it harder for an attacker to perform such an attack, as shown in Figure <a href="#page-10-1">2,</a> we have the destination chain smart contract to require a proof of source chain consensus, which works as follows.    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>If the source chain uses <em>proof-of-work (PoW)</em>: the proof of source chain consensus proves that the new block is extended from the previous block, and it has an expected amount of proven work based on the current difficulty. The zero-knowledge proof will be mostly checking an evaluation of SHA256 or Equihash.</li>
+      <li>If the source chain uses <em>proof-of-stake (PoS)</em>: the proof of source chain consensus proves that the validators have endorsed the new block header with their signatures. In this case, the attacker needs to compromise the validators of the source chain in order to convince the target chain smart contract about a forged new block header. The zero-knowledge proof will be verifying ed25519 (or others) ECDSA/EdDSA signatures.</li>
+    </ul></li>
+    </ul>
+
+    <p class="text-gray-300">&bull; Proof of expected contract executions: The use of zero-knowledge proofs is not limited in verifying the source chain consensus (i.e., passing the source chain block header). It can naturally be extended to verify the other operations in a cross-chain bridge, such as the withdrawal process. The zero-knowledge proof shows that the execution plan that is calculated by an independent and separate implementation is valid, and this execution plan will be compared with the execution plan created in the existing cross-chain bridge contract.</p>
+
+    <p class="text-gray-300">The redundancy bridge wants to ensure that an attacker needs <em>not only</em> to pass the existing security mechanisms <em>but also</em> to pass the checks based on zero-knowledge proofs. Only when both of them agree with each other, the bridge will perform the withdrawal. This can be implemented through a <em>shell mechanism</em> <a href="#page-47-7">[Can01]</a>, described as follows.</p>
+
+    <p class="text-gray-300">    <img src="_page_10_Figure_2.jpeg" alt="" class="my-4 max-w-full" />
+</p>
+
+    <p class="text-gray-300">Figure 2: Comparison between an existing cross-chain bridge and a redundancy bridge.</p>
+
+    <p class="text-gray-300">The shell mechanism by Ran Canetti for universal composability (UC) security is a useful model to describe the redundancy design shown in Figure <a href="#page-10-1">2.</a> The contract of the redundancy bridge will be separated into two parts: a body and a shell. The body has restricted access to the blockchain&mdash;it can only propose an execution plan to the shell instead of interacting with the blockchain directly. If the shell agrees with the execution plan, the shell executes this plan. The shell is designed to be minimalistic, so it can be treated as a trusted computing base (TCB). In the redundancy bridge, the shell obtains one execution plan from the existing bridge logic, and another execution plan from an independent implementation with a zero-knowledge proof of its correctness (as well as the source chain consensus). Only when these two plans are equal, the shell will perform the operations.</p>
+
+    <p class="text-gray-300">The use of a SNARK-friendly hash function benefits the redundancy bridge. For the zero-knowledge proof to verify the consensus or the withdrawal, it may require access to a persistent state, which can be realized through a Merkle tree built off a SNARK-friendly hash function.</p>
+
+      <h3 id="sec-1.4" class="text-xl font-semibold mt-8">1.4 Rest of the note</h3>
+
+    <p class="text-gray-300">The rest of the note is organized as follows.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Section <a href="#page-12-0">2</a> provides some necessary background on TurboPlonk as well as the components of the Anemoi hash function.</li>
+      <li>Section <a href="#page-18-0">3</a> provides our starting point, a TurboPlonk implementation used in production, which does not have customized gates for the Anemoi hash function.</li>
+      <li>Section <a href="#page-19-0">4</a> presents a version of the TurboPlonk for the Anemoi hash function, but without any optimization. This is to help readers understand how the customized gates work without involving the tricky and confusing detail about the TurboPlonk optimization.</li>
+      <li>Section <a href="#page-23-0">5</a> discusses how to apply standard optimization techniques of TurboPlonk to the strawman construction. We believe that this section will be instructive, in that such techniques are only implicit in the original Plonk paper <a href="#page-47-8">[GWC19]</a>.</li>
+      <li>Section <a href="#page-29-0">6</a> puts it all together and provides the detailed construction of the indexer, the prover, and the verifier of the final TurboPlonk construction.</li>
+      <li>Section <a href="#page-40-0">7</a> describes a design and implementation of privacy token transfer based on the Zerocash construction, which uses a Merkle tree built off the Anemoi hash function.</li>
+      <li>Section <a href="#page-44-0">8</a> lists the reference materials that we found useful when we were working on this note.</li>
+    </ul>
+
+    <p class="text-gray-300">In this section we provide the necessary background of TurboPlonk, Flystel S-box, Anemoi permutation, Jive mode of operation, and Anemoi variable-length hash.</p>
+
+      <h3 id="sec-2.1" class="text-xl font-semibold mt-8">2.1 TurboPlonk</h3>
+
+    <p class="text-gray-300">TurboPlonk is Plonk <a href="#page-47-8">[GWC19]</a> with customized gates. There are many different ways to construct customized gates, and as a result, TurboPlonk does not mean a specific construction, but a family of proof systems based on Plonk. Readers are encouraged to read the original Plonk paper <a href="#page-47-8">[GWC19]</a>, as we will be keeping it high-level here.</p>
+
+    <p class="text-gray-300">Circuit representation. TurboPlonk expresses the statement to be proven in zero knowledge as a circuit. The circuit consists of gates, and all the gates have the same number of wires. Usually, there is one output wire, and the rest are input wires. Here are two examples:</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>the textbook TurboPlonk <a href="#page-47-8">[GWC19]</a> has 2 input wires and 1 output wire, in total 3 wires</li>
+      <li>the baseline presented in Section <a href="#page-18-0">3</a> has 4 input wires and 1 output wire, in total 5 wires</li>
+    </ul>
+
+    <p class="text-gray-300">Note that the distinction between &quot;input&quot; and &quot;output&quot; wires is indeed artificial, and we expect that it will be deprecated soon, as TurboPlonk does not distinguish them. Customized gates can use these wires in an arbitrary way.</p>
+
+    <p class="text-gray-300">    <img src="_page_12_Figure_8.jpeg" alt="" class="my-4 max-w-full" />
+</p>
+
+    <p class="text-gray-300">Figure 3: TurboPlonk consists of the gate check and the copy check.</p>
+
+    <p class="text-gray-300">TurboPlonk enforces that these gates in the circuit satisfy certain conditions, which consist of a gate check and a copy check, as follows.</p>
+
+    <p class="text-gray-300">&bull; Gate check: Each gate in the circuit has some parameters that are independent of the values on the wires, which uniquely define the gate predicate Gi(w1, w2, w3, w4, wo) &isin; {0, 1} for each gate Gi , as shown in Figure <a href="#page-12-2">3,</a> and here, w1, w2, w3, w4, w<sup>o</sup> are the values on the wires. We call these parameters as &quot;selectors&quot;. Different gates can have very different selectors. We say that the gate check passes if for every gate G<sup>i</sup> in the circuit, it holds that Gi(w1, w2, w3, w4, wo) = 0. A reader may wonder why the equation is written in this way rather than G&prime; i (w1, w2, w3, w4) = wo, which is naturally closer to what a &quot;gate&quot; sounds like. We want to point out that the former definition is indeed more general, as it captures the case when there is more than one possible value for wo. It also captures the case when checking if a specific value of w<sup>o</sup> makes Gi(w1, w2, w3, w4, wo) = 0 is easy, but finding this particular value is expensive (and probably computationally hard).</p>
+
+    <p class="text-gray-300">&bull; Copy check: The statement we are proving in TurboPlonk is unlikely going to be described with a single gate because one gate can only access a limited number of values. It requires a large number of gates. To combine these gates in order to represent the statement that we are proving, we need to connect the wires in these gates. In Figure <a href="#page-12-2">3</a> we use colored lines to represent such connections. There is a lot of flexibility in connecting the wires. It can connect an output wire to an input wire in the same gate or in a different gate. It can connect two input wires in the same gate or in a different gate. It can connect more than two wires. We call such connections &quot;copy&quot; as the values in the connected wires should be exactly the same copy. This allows TurboPlonk to use multiple gates to represent a more complicated statement.</p>
+
+    <p class="text-gray-300">By using the gate check and the copy check, we can represent the statement that we are proving in the circuit, and the statement can be proven if and only if it passes both checks. Now, we describe <em>arithmetization</em>, i.e., how to represent the circuit and express both checks mathematically.</p>
+
+    <p class="text-gray-300">Arithmetization. The arithmetization process expresses the relation as some conditions between these polynomials. TurboPlonk first interpolates the values on the different kinds of wires into polynomials. In our case, we have five polynomials, w1(X), w2(X), w3(X), w4(X), and wo(X). Then, we represent the gate parameters as &quot;selectors&quot; polynomials. There is a lot of customizability in this step, and different TurboPlonk implementations can have different ways to define and use such parameters. In our example in Section <a href="#page-18-0">3,</a> we have a few selector polynomials q1(X), q2(X), q3(X), q4(X), qm1(X), qm2(X), qc(X), qecc(X), and qo(X). Each selector polynomial is interpolated from one kind of the gate parameters in each of the gates, and it allows us to express this part of the gate check as the <em>existence of a polynomial</em> g(X) in the following equation.</p>
+
+    <pre><code class="language-text">q1(X) &middot; w1(X) + q2(X) &middot; w2(X) + q3(X) &middot; w3(X) + q4(X) &middot; w4(X) // linear combination
++ qm1(X) &middot; w1(X) &middot; w2(X) + qm2(X) &middot; w3(X) &middot; w4(X) // multiplication (somewhat)
++ qc(X) // constants
++ PI(X) // inputs
++ qecc(X) &middot; w1(X) &middot; w2(X) &middot; w3(X) &middot; w4(X) &middot; wo(X) // operations on twisted Edwards curves
+&minus; qo(X) &middot; wo(X) // output
+= g(X) &middot; ZH(X)
+</code></pre>
+
+    <p class="text-gray-300">where PI(X) is a separate polynomial that defines the input and ZH(X) is the vanishing polynomial that evaluates to zero in the domain H. The existence of g(X) means that it passes this part of the gate check. There are other parts of the gate check that we will defer to Section <a href="#page-18-0">3.</a></p>
+
+    <p class="text-gray-300">Now that we have discussed the gate check, we turn our attention to the copy check. In TurboPlonk, we express the connections between the wires of different gates (for N gates, there are in total 5N wires) as a permutation &sigma;. If &sigma;(i) = j (i, j &isin; {1, 2, ..., 5N}), it means that the i-th wire and the j-th wire are connected together and therefore they must have the same value. All the connections can be expressed in this way. Then, in a domain H of size N with generator &omega; (which should also be a quadratic residue), we define a polynomial S(X) with the starting point (and the endpoint) as S(1) = 1 and the following recursion.</p>
+
+    <p class="text-gray-300"><span class="math">$S(\\omega^{i}) = S(\\omega^{i-1}) \\cdot \\frac{H(w_{1}(\\omega^{i-1}), \\omega^{i-1}) \\cdot H(w_{2}(\\omega^{i-1}), k_{1} \\cdot \\omega^{i-1}) \\cdot H(w_{3}(\\omega^{i-1}), k_{2} \\cdot \\omega^{i-1}) \\cdot}{H(w_{4}(\\omega^{i-1}), k_{3} \\cdot \\omega^{i-1}) \\cdot H(w_{o}(\\omega^{i-1}), k_{4} \\cdot \\omega^{i-1})}{H(w_{1}(\\omega^{i-1}), \\sigma^{*}(i)) \\cdot H(w_{2}(\\omega^{i-1}), \\sigma^{*}(N+i)) \\cdot H(w_{3}(\\omega^{i-1}), \\sigma^{*}(2N+i)) \\cdot}{H(w_{4}(\\omega^{i-1}), \\sigma^{*}(3N+i)) \\cdot H(w_{o}(\\omega^{i-1}), \\sigma^{*}(4N+i))}</span>$</p>
+
+    <p class="text-gray-300">where H(x, y) = x+&beta;y+&gamma; with random &beta; and &gamma; and works as a universal one-way hash function, k<sup>1</sup> to k<sup>4</sup> are different quadratic non-residue, and &sigma; &lowast; (&middot;) is a special function derived from &sigma;, which outputs the corresponding k(&middot;) &middot; &omega; (&middot;) of the other wire that the corresponding wire connects to.</p>
+
+    <p class="text-gray-300">The requirement that S(1) = 1 implies that S(&omega; <sup>N</sup> ) = 1. If we assume that the hash function here is a black box, then S(&omega; <sup>N</sup> ) means that all those wires that are connected together must have the same value. This concludes the copy check.</p>
+
+    <p class="text-gray-300">Perform both checks in polynomial IOPs. The last step is to find a way to convince the verifier that these polynomials satisfy these conditions without sending the verifier the polynomials. There are two reasons why we do not want to send the polynomials. First, sending the polynomials in their entirety leads to a large proof size. Second, for zero knowledge, the prover cannot reveal the entire polynomial. To solve this issue, in polynomial IOPs, instead of sending the polynomials, we send <em>polynomial commitments</em> <a href="#page-48-5">[KZG10;</a> <a href="#page-48-6">MBKM19;</a> <a href="#page-47-9">Gab19;</a> <a href="#page-47-10">CHMMVW20;</a> <a href="#page-46-8">BCMS20;</a> <a href="#page-48-7">PST13]</a>, which are cryptographic commitments of polynomials that can be opened at an arbitrary point. The verifier checks if the polynomials satisfy the conditions by opening the polynomials on both sides of the equations at a random point and checks if the evaluations on this random point satisfy the equations. If so, then by the Demillo-Lipton-Zippel-Schwartz lemma <a href="#page-47-11">[DL78;</a> <a href="#page-49-5">Zip79;</a> <a href="#page-49-6">Sch80]</a>, the verifier knows that the polynomials satisfy these conditions unless with a negligible probability (as long as the finite field is sufficiently large). This is the standard recipe for proof systems from polynomial IOPs (interactive oracle proofs) <a href="#page-48-8">[RRR16;</a> <a href="#page-46-9">BCS16]</a>, and can be considered the raw version of TurboPlonk. The modern construction of TurboPlonk can be viewed as an optimized version of this raw version. This gives us TurboPlonk, a proof system for such circuits.</p>
+
+    <p class="text-gray-300">&quot;Supergates&quot;: checking multiple equations in one gate. An important observation in Turbo-Plonk is that, in the gate check, the gate function can be very general, in that the gate function can check multiple equations over the polynomial rings. For example, in the proof system that we will present in Section <a href="#page-18-0">3,</a> the gate function also enforces three equations.</p>
+
+    <p class="text-gray-300"><span class="math">$q_b(X)\\cdot w_2(X)\\cdot (w_2(X)-1)=0</span>$
+// boolean testing on the second wire  <span class="math">q_b(X)\\cdot w_3(X)\\cdot (w_3(X)-1)=0</span>  // boolean testing on the third wire  <span class="math">q_b(X)\\cdot w_4(X)\\cdot (w_4(X)-1)=0</span>  // boolean testing on the fourth wire</p>
+
+    <p class="text-gray-300">where qb(X) is a selector that determines if the current gate enforces this boolean condition on its second, third, and fourth wires. In addition to the three equations above, the gate can still enforce the previous equation for linear combination, multiplication, constants, inputs, and others, by appropriately setting the gate parameters.</p>
+
+    <p class="text-gray-300">This observation, which goes beyond the original Plonk paper, suggests a large <em>design space</em> for TurboPlonk: one can use multiple equations, and multiple equations can be &quot;activated&quot; in one gate. We now turn our attention to the different building blocks of the Anemoi hash function. Details of our final TurboPlonk proof will be given in Section <a href="#page-29-0">6.</a></p>
+
+      <h3 id="sec-2.2" class="text-xl font-semibold mt-8">2.2 Flystel S-box: rotating an algebraic butterfly</h3>
+
+    <p class="text-gray-300">A new cryptographic tool presented in the Anemoi paper <a href="#page-46-0">[Bou+22]</a> is the Flystel S-box, which is based on the butterfly structure <a href="#page-48-9">[PUB16;</a> <a href="#page-48-10">LTYW18;</a> <a href="#page-47-12">CP17]</a>. In this note, we assume that the S-box is defined on F<sup>p</sup> where p is a large odd prime.</p>
+
+    <p class="text-gray-300">    <img src="_page_15_Figure_3.jpeg" alt="" class="my-4 max-w-full" />
+</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>(a) Before rotation: open butterfly</li>
+      <li>(b) After rotation: closed butterfly</li>
+    </ul>
+
+    <p class="text-gray-300">Figure 4: The open and closed butterfly in the Flystel S-box.</p>
+
+    <p class="text-gray-300">The Flystel S-box is a function that takes as input (x, y) and outputs (x &prime; , y&prime; ). Figure <a href="#page-15-1">4a</a> shows the workflow of this function, which is equivalent to the following formulas.</p>
+
+    <p class="text-gray-300"><span class="math">$x&#x27; = x - \\beta y^{2} + \\beta (y - (x - \\beta y^{2}))^{2/\\alpha} + g^{-1}</span>$
+<span class="math">$y&#x27; = y - (x - \\beta y^{2})^{1/\\alpha}</span>$</p>
+
+    <p class="text-gray-300">Here, g is a constant. The problem with the two formulas above is that computing (&middot;) <sup>1</sup>/&alpha; is expensive and it is a polynomial of a very high degree. The Flystel S-box solves this issue by observing that, if we <em>rotate</em> the butterfly in the counterclockwise direction, we can have the closed form of the butterfly, as shown in Figure <a href="#page-15-1">4b,</a> which is equivalent to the following formulas.</p>
+
+    <p class="text-gray-300"><span class="math">$x = \\beta \\cdot y^{2} + (y - y&#x27;)^{\\alpha}</span>$</p>
+
+    <p class="text-gray-300"><span class="math">$x&#x27; = \\beta \\cdot (y&#x27;)^{2} + (y - y&#x27;)^{\\alpha} + g^{-1}</span>$</p>
+
+    <p class="text-gray-300">This is, excitingly, a low-degree polynomial (for example, in BLS12-381, &alpha; = 5). In other words, although it is slightly expensive to compute it, it is easy to verify it, given (x, y) as well as (x &prime; , y&prime; ). We can then use this easy-to-verify S-box in a classical substitution-permutation network, and obtain a fixed permutation that can be used to construct a collision-resistant hash function as well as a sponge, which we now describe.</p>
+
+      <h3 id="sec-2.3" class="text-xl font-semibold mt-8">2.3 Anemoi permutation: a substitution-permutation network</h3>
+
+    <p class="text-gray-300">The Anemoi permutation [Bou+22] follows the standard structure of a substitution-permutation network. The permutation has N rounds, and each round consists of four steps: (1) constant addition, (2) MDS matrix, (3) pseudo-Hadamard transform, and (4) S-box. We assume the input to the Anemoi permutation is of size  <span class="math">2\\ell</span> . The four steps can be described as follows.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Constant addition: For input  <span class="math">(\\vec{x}, \\vec{y}) \\in (\\mathbb{F}^{\\ell}, \\mathbb{F}^{\\ell})</span> , the r-th round has some round-specific constants  <span class="math">\\vec{c}_r \\in \\mathbb{F}^{\\ell}</span>  and  <span class="math">\\vec{d}_r \\in \\mathbb{F}^{\\ell}</span> . It outputs  <span class="math">(\\vec{x} + \\vec{c}_r, \\vec{y} + \\vec{d}_r)</span> .</li>
+      <li>MDS matrix: The MDS matrix in the Anemoi permutation is a fixed matrix M of size  <span class="math">\\mathbb{F}^{\\ell \\times \\ell}</span> . For input  <span class="math">(\\vec{x}, \\vec{y}) \\in (\\mathbb{F}^{\\ell}, \\mathbb{F}^{\\ell})</span> , we have  <span class="math">\\vec{u} = M \\cdot \\vec{x}</span>  and  <span class="math">\\vec{v} = M \\cdot \\vec{y}_{\\omega}</span>  where  <span class="math">\\vec{y}_{\\omega}</span>  a shifted version of  <span class="math">\\vec{y}</span>  (in the Amenoi permutation, moving the first element to the end). The Anemoi permutation uses a shift instead of having another MDS matrix for  <span class="math">\\vec{y}</span> .</li>
+      <li><strong>Pseudo-Hadamard transform:</strong> For input  <span class="math">(\\vec{x}, \\vec{y}) \\in (\\mathbb{F}^{\\ell}, \\mathbb{F}^{\\ell})</span> , an additional step is made after the MDS matrix to mix  <span class="math">\\vec{x}</span>  and  <span class="math">\\vec{y}</span> . The mix needs to be invertible. In Anemoi, this is done by having  <span class="math">\\vec{v} := \\vec{y} + \\vec{x}</span>  and  <span class="math">\\vec{u} := \\vec{y} + 2\\vec{x}</span> . It outputs  <span class="math">(\\vec{u}, \\vec{v})</span> .</li>
+      <li>S-box: For input  <span class="math">(\\vec{x}, \\vec{y}) \\in (\\mathbb{F}^{\\ell}, \\mathbb{F}^{\\ell})</span> , and we let the S-box be  <span class="math">S(x, y) \\to (x&#x27;, y&#x27;)</span> , then the output  <span class="math">\\vec{u}</span>  and  <span class="math">\\vec{v}</span>  can be computed by letting (u[i], v[i]) = S(x[i], y[i]) for  <span class="math">i = 1, ..., \\ell</span> .</li>
+    </ul>
+
+    <p class="text-gray-300">The operations listed above will be repeated for N rounds, followed by an additional MDS matrix step in the end. This gives a permutation with input  <span class="math">\\mathbb{F}^{2\\ell}</span>  and output  <span class="math">\\mathbb{F}^{2\\ell}</span> . With such a permutation, we can then construct the collision-resistant hash function and a sponge.</p>
+
+      <h3 id="sec-2.4" class="text-xl font-semibold mt-8">2.4 Jive mode of operation: k-to-1 compression for Merkle trees</h3>
+
+    <p class="text-gray-300">An important observation in [Bou+22] is that in many zk-SNARK applications we use the SNARK-friendly hash function mostly for Merkle trees (or a Merkle forest). However, when people design a SNARK-friendly hash function, we expect it to be cryptographically secure enough so that it can be modeled as a random oracle. This is, however, <em>an overkill</em>. For a Merkle tree to work, all we need is a collision-resistant hash function.</p>
+
+    <p class="text-gray-300">The Anemoi paper [Bou+22] shows a construction of a collision-resistant hash function CRH directly from the permutation  <span class="math">P(\\vec{x}, \\vec{y}) \\to (\\vec{u}, \\vec{v})</span> , as shown below.</p>
+
+    <p class="text-gray-300"><span class="math">$\\mathsf{CRH}(\\vec{x}, \\vec{y}) = P(\\vec{x}, \\vec{y}) + \\sum_{i=1}^{\\ell} (x[i] + y[i] + u[i] + v[i])</span>$</p>
+
+    <p class="text-gray-300">The cost of the collision-resistant hash function is therefore very close to the cost of the permutation itself, and we use it to instantiate the Merkle tree in zk-SNARK.</p>
+
+      <h3 id="sec-2.5" class="text-xl font-semibold mt-8">2.5 Anemoi variable-length hash: a sponge construction</h3>
+
+    <p class="text-gray-300">One can use the Anemoi permutation to construct a sponge. The Anemoi paper [Bou+22] suggests the use of the Hirose variant [Hir18] of the sponge construction. When the field  <span class="math">\\mathbb F</span>  is sufficiently large, for a permutation from  <span class="math">\\mathbb F^{2\\ell}</span>  to  <span class="math">\\mathbb F^{2\\ell}</span> , we can create a sponge with the rate  <span class="math">(2\\ell-1)</span>  and capacity</p>
+
+    <div class="overflow-x-auto my-4">
+      <table class="min-w-full text-sm text-gray-300">
+        <thead>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">1. A variable-length hash function can be made directly from such a sponge construction. We want<br>to note that the sponge construction is somewhat &quot;naturally immune&quot; to length-extension attacks,<br>so we do not need special treatment about the length.</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left"></th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left"></th>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p class="text-gray-300">Our starting point is a regular TurboPlonk implementation. We can specify a TurboPlonk implementation via the polynomial identity relations and the strategy to open the polynomials. We use the standard copy check, which is the same for the majority of the TurboPlonk constructions. Therefore, for the sake of conciseness, we focus on the gate check here. For any element x in a domain H, we have the following in this TurboPlonk system.</p>
+
+    <pre><code class="language-text">q1(X) &middot; w1(X) + q2(X) &middot; w2(X) + q3(X) &middot; w3(X) + q4(X) &middot; w4(X) // linear combination
++ qm1(X) &middot; w1(X) &middot; w2(X) + qm2(X) &middot; w3(X) &middot; w4(X) // multiplication (somewhat)
++ qc(X) // constants
++ PI(X) // inputs
++ qecc(X) &middot; w1(X) &middot; w2(X) &middot; w3(X) &middot; w4(X) &middot; wo(X) // operations on twisted Edwards curves
+= qo(X) &middot; wo(X) // output
+ qb(X) &middot; w2(X) &middot; (w2(X) &minus; 1) = 0 // boolean testing on the second wire
+ qb(X) &middot; w3(X) &middot; (w3(X) &minus; 1) = 0 // boolean testing on the third wire
+ qb(X) &middot; w4(X) &middot; (w4(X) &minus; 1) = 0 // boolean testing on the fourth wire
+</code></pre>
+
+    <p class="text-gray-300">In the linearization step, we open some polynomials at some random points, as shown below.</p>
+
+    <p class="text-gray-300"><span class="math">$q_1(X) \\cdot w_1(\\zeta) + q_2(X) \\cdot w_2(\\zeta) + q_3(X) \\cdot w_3(\\zeta) + q_4(X) \\cdot w_4(\\zeta) \\quad \\text{// linear combination} \\\\ + q_{m1}(X) \\cdot w_1(\\zeta) \\cdot w_2(\\zeta) + q_{m2}(X) \\cdot w_3(\\zeta) \\cdot w_4(\\zeta) \\quad \\text{// multiplication (somewhat)} \\\\ + q_c(X) \\quad \\text{// constants} \\\\ + \\text{PI}(X) \\quad \\text{// inputs} \\\\ + q_{ecc}(X) \\cdot w_1(\\zeta) \\cdot w_2(\\zeta) \\cdot w_3(\\zeta) \\cdot w_4(\\zeta) \\cdot w_o(\\zeta) \\quad \\text{// operations on twisted Edwards curves} \\\\ = q_o(X) \\cdot w_o(\\zeta) \\quad \\text{// output} \\\\ q_b(X) \\cdot w_2(\\zeta) \\cdot (w_2(\\zeta) - 1) = 0 \\quad \\text{// boolean testing on the second wire} \\\\ q_b(X) \\cdot w_3(\\zeta) \\cdot (w_3(\\zeta) - 1) = 0 \\quad \\text{// boolean testing on the fourth wire} \\\\ q_b(X) \\cdot w_4(\\zeta) \\cdot (w_4(\\zeta) - 1) = 0 \\quad \\text{// boolean testing on the fourth wire} \\\\ \\end{cases}</span>$</p>
+
+    <p class="text-gray-300">Binary testing supergates. The last three equations (for boolean testing) are what we discuss in Section <a href="#page-12-0">2</a> as an example of &quot;supergates&quot;. These three equations enforce that, for those gates whose qb(X) &#824;= 0, it requires that the 2nd, 3rd, and 4th (input) wires to be <em>binary</em>, that is, either 0 or 1.</p>
+
+    <p class="text-gray-300">In the rest of the note we focus specifically on the case where &#8467; = 2. We design the customized gates for the Anemoi hash function by representing the equations directly into polynomial identity relations and inlining the linear layer (constant addition and MDS matrix) into these relations. Let us consider the relationship between the state after S-box in a round (x[1], x[2], y[1], y[2]) and the state after S-box in the following round (x &prime; [1], x&prime; [2], y&prime; [1], y&prime; [2]).</p>
+
+    <p class="text-gray-300">Apply the constant addition. Let the r-th round addition constants be (cr[1], cr[2], dr[1], dr[2]). Then, after applying the constant addition, we have:</p>
+
+    <p class="text-gray-300"><span class="math">$\\begin{pmatrix} x[1] \\\\ x[2] \\\\ y[1] \\\\ y[2] \\end{pmatrix} \\Rightarrow \\begin{pmatrix} x[1] + c_r[1] \\\\ x[2] + c_r[2] \\\\ y[1] + d_r[1] \\\\ y[2] + d_r[2] \\end{pmatrix}</span>$</p>
+
+    <p class="text-gray-300">Apply the MDS matrix. The next is to apply the MDS matrix. The Anemoi paper <a href="#page-46-0">[Bou+22]</a> suggests that one can simply use the following matrix for &#8467; = 2 where g is a generator.</p>
+
+    <p class="text-gray-300"><span class="math">$\\begin{bmatrix} 1 &amp; g \\\\ g &amp; g^2 + 1 \\end{bmatrix}</span>$</p>
+
+    <p class="text-gray-300">After applying the MDS matrix as described in the Anemoi permutation, we have:</p>
+
+    <p class="text-gray-300"><span class="math">$\\begin{pmatrix} x[1] + c_r[1] \\\\ x[2] + c_r[2] \\\\ y[1] + d_r[1] \\\\ y[2] + d_r[2] \\end{pmatrix} \\Rightarrow \\begin{pmatrix} x[1] + g \\cdot x[2] + (c_r[1] + g \\cdot c_r[2]) \\\\ g \\cdot x[1] + (g^2 + 1) \\cdot x[2] + (g \\cdot c_r[1] + (g^2 + 1) \\cdot c_r[2]) \\\\ y[2] + g \\cdot y[1] + (d_r[2] + g \\cdot d_r[1]) \\\\ g \\cdot y[2] + (g^2 + 1) \\cdot y[1] + (g \\cdot d_r[2] + (g^2 + 1) \\cdot d_r[1]) \\end{pmatrix}</span>$</p>
+
+    <p class="text-gray-300">Note that &#8407;y needs to be shifted before applying the MDS matrix, as described in Section <a href="#page-12-0">2.</a></p>
+
+    <p class="text-gray-300">Apply the pseudo Hadamard transform. Now we apply the pseudo Hadamard transform, which gives us the following results.</p>
+
+    <p class="text-gray-300"><span class="math">$\\begin{pmatrix} (2x[1] + y[2]) + g \\cdot (2x[2] + y[1]) \\\\ + (2c_r[1] + d_r[2] + g \\cdot (2c_r[2] + d_r[1])) \\\\ g \\cdot (2x[1] + y[2]) + (g^2 + 1) \\cdot (2x[2] + y[1]) \\\\ + (g \\cdot (2c_r[1] + d_r[2]) + (g^2 + 1) \\cdot (2c_r[2] + d_r[1])) \\\\ (x[1] + y[2]) + g \\cdot (x[2] + y[1]) \\\\ + (c_r[1] + d_r[2] + g \\cdot (c_r[2] + d_r[1])) \\\\ g \\cdot (x[1] + y[2]) + (g^2 + 1) \\cdot (x[2] + y[1]) \\\\ + (g \\cdot (c_r[1] + d_r[2]) + (g^2 + 1) \\cdot (c_r[2] + d_r[1])) \\end{pmatrix}</span>$</p>
+
+    <p class="text-gray-300"><strong>Processed round keys.</strong> Now, for convenience, we define &quot;processed round keys&quot; (PRK), which are the parts highlighted above, and they are round-specific.</p>
+
+    <p class="text-gray-300"><span class="math">$\\begin{split} \\operatorname{prk} &amp;\\mathbf{1}_r := 2c_r[1] + d_r[2] + g \\cdot (2c_r[2] + d_r[1]) \\\\ \\operatorname{prk} &amp;\\mathbf{2}_r := g \\cdot (2c_r[1] + d_r[2]) + (g^2 + 1) \\cdot (2c_r[2] + d_r[1]) \\\\ \\operatorname{prk} &amp;\\mathbf{3}_r := c_r[1] + d_r[2] + g \\cdot (c_r[2] + d_r[1]) \\\\ \\operatorname{prk} &amp;\\mathbf{4}_r := g \\cdot (c_r[1] + d_r[2]) + (g^2 + 1) \\cdot (c_r[2] + d_r[1]) \\end{split}</span>$</p>
+
+    <p class="text-gray-300">And therefore, we know that the input to the S-box is as follows.</p>
+
+    <p class="text-gray-300"><span class="math">$\\left( \\begin{array}{l} 2x[1] + y[2] + g \\cdot (2x[2] + y[1]) + \\operatorname{prk1}_r \\\\ g \\cdot (2x[1] + y[2]) + (g^2 + 1) \\cdot (2x[2] + y[1]) + \\operatorname{prk2}_r \\\\ x[1] + y[2] + g \\cdot (x[2] + y[1]) + \\operatorname{prk3}_r \\\\ g \\cdot (x[1] + y[2]) + (g^2 + 1) \\cdot (x[2] + y[1]) + \\operatorname{prk4}_r \\end{array} \\right)</span>$</p>
+
+    <p class="text-gray-300">And the output should be, by definitions:</p>
+
+    <p class="text-gray-300"><span class="math">$\\begin{pmatrix} x&#x27;[1] \\\\ x&#x27;[2] \\\\ y&#x27;[1] \\\\ y&#x27;[2] \\end{pmatrix}</span>$</p>
+
+    <p class="text-gray-300">This gives us four equations based on the closed Flystel butterfly in Section 2, as follows:</p>
+
+    <p class="text-gray-300"><span class="math">$\\begin{split} &amp;(x[1]+y[2]+g\\cdot(x[2]+y[1])+\\operatorname{prk3}_r-y&#x27;[1])^5\\\\ &amp;+g\\cdot(x[1]+y[2]+g\\cdot(x[2]+y[1])+\\operatorname{prk3}_r)^2\\\\ &amp;=(2x[1]+y[2])+g\\cdot(2x[2]+y[1])+\\operatorname{prk1}_r\\\\ &amp;(g\\cdot(x[1]+y[2])+(g^2+1)\\cdot(x[2]+y[1])+\\operatorname{prk4}_r-y&#x27;[2])^5\\\\ &amp;+g\\cdot(g\\cdot y[2]+(g^2+1)\\cdot y[1]+\\operatorname{prk4}_r)^2\\\\ &amp;=g\\cdot(2x[1]+y[2])+(g^2+1)\\cdot(2x[2]+y[1])+\\operatorname{prk2}_r\\\\ &amp;x[1]+y[2]+g\\cdot(x[2]+y[1])+\\operatorname{prk3}_r-y&#x27;[1])^5+g\\cdot y&#x27;[1]^2+g^{-1}\\\\ &amp;=x&#x27;[1]\\\\ &amp;(g\\cdot(x[1]+y[2])+(g^2+1)\\cdot(x[2]+y[1])+\\operatorname{prk4}_r-y&#x27;[2])^5+g\\cdot y&#x27;[2]^2+g^{-1}\\\\ &amp;=x&#x27;[2] \\end{split}</span>$</p>
+
+    <p class="text-gray-300">We replace (x[1], x[2], y[1], y[2]), (x'[1], x'[2], y'[1], y'[2]),  <span class="math">(\\mathsf{prk1}_r, \\mathsf{prk2}_r, \\mathsf{prk3}_r, \\mathsf{prk4}_r)</span>  as follows.</p>
+
+    <p class="text-gray-300"><span class="math">$\\begin{array}{lll} x[1] \\Rightarrow w_1(X) &amp; x&#x27;[1] \\Rightarrow w_1(X\\omega) &amp; \\mathsf{prk1}_r \\Rightarrow q_{prk1}(X) \\\\ x[2] \\Rightarrow w_2(X) &amp; x&#x27;[2] \\Rightarrow w_2(X\\omega) &amp; \\mathsf{prk2}_r \\Rightarrow q_{prk2}(X) \\\\ y[1] \\Rightarrow w_3(X) &amp; y&#x27;[1] \\Rightarrow w_3(X\\omega) &amp; \\mathsf{prk3}_r \\Rightarrow q_{prk3}(X) \\\\ y[2] \\Rightarrow w_4(X) &amp; y&#x27;[2] \\Rightarrow w_4(X\\omega) &amp; \\mathsf{prk4}_r \\Rightarrow q_{prk4}(X) \\end{array}</span>$</p>
+
+    <p class="text-gray-300">We add four selector polynomials qsel1(X), qsel2(X), qsel3(X), and qsel4(X) to configure whether an equation applies to a gate. The new polynomial identity relations are as follows.</p>
+
+    <p class="text-gray-300"><span class="math">$q_{sel1}(X) \\cdot ((w_1(X) + w_4(X) + g \\cdot (w_2(X) + w_3(X)) + q_{prk3}(X) - w_3(X\\omega))^5</span>$</p>
+
+    <p class="text-gray-300"><span class="math">$+ g \\cdot (w_1(X) + w_4(X) + g \\cdot (w_2(X) + w_3(X)) + q_{prk3}(X))^2</span>$</p>
+
+    <p class="text-gray-300"><span class="math">$- (2w_1(X) + w_4(X) + g \\cdot (2w_2(X) + w_3(X)) + q_{prk1}(X))) = 0</span>$</p>
+
+    <p class="text-gray-300">// the first equation for Anemoi/Jive</p>
+
+    <p class="text-gray-300"><span class="math">$q_{sel2}(X) \\cdot ((g \\cdot (w_1(X) + w_4(X)) + (g^2 + 1) \\cdot (w_2(X) + w_3(X)) + q_{prk4}(X) - w_4(X\\omega))^5</span>$</p>
+
+    <p class="text-gray-300"><span class="math">$+ g \\cdot (g \\cdot (w_1(X) + w_4(X)) + (g^2 + 1) \\cdot (w_2(X) + w_3(X)) + q_{prk4}(X))^2</span>$</p>
+
+    <p class="text-gray-300"><span class="math">$- (g \\cdot (2w_1(X) + w_4(X)) + (g^2 + 1) \\cdot (2w_2(X) + w_3(X)) + q_{prk2}(X))) = 0</span>$</p>
+
+    <p class="text-gray-300">// the second equation for Anemoi/Jive</p>
+
+    <p class="text-gray-300"><span class="math">$q_{sel3}(X) \\cdot ((w_1(X) + w_4(X) + g \\cdot (w_2(X) + w_3(X)) + q_{prk3}(X) - w_3(X\\omega))^5 + g \\cdot (w_3(X\\omega))^2 + g^{-1} - w_1(X\\omega)) = 0</span>$</p>
+
+    <p class="text-gray-300">// the third equation for Anemoi/Jive</p>
+
+    <p class="text-gray-300"><span class="math">$q_{sel4}(X) \\cdot ((g \\cdot (w_1(X) + w_4(X)) + (g^2 + 1) \\cdot (w_2(X) + w_3(X)) + q_{prk4}(X) - w_4(X\\omega))^5 + g \\cdot (w_4(X\\omega))^2 + g^{-1} - w_2(X\\omega)) = 0</span>$</p>
+
+    <p class="text-gray-300">// the fourth equation for Anemoi/Jive</p>
+
+    <p class="text-gray-300">A strategy to open the points for linearization is as follows. This strategy opens all the polynomials</p>
+
+    <p class="text-gray-300">that we have discussed, and it is suboptimal. Later we will discuss how to optimize this strategy.</p>
+
+    <p class="text-gray-300"><span class="math">$q_{sel1}(\\zeta) \\cdot ((w_1(\\zeta) + w_4(\\zeta) + g \\cdot (w_2(\\zeta) + w_3(\\zeta)) + q_{prk3}(\\zeta) - w_3(\\zeta\\omega))^5</span>$</p>
+
+    <p class="text-gray-300"><span class="math">$+ g \\cdot (w_1(\\zeta) + w_4(\\zeta) + g \\cdot (w_2(\\zeta) + w_3(\\zeta)) + q_{prk3}(\\zeta))^2</span>$</p>
+
+    <p class="text-gray-300"><span class="math">$- (2 \\cdot w_1(\\zeta) + w_4(\\zeta) + g \\cdot (2 \\cdot w_2(\\zeta) + w_3(\\zeta)) + q_{prk1}(\\zeta))) = 0</span>$</p>
+
+    <p class="text-gray-300">// the first equation for Anemoi/Jive</p>
+
+    <p class="text-gray-300"><span class="math">$q_{sel2}(\\zeta) \\cdot ((g \\cdot (w_1(\\zeta) + w_4(\\zeta)) + (g^2 + 1) \\cdot (w_2(\\zeta) + w_3(\\zeta)) + q_{prk4}(\\zeta) - w_4(\\zeta\\omega))^5</span>$</p>
+
+    <p class="text-gray-300"><span class="math">$+ g \\cdot (g \\cdot (w_1(\\zeta) + w_4(\\zeta)) + (g^2 + 1) \\cdot (w_2(\\zeta) + w_3(\\zeta)) + q_{prk4}(\\zeta))^2</span>$</p>
+
+    <p class="text-gray-300"><span class="math">$- (g \\cdot (2 \\cdot w_1(\\zeta) + w_4(\\zeta)) + (g^2 + 1) \\cdot (2 \\cdot w_2(\\zeta) + w_3(\\zeta)) + q_{prk2}(\\zeta))) = 0</span>$</p>
+
+    <p class="text-gray-300">// the second equation for Anemoi/Jive</p>
+
+    <p class="text-gray-300"><span class="math">$q_{sel3}(\\zeta) \\cdot ((w_1(\\zeta) + w_4(\\zeta) + g \\cdot (w_2(\\zeta) + w_3(\\zeta)) + q_{prk3}(\\zeta) - w_3(\\zeta\\omega))^5 + g \\cdot (w_3(\\zeta\\omega))^2 + g^{-1} - w_1(\\zeta\\omega)) = 0</span>$</p>
+
+    <p class="text-gray-300">// the third equation for Anemoi/Jive</p>
+
+    <p class="text-gray-300"><span class="math">$\\begin{aligned} q_{sel4}(\\zeta) &amp; \\cdot ((g \\cdot (w_1(\\zeta) + w_4(\\zeta)) + (g^2 + 1) \\cdot (w_2(\\zeta) + w_3(\\zeta)) + q_{prk4}(\\zeta) - w_4(\\zeta\\omega))^5 \\\\ &amp; + g \\cdot (w_4(\\zeta\\omega))^2 + g^{-1} - w_2(\\zeta\\omega)) = 0 \\end{aligned}</span>$</p>
+
+    <p class="text-gray-300">// the fourth equation for Anemoi/Jive</p>
+
+    <p class="text-gray-300">Cost analysis. In later sections we will use some optimization tricks on this initial attempt, so it would be useful for us to see what can be improved.</p>
+
+    <p class="text-gray-300">The initial attempt has the following cost, which we describe as 8 + 12.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>additional indexing for four selector polynomials qsel1(X), qsel2(X), qsel3(X), qsel4(X) and four processed key polynomials qprk1(X), qprk2(X), qprk3(X), qprk4(X)</li>
+      <li>additional opening for four selector polynomials qsel1(&zeta;), qsel2(&zeta;), qsel3(&zeta;), qsel4(&zeta;), four processed key polynomials qprk1(&zeta;), qprk2(&zeta;), qprk3(&zeta;), qprk4(&zeta;), and four witness polynomials on input wires w1(&zeta;&omega;), w2(&zeta;&omega;), w3(&zeta;&omega;), w4(&zeta;&omega;)</li>
+    </ul>
+
+    <p class="text-gray-300">There are other side effects. For example, the use of the shifting trick in w4(&zeta;&omega;) requires us to increase the hiding bound of <sup>w</sup>4(X), or more precisely, <sup>w</sup>f<sup>4</sup>(X). We consider such costs to be minor, and will only be focusing on costs relevant to multiscalar multiplication (MSM) in this note.</p>
+
+    <p class="text-gray-300">In this section we discuss optimization to the construction in Section <a href="#page-19-0">4.</a> The optimization presented here is standard and not really novel because these ideas have been used in production. We choose to present the optimization step-by-step as we believe that it is instructive.</p>
+
+      <h3 id="sec-5.1" class="text-xl font-semibold mt-8">5.1 Use processed round key polynomials as selectors</h3>
+
+    <p class="text-gray-300">For a gate that the technique is applied to, the processed round key polynomials, with an overwhelming probability, are nonzeros. For a gate that is not related to the Anemoi hash, we can choose whatever we want as the evaluation for qprk1(X) to qprk4(X) at the location of this gate. We proceed by making qprk1(X) to qprk4(X) zeroes in locations not related to the Anemoi hash.</p>
+
+    <p class="text-gray-300">Now, we can replace the four selector polynomials qsel1(X), qsel2(X), qsel3(X), qsel4(X) with any of the processed round key polynomials. We choose to only use qprk3(X) for all four equations. This gives us a TurboPlonk that is defined with the following polynomials. We highlight the difference using an orange box.</p>
+
+    <p class="text-gray-300"><span class="math">$q_{prk3}(X) \\cdot ((w_1(X) + w_4(X) + g \\cdot (w_2(X) + w_3(X)) + q_{prk3}(X) - w_3(X\\omega))^5</span>$</p>
+
+    <p class="text-gray-300"><span class="math">$+ g \\cdot (w_1(X) + w_4(X) + g \\cdot (w_2(X) + w_3(X)) + q_{prk3}(X))^2</span>$</p>
+
+    <p class="text-gray-300"><span class="math">$- (2w_1(X) + w_4(X) + g \\cdot (2w_2(X) + w_3(X)) + q_{prk1}(X))) = 0</span>$</p>
+
+    <p class="text-gray-300">// the first equation for Anemoi/Jive</p>
+
+    <p class="text-gray-300"><span class="math">$q_{prk3}(X) \\cdot ((g \\cdot (w_1(X) + w_4(X)) + (g^2 + 1) \\cdot (w_2(X) + w_3(X)) + q_{prk4}(X) - w_4(X\\omega))^5</span>$</p>
+
+    <p class="text-gray-300"><span class="math">$+ g \\cdot (g \\cdot (w_1(X) + w_4(X)) + (g^2 + 1) \\cdot (w_2(X) + w_3(X)) + q_{prk4}(X))^2</span>$</p>
+
+    <p class="text-gray-300"><span class="math">$- (g \\cdot (2w_1(X) + w_4(X)) + (g^2 + 1) \\cdot (2w_2(X) + w_3(X)) + q_{prk2}(X))) = 0</span>$</p>
+
+    <p class="text-gray-300">// the second equation for Anemoi/Jive</p>
+
+    <p class="text-gray-300"><span class="math">$q_{prk3}(X) \\cdot ((w_1(X) + w_4(X) + g \\cdot (w_2(X) + w_3(X)) + q_{prk3}(X) - w_3(X\\omega))^5 + g \\cdot (w_3(X\\omega))^2 + g^{-1} - w_1(X\\omega)) = 0</span>$</p>
+
+    <p class="text-gray-300">// the third equation for Anemoi/Jive</p>
+
+    <p class="text-gray-300"><span class="math">$q_{prk3}(X) \\cdot ((g \\cdot (w_1(X) + w_4(X)) + (g^2 + 1) \\cdot (w_2(X) + w_3(X)) + q_{prk4}(X) - w_4(X\\omega))^5 + g \\cdot (w_4(X\\omega))^2 + g^{-1} - w_2(X\\omega)) = 0</span>$</p>
+
+    <p class="text-gray-300">// the fourth equation for Anemoi/Jive</p>
+
+    <p class="text-gray-300">The corresponding opening strategy is as follows.</p>
+
+    <p class="text-gray-300"><span class="math">$\\begin{aligned} q_{prk3}(\\zeta) &amp;\\cdot ((w_1(\\zeta) + w_4(\\zeta) + g \\cdot (w_2(\\zeta) + w_3(\\zeta)) + q_{prk3}(\\zeta) - w_3(\\zeta\\omega))^5 \\\\ &amp;+ g \\cdot (w_1(\\zeta) + w_4(\\zeta) + g \\cdot (w_2(\\zeta) + w_3(\\zeta)) + q_{prk3}(\\zeta))^2 \\\\ &amp;- (2 \\cdot w_1(\\zeta) + w_4(\\zeta) + g \\cdot (2 \\cdot w_2(\\zeta) + w_3(\\zeta)) + q_{prk1}(\\zeta))) = 0 \\end{aligned}</span>$</p>
+
+    <p class="text-gray-300">// the first equation for Anemoi/Jive</p>
+
+    <p class="text-gray-300">$$\\begin{array}{l}
+q_{prk3}(\\zeta) \\cdot ((g \\cdot (w_1(\\zeta) + w_4(\\zeta)) + (g^2 + 1) \\cdot (w_2(\\zeta) + w_3(\\zeta)) + q_{prk4}(\\zeta) - w_4(\\zeta\\omega))^5 \\</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>g \\cdot (g \\cdot (w_1(\\zeta) + w_4(\\zeta)) + (g^2 + 1) \\cdot (w_2(\\zeta) + w_3(\\zeta)) + q_{prk4}(\\zeta))^2 \\</li>
+    </ul>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>(g \\cdot (2 \\cdot w_1(\\zeta) + w_4(\\zeta)) + (g^2 + 1) \\cdot (2 \\cdot w_2(\\zeta) + w_3(\\zeta)) + q_{prk2}(\\zeta))) = 0
+\\end{array}$$</li>
+    </ul>
+
+    <p class="text-gray-300">// the second equation for Anemoi/Jive</p>
+
+    <p class="text-gray-300">$$\\frac{q_{prk3}(\\zeta)}{q_{prk3}(\\zeta)} \\cdot ((w_1(\\zeta) + w_4(\\zeta) + g \\cdot (w_2(\\zeta) + w_3(\\zeta)) + q_{prk3}(\\zeta) - w_3(\\zeta\\omega))^5</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>g \\cdot (w_3(\\zeta\\omega))^2 + g^{-1} - w_1(\\zeta\\omega)) = 0$$</li>
+    </ul>
+
+    <p class="text-gray-300">// the third equation for Anemoi/Jive</p>
+
+    <p class="text-gray-300"><span class="math">$\\frac{q_{prk3}(\\zeta)}{(g \\cdot (w_1(\\zeta) + w_4(\\zeta)) + (g^2 + 1) \\cdot (w_2(\\zeta) + w_3(\\zeta)) + q_{prk4}(\\zeta) - w_4(\\zeta\\omega))^5} + g \\cdot (w_4(\\zeta\\omega))^2 + g^{-1} - w_2(\\zeta\\omega)) = 0</span>$</p>
+
+    <p class="text-gray-300">// the fourth equation for Anemoi/Jive</p>
+
+    <p class="text-gray-300">Cost analysis. The construction in Section <a href="#page-23-1">5.1</a> has the following cost, which we call 4 + 8.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>additional indexing for four processed key polynomials qprk1(X), qprk2(X), qprk3(X), qprk4(X)</li>
+      <li>additional opening for four processed key polynomials qprk1(&zeta;), qprk2(&zeta;), qprk3(&zeta;), qprk4(&zeta;), and four witness polynomials on input wires w1(&zeta;&omega;), w2(&zeta;&omega;), w3(&zeta;&omega;), w4(&zeta;&omega;)</li>
+    </ul>
+
+      <h3 id="sec-5.2" class="text-xl font-semibold mt-8">5.2 Skip unnecessary opening during linearization</h3>
+
+    <p class="text-gray-300">Note that our construction has an overlinearization issue. In TurboPlonk, we actually do not need to open all the polynomials in the equation because verifiers can use their corresponding polynomial commitments, which are linearly homomorphic, to check a polynomial commitment equation. An example is the boolean testing constraint, in which qb(X) was never opened. This also explains what readers can see from many TurboPlonk implementations where the indexer polynomials are generally never opened, and the verifier uses their commitments for a zero test/identity test.</p>
+
+    <p class="text-gray-300"><span class="math">$q_b(X) \\cdot w_2(\\zeta) \\cdot (w_2(\\zeta) - 1) = 0</span>$</p>
+
+    <p class="text-gray-300">For linearization, we need to lower the degree of the quotient polynomial to n by opening these polynomials at specific points and replacing the polynomials with their corresponding evaluations. It is important to first identify what polynomials must be opened.</p>
+
+    <p class="text-gray-300">Looking at the equations in Section <a href="#page-23-1">5.1,</a> we can see that two of the processed round key polynomials, qprk3(X) and qprk4(X), are inside a bracket of (&middot;) 5 . The verifier cannot perform the identity test over these commitments because the commitments are, although homomorphic, only linearly homomorphic. As a result, we first know that qprk3(X) and qprk4(X) must be opened.</p>
+
+    <p class="text-gray-300">Then, we look at the other two processed round key polynomials, qprk1(X) and qprk2(X). They are a linear component of the equation, and therefore, we can use the same treatment as other indexer polynomials. This gives us the following opening strategy, while the quotient polynomial remains unchanged.</p>
+
+    <p class="text-gray-300"><span class="math">$q_{prk3}(\\zeta) \\cdot ((w_1(\\zeta) + w_4(\\zeta) + g \\cdot (w_2(\\zeta) + w_3(\\zeta)) + q_{prk3}(\\zeta) - w_3(\\zeta\\omega))^5</span>$</p>
+
+    <p class="text-gray-300"><span class="math">$+ g \\cdot (w_1(\\zeta) + w_4(\\zeta) + g \\cdot (w_2(\\zeta) + w_3(\\zeta)) + q_{prk3}(\\zeta))^2</span>$</p>
+
+    <p class="text-gray-300"><span class="math">$- (2 \\cdot w_1(\\zeta) + w_4(\\zeta) + g \\cdot (2 \\cdot w_2(\\zeta) + w_3(\\zeta)) + q_{prk1}(X))) = 0</span>$</p>
+
+    <p class="text-gray-300">// the first equation for Anemoi/Jive</p>
+
+    <p class="text-gray-300"><span class="math">$\\begin{aligned} q_{prk3}(\\zeta) &amp; \\cdot ((g \\cdot (w_1(\\zeta) + w_4(\\zeta)) + (g^2 + 1) \\cdot (w_2(\\zeta) + w_3(\\zeta)) + q_{prk4}(\\zeta) - w_4(\\zeta\\omega))^5 \\\\ &amp; + g \\cdot (g \\cdot (w_1(\\zeta) + w_4(\\zeta)) + (g^2 + 1) \\cdot (w_2(\\zeta) + w_3(\\zeta)) + q_{prk4}(\\zeta))^2 \\\\ &amp; - (g \\cdot (2 \\cdot w_1(\\zeta) + w_4(\\zeta)) + (g^2 + 1) \\cdot (2 \\cdot w_2(\\zeta) + w_3(\\zeta)) + q_{prk2}(X))) = 0 \\end{aligned}</span>$</p>
+
+    <p class="text-gray-300">// the second equation for Anemoi/Jive</p>
+
+    <p class="text-gray-300"><span class="math">$q_{prk3}(\\zeta) \\cdot ((w_1(\\zeta) + w_4(\\zeta) + g \\cdot (w_2(\\zeta) + w_3(\\zeta)) + q_{prk3}(\\zeta) - w_3(\\zeta\\omega))^5 + g \\cdot (w_3(\\zeta\\omega))^2 + g^{-1} - w_1(\\zeta\\omega)) = 0</span>$</p>
+
+    <p class="text-gray-300">// the third equation for Anemoi/Jive</p>
+
+    <p class="text-gray-300"><span class="math">$q_{prk3}(\\zeta) \\cdot ((g \\cdot (w_1(\\zeta) + w_4(\\zeta)) + (g^2 + 1) \\cdot (w_2(\\zeta) + w_3(\\zeta)) + q_{prk4}(\\zeta) - w_4(\\zeta\\omega))^5 + g \\cdot (w_4(\\zeta\\omega))^2 + g^{-1} - w_2(\\zeta\\omega)) = 0</span>$</p>
+
+    <p class="text-gray-300">// the fourth equation for Anemoi/Jive</p>
+
+    <p class="text-gray-300">Cost analysis. The construction in Section <a href="#page-24-0">5.2</a> has the following cost, which we call 4 + 6.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>additional indexing for four processed key polynomials qprk1(X), qprk2(X), qprk3(X), qprk4(X)</li>
+      <li>additional opening for two of the processed key polynomials qprk3(&zeta;), qprk4(&zeta;), and four witness polynomials on input wires w1(&zeta;&omega;), w2(&zeta;&omega;), w3(&zeta;&omega;), w4(&zeta;&omega;)</li>
+    </ul>
+
+      <h3 id="sec-5.3" class="text-xl font-semibold mt-8">5.3 Connect the output wire to the next gate</h3>
+
+    <p class="text-gray-300">We now describe the last optimization that we apply to give us 4 + 5. Looking at the equations shown in Section <a href="#page-23-1">5.1</a> and Section <a href="#page-24-0">5.2,</a> we have used w1(&zeta;), w2(&zeta;), w3(&zeta;), w4(&zeta;), w1(&zeta;&omega;), w2(&zeta;&omega;), w3(&zeta;&omega;), w4(&zeta;&omega;), but we have never used the output wire wo(&zeta;). To further optimize the TurboPlonk instantiation, we want to further reduce the number of polynomials being opened, since this can reduce the proof size.</p>
+
+    <p class="text-gray-300">To do that, we want to substitute w4(&zeta;&omega;) with wo(&zeta;). We can also use wo(&zeta;) to replace the other three w1(&zeta;&omega;), w2(&zeta;&omega;), w3(&zeta;&omega;), here, without loss of generality, we choose to replace w4(&zeta;&omega;).</p>
+
+    <p class="text-gray-300">Simply replacing w4(&zeta;&omega;) with wo(&zeta;) is not sufficient, because we also need to enforce that the output is correctly connected to the fourth input wire of the next gate. This is, in fact, very easy to achieve, by using the copy check. With the assumption that the copy check has been done, we have the following equations.</p>
+
+    <p class="text-gray-300"><span class="math">$q_{prk3}(X) \\cdot ((w_1(X) + w_4(X) + g \\cdot (w_2(X) + w_3(X)) + q_{prk3}(X) - w_3(X\\omega))^5</span>$</p>
+
+    <p class="text-gray-300"><span class="math">$+ g \\cdot (w_1(X) + w_4(X) + g \\cdot (w_2(X) + w_3(X)) + q_{prk3}(X))^2</span>$</p>
+
+    <p class="text-gray-300"><span class="math">$- (2w_1(X) + w_4(X) + g \\cdot (2w_2(X) + w_3(X)) + q_{prk1}(X))) = 0</span>$</p>
+
+    <p class="text-gray-300">// the first equation for Anemoi/Jive</p>
+
+    <p class="text-gray-300"><span class="math">$q_{prk3}(X) \\cdot ((g \\cdot (w_1(X) + w_4(X)) + (g^2 + 1) \\cdot (w_2(X) + w_3(X)) + q_{prk4}(X) - w_0(X))^5 + g \\cdot (g \\cdot (w_1(X) + w_4(X)) + (g^2 + 1) \\cdot (w_2(X) + w_3(X)) + q_{prk4}(X))^2 - (g \\cdot (2w_1(X) + w_4(X)) + (g^2 + 1) \\cdot (2w_2(X) + w_3(X)) + q_{prk2}(X))) = 0</span>$</p>
+
+    <p class="text-gray-300">// the second equation for Anemoi/Jive</p>
+
+    <p class="text-gray-300"><span class="math">$q_{prk3}(X) \\cdot ((w_1(X) + w_4(X) + g \\cdot (w_2(X) + w_3(X)) + q_{prk3}(X) - w_3(X\\omega))^5 + g \\cdot (w_3(X\\omega))^2 + g^{-1} - w_1(X\\omega)) = 0</span>$</p>
+
+    <p class="text-gray-300">// the third equation for Anemoi/Jive</p>
+
+    <p class="text-gray-300"><span class="math">$q_{prk3}(X) \\cdot ((g \\cdot (w_1(X) + w_4(X)) + (g^2 + 1) \\cdot (w_2(X) + w_3(X)) + q_{prk4}(X) - w_o(X))^5 + g \\cdot (w_o(X))^2 + g^{-1} - w_2(X\\omega)) = 0</span>$</p>
+
+    <p class="text-gray-300">// the fourth equation for Anemoi/Jive</p>
+
+    <p class="text-gray-300">The opening strategy is similar. Note that wo(&zeta;) is already opened for the other part of TurboPlonk, so this optimization allows us to reduce the number of openings by one. In addition, w4(X), or more precisely, <sup>w</sup>f<sup>4</sup>(X), does not need a higher hiding degree.</p>
+
+    <p class="text-gray-300"><span class="math">$q_{prk3}(\\zeta) \\cdot ((w_1(\\zeta) + w_4(\\zeta) + g \\cdot (w_2(\\zeta) + w_3(\\zeta)) + q_{prk3}(\\zeta) - w_3(\\zeta\\omega))^5</span>$</p>
+
+    <p class="text-gray-300"><span class="math">$+ g \\cdot (w_1(\\zeta) + w_4(\\zeta) + g \\cdot (w_2(\\zeta) + w_3(\\zeta)) + q_{prk3}(\\zeta))^2</span>$</p>
+
+    <p class="text-gray-300"><span class="math">$- (2 \\cdot w_1(\\zeta) + w_4(\\zeta) + g \\cdot (2 \\cdot w_2(\\zeta) + w_3(\\zeta)) + q_{prk1}(X))) = 0</span>$</p>
+
+    <p class="text-gray-300">// the first equation for Anemoi/Jive</p>
+
+    <p class="text-gray-300"><span class="math">$\\begin{aligned} q_{prk3}(\\zeta) &amp;\\cdot ((g \\cdot (w_1(\\zeta) + w_4(\\zeta)) + (g^2 + 1) \\cdot (w_2(\\zeta) + w_3(\\zeta)) + q_{prk4}(\\zeta) - w_o(\\zeta))^5 \\\\ &amp;+ g \\cdot (g \\cdot (w_1(\\zeta) + w_4(\\zeta)) + (g^2 + 1) \\cdot (w_2(\\zeta) + w_3(\\zeta)) + q_{prk4}(\\zeta))^2 \\\\ &amp;- (g \\cdot (2 \\cdot w_1(\\zeta) + w_4(\\zeta)) + (g^2 + 1) \\cdot (2 \\cdot w_2(\\zeta) + w_3(\\zeta)) + q_{prk2}(X))) = 0 \\end{aligned}</span>$</p>
+
+    <p class="text-gray-300">// the second equation for Anemoi/Jive</p>
+
+    <p class="text-gray-300"><span class="math">$|q_{prk3}(\\zeta)| \\cdot (|w_1(\\zeta)| + |w_4(\\zeta)| + g \\cdot (|w_2(\\zeta)| + |w_3(\\zeta)|) + |q_{prk3}(\\zeta)| - |w_3(\\zeta\\omega)|^5 + g \\cdot (|w_3(\\zeta\\omega)|)^2 + g^{-1} - |w_1(\\zeta\\omega)| = 0</span>$</p>
+
+    <p class="text-gray-300">// the third equation for Anemoi/Jive</p>
+
+    <p class="text-gray-300"><span class="math">$q_{prk3}(\\zeta) \\cdot ((g \\cdot (w_1(\\zeta) + w_4(\\zeta)) + (g^2 + 1) \\cdot (w_2(\\zeta) + w_3(\\zeta)) + q_{prk4}(\\zeta) - w_o(\\zeta))^5 + g \\cdot (w_o(\\zeta))^2 + g^{-1} - w_2(\\zeta\\omega)) = 0</span>$</p>
+
+    <p class="text-gray-300">// the fourth equation for Anemoi/Jive</p>
+
+    <p class="text-gray-300">Cost analysis. The construction in Section <a href="#page-25-0">5.3</a> has the following cost, which we call 4 + 5.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>additional indexing for four processed key polynomials qprk1(X), qprk2(X), qprk3(X), qprk4(X)</li>
+      <li>additional opening for two of the processed key polynomials qprk3(&zeta;), qprk4(&zeta;), and three of the witness polynomials on input wires w1(&zeta;&omega;), w2(&zeta;&omega;), w3(&zeta;&omega;).</li>
+    </ul>
+
+      <h3 id="sec-5.4" class="text-xl font-semibold mt-8">5.4 Other unexplored optimization</h3>
+
+    <p class="text-gray-300">We did not explore more optimization techniques, as we consider the rest to be too aggressive and can have some side effects.</p>
+
+    <p class="text-gray-300">Explicitly structured round keys. One observation is that the round keys are generated from an open butterfly structure in Anemoi. There can be other ways to generate the round keys, and may be able to reduce the number of processed round key polynomials. We did not explore such directions because even if we can reduce the number of processed round key polynomials, it seems to only benefit the verifier, in that the verifier may do one or two fewer scalar multiplication.</p>
+
+    <p class="text-gray-300">More than five wires. A construction with more wires may be able to reduce the number of gates further. We choose to stick to five because, assuming that the number of gates (after padding) is N = 2<sup>k</sup> , then the FFT space for computing the quotient polynomial is of size larger than 5N but smaller than 6N (for sufficiently large N), and for BLS12-381, the curve that we are using, we can</p>
+
+    <p class="text-gray-300">use a mixed-radix FFT of size 2 k+1 &middot; 3. When we increase the number of wires further, we may have to use an FFT space of size 2 <sup>k</sup>+3, i.e., 8N. Not only does the FFT cost go up, but we also need to commit more polynomials, as the quotient polynomial needs to be split into more size-N polynomials and we need to commit more witness polynomials. We think implementing the Anemoi hash function over a different curve or with different numbers of wires to be an interesting work on its own.</p>
+
+    <p class="text-gray-300">Curve where &alpha; = 3 is permissible. Let the constraint field prime be q. If 3 &#8740; (q&minus;1), then we can use &alpha; = 3 in the S-box. This is beneficial because, assuming that we do not have other gates that cause the quotient polynomial to go to very high degrees (which is not the case in Section <a href="#page-18-0">3,</a> as we have the customized gate for twisted Edwards curves, and we also have five wires), having &alpha; = 3 allows us to have a quotient polynomial of lower degrees. This not only reduces the cost of FFT but also reduces the cost of MSM and the proof size. The increase in the number of rounds necessary for security appears to be minor. Unfortunately, for BLS12-381, &alpha; = 3 is not permissible since 3 | (q &minus; 1).</p>
+
+    <p class="text-gray-300">Using a higher &alpha; in the S-box. Another direction is to use &alpha; that is larger in the hope that it can reduce the number of rounds. This seems to not be worthwhile in general, as the reduction to the number of rounds is minor, but it increases the work of FFT and MSM and increases the proof size, unless there are already other high-degree customized gates, or there are more wires.</p>
+
+    <p class="text-gray-300">For completeness we present the final protocol in this section. The polynomial identity relations are as follows.</p>
+
+    <p class="text-gray-300"><span class="math">$q_{1}(X) \\cdot w_{1}(X) + q_{2}(X) \\cdot w_{2}(X) + q_{3}(X) \\cdot w_{3}(X) + q_{4}(X) \\cdot w_{4}(X) \\quad \\text{</span>#$ linear combination} \\ + q_{m1}(X) \\cdot w_{1}(X) \\cdot w_{2}(X) + q_{m2}(X) \\cdot w_{3}(X) \\cdot w_{4}(X) \\quad \\text{<span class="math">\\#</span> multiplication (somewhat)} \\ + q_{c}(X) \\quad \\text{<span class="math">\\#</span> constants} \\ + \\text{PI}(X) \\quad \\text{<span class="math">\\#</span> inputs} \\ + q_{ecc}(X) \\cdot w_{1}(X) \\cdot w_{2}(X) \\cdot w_{3}(X) \\cdot w_{4}(X) \\cdot w_{o}(X) \\quad \\text{<span class="math">\\#</span> operations on twisted Edwards curves} \\ = q_{o}(X) \\cdot w_{o}(X) \\quad \\text{<span class="math">\\#</span> output} \\ q_{b}(X) \\cdot w_{2}(X) \\cdot (w_{2}(X) - 1) = 0 \\quad \\text{<span class="math">\\#</span> boolean testing on the second wire} \\ q_{b}(X) \\cdot w_{3}(X) \\cdot (w_{3}(X) - 1) = 0 \\quad \\text{<span class="math">\\#</span> boolean testing on the fourth wire} \\ q_{b}(X) \\cdot w_{4}(X) \\cdot (w_{4}(X) - 1) = 0 \\quad \\text{<span class="math">\\#</span> boolean testing on the fourth wire} \\ q_{prk3}(X) \\cdot ((w_{1}(X) + w_{4}(X) + g \\cdot (w_{2}(X) + w_{3}(X)) + q_{prk3}(X) - w_{3}(X\\omega))^{5} \\ + g \\cdot (w_{1}(X) + w_{4}(X) + g \\cdot (w_{2}(X) + w_{3}(X)) + q_{prk3}(X))^{2} \\ - (2w_{1}(X) + w_{4}(X) + g \\cdot (2w_{2}(X) + w_{3}(X)) + q_{prk1}(X))) = 0 \\ \\text{<span class="math">\\#</span> the first equation for Anemoi/Jive} \\ q_{prk3}(X) \\cdot ((g \\cdot (w_{1}(X) + w_{4}(X)) + (g^{2} + 1) \\cdot (w_{2}(X) + w_{3}(X)) + q_{prk4}(X) - w_{o}(X))^{5} \\ + g \\cdot (g \\cdot (w_{1}(X) + w_{4}(X)) + (g^{2} + 1) \\cdot (w_{2}(X) + w_{3}(X)) + q_{prk4}(X)^{2} \\ - (g \\cdot (2w_{1}(X) + w_{4}(X)) + (g^{2} + 1) \\cdot (2w_{2}(X) + w_{3}(X)) + q_{prk2}(X))) = 0 \\ \\end{cases}$$</p>
+
+    <p class="text-gray-300"><span class="math">$q_{prk3}(X) \\cdot ((g \\cdot (w_1(X) + w_4(X)) + (g^2 + 1) \\cdot (w_2(X) + w_3(X)) + q_{prk4}(X) - w_o(X))^{\\circ} + g \\cdot (g \\cdot (w_1(X) + w_4(X)) + (g^2 + 1) \\cdot (w_2(X) + w_3(X)) + q_{prk4}(X))^{2} - (g \\cdot (2w_1(X) + w_4(X)) + (g^2 + 1) \\cdot (2w_2(X) + w_3(X)) + q_{prk2}(X))) = 0</span>$</p>
+
+    <p class="text-gray-300">// the second equation for Anemoi/Jive</p>
+
+    <p class="text-gray-300"><span class="math">$q_{prk3}(X) \\cdot ((w_1(X) + w_4(X) + g \\cdot (w_2(X) + w_3(X)) + q_{prk3}(X) - w_3(X\\omega))^5 + g \\cdot (w_3(X\\omega))^2 + g^{-1} - w_1(X\\omega)) = 0</span>$</p>
+
+    <p class="text-gray-300">// the third equation for Anemoi/Jive</p>
+
+    <p class="text-gray-300"><span class="math">$q_{prk3}(X) \\cdot ((g \\cdot (w_1(X) + w_4(X)) + (g^2 + 1) \\cdot (w_2(X) + w_3(X)) + q_{prk4}(X) - w_o(X))^5 + g \\cdot (w_o(X))^2 + g^{-1} - w_2(X\\omega)) = 0</span>$</p>
+
+    <p class="text-gray-300">// the fourth equation for Anemoi/Jive</p>
+
+    <p class="text-gray-300">We now describe the indexer, the prover, and the verifier.</p>
+
+      <h3 id="sec-6.1" class="text-xl font-semibold mt-8">6.1 Indexer</h3>
+
+    <p class="text-gray-300">The indexer in TurboPlonk computes the commitments and openings for indexer polynomials, which consist of the following:</p>
+
+    <p class="text-gray-300">&bull; The fourteen selector polynomials:</p>
+
+    <p class="text-gray-300"><span class="math">$q_1(X), q_2(X), q_3(X), q_4(X), q_o(X), q_{m1}(X), q_{m2}(X), q_c(X), q_{ecc}(X), q_b(X), q_{prk1}(X), q_{prk2}(X), q_{prk3}(X), q_{prk4}(X)</span>$</p>
+
+    <p class="text-gray-300">&bull; The five permutation polynomials:</p>
+
+    <p class="text-gray-300"><span class="math">$S_{\\sigma 1}(X), S_{\\sigma 2}(X), S_{\\sigma 3}(X), S_{\\sigma 4}(X), S_{\\sigma o}(X)</span>$</p>
+
+    <p class="text-gray-300">First of all, let the number of gates be n, the constraint system should have indicated a permutation &sigma; : [5n] &rarr; [5n], which fulfills the following requirements.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Let w(X) be the concatenated witness polynomial of w1(X), w2(X), w3(X), w4(X), wo(X). The concatenation is over the evaluation representation, not the coefficient representation.</li>
+      <li>The evaluation of w(X) remains unchanged after applying &sigma; as a permutation over the evaluation of w(X) itself.</li>
+    </ul>
+
+    <p class="text-gray-300">Now, given four different quadratic non-residues (k1, k2, k3, k4) and a generator &omega; with order n, we define a mapping as follows.</p>
+
+    <p class="text-gray-300"><span class="math">$\\sigma_{0}(i) = \\begin{cases} \\omega^{i-1} &amp; i \\in \\{1, 2, ..., n\\} \\\\ k_{1} \\cdot \\omega^{i-1-n} &amp; i \\in \\{n+1, n+2, ..., 2n\\} \\\\ k_{2} \\cdot \\omega^{i-1-2n} &amp; i \\in \\{2n+1, 2n+2, ..., 3n\\} \\\\ k_{3} \\cdot \\omega^{i-1-3n} &amp; i \\in \\{3n+1, 3n+2, ..., 4n\\} \\\\ k_{4} \\cdot \\omega^{i-1-4n} &amp; i \\in \\{4n+1, 4n+2, ..., 5n\\} \\end{cases}</span>$</p>
+
+    <p class="text-gray-300">where i = 1, 2, ..., n. And we apply this mapping to each element in &sigma;, obtaining a map &sigma; &lowast; (x) : [5n] &rarr; F. We split this map into five permutation polynomials, as follows.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>S&sigma;1(X)'s evaluation on 1, &omega;, ..., &omega;<sup>n</sup>&minus;<sup>1</sup> equals &sigma; &lowast; (x)'s evaluation on 1, 2, ..., n.</li>
+      <li>S&sigma;2(X)'s evaluation on 1, &omega;, ..., &omega;<sup>n</sup>&minus;<sup>1</sup> equals &sigma; &lowast; (x)'s evaluation on n + 1, n + 2, ..., 2n.</li>
+      <li>S&sigma;3(X)'s evaluation on 1, &omega;, ..., &omega;<sup>n</sup>&minus;<sup>1</sup> equals &sigma; &lowast; (x)'s evaluation on 2n + 1, 2n + 2, ..., 3n.</li>
+      <li>S&sigma;4(X)'s evaluation on 1, &omega;, ..., &omega;<sup>n</sup>&minus;<sup>1</sup> equals &sigma; &lowast; (x)'s evaluation on 3n + 1, 3n + 2, ..., 4n.</li>
+      <li>S&sigma;o(X)'s evaluation on 1, &omega;, ..., &omega;<sup>n</sup>&minus;<sup>1</sup> equals &sigma; &lowast; (x)'s evaluation on 4n + 1, 4n + 2, ..., 5n.</li>
+    </ul>
+
+    <p class="text-gray-300">Step 1: commit all polynomials. We first commit all these indexer polynomials. The commitments are included in the verifier parameters. We then perform some precomputation: we prepare a representation of these polynomials that are easy to be use later for proving, by doing a coset FFT over them. The prepared polynomials are included in the prover parameters.</p>
+
+    <p class="text-gray-300">Step 2: precompute the two helper polynomials. Compute the following polynomial defined on a domain H of size n:</p>
+
+    <p class="text-gray-300"><span class="math">$L_1(X) = \\frac{X^n - 1}{X - 1}</span>$</p>
+
+    <p class="text-gray-300">and store its coset FFT representation. This is done by first observing that L1(X) evaluates to n on X = 1 and 0 otherwise in H. We can perform an inverse FFT to convert it back to the coefficient representation (which indeed looks nontrivial). Then, we perform a coset FFT, which gives us the prepared version of this polynomial.</p>
+
+    <p class="text-gray-300">Another polynomial we precompute is the vanishing polynomial of domain H of size n:</p>
+
+    <p class="text-gray-300"><span class="math">$Z_H(X) = X^n - 1</span>$</p>
+
+    <p class="text-gray-300">and we want to store its coset FFT representation. This is done by a coset FFT over the coefficient representation above. The representations for the two helper polynomials are included in the prover parameters.</p>
+
+    <p class="text-gray-300">Step 3: compute the Lagrange interpolation constants. Recall that the Lagrange interpolation from (1, y0),(&omega;, y1), ...,(&omega; n , yn) where &omega; is the generator for a domain H, into to a polynomial f(X) of degree n is as follows:</p>
+
+    <p class="text-gray-300"><span class="math">$f(X) = \\sum_{j=0}^{n} y_j \\left( \\prod_{\\substack{0 \\le m \\le n \\\\ m \\ne j}} \\frac{X - \\omega^m}{\\omega^j - \\omega^m} \\right)</span>$</p>
+
+    <p class="text-gray-300">We can rewrite it as follows.</p>
+
+    <p class="text-gray-300"><span class="math">$f(X) = \\sum_{j=0}^{n} y_j \\left( \\prod_{\\substack{0 \\le m \\le n \\\\ m \\ne j}} \\frac{X - \\omega^m}{\\omega^j - \\omega^m} \\right)</span>$
+<span class="math">$= \\left( \\prod_{0 \\le m \\le n} (X - \\omega^m) \\right) \\left( \\sum_{j=0}^{n} \\frac{y_j}{X - \\omega^j} \\left( \\prod_{\\substack{0 \\le m \\le n \\\\ m \\ne j}} \\frac{1}{\\omega^j - \\omega^m} \\right) \\right)</span>$</p>
+
+    <p class="text-gray-300">Now, precompute c<sup>j</sup> for every j &isin; {0, 1, ..., n}.</p>
+
+    <p class="text-gray-300"><span class="math">$c_j = \\prod_{\\substack{0 \\le m \\le n \\\\ m \\ne j}} \\frac{1}{\\omega^j - \\omega^m}</span>$</p>
+
+    <p class="text-gray-300">This allows us to simplify f(X) as follows.</p>
+
+    <p class="text-gray-300"><span class="math">$f(X) = \\left(\\prod_{0 \\le m \\le n} (X - \\omega^m)\\right) \\sum_{j=0}^n \\frac{c_j \\cdot y_j}{X - \\omega^j}</span>$
+<span class="math">$= (X^n - 1) \\sum_{j=0}^n \\frac{c_j \\cdot y_j}{X - \\omega^j}</span>$</p>
+
+    <p class="text-gray-300">These constants c<sup>j</sup> (j &isin; {0, 1, ..., n}) are included in the verifier parameters. We conclude the description of the indexer.</p>
+
+      <h3 id="sec-6.2" class="text-xl font-semibold mt-8">6.2 Prover</h3>
+
+    <p class="text-gray-300">The prover in TurboPlonk uses the prover parameters from the indexer and a complete constraint system with all the gate values and copy check information ready. It follows the following steps.</p>
+
+    <p class="text-gray-300">Step 1: assemble public inputs. The prover parameters have indicated which witness value indeed belongs to public inputs. The prover finds those witness values and stores them in a vector of length  <span class="math">n_{in}</span> , which is the number of field elements in public inputs. This is to enable us to calculate the state of the verifier.</p>
+
+    <p class="text-gray-300"><strong>Step 2: instantiate the verifier.</strong> For the purpose of the Fiat-Shamir transform, we create a cryptographic sponge, which will absorb the verifier's state as well as the messages that the verifier would receive from the prover in an interactive proof protocol.</p>
+
+    <p class="text-gray-300">After we create the sponge, we put the following two things into the sponge: (1) verifier parameters and (2) public inputs.</p>
+
+    <p class="text-gray-300">Step 3: commit witness polynomials with hiding. Given the witness polynomials  <span class="math">w_1(X)</span> ,  <span class="math">w_2(X), w_3(X), w_4(X), w_o(X)</span> , we add a random blinding polynomial over each of them. The prover samples  <span class="math">b_1, b_2, b_3, ..., b_{13} \\in \\mathbb{F}</span>  and computes blinded witness polynomials.</p>
+
+    <p class="text-gray-300"><span class="math">$\\widetilde{w_1}(X) = w_1(X) + Z_H(X) \\cdot (b_1 \\cdot X^2 + b_2 \\cdot X + b_3)</span>$</p>
+
+    <p class="text-gray-300"><span class="math">$\\widetilde{w_2}(X) = w_2(X) + Z_H(X) \\cdot (b_4 \\cdot X^2 + b_5 \\cdot X + b_6)</span>$</p>
+
+    <p class="text-gray-300"><span class="math">$\\widetilde{w_3}(X) = w_3(X) + Z_H(X) \\cdot (b_7 \\cdot X^2 + b_8 \\cdot X + b_9)</span>$</p>
+
+    <p class="text-gray-300"><span class="math">$\\widetilde{w_4}(X) = w_4(X) + Z_H(X) \\cdot (b_{10} \\cdot X + b_{11})</span>$</p>
+
+    <p class="text-gray-300"><span class="math">$\\widetilde{w_o}(X) = w_o(X) + Z_H(X) \\cdot (b_{12} \\cdot X + b_{13})</span>$</p>
+
+    <p class="text-gray-300">We commit each of the polynomial above and put the polynomial commitments  <span class="math">cm_{w1}, cm_{w2}, cm_{w3}, cm_{w4}, cm_{wo} \\in \\mathbb{G}_1</span>  into the sponge.</p>
+
+    <p class="text-gray-300">Step 4: build the sigma polynomial, for wiring. The prover squeezes out two challenges  <span class="math">\\beta, \\gamma \\in \\mathbb{F}</span>  from the sponge. We now need to build the sigma polynomial. It helps for us to first compute:</p>
+
+    <p class="text-gray-300"><span class="math">$S_{i} := \\frac{(w_{i} + \\beta \\cdot \\omega^{i-1} + \\gamma) \\cdot (w_{n+i} + \\beta \\cdot k_{1} \\cdot \\omega^{i-1} + \\gamma) \\cdot (w_{2n+i} + \\beta \\cdot k_{2} \\cdot \\omega^{i-1} + \\gamma)}{(w_{3n+i} + \\beta \\cdot k_{3} \\cdot \\omega^{i-1} + \\gamma) \\cdot (w_{4n+i} + \\beta \\cdot k_{4} \\cdot \\omega^{i-1} + \\gamma)}{(w_{i} + \\sigma^{*}(i) \\cdot \\beta + \\gamma) \\cdot (w_{n+i} + \\sigma^{*}(n+i) \\cdot \\beta + \\gamma) \\cdot (w_{2n+i} + \\sigma^{*}(2n+i) \\cdot \\beta + \\gamma)} \\cdot (w_{3n+i} + \\sigma^{*}(3n+i) \\cdot \\beta + \\gamma) \\cdot (w_{4n+i} + \\sigma^{*}(4n+i) \\cdot \\beta + \\gamma)}</span>$</p>
+
+    <p class="text-gray-300">We can then define the permutation polynomial z(X) with the following evaluations:</p>
+
+    <p class="text-gray-300"><span class="math">$z(\\omega^{i-1}) = \\begin{cases} 1 &amp; i = 1\\\\ \\prod_{j=1}^{i-1} S_i &amp; i = 2, 3, ..., n \\end{cases}</span>$</p>
+
+    <p class="text-gray-300">Step 5: commit the sigma polynomial, with hiding. The prover first samples  <span class="math">b_{14}, b_{15}, b_{16} \\in \\mathbb{F}</span>  and apply them as blinding factors to the polynomial z(X).</p>
+
+    <p class="text-gray-300"><span class="math">$\\widetilde{z}(X) = z(X) + Z_H(X) \\cdot (b_{14}X^2 + b_{15}X + b_{16})</span>$</p>
+
+    <p class="text-gray-300">We commit this polynomial and put the polynomial commitment  <span class="math">cm_z \\in \\mathbb{G}_1</span>  into the sponge.</p>
+
+    <p class="text-gray-300">Step 6: compute the quotient polynomial. The prover squeezes out a challenge  <span class="math">\\alpha</span>  from the sponge. This is used to construct the following polynomial.</p>
+
+    <p class="text-gray-300"><span class="math">$t(X) = t_{sat}(X) \\cdot \\frac{1}{Z_H(X)} + t_{\\sigma 1}(X) \\cdot \\frac{\\alpha}{Z_H(X)} - t_{\\sigma 2}(X) \\cdot \\frac{\\alpha}{Z_H(X)} + t_{\\sigma 3}(X) \\cdot \\frac{\\alpha^2}{Z_H(X)} + t_{b1}(X) \\cdot \\frac{\\alpha^3}{Z_H(X)} + t_{b2}(X) \\cdot \\frac{\\alpha^4}{Z_H(X)} + t_{b3}(X) \\cdot \\frac{\\alpha^5}{Z_H(X)} - t_{h1}(X) \\cdot \\frac{\\alpha^6}{Z_H(X)} - t_{h2}(X) \\cdot \\frac{\\alpha^7}{Z_H(X)} - t_{h3}(X) \\cdot \\frac{\\alpha^8}{Z_H(X)} - t_{h4}(X) \\cdot \\frac{\\alpha^9}{Z_H(X)}</span>$</p>
+
+    <p class="text-gray-300">where</p>
+
+    <p class="text-gray-300"><span class="math">$\\begin{split} t_{sat}(X) &amp;= q_1(X) \\cdot \\widetilde{w_1}(X) + q_2(X) \\cdot \\widetilde{w_2}(X) + q_3(X) \\cdot \\widetilde{w_3}(X) + q_4(X) \\cdot \\widetilde{w_4}(X) \\\\ &amp;+ q_{m1}(X) \\cdot \\widetilde{w_1}(X) \\cdot \\widetilde{w_2}(X) + q_{m2}(X) \\cdot \\widetilde{w_3}(X) \\cdot \\widetilde{w_4}(X) + q_c(X) + \\mathsf{PI}(X) \\\\ &amp;+ q_{ecc}(X) \\cdot \\widetilde{w_1}(X) \\cdot \\widetilde{w_2}(X) \\cdot \\widetilde{w_3}(X) \\cdot \\widetilde{w_4}(X) \\cdot \\widetilde{w_o}(X) \\\\ &amp;- q_o(X) \\cdot \\widetilde{w_o}(X) \\end{split}</span>$</p>
+
+    <p class="text-gray-300">and</p>
+
+    <p class="text-gray-300"><span class="math">$t_{\\sigma_1}(X) = (\\widetilde{w_1}(X) + \\beta \\cdot X + \\gamma) \\cdot (\\widetilde{w_2}(X) + \\beta \\cdot k_1 \\cdot X + \\gamma) \\cdot (\\widetilde{w_3}(X) + \\beta \\cdot k_2 \\cdot X + \\gamma) \\cdot (\\widetilde{w_4}(X) + \\beta \\cdot k_3 \\cdot X + \\gamma) \\cdot (\\widetilde{w_o}(X) + \\beta \\cdot k_4 \\cdot X + \\gamma) \\cdot \\widetilde{z}(X)</span>$</p>
+
+    <p class="text-gray-300">and</p>
+
+    <p class="text-gray-300"><span class="math">$\\begin{split} t_{\\sigma 2}(X) = &amp; (\\widetilde{w_1}(X) + \\beta \\cdot S_{\\sigma 1}(X) + \\gamma) \\cdot (\\widetilde{w_2}(X) + \\beta \\cdot S_{\\sigma 2}(X) + \\gamma) \\cdot (\\widetilde{w_3}(X) + \\beta \\cdot S_{\\sigma 3}(X) + \\gamma) \\\\ &amp; \\cdot (\\widetilde{w_4}(X) + \\beta \\cdot S_{\\sigma 4}(X) + \\gamma) \\cdot (\\widetilde{w_o}(X) + \\beta \\cdot S_{\\sigma o}(X) + \\gamma) \\\\ &amp; \\cdot \\widetilde{z}(X\\omega) \\quad \\text{// the shifting trick} \\end{split}</span>$</p>
+
+    <p class="text-gray-300">and</p>
+
+    <p class="text-gray-300"><span class="math">$t_{\\sigma 3}(X) = (\\widetilde{z}(X) - 1) \\cdot L_1(X)</span>$</p>
+
+    <p class="text-gray-300">and</p>
+
+    <p class="text-gray-300"><span class="math">$t_{b1}(X) = q_b(X) \\cdot \\widetilde{w}_2(X) \\cdot (1 - \\widetilde{w}_2(X))</span>$</p>
+
+    <p class="text-gray-300"><span class="math">$t_{b2}(X) = q_b(X) \\cdot \\widetilde{w}_3(X) \\cdot (1 - \\widetilde{w}_3(X))</span>$</p>
+
+    <p class="text-gray-300"><span class="math">$t_{b3}(X) = q_b(X) \\cdot \\widetilde{w}_4(X) \\cdot (1 - \\widetilde{w}_4(X))</span>$</p>
+
+    <p class="text-gray-300">and</p>
+
+    <p class="text-gray-300"><span class="math">$t_{h1}(X) = q_{prk3}(X)</span>$</p>
+
+    <p class="text-gray-300"><span class="math">$\\cdot \\begin{pmatrix} (\\widetilde{w_1}(X) + \\widetilde{w_4}(X) + g \\cdot (\\widetilde{w_2}(X) + \\widetilde{w_3}(X)) + q_{prk3}(X) - \\widetilde{w_3}(X\\omega))^5 \\\\ + g \\cdot (\\widetilde{w_1}(X) + \\widetilde{w_4}(X) + g \\cdot (\\widetilde{w_2}(X) + \\widetilde{w_3}(X)) + q_{prk3}(X))^2 \\\\ - (2 \\cdot \\widetilde{w_1}(X) + \\widetilde{w_4}(X) + g \\cdot (2 \\cdot \\widetilde{w_2}(X) + \\widetilde{w_3}(X)) + q_{prk1}(X)) \\end{pmatrix}</span>$</p>
+
+    <p class="text-gray-300"><span class="math">$t_{h2}(X) = q_{prk3}(X)</span>$</p>
+
+    <p class="text-gray-300"><span class="math">$\\cdot \\begin{pmatrix} (g \\cdot (\\widetilde{w_1}(X) + \\widetilde{w_4}(X)) + (g^2 + 1) \\cdot (\\widetilde{w_2}(X) + \\widetilde{w_3}(X)) + q_{prk4}(X) - \\widetilde{w_o}(X))^5 \\\\ + g \\cdot (g \\cdot (\\widetilde{w_1}(X) + \\widetilde{w_4}(X)) + (g^2 + 1) \\cdot (\\widetilde{w_2}(X) + \\widetilde{w_3}(X)) + q_{prk4}(X))^2 \\\\ - (g \\cdot (2 \\cdot \\widetilde{w_1}(X) + \\widetilde{w_4}(X)) + (g^2 + 1) \\cdot (2 \\cdot \\widetilde{w_2}(X) + \\widetilde{w_3}(X)) + q_{prk2}(X)) \\end{pmatrix}</span>$</p>
+
+    <p class="text-gray-300"><span class="math">$t_{h3}(X) = q_{prk3}(X)</span>$</p>
+
+    <p class="text-gray-300"><span class="math">$\\cdot \\begin{pmatrix} (\\widetilde{w_1}(X) + \\widetilde{w_4}(X) + g \\cdot (\\widetilde{w_2}(X) + \\widetilde{w_3}(X)) + q_{prk3}(X) - \\widetilde{w_3}(X\\omega))^5 \\\\ + g \\cdot (\\widetilde{w_3}(X\\omega))^2 + g^{-1} - \\widetilde{w_1}(X\\omega) \\end{pmatrix}</span>$</p>
+
+    <p class="text-gray-300"><span class="math">$t_{h4}(X) = q_{prk3}(X)</span>$</p>
+
+    <p class="text-gray-300"><span class="math">$\\cdot \\begin{pmatrix} (g \\cdot (\\widetilde{w_1}(X) + \\widetilde{w_4}(X)) + (g^2 + 1) \\cdot (\\widetilde{w_2}(X) + \\widetilde{w_3}(X)) + q_{prk4}(X) - \\widetilde{w_o}(X))^5 \\\\ + g \\cdot (\\widetilde{w_2}(X))^2 + g^{-1} - \\widetilde{w_1}(X\\omega) \\end{pmatrix}</span>$</p>
+
+    <p class="text-gray-300">Then, in the coefficient representations, we split the polynomial into five parts:  <span class="math">t_1(X)</span> ,  <span class="math">t_2(X)</span> ,  <span class="math">t_3(X)</span> ,  <span class="math">t_4(X)</span> , and  <span class="math">t_5(X)</span> , where each polynomial has degree n+2. This is because t(X) is expected to have degree  <span class="math">3 \\cdot (n+2) + 2 \\cdot (n+1) + (n+2) - n = 5n + 10</span> , and  <span class="math">5n + 10 = 5 \\cdot (n+2)</span> .</p>
+
+    <p class="text-gray-300">Step 7: commit the split quotient polynomials, without hiding. We commit all these polynomials and put the commitments  <span class="math">cm_{t1}</span> ,  <span class="math">cm_{t2}</span> ,  <span class="math">cm_{t3}</span> ,  <span class="math">cm_{t4}</span> , and  <span class="math">cm_{t5}</span>  into the sponge.</p>
+
+    <p class="text-gray-300">Step 8: open the polynomials at a random point. The prover squeezes a random challenge  <span class="math">\\zeta \\in \\mathbb{F}</span>  and compute the following opening evaluations:</p>
+
+    <p class="text-gray-300"><span class="math">$\\widetilde{w}_{1}(\\zeta), \\widetilde{w}_{2}(\\zeta), \\widetilde{w}_{3}(\\zeta), \\widetilde{w}_{4}(\\zeta), \\widetilde{w}_{o}(\\zeta), S_{\\sigma 1}(\\zeta), S_{\\sigma 2}(\\zeta), S_{\\sigma 3}(\\zeta), S_{\\sigma 4}(\\zeta), q_{prk3}(\\zeta), q_{prk4}(\\zeta), \\widetilde{w}_{1}(\\zeta\\omega), \\widetilde{w}_{2}(\\zeta\\omega), \\widetilde{w}_{3}(\\zeta\\omega), \\widetilde{z}(\\zeta\\omega)</span>$</p>
+
+    <p class="text-gray-300">And we remind the readers that some evaluations are over  <span class="math">\\zeta \\omega</span>  instead of  <span class="math">\\zeta</span> . This is common in entry product arguments. The prover puts these, which are elements in  <span class="math">\\mathbb{F}</span> , into the sponge.</p>
+
+    <p class="text-gray-300">Step 9: compute the linearization polynomial. The linearization polynomial is, at a high level, to replace  <span class="math">\\widetilde{w_1}(X)</span> ,  <span class="math">\\widetilde{w_2}(X)</span> ,  <span class="math">\\widetilde{w_3}(X)</span> ,  <span class="math">\\widetilde{w_1}(X\\omega)</span> ,  <span class="math">\\widetilde{w_2}(X\\omega)</span> ,  <span class="math">\\widetilde{w_3}(X\\omega)</span> ,  <span class="math">\\widetilde{w_4}(X)</span> ,  <span class="math">\\widetilde{w_o}(X)</span> ,  <span class="math">S_{\\sigma 1}(X)</span> ,  <span class="math">S_{\\sigma 2}(X)</span> ,  <span class="math">S_{\\sigma 3}(X)</span> ,  <span class="math">S_{\\sigma 4}(X)</span> ,  <span class="math">q_{prk3}(X)</span> ,  <span class="math">q_{prk4}(X)</span> , and  <span class="math">\\widetilde{z}(X\\omega)</span>  with the evaluations over that random point. More specifically, r(X) reads as follows. Note that the locations of  <span class="math">Z_H(X)</span>  are different now. The constant terms of r(X) are removed here.</p>
+
+    <p class="text-gray-300"><span class="math">$\\begin{split} r(X) &amp;= r_{\\mathsf{sat}}(X) + r_1(X) \\cdot \\alpha - r_2(X) \\cdot \\alpha + r_3(X) \\cdot \\alpha^2 + r_4(X) \\cdot \\alpha^3 \\\\ &amp;+ r_5(X) \\cdot \\alpha^4 + r_6(X) \\cdot \\alpha^5 + r_7(X) \\cdot \\alpha^6 + r_8(X) \\cdot \\alpha^7 \\\\ &amp;- Z_H(\\zeta)(t_1(X) + \\zeta^{n+2} \\cdot t_2(X) + \\zeta^{2(n+2)} \\cdot t_3(X) + \\zeta^{3(n+2)} \\cdot t_4(X) + \\zeta^{4(n+2)} \\cdot t_5(X)) \\end{split}</span>$</p>
+
+    <p class="text-gray-300">where</p>
+
+    <p class="text-gray-300"><span class="math">$\\begin{split} r_{\\mathsf{sat}}(X) &amp;= \\widetilde{w_1}(\\zeta) \\cdot q_1(X) + \\widetilde{w_2}(\\zeta) \\cdot q_2(X) + \\widetilde{w_3}(\\zeta) \\cdot q_3(X) + \\widetilde{w_4}(\\zeta) \\cdot q_4(X) \\\\ &amp;+ \\widetilde{w_1}(\\zeta) \\cdot \\widetilde{w_2}(\\zeta) \\cdot q_{m1}(X) + \\widetilde{w_3}(\\zeta) \\cdot \\widetilde{w_4}(\\zeta) \\cdot q_{m2}(X) + q_c(X) \\\\ &amp;+ q_{ecc}(X) \\cdot \\widetilde{w_1}(\\zeta) \\cdot \\widetilde{w_2}(\\zeta) \\cdot \\widetilde{w_3}(\\zeta) \\cdot \\widetilde{w_4}(\\zeta) \\cdot \\widetilde{w_o}(\\zeta) \\\\ &amp;- \\widetilde{w_o}(\\zeta) \\cdot q_o(X) \\end{split}</span>$</p>
+
+    <p class="text-gray-300">and</p>
+
+    <p class="text-gray-300"><span class="math">$r_1(X) = (\\widetilde{w_1}(\\zeta) + \\beta \\cdot \\zeta + \\gamma) \\cdot (\\widetilde{w_2}(\\zeta) + \\beta \\cdot k_1 \\cdot \\zeta + \\gamma) \\cdot (\\widetilde{w_3}(\\zeta) + \\beta \\cdot k_2 \\cdot \\zeta + \\gamma) \\cdot (\\widetilde{w_4}(\\zeta) + \\beta \\cdot k_3 \\cdot \\zeta + \\gamma) \\cdot (\\widetilde{w_o}(\\zeta) + \\beta \\cdot k_4 \\cdot \\zeta + \\gamma) \\cdot \\widetilde{z}(X)</span>$</p>
+
+    <p class="text-gray-300">and</p>
+
+    <p class="text-gray-300"><span class="math">$r_2(X) = (\\widetilde{w_1}(\\zeta) + \\beta S_{\\sigma 1}(\\zeta) + \\gamma) \\cdot (\\widetilde{w_2}(\\zeta) + \\beta S_{\\sigma 2}(\\zeta) + \\gamma) \\cdot (\\widetilde{w_3}(\\zeta) + \\beta S_{\\sigma 3}(\\zeta) + \\gamma) \\cdot (\\widetilde{w_4}(\\zeta) + \\beta S_{\\sigma 4}(\\zeta) + \\gamma) \\cdot \\beta \\cdot S_{\\sigma o}(X) \\cdot \\widetilde{z}(\\zeta\\omega)</span>$</p>
+
+    <p class="text-gray-300">Note that  <span class="math">S_{\\sigma o}(X)</span>  is not being replaced by its evaluation, and</p>
+
+    <p class="text-gray-300"><span class="math">$r_3(X) = \\widetilde{z}(X) \\cdot L_1(\\zeta)</span>$</p>
+
+    <p class="text-gray-300">and</p>
+
+    <p class="text-gray-300"><span class="math">$r_4(X) = q_b(X) \\cdot \\widetilde{w_2}(\\zeta) \\cdot (\\widetilde{w_2}(\\zeta) - 1)</span>$</p>
+
+    <p class="text-gray-300"><span class="math">$r_5(X) = q_b(X) \\cdot \\widetilde{w_3}(\\zeta) \\cdot (\\widetilde{w_3}(\\zeta) - 1)</span>$</p>
+
+    <p class="text-gray-300"><span class="math">$r_6(X) = q_b(X) \\cdot \\widetilde{w_4}(\\zeta) \\cdot (\\widetilde{w_4}(\\zeta) - 1)</span>$</p>
+
+    <p class="text-gray-300">and</p>
+
+    <p class="text-gray-300"><span class="math">$r_7(X) = q_{prk3}(\\zeta) \\cdot q_{prk1}(X)</span>$</p>
+
+    <p class="text-gray-300"><span class="math">$r_8(X) = q_{prk3}(\\zeta) \\cdot q_{prk2}(X)</span>$</p>
+
+    <p class="text-gray-300">Now we have the linearization polynomial. Although this polynomial is not linear, its degree is down from  <span class="math">\\approx 5n</span>  to  <span class="math">\\approx n</span> , and one can see that the polynomial collapses to a small one.</p>
+
+    <p class="text-gray-300">We note that the evaluation of r(X) at point  <span class="math">\\zeta</span>  is as follows. The prover does not need to include</p>
+
+    <p class="text-gray-300">this number in the proof because it can be computed by the verifier.</p>
+
+    <p class="text-gray-300"><span class="math">$\\begin{split} r(\\zeta) &amp;= -\\mathsf{PI}(\\zeta) + \\alpha \\cdot (\\widetilde{w_1}(\\zeta) + \\beta S_{\\sigma 1}(\\zeta) + \\gamma) \\cdot (\\widetilde{w_2}(\\zeta) + \\beta S_{\\sigma 2}(\\zeta) + \\gamma) \\cdot (\\widetilde{w_3}(\\zeta) + \\beta S_{\\sigma 3}(\\zeta) + \\gamma) \\\\ &amp; \\cdot (\\widetilde{w_4}(\\zeta) + \\beta S_{\\sigma 4}(\\zeta) + \\gamma) \\cdot (\\widetilde{w_o}(\\zeta) + \\gamma) \\cdot \\widetilde{z}(\\zeta\\omega) + \\alpha^2 L_1(\\zeta) \\\\ &amp;- \\alpha^6 \\cdot q_{prk3}(\\zeta) \\\\ &amp; \\cdot \\begin{pmatrix} (\\widetilde{w_1}(\\zeta) + \\widetilde{w_4}(\\zeta) + g \\cdot (\\widetilde{w_2}(\\zeta) + \\widetilde{w_3}(\\zeta)) + q_{prk3}(\\zeta) - \\widetilde{w_3}(\\zeta\\omega))^5 \\\\ &amp; \\cdot \\begin{pmatrix} (\\widetilde{w_1}(\\zeta) + \\widetilde{w_4}(\\zeta) + g \\cdot (\\widetilde{w_2}(\\zeta) + \\widetilde{w_3}(\\zeta)) + q_{prk3}(\\zeta))^2 \\\\ &amp; - (2 \\cdot \\widetilde{w_1}(\\zeta) + \\widetilde{w_4}(\\zeta) + g \\cdot (2 \\cdot \\widetilde{w_2}(\\zeta) + \\widetilde{w_3}(\\zeta))) \\end{pmatrix} \\\\ &amp; - \\alpha^7 \\cdot q_{prk3}(\\zeta) \\\\ &amp; \\cdot \\begin{pmatrix} (g \\cdot (\\widetilde{w_1}(\\zeta) + \\widetilde{w_4}(\\zeta)) + (g^2 + 1) \\cdot (\\widetilde{w_2}(\\zeta) + \\widetilde{w_3}(\\zeta)) + q_{prk4}(\\zeta) - \\widetilde{w_o}(\\zeta))^5 \\\\ &amp; + g \\cdot (g \\cdot (\\widetilde{w_1}(\\zeta) + \\widetilde{w_4}(\\zeta)) + (g^2 + 1) \\cdot (\\widetilde{w_2}(\\zeta) + \\widetilde{w_3}(\\zeta)) + q_{prk4}(\\zeta))^2 \\\\ &amp; - (g \\cdot (2 \\cdot \\widetilde{w_1}(\\zeta) + \\widetilde{w_4}(\\zeta)) + (g^2 + 1) \\cdot (2 \\cdot \\widetilde{w_2}(\\zeta) + \\widetilde{w_3}(\\zeta)) \\end{pmatrix} \\\\ &amp; - \\alpha^8 \\cdot q_{prk3}(\\zeta) \\\\ &amp; \\cdot \\begin{pmatrix} (\\widetilde{w_1}(\\zeta) + \\widetilde{w_4}(\\zeta) + g \\cdot (\\widetilde{w_2}(\\zeta) + \\widetilde{w_3}(\\zeta)) + q_{prk3}(\\zeta) - \\widetilde{w_3}(\\zeta\\omega))^5 \\\\ &amp; + g \\cdot (\\widetilde{w_3}(\\zeta))^2 + g^{-1} - \\widetilde{w_1}(\\zeta\\omega) \\end{pmatrix} \\\\ &amp; - \\alpha^9 \\cdot q_{prk3}(\\zeta) \\\\ &amp; \\cdot \\begin{pmatrix} (g \\cdot (\\widetilde{w_1}(\\zeta) + \\widetilde{w_4}(\\zeta)) + (g^2 + 1) \\cdot (\\widetilde{w_2}(\\zeta) + \\widetilde{w_3}(\\zeta)) + q_{prk4}(\\zeta) - \\widetilde{w_o}(\\zeta))^5 \\\\ &amp; + g \\cdot (\\widetilde{w_o}(\\zeta))^2 + g^{-1} - \\widetilde{w_2}(\\zeta\\omega) \\end{pmatrix} \\end{pmatrix}</span>$</p>
+
+    <p class="text-gray-300">Step 10: compute the opening proof polynomials. Now we want to prove that the previous openings are correct, as well as r(X) is actually vanishing in H. We first squeeze out a challenge  <span class="math">v \\in \\mathbb{F}</span>  from the sponge. This is done by showing that one can find a polynomial  <span class="math">W_{\\mathcal{E}}(X)</span>  such that:</p>
+
+    <p class="text-gray-300"><span class="math">$W_{\\zeta}(X) = \\frac{1}{X - \\zeta} \\begin{pmatrix} \\widetilde{w_{1}}(X) - \\widetilde{w_{1}}(\\zeta) \\\\ +v(\\widetilde{w_{2}}(X) - \\widetilde{w_{2}}(\\zeta)) \\\\ +v^{2}(\\widetilde{w_{3}}(X) - \\widetilde{w_{3}}(\\zeta)) \\\\ +v^{3}(\\widetilde{w_{4}}(X) - \\widetilde{w_{4}}(\\zeta)) \\\\ +v^{4}(\\widetilde{w_{o}}(X) - \\widetilde{w_{o}}(\\zeta)) \\\\ +v^{5}(S_{\\sigma 1}(X) - S_{\\sigma 1}(\\zeta)) \\\\ +v^{6}(S_{\\sigma 2}(X) - S_{\\sigma 2}(\\zeta)) \\\\ +v^{7}(S_{\\sigma 3}(X) - S_{\\sigma 3}(\\zeta)) \\\\ +v^{8}(S_{\\sigma 4}(X) - S_{\\sigma 4}(\\zeta)) \\\\ +v^{9}(q_{prk3}(X) - q_{prk3}(\\zeta)) \\\\ +v^{10}(q_{prk4}(X) - q_{prk4}(\\zeta)) \\\\ +v^{11}(r(X) - r(\\zeta)) \\end{pmatrix}</span>$</p>
+
+    <p class="text-gray-300">and similarly, another polynomial  <span class="math">W_{\\zeta\\omega}(X)</span>  as follows.</p>
+
+    <p class="text-gray-300"><span class="math">$W_{\\zeta\\omega}(X) = \\frac{1}{X - \\zeta\\omega} \\begin{pmatrix} \\widetilde{z}(X) - \\widetilde{z}(\\zeta\\omega) \\\\ + v(\\widetilde{w_1}(X) - \\widetilde{w_1}(\\zeta\\omega)) \\\\ + v^2(\\widetilde{w_2}(X) - \\widetilde{w_2}(\\zeta\\omega)) \\\\ + v^3(\\widetilde{w_3}(X) - \\widetilde{w_3}(\\zeta\\omega)) \\end{pmatrix}</span>$</p>
+
+    <p class="text-gray-300">We commit these two polynomials as  <span class="math">cm_{\\zeta}</span>  and  <span class="math">cm_{\\zeta\\omega}</span> .</p>
+
+    <p class="text-gray-300"><strong>Step 11: output the full proof.</strong> After the Fiat-Shamir transform, the final proof reads as follows.</p>
+
+    <p class="text-gray-300"><span class="math">$\\begin{pmatrix} \\mathsf{cm}_{w1}, \\mathsf{cm}_{w2}, \\mathsf{cm}_{w3}, \\mathsf{cm}_{w4}, \\mathsf{cm}_{wo}, \\\\ \\mathsf{cm}_{z}, \\\\ \\mathsf{cm}_{t1}, \\mathsf{cm}_{t2}, \\mathsf{cm}_{t3}, \\mathsf{cm}_{t4}, \\mathsf{cm}_{t5}, \\\\ \\widetilde{w}_{1}(\\zeta), \\widetilde{w}_{2}(\\zeta), \\widetilde{w}_{3}(\\zeta), \\widetilde{w}_{4}(\\zeta), \\widetilde{w}_{o}(\\zeta), \\\\ S_{\\sigma 1}(\\zeta), S_{\\sigma 2}(\\zeta), S_{\\sigma 3}(\\zeta), S_{\\sigma 4}(\\zeta), \\\\ q_{prk3}(\\zeta), q_{prk4}(\\zeta), \\widetilde{w}_{1}(\\zeta\\omega), \\widetilde{w}_{2}(\\zeta\\omega), \\widetilde{w}_{3}(\\zeta\\omega), \\\\ \\widetilde{z}(\\zeta\\omega), \\\\ \\mathsf{cm}_{\\zeta}, \\mathsf{cm}_{\\zeta\\omega} \\end{pmatrix}</span>$</p>
+
+      <h3 id="sec-6.3" class="text-xl font-semibold mt-8">6.3 Verifier</h3>
+
+    <p class="text-gray-300">The verifier reads the full proof above and proceeds as follows.</p>
+
+    <p class="text-gray-300">Step 1: compute all the challenges. For convenience, the verifier first computes all the random challenges in this protocol execution:  <span class="math">\\beta</span> ,  <span class="math">\\gamma</span> ,  <span class="math">\\alpha</span> ,  <span class="math">\\zeta</span> , v, and u.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Initialize the same cryptographic sponge.</li>
+      <li>Put  <span class="math">cm_{w1}</span> ,  <span class="math">cm_{w2}</span> ,  <span class="math">cm_{w3}</span> ,  <span class="math">cm_{w4}</span> ,  <span class="math">cm_{wo}</span>  into the sponge and squeeze out  <span class="math">\\beta, \\gamma \\in \\mathbb{F}</span>  from the sponge.</li>
+      <li>Put cm<sub>z</sub> into the sponge and squeeze out  <span class="math">\\alpha \\in \\mathbb{F}</span>  from the sponge.</li>
+      <li>Put  <span class="math">cm_{t1}</span> ,  <span class="math">cm_{t2}</span> ,  <span class="math">cm_{t3}</span> ,  <span class="math">cm_{t4}</span> ,  <span class="math">cm_{t5}</span>  into the sponge and squeeze out  <span class="math">\\zeta \\in \\mathbb{F}</span>  from the sponge.</li>
+      <li>Put  <span class="math">\\widetilde{w_1}(\\zeta)</span> ,  <span class="math">\\widetilde{w_2}(\\zeta)</span> ,  <span class="math">\\widetilde{w_3}(\\zeta)</span> ,  <span class="math">\\widetilde{w_4}(\\zeta)</span> ,  <span class="math">\\widetilde{w_o}(\\zeta)</span> ,  <span class="math">S_{\\sigma 1}(\\zeta)</span> ,  <span class="math">S_{\\sigma 2}(\\zeta)</span> ,  <span class="math">S_{\\sigma 3}(\\zeta)</span> ,  <span class="math">S_{\\sigma 4}(\\zeta)</span> ,  <span class="math">q_{prk3}(\\zeta)</span> ,  <span class="math">q_{prk4}(\\zeta)</span> ,  <span class="math">\\widetilde{w_1}(\\zeta\\omega)</span> ,  <span class="math">\\widetilde{w_2}(\\zeta\\omega)</span> ,  <span class="math">\\widetilde{w_3}(\\zeta\\omega)</span> ,  <span class="math">\\widetilde{z}(\\zeta\\omega)</span>  into the sponge and squeeze out  <span class="math">v \\in \\mathbb{F}</span>  from the sponge.</li>
+      <li>Put  <span class="math">\\operatorname{cm}_{\\zeta}</span>  and  <span class="math">\\operatorname{cm}_{\\zeta\\omega}</span>  into the sponge and squeeze out  <span class="math">u\\in\\mathbb{F}</span>  from the sponge.</li>
+    </ul>
+
+    <p class="text-gray-300">Step 2: compute  <span class="math">r(\\zeta)</span> . Recall from the Step 9 of the prover,  <span class="math">r(\\zeta)</span>  can indeed be computed by the verifier.</p>
+
+    <p class="text-gray-300"><span class="math">$\\begin{split} r(\\zeta) &amp;= -\\mathsf{PI}(\\zeta) + \\alpha \\cdot (\\widetilde{w_1}(\\zeta) + \\beta S_{\\sigma 1}(\\zeta) + \\gamma) \\cdot (\\widetilde{w_2}(\\zeta) + \\beta S_{\\sigma 2}(\\zeta) + \\gamma) \\cdot (\\widetilde{w_3}(\\zeta) + \\beta S_{\\sigma 3}(\\zeta) + \\gamma) \\\\ &amp; \\cdot (\\widetilde{w_4}(\\zeta) + \\beta S_{\\sigma 4}(\\zeta) + \\gamma) \\cdot (\\widetilde{w_o}(\\zeta) + \\gamma) \\cdot \\widetilde{z}(\\zeta\\omega) + \\alpha^2 L_1(\\zeta) \\\\ &amp; - \\alpha^6 \\cdot q_{prk3}(\\zeta) \\\\ &amp; \\cdot \\begin{pmatrix} (\\widetilde{w_1}(\\zeta) + \\widetilde{w_4}(\\zeta) + g \\cdot (\\widetilde{w_2}(\\zeta) + \\widetilde{w_3}(\\zeta)) + q_{prk3}(\\zeta) - \\widetilde{w_3}(\\zeta\\omega))^5 \\\\ &amp; \\cdot \\begin{pmatrix} (\\widetilde{w_1}(\\zeta) + \\widetilde{w_4}(\\zeta) + g \\cdot (\\widetilde{w_2}(\\zeta) + \\widetilde{w_3}(\\zeta)) + q_{prk3}(\\zeta))^2 \\\\ &amp; - (2 \\cdot \\widetilde{w_1}(\\zeta) + \\widetilde{w_4}(\\zeta) + g \\cdot (2 \\cdot \\widetilde{w_2}(\\zeta) + \\widetilde{w_3}(\\zeta))) \\end{pmatrix} \\\\ &amp; - \\alpha^7 \\cdot q_{prk3}(\\zeta) \\\\ &amp; \\cdot \\begin{pmatrix} (g \\cdot (\\widetilde{w_1}(\\zeta) + \\widetilde{w_4}(\\zeta)) + (g^2 + 1) \\cdot (\\widetilde{w_2}(\\zeta) + \\widetilde{w_3}(\\zeta)) + q_{prk4}(\\zeta) - \\widetilde{w_o}(\\zeta))^5 \\\\ &amp; + g \\cdot (g \\cdot (\\widetilde{w_1}(\\zeta) + \\widetilde{w_4}(\\zeta)) + (g^2 + 1) \\cdot (\\widetilde{w_2}(\\zeta) + \\widetilde{w_3}(\\zeta)) + q_{prk4}(\\zeta))^2 \\\\ &amp; - (g \\cdot (2 \\cdot \\widetilde{w_1}(\\zeta) + \\widetilde{w_4}(\\zeta)) + (g^2 + 1) \\cdot (2 \\cdot \\widetilde{w_2}(\\zeta) + \\widetilde{w_3}(\\zeta)) \\end{pmatrix} \\\\ &amp; - \\alpha^8 \\cdot q_{prk3}(\\zeta) \\\\ &amp; \\cdot \\begin{pmatrix} (\\widetilde{w_1}(\\zeta) + \\widetilde{w_4}(\\zeta) + g \\cdot (\\widetilde{w_2}(\\zeta) + \\widetilde{w_3}(\\zeta)) + q_{prk3}(\\zeta) - \\widetilde{w_3}(\\zeta\\omega))^5 \\\\ &amp; + g \\cdot (\\widetilde{w_3}(\\zeta))^2 + g^{-1} - \\widetilde{w_1}(\\zeta\\omega) \\end{pmatrix} \\\\ &amp; - \\alpha^9 \\cdot q_{prk3}(\\zeta) \\\\ &amp; \\cdot \\begin{pmatrix} (g \\cdot (\\widetilde{w_1}(\\zeta) + \\widetilde{w_4}(\\zeta)) + (g^2 + 1) \\cdot (\\widetilde{w_2}(\\zeta) + \\widetilde{w_3}(\\zeta)) + q_{prk4}(\\zeta) - \\widetilde{w_o}(\\zeta))^5 \\\\ &amp; + g \\cdot (\\widetilde{w_o}(\\zeta))^2 + g^{-1} - \\widetilde{w_2}(\\zeta\\omega) \\end{pmatrix} \\end{pmatrix}</span>$</p>
+
+    <p class="text-gray-300"><strong>Step 3: assemble cm</strong><sub>r</sub>. The verifier can also assemble the commitment of r(X) from available commitments, as follows.</p>
+
+    <p class="text-gray-300"><span class="math">$\\begin{split} \\mathsf{cm}_r &amp;= \\mathsf{cm}_{sat} + \\mathsf{cm}_{r1} \\cdot \\alpha - \\mathsf{cm}_{r2} \\cdot \\alpha + \\mathsf{cm}_{r3} \\cdot \\alpha^2 \\\\ &amp;- Z_H(\\zeta) \\cdot (\\mathsf{cm}_{t1} + \\zeta^{n+2} \\cdot \\mathsf{cm}_{t2} + \\zeta^{2(n+2)} \\cdot \\mathsf{cm}_{t3} + \\zeta^{3(n+2)} \\cdot \\mathsf{cm}_{t4} + \\zeta^{4(n+2)} \\cdot \\mathsf{cm}_{t5}) \\\\ &amp;+ \\mathsf{cm}_b \\cdot (\\widetilde{w_2}(\\zeta) \\cdot (\\widetilde{w_2}(\\zeta) - 1) \\cdot \\alpha^3 + \\widetilde{w_3}(\\zeta) \\cdot (\\widetilde{w_3}(\\zeta) - 1) \\cdot \\alpha^4 + \\widetilde{w_4}(\\zeta) \\cdot (\\widetilde{w_4}(\\zeta) - 1) \\cdot \\alpha^5) \\\\ &amp;+ \\mathsf{cm}_{prk1} \\cdot q_{prk3}(\\zeta) \\cdot \\alpha^6 + \\mathsf{cm}_{prk2} \\cdot q_{prk3}(\\zeta) \\cdot \\alpha^7 \\end{split}</span>$</p>
+
+    <p class="text-gray-300">where</p>
+
+    <p class="text-gray-300"><span class="math">$\\begin{split} \\mathsf{cm}_{sat} &amp;= \\widetilde{w_1}(\\zeta) \\cdot \\mathsf{cm}_{q1} + \\widetilde{w_2}(\\zeta) \\cdot \\mathsf{cm}_{q2} + \\widetilde{w_3}(\\zeta) \\cdot \\mathsf{cm}_{q3} + \\widetilde{w_4}(\\zeta) \\cdot \\mathsf{cm}_{q4} \\\\ &amp;+ \\widetilde{w_1}(\\zeta) \\cdot \\widetilde{w_2}(\\zeta) \\cdot \\mathsf{cm}_{m1} + \\widetilde{w_3}(\\zeta) \\cdot \\widetilde{w_4}(\\zeta) \\cdot \\mathsf{cm}_{m2} + \\mathsf{cm}_{qc} \\\\ &amp;+ \\widetilde{w_1}(\\zeta) \\cdot \\widetilde{w_2}(\\zeta) \\cdot \\widetilde{w_3}(\\zeta) \\cdot \\widetilde{w_4}(\\zeta) \\cdot \\widetilde{w_o}(\\zeta) \\cdot \\mathsf{cm}_{ecc} \\\\ &amp;- \\widetilde{w_o}(\\zeta) \\cdot \\mathsf{cm}_o \\end{split}</span>$</p>
+
+    <p class="text-gray-300">and</p>
+
+    <p class="text-gray-300"><span class="math">$\\begin{aligned} \\mathsf{cm}_{r1} = &amp; (\\widetilde{w_1}(\\zeta) + \\beta \\cdot \\zeta + \\gamma) \\cdot (\\widetilde{w_2}(\\zeta) + \\beta \\cdot k_1 \\cdot \\zeta + \\gamma) \\cdot (\\widetilde{w_3}(\\zeta) + \\beta \\cdot k_2 \\cdot \\zeta + \\gamma) \\\\ &amp; \\cdot (\\widetilde{w_4}(\\zeta) + \\beta \\cdot k_3 \\cdot \\zeta + \\gamma) \\cdot (\\widetilde{w_o}(\\zeta) + \\beta \\cdot k_4 \\cdot \\zeta + \\gamma) \\cdot \\mathsf{cm}_z \\end{aligned}</span>$</p>
+
+    <p class="text-gray-300">and</p>
+
+    <p class="text-gray-300"><span class="math">$\\begin{split} \\mathsf{cm}_{r2} = &amp; (\\widetilde{w_1}(\\zeta) + \\beta S_{\\sigma 1}(\\zeta) + \\gamma) \\cdot (\\widetilde{w_2}(\\zeta) + \\beta S_{\\sigma 2}(\\zeta) + \\gamma) \\cdot (\\widetilde{w_3}(\\zeta) + \\beta S_{\\sigma 3}(\\zeta) + \\gamma) \\\\ &amp; \\cdot (\\widetilde{w_4}(\\zeta) + \\beta S_{\\sigma 4}(\\zeta) + \\gamma) \\cdot \\beta \\cdot \\widetilde{z}(\\zeta\\omega) \\cdot \\mathsf{cm}_{\\sigma o} \\end{split}</span>$</p>
+
+    <p class="text-gray-300">and</p>
+
+    <p class="text-gray-300"><span class="math">$\\mathsf{cm}_{r3} = L_1(\\zeta) \\cdot \\mathsf{cm}_z</span>$</p>
+
+    <p class="text-gray-300">Step 4: compute linear combination of commitments. Let the cumulative commitment cm be as follows. Note that the last one has a coefficient u.</p>
+
+    <p class="text-gray-300"><span class="math">$\\begin{split} \\mathsf{cm} &amp;= \\mathsf{cm}_{w1} + v \\cdot \\mathsf{cm}_{w2} + v^2 \\cdot \\mathsf{cm}_{w3} + v^3 \\cdot \\mathsf{cm}_{w4} + v^4 \\cdot \\mathsf{cm}_{wo} + v^5 \\cdot \\mathsf{cm}_{\\sigma1} + v^6 \\cdot \\mathsf{cm}_{\\sigma2} \\\\ &amp;+ v^7 \\cdot \\mathsf{cm}_{\\sigma3} + v^8 \\cdot \\mathsf{cm}_{\\sigma4} + v^9 \\cdot \\mathsf{cm}_{prk3} + v^{10} \\cdot \\mathsf{cm}_{prk4} + v^{11} \\cdot \\mathsf{cm}_r \\\\ &amp;+ u \\cdot (\\mathsf{cm}_z + v \\cdot \\mathsf{cm}_{w1} + v^2 \\cdot \\mathsf{cm}_{w2} + v^3 \\cdot \\mathsf{cm}_{w3}) \\end{split}</span>$</p>
+
+    <p class="text-gray-300"><strong>Step 5: compute linear combination of evaluations.</strong> Let the cumulative evaluation s be as follows. Also, note the last one.</p>
+
+    <p class="text-gray-300"><span class="math">$s = \\widetilde{w_1}(\\zeta) + v \\cdot \\widetilde{w_2}(\\zeta) + v^2 \\cdot \\widetilde{w_3}(\\zeta) + v^3 \\cdot \\widetilde{w_4}(\\zeta) + v^4 \\cdot \\widetilde{w_o}(\\zeta) + v^5 \\cdot S_{\\sigma 1}(\\zeta) + v^6 \\cdot S_{\\sigma 2}(\\zeta) + v^7 \\cdot S_{\\sigma 3}(\\zeta) + v^8 \\cdot S_{\\sigma 4}(\\zeta) + v^9 \\cdot q_{prk3}(\\zeta) + v^{10} \\cdot q_{prk4}(\\zeta) + v^{11} \\cdot r(\\zeta) + u \\cdot (\\widetilde{z}(\\zeta\\omega) + v \\cdot \\widetilde{w_1}(\\zeta\\omega) + v^2 \\cdot \\widetilde{w_2}(\\zeta\\omega) + v^3 \\cdot \\widetilde{w_3}(\\zeta\\omega))</span>$</p>
+
+    <p class="text-gray-300"><strong>Step 6: pairing.</strong> Compute L, R as follows.</p>
+
+    <p class="text-gray-300"><span class="math">$L = e((\\mathsf{cm}_{\\zeta} + u \\cdot \\mathsf{cm}_{\\zeta\\omega}), x \\cdot H)</span>$</p>
+
+    <p class="text-gray-300">where H is the generator of  <span class="math">\\mathbb{G}_2</span>  in the SRS and x is the secret in the SRS. The element  <span class="math">x \\cdot H</span>  here is part of the SRS.</p>
+
+    <p class="text-gray-300"><span class="math">$R = e((\\zeta \\cdot \\mathsf{cm}_\\zeta + u \\cdot \\zeta \\cdot \\omega \\cdot \\mathsf{cm}_{\\zeta\\omega} + \\mathsf{cm} - s \\cdot G), H)</span>$</p>
+
+    <p class="text-gray-300">where G is the generator of  <span class="math">\\mathbb{G}_1</span>  in the SRS.</p>
+
+    <p class="text-gray-300"><strong>Step 7: decision.</strong> The verifier accepts the proof if L=R and rejects otherwise.</p>
+
+    <p class="text-gray-300">In this section we present an application of the Anemoi hash function and the proof system that we have constructed so far. The application that we present is an anonymous privacy token transfer, which is based on the Zerocash construction <a href="#page-46-2">[Ben+14]</a>. We focus on the Merkle tree membership proof that is needed in zk-SNARK for the user to claim the ownership of an unspent token. The code for this anonymous privacy token transfer can be found in the Noah library.</p>
+
+    <p class="text-gray-300"><a href="https://github.com/FindoraNetwork/noah/" target="_blank" rel="noopener noreferrer">https://github.com/FindoraNetwork/noah/</a></p>
+
+      <h3 id="sec-7.1" class="text-xl font-semibold mt-8">7.1 3-ary Merkle tree</h3>
+
+    <p class="text-gray-300">Coin commitments in Noah are organized into a 3-ary Merkle tree, which can store about 2 <sup>32</sup> coin commitments. All the coin commitments are at the leaf level. The internal node's value is the hash of their left child, middle child, and right child, which is:</p>
+
+    <p class="text-gray-300">h = H (left hash &#8741; middle hash &#8741; right hash)</p>
+
+    <p class="text-gray-300">As can be seen, we only need a 3-to-1 compression function here. We implement this with the Jive CRH mentioned in Section <a href="#page-12-0">2</a> with &#8467; = 2. Note that &#8467; = 2 gives us actually a compression function that is 4-to-1. We could have considered a 4-ary tree, but we find the improvement to be limited, and there is an additional cost for the user to retrieve the Merkle tree path. Given that we will only do 3-to-1, we will use a constant for the 4th input into the Jive CRH, for domain separation.</p>
+
+      <h3 id="sec-7.2" class="text-xl font-semibold mt-8">7.2 Domain separation in the Jive CRH</h3>
+
+    <p class="text-gray-300">The Anemoi hash function uses the first 200 digits of &pi; to generate the round keys. We apply the opened Flystel structure to the next 200 digits of &pi; and generate 20 padding constants, which will be used as the 4th input to the Jive CRH. For the i-th level of the Merkle tree, the i-th padding constant will be used during the compression.</p>
+
+    <p class="text-gray-300">We are aware that such a domain separation is not actually necessary in theory, as one can construct a Merkle tree using the CRH without such domain separation. We choose to do this because we feel that leaving the 4th input zeroes is, although okay theoretically, usually not a good design.</p>
+
+    <p class="text-gray-300">Relation with salts and peppers. The padding constants in the domain separation may look like <em>salts</em> or <em>peppers</em>. Salts and peppers refer to a random string that is hashed together with a user's password, in an effort to make it difficult to create a rainbow table. The difference between salts and peppers is that the salts are stored along with the hash, while the peppers are stored in a private location. Our padding constants here are not salts and peppers, as they are the same for the Merkle tree, rather than generated randomly every time a new coin commitment is inserted.</p>
+
+      <h3 id="sec-7.3" class="text-xl font-semibold mt-8">7.3 Concrete instantiation for the Jive CRH</h3>
+
+    <p class="text-gray-300">We present the details of the constraint system for the Jive CRH.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Let the current state be (x[1], x[2], y[1], y[2]) and the next state be (x &prime; [1], x&prime; [2], y&prime; [1], y&prime; [2]) (immediately after the S-box)</li>
+      <li>Set x[1], x[2], y[1] to be the input</li>
+      <li>Set y[2] to be the salt</li>
+      <li>1st round: Create a gate with w<sup>1</sup> = x[1], w<sup>2</sup> = x[2], w<sup>3</sup> = y[1], w<sup>4</sup> = y[2], and w<sup>o</sup> = y &prime; [2]    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Apply the Anemoi hash function constraint to this gate, by setting:</li>
+    </ul></li>
+    </ul>
+
+    <p class="text-gray-300"><span class="math">$\\begin{aligned} q_{prk1} &amp;= \\mathsf{prk1}_1 &amp; q_{prk2} &amp;= \\mathsf{prk2}_1 \\\\ q_{prk3} &amp;= \\mathsf{prk3}_1 &amp; q_{prk4} &amp;= \\mathsf{prk4}_1 \\end{aligned}</span>$</p>
+
+    <p class="text-gray-300">&ndash; Enforce w<sup>4</sup> = salt by setting:</p>
+
+    <p class="text-gray-300"><span class="math">$\\begin{array}{lll} q_1 = 0 &amp; q_2 = 0 &amp; q_3 = 0 \\\\ \\boldsymbol{q_4} = \\boldsymbol{1} &amp; q_{m1} = 0 &amp; q_{m2} = 0 \\\\ \\boldsymbol{q_c} = -\\mathbf{salt} &amp; PI = 0 &amp; q_{ecc} = 0 \\\\ q_o = 0 &amp; q_b = 0 \\end{array}</span>$</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>each of the 2nd to 14th rounds: Let x[1], x[2], y[1], y[2], x&prime; [1], x&prime; [2], y&prime; [1], y&prime; [2] progress to the next round. Create a gate with w<sup>1</sup> = x[1], w<sup>2</sup> = x[2], w<sup>3</sup> = y[1], w<sup>4</sup> = y[2], and w<sup>o</sup> = y &prime; [2]    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Apply the Anemoi hash function constraint to this gate, by setting:</li>
+    </ul></li>
+    </ul>
+
+    <p class="text-gray-300"><span class="math">$\\begin{aligned} q_{prk1} &amp;= \\mathsf{prk1}_r &amp; q_{prk2} &amp;= \\mathsf{prk2}_r \\\\ q_{prk3} &amp;= \\mathsf{prk3}_r &amp; q_{prk4} &amp;= \\mathsf{prk4}_r \\end{aligned}</span>$</p>
+
+    <p class="text-gray-300">&ndash; Suppress the rest of the constraints by setting:</p>
+
+    <p class="text-gray-300"><span class="math">$\\begin{array}{lll} q_1 = 0 &amp; q_2 = 0 &amp; q_3 = 0 \\\\ q_4 = 0 &amp; q_{m1} = 0 &amp; q_{m2} = 0 \\\\ q_c = 0 &amp; PI = 0 &amp; q_{ecc} = 0 \\\\ q_o = 0 &amp; q_b = 0 \\end{array}</span>$</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>sum of the output: Let x[1], x[2], y[1], and y[2] be the final state. The sum of the output of the permutation can be calculated by creating a gate with w<sup>1</sup> = x[1], w<sup>2</sup> = x[2], w<sup>3</sup> = y[1], w<sup>4</sup> = y[2], and w<sup>o</sup> be a variable that stores the supposed sum of the output, denoted by output-sum    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Suppress the Anemoi hash function constraint, by setting:</li>
+    </ul></li>
+    </ul>
+
+    <p class="text-gray-300"><span class="math">$q_{prk1} = q_{prk2} = q_{prk3} = q_{prk4} = 0</span>$</p>
+
+    <p class="text-gray-300">&ndash; Enforce that output-sum is the sum of x[1], x[2], y[1], and y[2] by setting:</p>
+
+    <p class="text-gray-300"><span class="math">$\\begin{aligned} \\bm{q_1} &amp;= \\bm{2g} &amp; q_2 = \\bm{g^2} + \\bm{g} + \\bm{1} &amp; \\bm{q_3} = \\bm{g^2} + \\bm{g} + \\bm{1} \\\\ \\bm{q_4} &amp;= \\bm{2g} &amp; q_{m1} = 0 &amp; q_{m2} = 0 \\\\ q_c &amp;= 0 &amp; PI = 0 &amp; q_{ecc} = 0 \\\\ \\bm{q_o} &amp;= \\bm{1} &amp; q_b = 0 \\end{aligned}</span>$</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>sum of the input and output: Note that the output of the Jive CRH is the sum of the input and the output. Let x[1], x[2], y[1] be the input again. Create a gate with w<sup>1</sup> = x[1], w<sup>2</sup> = x[2], w<sup>3</sup> = x[3], w<sup>4</sup> = output-sum, and w<sup>o</sup> be the Jive CRH output, denoted by result    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Suppress the Anemoi hash function constraint, by setting:</li>
+    </ul></li>
+    </ul>
+
+    <p class="text-gray-300"><span class="math">$q_{prk1} = q_{prk2} = q_{prk3} = q_{prk4} = 0</span>$</p>
+
+    <p class="text-gray-300">&ndash; Enforce that result is the sum of x[1], x[2], y[1], output-sum, and the salt by setting:</p>
+
+    <p class="text-gray-300"><span class="math">$\\begin{array}{lll} \\bm{q_1} = \\bm{1} &amp; \\bm{q_2} = \\bm{1} &amp; \\bm{q_3} = \\bm{1} \\\\ \\bm{q_4} = \\bm{1} &amp; q_{m1} = 0 &amp; q_{m2} = 0 \\\\ \\bm{q_c} = \\bm{salt} &amp; PI = 0 &amp; q_{ecc} = 0 \\\\ \\bm{q_o} = \\bm{1} &amp; q_b = 0 \\end{array}</span>$</p>
+
+    <p class="text-gray-300">&bull; The Jive CRH output is the result variable</p>
+
+    <p class="text-gray-300">Note that in the construction above, an invocation of the Jive CRH takes 14 gates.</p>
+
+      <h3 id="sec-7.4" class="text-xl font-semibold mt-8">7.4 Concrete instantiation for the Merkle tree membership proof</h3>
+
+    <p class="text-gray-300">We now describe how to verify a Merkle tree membership proof in zk-SNARK, given a leaf, the path, and a root hash.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Compute the leaf hash by applying the Anemoi variable-length hash function (for which we omit the detail here) to the leaf</li>
+      <li>Going up in the tree path, we compute three variables: is-left-child, is-mid-child is-right-child    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>if the present node is the left child of its parent    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>* is-left-child = 1, is-mid-child = 0, is-right-child = 0</li>
+    </ul></li>
+      <li>if the present node is the middle child of its parent    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>* is-left-child = 0, is-mid-child = 1, is-right-child = 0</li>
+    </ul></li>
+      <li>if the present node is the right child of its parent    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>* is-left-child = 0, is-mid-child = 0, is-right-child = 1</li>
+    </ul></li>
+    </ul></li>
+      <li>Check that is-left-child, is-mid-child, and is-right-child are binary, and only one of them is one, by creating a gate with w<sup>1</sup> = &#981;, w<sup>2</sup> = is-left-child, w<sup>3</sup> = is-mid-child, w<sup>4</sup> = is-right-child, and w<sup>o</sup> = &#981;, where &#981; is a zero variable, and setting:    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Suppress the Anemoi hash function constraint, by setting:</li>
+    </ul></li>
+    </ul>
+
+    <p class="text-gray-300"><span class="math">$q_{prk1} = q_{prk2} = q_{prk3} = q_{prk4} = 0</span>$</p>
+
+    <p class="text-gray-300">&ndash; Enforce the desired relation by setting:</p>
+
+    <p class="text-gray-300"><span class="math">$q_1 = 0</span>$
+<span class="math">q_2 = 1</span>   <span class="math">q_3 = 1</span>
+<span class="math">q_4 = 1</span>   <span class="math">q_{m1} = 0</span>   <span class="math">q_{m2} = 0</span>
+<span class="math">q_c = -1</span>   <span class="math">PI = 0</span>   <span class="math">q_{ecc} = 0</span>
+<span class="math">q_o = 0</span>   <span class="math">q_b = 1</span></p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>In each layer, given the left child hash hleft, the middle child hash hmid, and the right child hash hright, we check if the present node (whose hash is hnode) is in the correct location by creating two gates, as follows:    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>The first gate has w<sup>1</sup> = hleft, w<sup>2</sup> = is-left-child, w<sup>3</sup> = hmid, w<sup>4</sup> = is-mid-child, and w<sup>o</sup> be hleft if is-left-child, hmid if is-mid-child, and zero if is-right-child. We use partial-sum to denote w<sup>o</sup> here. Suppress the Anemoi constraint and enforce the desired relation by setting:</li>
+    </ul></li>
+    </ul>
+
+    <p class="text-gray-300"><span class="math">$q_{prk1} = q_{prk2} = q_{prk3} = q_{prk4} = 0</span>$</p>
+
+    <p class="text-gray-300"><span class="math">q_1 = 0</span>   <span class="math">q_2 = 0</span>   <span class="math">q_3 = 0</span>
+<span class="math">q_4 = 0</span>   <span class="math">q_{m1} = 1</span>   <span class="math">q_{m2} = 1</span>
+<span class="math">q_c = 0</span>   <span class="math">PI = 0</span>   <span class="math">q_{ecc} = 0</span>
+<span class="math">q_o = 1</span>   <span class="math">q_b = 0</span></p>
+
+    <p class="text-gray-300">&ndash; The second gate has w<sup>1</sup> = hright, w<sup>2</sup> = is-right-child, w<sup>3</sup> = partial-sum, w<sup>4</sup> = &#981;, and w<sup>o</sup> = hnode. Suppress the Anemoi constraint and enforce the desired relation by setting:</p>
+
+    <p class="text-gray-300"><span class="math">$q_{prk1} = q_{prk2} = q_{prk3} = q_{prk4} = 0</span>$</p>
+
+    <p class="text-gray-300"><span class="math">q_1 = 0</span>   <span class="math">q_2 = 0</span>   <span class="math">q_3 = 1</span>
+<span class="math">q_4 = 0</span>   <span class="math">q_{m1} = 1</span>   <span class="math">q_{m2} = 0</span>
+<span class="math">q_c = 0</span>   <span class="math">PI = 0</span>   <span class="math">q_{ecc} = 0</span>
+<span class="math">q_o = 1</span>   <span class="math">q_b = 0</span></p>
+
+    <p class="text-gray-300">&bull; Use the Jive CRH to check the hashes layer by layer</p>
+
+    <p class="text-gray-300">In this section we list the reference materials we found useful when working on this note.</p>
+
+    <p class="text-gray-300">SNARK-friendly hash functions. Cryptographically secure hash functions have become increasingly researched in the past decade. By applying well-studied techniques and designs from hash functions over a characteristic-2 field (e.g., SHA3) to a prime field, there have been many SNARKfriendly hash functions. To list a few, we have MiMC <a href="#page-46-5">[AGRRT16]</a>, Poseidon <a href="#page-47-1">[GKRRS21]</a>, Rescue <a href="#page-46-6">[AABSDS20]</a>, and Anemoi <a href="#page-46-0">[Bou+22]</a>. These SNARK-friendly hash functions commonly have two applications in zk-SNARK: one is to serve as a collision-resistant hash function to construct a Merkle tree, and another one is to instantiate the Fiat-Shamir sponge used for proof recursion.</p>
+
+    <p class="text-gray-300">TurboPlonk variants. Since the invention of TurboPlonk <a href="#page-49-7">[Tur]</a>, we have seen many new variants being deployed in the industry, and they have contributed to our knowledge of efficient proof systems. This includes Matter Labs's Franklin crypto library <a href="#page-47-13">[Fra]</a>, Polygon Zero (formerly, Mir)'s Plonky2 <a href="#page-48-12">[Plo]</a>, Dusk Network's PLONK <a href="#page-47-14">[Dus]</a>, and most notably Zcash's Halo2 <a href="#page-48-13">[Hal]</a>. Some of these libraries also use lookup arguments, and TurboPlonk proof systems with lookup are often referred to as UltraPlonk.</p>
+
+    <p class="text-gray-300">Verifiable data structures. There are four common types of verifiable data structures used in zk-SNARK: (1) Merkle tree <a href="#page-48-14">[Mer87]</a>, (2) RSA accumulators <a href="#page-46-10">[BM93;</a> <a href="#page-48-15">LLX07;</a> <a href="#page-46-11">BBF19]</a>, (3) offline memory checking <a href="#page-46-12">[BEGKN91;</a> <a href="#page-46-13">CDDGS03;</a> <a href="#page-48-16">SAGL18;</a> <a href="#page-49-8">Set20]</a>, and (4) table lookup <a href="#page-49-1">[ZBKMNS22;</a> <a href="#page-48-2">PK22;</a> <a href="#page-47-4">GK22]</a>. There are pros and cons between these verifiable data structures, and their asymptotic efficiency varies. In practice, we consider the concrete efficiency, and this paper suggests that the Anemoi hash function, as a SNARK-friendly hash function, may have significantly helped the Merkle tree in this competition.</p>
+
+    <p class="text-gray-300">We had a discussion with the authors of <a href="#page-46-0">[Bou+22]</a> and learned a lot about Anemoi. We would like to thank Daira Hopwood, Yuncong Hu, Dmitry Khovratovich, Pratyush Mishra, Robin Salen, Markus Schofnegger, Danny Willems, and Zhenfei Zhang for discussions that eventually help make this work.</p>
+
+    <p class="text-gray-300">We would also like to thank the researchers who have pioneered the study of SNARK-friendly hash functions, despite the fact that it is known among researchers that these constructive cryptanalysis papers have a harder time in the peer-review process due to biased opinions. Nevertheless, we believe that the adoption of these hash functions in the blockchain industry and the important applications that they enabled have demonstrated their values, and it is now only a matter of time.</p>
+
+    <p class="text-gray-300">Update: We would like to congratulate Anemoi (as well as Griffin) for being accepted in CRYPTO 2023. This is a breakthrough over prior constructive SNARK-friendly hash function papers.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>LowMC in EUROCRYPT 2015</li>
+      <li>MiMC in ASIACRYPT 2016</li>
+      <li>GMiMC in ESORICS 2019</li>
+      <li>Rescue in FSE 2020</li>
+      <li>Poseidon in USENIX Security 2021</li>
+      <li>Reinforced Concrete in CCS 2022</li>
+      <li>Ciminion in EUROCRYPT 2022</li>
+      <li>Now, Anemoi and Griffin in CRYPTO 2023</li>
+    </ul>
+
+    <p class="text-gray-300">[AABSDS20] Abdelrahaman Aly, Tomer Ashur, Eli Ben-Sasson, Siemen Dhooghe, and Alan Szepieniec. &quot;Design of symmetric-key primitives for advanced cryptographic protocols&quot;. In: <em>FSE '20</em>. 2020. [AGRRT16] Martin Albrecht, Lorenzo Grassi, Christian Rechberger, Arnab Roy, and Tyge Tiessen. &quot;MiMC: Efficient encryption and cryptographic hashing with minimal multiplicative complexity&quot;. In: <em>ASIACRYPT '16</em>. 2016. [BBF19] Dan Boneh, Benedikt Bunz, and Ben Fisch. &quot;Batching techniques for accumu- &uml; lators with applications to IOPs and stateless blockchains&quot;. In: <em>CRYPTO '19</em>. 2019. [BCMS20] Benedikt Bunz, Alessandro Chiesa, Pratyush Mishra, and Nicholas Spooner. &uml; &quot;Proof-carrying data from accumulation schemes&quot;. In: <em>TCC '20</em>. 2020. [BCS16] Eli Ben-Sasson, Alessandro Chiesa, and Nicholas Spooner. &quot;Interactive oracle proofs&quot;. In: <em>TCC '16b</em>. 2016. [BCTV14] Eli Ben-Sasson, Alessandro Chiesa, Eran Tromer, and Madars Virza. &quot;Scalable zero knowledge via cycles of elliptic curves&quot;. In: <em>CRYPTO '14</em>. 2014. [BEGKN91] Manuel Blum, Will Evans, Peter Gemmell, Sampath Kannan, and Moni Naor. &quot;Checking the correctness of memories&quot;. In: <em>FOCS '91</em>. 1991. [BFRSBW13] Benjamin Braun, Ariel J. Feldman, Zuocheng Ren, Srinath Setty, Andrew J. Blumberg, and Michael Walfish. &quot;Verifying computations with state&quot;. In: <em>SOSP '13</em>. 2013. [BM93] Josh Benaloh and Michael de Mare. &quot;One-way accumulators: A decentralized alternative to digital signatures&quot;. In: <em>EUROCRYPT '93</em>. 1993. [Ben+14] Eli Ben-Sasson, Alessandro Chiesa, Christina Garman, Matthew Green, Ian Miers, Eran Tromer, and Madars Virza. &quot;Zerocash: Decentralized anonymous payments from Bitcoin&quot;. In: <em>S&amp;P '14</em>. 2014. [Bou+22] Clemence Bouvier, Pierre Briaud, Pyrros Chaidos, Robin Salen, L &acute; eo Perrin, &acute; Vesselin Velichkov, and Danny Willems. &quot;New design techniques for Efficient arithmetization-oriented hash functions: Anemoi permutations and Jive compression&quot;. In: <em>IACR ePrint 2022/840</em>. 2022. [CCZ98] Claude Carlet, Pascale Charpin, and Victor Zinoviev. &quot;Codes, bent functions and permutations suitable for DES-like cryptosystems&quot;. In: <em>Designs, Codes and Cryptography '98</em>. 1998. [CDDGS03] Dwaine Clarke, Srinivas Devadas, Marten van Dijk, Blaise Gassend, and G. Edward Suh. &quot;Incremental multiset hash functions and their application to memory integrity checking&quot;. In: <em>ASIACRYPT '03</em>. 2003.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>[CHMMVW20] Alessandro Chiesa, Yuncong Hu, Mary Maller, Pratyush Mishra, Noah Vesely, and Nicholas Ward. &quot;Marlin: Preprocessing zkSNARKs with universal and updatable SRS&quot;. In: <em>EUROCRYPT '20</em>. 2020.</li>
+      <li>[CL20] Alessandro Chiesa and Siqi Liu. &quot;On the impossibility of probabilistic proofs in relativized worlds&quot;. In: <em>ITCS '20</em>. 2020.</li>
+      <li>[CL99] Miguel Castro and Barbara Liskov. &quot;Practical Byzantine fault tolerance&quot;. In: <em>OSDI '99</em>. 1999.</li>
+      <li>[CP17] Anne Canteaut and Sebastien Duval L &acute; eo Perrin. &quot;A generalisation of Dillon's &acute; APN permutation with the best known differential and nonlinear properties for all fields of size 2 <sup>4</sup>k+2&quot;. In: <em>IEEE Transactions on Information Theory '17</em>. 2017.</li>
+      <li>[Can01] Ran Canetti. &quot;Universally composable security: A new paradigm for cryptographic protocols&quot;. In: <em>FOCS '01</em>. 2001.</li>
+      <li>[DL78] Richard A. Demillo and Richard J. Lipton. &quot;A probabilistic remark on algebraic program testing&quot;. In: <em>Information Processing Letters '78</em>. 1978.</li>
+      <li>[Dai] <em>Daira Hopwood's response in &quot;choose improved hash function for Merkle Tree (or replace Merkle Tree)&quot; PR #2258 to zcash/zcash</em>. URL: <a href="https://github.com/zcash/zcash/issues/2258#issuecomment-339801513" target="_blank" rel="noopener noreferrer">https://github.</a> <a href="https://github.com/zcash/zcash/issues/2258#issuecomment-339801513" target="_blank" rel="noopener noreferrer">com/zcash/zcash/issues/2258#issuecomment-339801513</a>.</li>
+      <li>[Dus] <em>Dusk Plonk</em>. URL: <a href="https://github.com/dusk-network/plonk" target="_blank" rel="noopener noreferrer">https://github.com/dusk-network/plonk</a>.</li>
+      <li>[Fra] <em>franklin-crypto: Gadget library for PLONK/Plookup</em>. URL: <a href="https://github.com/matter-labs/franklin-crypto" target="_blank" rel="noopener noreferrer">https://github</a>. <a href="https://github.com/matter-labs/franklin-crypto" target="_blank" rel="noopener noreferrer">com/matter-labs/franklin-crypto</a>.</li>
+      <li>[GK22] Ariel Gabizon and Dmitry Khovratovich. &quot;flookup: Fractional decompositionbased lookups in quasi-linear time independent of table size&quot;. In: <em>IACR ePrint 2022/1447</em>. 2022.</li>
+      <li>[GKLRSW21] Lorenzo Grassi, Dmitry Khovratovich, Reinhard Luftenegger, Christian Rech- &uml; berger, Markus Schofnegger, and Roman Walch. &quot;Reinforced Concrete: A fast hash function for verifiable computation&quot;. In: <em>IACR ePrint 2021/1038</em>. 2021.</li>
+      <li>[GKRRS21] Lorenzo Grassi, Dmitry Khovratovich, Christian Rechberger, Arnab Roy, and Markus Schofnegger. &quot;Poseidon: A new hash function for zero-knowledge proof systems&quot;. In: <em>USENIX Security '21</em>. 2021.</li>
+      <li>[GWC19] Ariel Gabizon, Zachary J. Williamson, and Oana Ciobotaru. &quot;PLONK: Permutations over Lagrange-bases for oecumenical noninteractive arguments of knowledge&quot;. In: <em>IACR ePrint 2019/953</em>. 2019.</li>
+      <li>[Gab19] Ariel Gabizon. &quot;AuroraLight: Improved prover efficiency and SRS size in a Sonic-like system&quot;. In: <em>IACR ePrint 2019/601</em>. 2019.</li>
+      <li>[Gro16] Jens Groth. &quot;On the size of pairing-based non-interactive arguments&quot;. In: <em>EU-ROCRYPT '16</em>. 2016.</li>
+    </ul>
+
+    <p class="text-gray-300">[HBHW] Daira Hopwood, Sean Bowe, Taylor Hornby, and Nathan Wilcox. <em>Zcash protocol specification</em>. URL: <a href="https://zips.z.cash/protocol/protocol.pdf" target="_blank" rel="noopener noreferrer">https://zips.z.cash/protocol/protocol.</a> <a href="https://zips.z.cash/protocol/protocol.pdf" target="_blank" rel="noopener noreferrer">pdf</a>.</p>
+
+    <p class="text-gray-300">[Hal] <em>halo2</em>. URL: <a href="https://github.com/zcash/halo2" target="_blank" rel="noopener noreferrer">https://github.com/zcash/halo2</a>.</p>
+
+    <p class="text-gray-300">[Hir18] Shoichi Hirose. &quot;Sequential hashing with minimum padding&quot;. In: <em>MDPI Cryptography '18</em>. 2018.</p>
+
+    <p class="text-gray-300">[Jub] <em>What is Jubjub?</em> URL: <a href="https://z.cash/technology/jubjub/" target="_blank" rel="noopener noreferrer">https://z.cash/technology/jubjub/</a>.</p>
+
+    <p class="text-gray-300">[KZG10] Aniket Kate, Gregory M. Zaverucha, and Ian Goldberg. &quot;Constant-size commitments to polynomials and their applications&quot;. In: <em>ASIACRYPT '10</em>. 2010.</p>
+
+    <p class="text-gray-300">[LLX07] Jiangtao Li, Ninghui Li, and Rui Xue. &quot;Universal accumulators with efficient nonmembership proofs&quot;. In: <em>ACNS '07</em>. 2007.</p>
+
+    <p class="text-gray-300">[LTYW18] Yongqiang Li, Shizhu Tian, Yuyin Yu, and Mingsheng Wang. &quot;On the generalization of butterfly structure&quot;. In: <em>IACR Transactions on Symmetric Cryptology '18</em>. 2018.</p>
+
+    <p class="text-gray-300">[MBKM19] Mary Maller, Sean Bowe, Markulf Kohlweiss, and Sarah Meiklejohn. &quot;Sonic: Zero-knowledge SNARKs from linear-size universal and updateable structured reference strings&quot;. In: <em>CCS '19</em>. 2019.</p>
+
+    <p class="text-gray-300">[Man] <em>WASM Z-prize challenge proposal (draft)</em>. URL: <a href="https://github.com/Manta-Network/wasm-zkp-challenge" target="_blank" rel="noopener noreferrer">https://github.com/</a> <a href="https://github.com/Manta-Network/wasm-zkp-challenge" target="_blank" rel="noopener noreferrer">Manta-Network/wasm-zkp-challenge</a>.</p>
+
+    <p class="text-gray-300">[Mer87] Ralph C. Merkle. &quot;A digital signature based on a conventional encryption function&quot;. In: <em>CRYPTO '87</em>. 1987.</p>
+
+    <p class="text-gray-300">[PBCWC96] Calton Pu, Andrew P. Black, Crispin Cowan, Jonathan Walpole, and Charles Consel. &quot;A specialization toolkit to increase the diversity of operating systems&quot;. In: <em>ICMAS Workshop on Immunity-Based Systems '96</em>. 1996.</p>
+
+    <p class="text-gray-300">[PK22] Jim Posen and Assimakis A. Kattis. &quot;Caulk+: Table-independent lookup arguments&quot;. In: <em>IACR ePrint 2022/957</em>. 2022.</p>
+
+    <p class="text-gray-300">[PST13] Charalampos Papamanthou, Elaine Shi, and Roberto Tamassia. &quot;Signatures of Correct Computation&quot;. In: <em>TCC '13</em>. 2013.</p>
+
+    <p class="text-gray-300">[PUB16] Leo Perrin, Aleksei Udovenko, and Alex Biryukov. &quot;Cryptanalysis of a the- &acute; orem: Decomposing the only known solution to the big APN problem&quot;. In: <em>CRYPTO '16</em>. 2016.</p>
+
+    <p class="text-gray-300">[Plo] <em>Plonky2 &amp; more</em>. URL: <a href="https://github.com/mir-protocol/plonky2" target="_blank" rel="noopener noreferrer">https://github.com/mir-protocol/plonky2</a>.</p>
+
+    <p class="text-gray-300">[RRR16] Omer Reingold, Guy N. Rothblum, and Ron D. Rothblum. &quot;Constant-round interactive proofs for delegating computation&quot;. In: <em>STOC '16</em>. 2016.</p>
+
+    <p class="text-gray-300">[SAGL18] Srinath Setty, Sebastian Angel, Trinabh Gupta, and Jonathan Lee. &quot;Proving the correct execution of concurrent services in zero-knowledge&quot;. In: <em>OSDI '18</em>. 2018.</p>
+
+    <p class="text-gray-300">[Sch80] Jack T. Schwartz. &quot;Fast probabilistic algorithms for verification of polynomial</p>
+
+    <p class="text-gray-300">identities&quot;. In: <em>JACM '80</em>. 1980.</p>
+
+    <p class="text-gray-300">[Set20] Srinath Setty. &quot;Spartan: Efficient and general-purpose zkSNARKs without trusted</p>
+
+    <p class="text-gray-300">setup&quot;. In: <em>CRYPTO '20</em>. 2020.</p>
+
+    <p class="text-gray-300">[Sin] <em>Sinsemilla</em>. URL: <a href="https://zcash.github.io/halo2/design/gadgets/sinsemilla.html" target="_blank" rel="noopener noreferrer">https : / / zcash . github . io / halo2 / design /</a></p>
+
+    <p class="text-gray-300"><a href="https://zcash.github.io/halo2/design/gadgets/sinsemilla.html" target="_blank" rel="noopener noreferrer">gadgets/sinsemilla.html</a>.</p>
+
+    <p class="text-gray-300">[Tur] <em>Proposal: The Turbo-PLONK program syntax for specifying SNARK programs</em>.</p>
+
+    <p class="text-gray-300">URL: <a href="https://docs.zkproof.org/pages/standards/accepted-workshop3/proposal-turbo_plonk.pdf" target="_blank" rel="noopener noreferrer">https://docs.zkproof.org/pages/standards/accepted-</a></p>
+
+    <p class="text-gray-300"><a href="https://docs.zkproof.org/pages/standards/accepted-workshop3/proposal-turbo_plonk.pdf" target="_blank" rel="noopener noreferrer">workshop3/proposal-turbo\\_plonk.pdf</a>.</p>
+
+    <p class="text-gray-300">[Wu21] Alexander Wu. &quot;Optimizations and improvements to cryptographic libraries for</p>
+
+    <p class="text-gray-300">zkSNARKs&quot;. MA thesis. EECS Department, University of California, Berkeley, 2021. URL: <a href="http://www2.eecs.berkeley.edu/Pubs/TechRpts/2021/EECS-2021-102.html" target="_blank" rel="noopener noreferrer">http://www2.eecs.berkeley.edu/Pubs/TechRpts/</a></p>
+
+    <p class="text-gray-300"><a href="http://www2.eecs.berkeley.edu/Pubs/TechRpts/2021/EECS-2021-102.html" target="_blank" rel="noopener noreferrer">2021/EECS-2021-102.html</a>.</p>
+
+    <p class="text-gray-300">[Xie+22] Tiancheng Xie, Jiaheng Zhang, Zerui Cheng, Fan Zhang, Yupeng Zhang, Yongzheng</p>
+
+    <p class="text-gray-300">Jia, Dan Boneh, and Dawn Song. &quot;zkBridge: Trustless cross-chain bridges made</p>
+
+    <p class="text-gray-300">practical&quot;. In: <em>CCS '22</em>. 2022.</p>
+
+    <p class="text-gray-300">[ZBKMNS22] Arantxa Zapico, Vitalik Buterin, Dmitry Khovratovich, Mary Maller, Anca Ni-</p>
+
+    <p class="text-gray-300">tulescu, and Mark Simkin. &quot;Caulk: Lookup arguments in sublinear time&quot;. In:</p>
+
+    <p class="text-gray-300"><em>CCS '22</em>. 2022.</p>
+
+    <p class="text-gray-300">[Zip79] Richard Zippel. &quot;Probabilistic algorithms for sparse polynomials&quot;. In: <em>EUROSAM '79</em>.</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li></li>
+    </ol>
+
+    <p class="text-gray-300">[Zks] <em>zkSync</em>. URL: <a href="https://zksync.io/" target="_blank" rel="noopener noreferrer">https://zksync.io/</a>.</p>
+
+`;
+---
+
+<BaseLayout title="An efficient verifiable state for zk-EVM and beyond from the... (2022/1487)">
+  <article class="max-w-4xl mx-auto article-prose">
+    <nav class="mb-8">
+      <a href="/papers" class="text-blue-400 hover:text-blue-300">
+        &larr; Back to Papers
+      </a>
+    </nav>
+
+    <header class="mb-12">
+      <h1 class="text-3xl font-bold mb-4"
+        set:html={TITLE_HTML} />
+      <p class="text-gray-400 mb-2"
+        set:html={AUTHORS_HTML} />
+      <p class="text-gray-500 text-sm mb-4">
+        2022 &middot; eprint 2022/1487
+      </p>
+      <div class="flex gap-4 text-sm">
+        <a
+          href={EPRINT_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          class="text-blue-400 hover:text-blue-300"
+        >
+          Paper (eprint) &rarr;
+        </a>
+      </div>
+      <PaperDisclaimer eprintUrl={EPRINT_URL} />
+      <p class="mt-1 text-xs text-gray-600">
+        Converted with: {CRAWLER} &middot; {CONVERTED_DATE}
+      </p>
+    </header>
+
+    <nav id="toc" class="mb-10 p-6 rounded-lg" style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06);">
+      <h2 class="text-lg font-bold mb-4">Table of Contents</h2>
+      <ol class="space-y-1 text-sm text-gray-300
+        list-decimal list-inside">
+        <li><a href="#abstract" class="hover:text-white">Abstract</a></li>
+        <li>
+          <a href="#sec-1" class="hover:text-white">Introduction</a>
+          <ol class="ml-6 mt-1 space-y-1 list-decimal
+            list-inside text-gray-400">
+            <li><a href="#sec-1.1" class="hover:text-white">Our approach: use the standard TurboPlonk recipe on Anemoi</a></li>
+            <li><a href="#sec-1.2" class="hover:text-white">Applications on scalability: zk-Rollup, zk-EVM, and zk-BatchVerify</a></li>
+            <li><a href="#sec-1.3" class="hover:text-white">Applications on security: Zerocash, zk-DID, and zk-Bridge</a></li>
+            <li><a href="#sec-1.4" class="hover:text-white">Rest of the note</a></li>
+          </ol>
+        </li>
+        <li>
+          <a href="#sec-2" class="hover:text-white">Background</a>
+          <ol class="ml-6 mt-1 space-y-1 list-decimal
+            list-inside text-gray-400">
+            <li><a href="#sec-2.1" class="hover:text-white">TurboPlonk</a></li>
+            <li><a href="#sec-2.2" class="hover:text-white">Flystel S-box: rotating an algebraic butterfly</a></li>
+            <li><a href="#sec-2.3" class="hover:text-white">Anemoi permutation: a substitution-permutation network</a></li>
+            <li><a href="#sec-2.4" class="hover:text-white">Jive mode of operation: k-to-1 compression for Merkle trees</a></li>
+            <li><a href="#sec-2.5" class="hover:text-white">Anemoi variable-length hash: a sponge construction</a></li>
+          </ol>
+        </li>
+        <li><a href="#sec-3" class="hover:text-white">Starting point</a></li>
+        <li><a href="#sec-4" class="hover:text-white">Initial attempt</a></li>
+        <li>
+          <a href="#sec-5" class="hover:text-white">Optimization</a>
+          <ol class="ml-6 mt-1 space-y-1 list-decimal
+            list-inside text-gray-400">
+            <li><a href="#sec-5.1" class="hover:text-white">Use processed round key polynomials as selectors</a></li>
+            <li><a href="#sec-5.2" class="hover:text-white">Skip unnecessary opening during linearization</a></li>
+            <li><a href="#sec-5.3" class="hover:text-white">Connect the output wire to the next gate</a></li>
+            <li><a href="#sec-5.4" class="hover:text-white">Other unexplored optimization</a></li>
+          </ol>
+        </li>
+        <li>
+          <a href="#sec-6" class="hover:text-white">Final protocol</a>
+          <ol class="ml-6 mt-1 space-y-1 list-decimal
+            list-inside text-gray-400">
+            <li><a href="#sec-6.1" class="hover:text-white">Indexer</a></li>
+            <li><a href="#sec-6.2" class="hover:text-white">Prover</a></li>
+            <li><a href="#sec-6.3" class="hover:text-white">Verifier</a></li>
+          </ol>
+        </li>
+        <li>
+          <a href="#sec-7" class="hover:text-white">Design and implementation</a>
+          <ol class="ml-6 mt-1 space-y-1 list-decimal
+            list-inside text-gray-400">
+            <li><a href="#sec-7.1" class="hover:text-white">3-ary Merkle tree</a></li>
+            <li><a href="#sec-7.2" class="hover:text-white">Domain separation in the Jive CRH</a></li>
+            <li><a href="#sec-7.3" class="hover:text-white">Concrete instantiation for the Jive CRH</a></li>
+            <li><a href="#sec-7.4" class="hover:text-white">Concrete instantiation for the Merkle tree membership proof</a></li>
+          </ol>
+        </li>
+        <li><a href="#sec-8" class="hover:text-white">Reference materials</a></li>
+      </ol>
+      <p class="text-xs text-gray-500 mt-4 mb-1 font-semibold">
+        Additional
+      </p>
+      <ul class="space-y-1 text-sm text-gray-400
+        list-disc list-inside">
+        <li><a href="#acknowledgements" class="hover:text-white">Acknowledgements</a></li>
+        <li><a href="#references" class="hover:text-white">References</a></li>
+      </ul>
+    </nav>
+
+
+    <Fragment set:html={CONTENT} />
+
+    <PaperHistory slug="contents-2022" />
+  </article>
+</BaseLayout>

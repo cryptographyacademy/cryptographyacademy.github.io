@@ -1,0 +1,1068 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import PaperDisclaimer from '../../components/PaperDisclaimer.astro';
+import PaperHistory from '../../components/PaperHistory.astro';
+
+const EPRINT_URL = 'https://eprint.iacr.org/2023/323';
+const CRAWLER = 'marker';
+const CONVERTED_DATE = '2026-02-16';
+const TITLE_HTML = 'Poseidon2: A Faster Version of the Poseidon Hash Function';
+const AUTHORS_HTML = 'Lorenzo Grassi, Dmitry Khovratovich, Markus Schofnegger';
+
+const CONTENT = `    <section id="abstract" class="mb-10">
+      <h2 class="text-2xl font-bold">Abstract</h2>
+      <p class="text-gray-300">Zero-knowledge proof systems for computational integrity have seen a rise in popularity in the last couple of years. One of the results of this development is the ongoing effort in designing so-called arithmetization-friendly hash functions in order to make these proofs more efficient. One of these new hash functions, Poseidon, is extensively used in this context, also thanks to being one of the first constructions tailored towards this use case. Many of the design principles of Poseidon have proven to be efficient and were later used in other primitives, yet parts of the construction have shown to be expensive in real-word scenarios.
+
+In this paper, we propose an optimized version of Poseidon, called Poseidon2. The two versions differ in two crucial points. First, Poseidon is a sponge hash function, while Poseidon2 can be either a sponge or a compression function depending on the use case. Secondly, Poseidon2 is instantiated by new and more efficient linear layers with respect to Poseidon. These changes allow to decrease the number of multiplications in the linear layer by up to 90% and the number of constraints in Plonk circuits by up to 70%. This makes Poseidon2 the currently fastest arithmetization-oriented hash function without lookups.
+
+Besides that, we address a recently proposed algebraic attack and propose a simple modification that makes both Poseidon and Poseidon2 secure against this approach.</p>
+      <p class="text-gray-300"><strong>Keywords:</strong> Hash Function &middot; Poseidon &middot; Poseidon2 &middot; Zero Knowledge &middot; Sponge/Compression Mode</p>
+    </section>
+
+    <p class="text-gray-300">The area of zero-knowledge proof systems has seen a rise in popularity during the last couple of years. Arithmetization techniques such as R1CS used in Groth16 <a href="#page-26-0">[37]</a>, AIR used for FRI-based commitments <a href="#page-25-0">[11,</a><a href="#page-25-1">12]</a>, and Plonk <a href="#page-26-1">[26]</a> and Plonkstyle arithmetizations (e.g., <a href="#page-26-2">[25]</a> used in halo2 <a href="#page-27-0">[56]</a>) make it possible to efficiently verify the correctness of a computation.</p>
+
+    <p class="text-gray-300">Most of these proof systems internally use hash functions for the purpose of polynomial (Merkle tree) commitments. These hash functions are rather different compared to more traditional primitives. Indeed, while the latter are often optimized for plain performance in software or hardware implementations, constructions for proof systems mostly focus on minimizing the number of <em>constraints</em> (similar to gates) when writing them down in a specific circuit language. This fact has led to new symmetric designs, exhibiting sometimes unusual symmetric building blocks (e.g., sacrificing plain performance in order to obtain a simpler description in a certain proof system).</p>
+
+    <p class="text-gray-300">In the literature, hash functions fulfilling these properties are often described as being arithmetization-oriented or circuit-friendly, which refers to their focus towards use cases of computational integrity. Besides Poseidon [30], examples of such constructions include MiMC/GMiMC [3,2], Friday [7], Rescue [4], Neptune [34], Anemoi [19], Griffin [27], and lookup-based primitives such as Reinforced Concrete [28] and Monolith [29]. In the last years, the knowledge of designing arithmetization-oriented hash functions has evolved, and more specific design goals are known today. For example, while minimizing the number of nonlinear operations was deemed the main target several years ago, many more performance metrics are taken into account now. Some of these metrics are the plain performance and the circuit complexity, which can play a significant role in the final proof composition.</p>
+
+    <p class="text-gray-300">The Origin of Poseidon. In this paper, we mostly focus on the Posei-DON hash function. First described in 2019 [32], it is heavily based on the HadesMiMC family of block ciphers [33]. The key property of HadesMiMC is that it uses two different round functions, one containing a full nonlinear layer with S-boxes applied to the entire state, and one containing a partial nonlinear layer with the S-boxes only affecting part of the state. This approach was chosen in order to provide convincing security arguments against statistical attacks using the full rounds while at the same time increasing the degree efficiently (i.e., by using a smaller number of S-boxes) using the partial rounds. However, HADESMiMC was designed with MPC use cases in mind, which has very different properties and optimization goals compared to modern proof systems. Most importantly, all linear operations can be computed locally by every party in an MPC protocol. Since the final efficiency of such a protocol depends on the number of communication rounds and no communication is needed for linear operations, the main optimization goal of HADESMiMC was to minimize the number of nonlinear operations. As a result, the final number of linear operations turned out to be comparatively high, mainly due to many multiplications with matrices of large sizes. In particular, each round of HADESMiMC contains a multiplication of a t-element state with a dense and unstructured  <span class="math">t \\times t</span>  matrix over  <span class="math">\\mathbb{F}_p</span> , where p is a comparatively large prime. Hence, this operation results in a number of multiplications in  <span class="math">\\mathcal{O}(t^2)</span>  over  <span class="math">\\mathbb{F}_p</span> .</p>
+
+    <p class="text-gray-300">Similar to MPC use cases, in some arithmetization techniques (e.g., R1CS used in Groth16 [37]), the number of nonlinear operations is also the main bot-</p>
+
+    <p class="text-gray-300">tleneck. Hence, building a hash function based on the HADESMIMC permutation seemed like an efficient approach. This idea led to the specification of POSEIDON, which is essentially a sponge hash function using an internal permutation similar to the one used in HADESMIMC (with minor differences such as the omission of a key addition). POSEIDON has since been implemented and used in many different proving frameworks, including e.g. Ginger-lib [38] and Plonky2 [49].</p>
+
+    <p class="text-gray-300">Plain Performance and the Plonk Arithmetization. Since the design of POSEIDON, various new optimization goals emerged. For example, it became clear that plain performance must not be neglected, since among other things it plays a crucial role when building the commitments outside of the respective circuits. Recent hash function designs in this area acknowledge this fact and try to also optimize for plain performance.</p>
+
+    <p class="text-gray-300">Moreover, the variety of different arithmetization techniques has increased in the last couple of years. While R1CS was the main target for the original POSEIDON, nowadays also the so-called algebraic intermediate representation (AIR) [13] for FRI-based proof systems [11] or Plonk [26] and &quot;Plonkish&quot; representations are popular approaches. Particularly, in Plonk linear operations also contribute to the final cost. Note that this is a clear distinction between Plonk and R1CS.</p>
+
+    <p class="text-gray-300">The Poseidon hash function, while widely used and arguably efficient in some use cases, exhibits a large number of linear operations. This makes it expensive in terms of plain performance and when considering a Plonk-style arithmetization.</p>
+
+      <h3 id="sec-1.1" class="text-xl font-semibold mt-8">1.1 Our Goals</h3>
+
+    <p class="text-gray-300">Our first goal for Poseidon2<sup> <span class="math">\\pi</span> </sup> is to achieve a simpler and more efficient version of Poseidon<sup> <span class="math">\\pi</span> </sup>. At the same time, we want to stay close to the original description, which allows us to benefit from years of third-party cryptanalysis applied to Poseidon<sup> <span class="math">\\pi</span> </sup>. In particular, our modifications allow us to achieve significant performance improvements while keeping the same round numbers, i.e., the same number of nonlinear operations. This is beneficial in concrete use cases in computational integrity. Indeed, the number of constraints does not increase when choosing Poseidon2<sup> <span class="math">\\pi</span> </sup> instead of Poseidon<sup> <span class="math">\\pi</span> </sup>, while at the same time the plain performance is better. For example, Merkle trees, a prominent building block in many proof systems, can be computed significantly faster.</p>
+
+    <p class="text-gray-300">The updated Poseidon2<sup> <span class="math">\\pi</span> </sup> will show similarities to other primitives, for example Neptune. Still, the algorithmic description is much closer to Poseidon<sup> <span class="math">\\pi</span> </sup>. We chose this approach since Poseidon<sup> <span class="math">\\pi</span> </sup> is widely used in practice, and reusing components from the original design reduces implementation efforts.</p>
+
+    <p class="text-gray-300">Remark 1. We emphasize that we do not propose changes to the original permutation, and we do not propose a new security analysis for it either. Instead, our modification  <span class="math">POSEIDON2^{\\pi}</span>  can be thought of as a new and optimized version of  <span class="math">POSEIDON^{\\pi}</span> .</p>
+
+      <h3 id="sec-1.2" class="text-xl font-semibold mt-8">1.2 Our Contributions and Results</h3>
+
+    <p class="text-gray-300">Security Issue for Poseidon<sup> <span class="math">\\pi</span> </sup>. We address a security problem with the original Poseidon<sup> <span class="math">\\pi</span> </sup> permutation. Indeed, as has been observed in [10], the first two nonlinear layers can be skipped when mounting an algebraic attack on Poseidon<sup> <span class="math">\\pi</span> </sup>. This results in equation systems of lower degrees and a more efficient attack. This approach can be mitigated by adding an additional linear layer to the beginning of the permutation. We discuss this issue in Section 7.3.</p>
+
+    <p class="text-gray-300"><strong>Poseidon2</strong><sup> <span class="math">\\pi</span> </sup>. As the main contribution, we consider various optimizations in order to make Poseidon faster and more efficient in recent proof systems. In particular, compared to the original Poseidon<sup> <span class="math">\\pi</span> </sup> permutation, our modification called Poseidon2<sup> <span class="math">\\pi</span> </sup> has</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>(1) an additional linear layer at the beginning of the permutation,</li>
+      <li>(2) different linear layer matrices,</li>
+      <li>(3) round constants only applied to the first word in the internal rounds, and</li>
+      <li>(4) the same number of rounds for many instantiations used in practice.</li>
+    </ul>
+
+    <p class="text-gray-300">Regarding the last point, we compare the statistical and the algebraic security of  <span class="math">POSEIDON2^{\\pi}</span>  with that of  <span class="math">POSEIDON^{\\pi}</span> . We also emphasize that our new modified permutation is very similar in nature to the original one, and thus inherits the trust gained from the third-party cryptanalysis of POSEIDON. A full specification of the new linear layers and of  <span class="math">POSEIDON2^{\\pi}</span>  is given in Section 5 and Section 6.</p>
+
+    <p class="text-gray-300">Modes of Operation. In many computational integrity proof systems, the construction of Merkle trees is a crucial part. For example, it is used to compute commitments to polynomials or to prove membership. When building a Merkle tree, the next hash is computed using a fixed number of previous (hash) outputs. For this purpose, the sponge function has often been used in the past, albeit with only one permutation call. In this paper, depending on the use case, we suggest to use either the classical sponge hash function or a generic compression function which computes a single new output using an arbitrary number of inputs and only one permutation call. In our practical use case, its main advantage regards the fact that it operates on a smaller size. For example, the inner part (capacity elements) of a sponge is not necessary, and thus the permutation can become smaller, with concrete advantages. We discuss both modes of operation specified for Poseidon2 <span class="math">\\pi</span>  in Section 3.1.</p>
+
+    <p class="text-gray-300"><strong>Performance Comparison.</strong> Following the description of our new permutation  <span class="math">Poseidon 2^{\\pi}</span> , we discuss its performance characteristics in Section 8. We focus on the plain performance and on the number of Plonk constraints, and provide benchmarks from a Rust implementation for various state sizes. We also compare  <span class="math">Poseidon 2^{\\pi}</span>  to the original version and to other similar primitives, and we provide a new Plonkish arithmetization technique which is compatible with both  <span class="math">Poseidon 2^{\\pi}</span>  and  <span class="math">Poseidon 2^{\\pi}</span> .</p>
+
+    <section id="sec-2" class="mb-10">
+      <h2 class="text-2xl font-bold">2 Preliminaries: Modern Arithmetization Techniques</h2>
+
+    <p class="text-gray-300">Our focus in this paper is on use cases in the area of computational integrity proof systems. In such a scenario, a prover wants to convince a verifier to have correctly run an arbitrary computation, without making the verifier recompute the result. Many such proof systems exist in practice <a href="#page-26-0">[37,</a><a href="#page-25-4">13,</a><a href="#page-26-1">26]</a>, and they also allow for zero-knowledge versions where the verifier does not learn any private details of the provided proof.</p>
+
+    <p class="text-gray-300">In general, a proof can be split into two steps. First, the computation has to be represented as a number of polynomials, which is usually called arithmetization. Then, a polynomial commitment scheme is used in order to finalize the proof. In this paper, we focus on the arithmetization step, and for this purpose we briefly describe popular techniques. The aim when applying these is to keep the number of constraints as low as possible.</p>
+
+    <p class="text-gray-300">R1CS. A rank-1 constraint satisfaction system (R1CS) consists of n equations in the variables <sup>v</sup>0, v1, . . . , v<sup>m</sup> defined by P<sup>m</sup> <sup>i</sup>=0 a (n) i vi &middot; P<sup>m</sup> <sup>i</sup>=0 b (n) i vi = P<sup>m</sup> <sup>i</sup>=0 c (n) i vi , where v<sup>i</sup> are elements from a finite field F, v<sup>0</sup> &isin; 0, 1, and a (n) i , b(n) i , c (n) i are field elements describing the n-th constraint.</p>
+
+    <p class="text-gray-300">Note that these equations are of degree 2 in {vi} m <sup>i</sup>=0. They are derived from the statement to prove, which in many cases is a hash function evaluation. Then, minimizing the number of constraints generally leads to more efficient proofs. As an example, using high-degree functions in the hash specification results in a larger number of constraints, which is why many recent arithmetization-oriented designs rely on low-degree components.</p>
+
+    <p class="text-gray-300">Plonk and Variants. The Plonk <a href="#page-26-1">[26]</a> arithmetization results in a table-like representation for the execution trace. However, the constraints are not restricted to describe entire state transitions, and in general more freedom is offered to the designer. In particular, every constraint is of the form</p>
+
+    <p class="text-gray-300"><span class="math">$q_{L_i} \\cdot a_{L_i} + q_{R_i} \\cdot a_{R_i} + q_{O_i} \\cdot a_{O_i} + q_{M_i} \\cdot (a_{L_i} a_{R_i}) + q_{C_i} = 0,</span>$</p>
+
+    <p class="text-gray-300">where aL<sup>i</sup> , aR<sup>i</sup> , aO<sup>i</sup> are witness variables describing two inputs and an output of a gate, and qL<sup>i</sup> , qR<sup>i</sup> , qO<sup>i</sup> , qM<sup>i</sup> , qC<sup>i</sup> are set such that a specific gate constraint (e.g., an addition or a multiplication) is enforced. Note that this is only a basic description of Plonk, and subsequent variants such as <a href="#page-26-2">[25]</a> make it possible to increase the &quot;width&quot; of the gate (e.g., the number of inputs).</p>
+
+    <p class="text-gray-300">A notable difference in Plonk when compared to R1CS is that linear gates (e.g., additions) also require constraints of their own. Hence, linear operations are not &quot;for free&quot; anymore. This can make expensive linear operations, such as matrix multiplications, not only inefficient in a plain evaluation, but also with regards to the arithmetization.</p>
+
+    <p class="text-gray-300">Plonkish and AIR. Both Plonkish [56] and AIR [13] are more powerful representations compared to R1CS and regular Plonk. Like Plonk, both Plonkish and AIR describe a computation trace as a matrix, but allow high-degree polynomial relations to represent the state transformation.</p>
+
+    <p class="text-gray-300">The set of states is a  <span class="math">T \\times w</span>  matrix, where T is the number of states and w is the width (or the number of registers). Focusing on a hash function evaluation, for example w is set to the state size of the hash primitive and each new state describes the values obtained after applying a round function to the previous state. In contrast to R1CS, the constraint polynomials are not required to be of degree 2, but the efficiency of the arithmetization still depends on the maximum degree d in the constraint polynomials. The prover time is proportional to  <span class="math">T \\cdot w \\cdot d</span> , whereas the proof size is an affine function of the maximal number of variables q in the constraints. Hence, more efficient Plonkish/AIR proofs are delivered by smaller degrees and/or fewer variables in the constraints.</p>
+
+      <h3 id="sec-3.1" class="text-xl font-semibold mt-8">3.1 Modes of Operation</h3>
+
+    <p class="text-gray-300">Hash functions are crucial in the context of zero-knowledge protocols, e.g., to build Merkle trees for a polynomial commitment. Given a hash function  <span class="math">\\mathcal{H}: \\mathbb{F}_p^{\\star} \\to \\mathbb{F}_p^{\\infty}</span>  for a prime  <span class="math">p \\geq 2</span> , it must be computationally hard to find</p>
+
+    <pre><code class="language-text">(collision resistance) x, x&#x27; such that \\mathcal{H}(x) = \\mathcal{H}(x&#x27;), (preimage resistance) x given y such that \\mathcal{H}(x) = y, (second-preimage resistance) x&#x27; given x \\neq x&#x27; such that \\mathcal{H}(x&#x27;) = \\mathcal{H}(x).
+</code></pre>
+
+    <p class="text-gray-300">In this paper, we mainly focus on the sponge mode, which has also been used in many of the recent arithmetization-oriented designs.</p>
+
+    <p class="text-gray-300">While hash functions are perfectly usable and allow to make strong security arguments, they are often more generic. For many classical applications (e.g., ordinary hashing of arbitrary-length inputs) this is not a major issue. However, when building a Merkle tree with small fixed-size input lengths, we often only need a single permutation call to process the entire input and compute the desired output. In this case, the construction is not used as a hash function in a traditional sense, but rather as a compression function.</p>
+
+    <p class="text-gray-300">The concept of compression functions is well-known in cryptography, and they can also be used to build general-purpose hash functions [48,21]. For our use case, however, we focus on single calls to compression functions, precisely matching our need for building a Merkle tree and supporting so-called t-to-n compressions, i.e., compressing a vector of size t into one of size n. As for the case of hash functions, a compression function  <span class="math">C: \\mathbb{F}_p^t \\to \\mathbb{F}_p^n</span>  must guarantee resistance against collision and (second-)preimage attacks.</p>
+
+    <p class="text-gray-300"><strong>Sponge Hash Functions.</strong> A sponge hash function [14,15] is built using an internal cryptographic permutation or function. It accommodates for both arbitrarily sized inputs and arbitrarily sized outputs. Let  <span class="math">\\mathcal{P}</span>  be a permutation over  <span class="math">\\mathbb{F}_p^t</span> , and let t = r + c, where c denotes the capacity and r the rate. A sponge function then works as follows.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>The input message  <span class="math">m \\in \\mathbb{F}_p^*</span>  is padded with 10* such that its size is a multiple of r, that is,  <span class="math">m = m_0 \\mid \\mid m_1 \\mid \\mid \\cdots \\mid \\mid m_{\\mu-1} \\in (\\mathbb{F}_p^r)^{\\mu}</span> .</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>The capacity is initialized with  <span class="math">IV \\in \\mathbb{F}_n^c</span> .</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>The message blocks are compressed one-by-one into a  <span class="math">\\mathbb{F}_p^t</span>  state such that</li>
+    </ol></li>
+    </ul>
+
+    <p class="text-gray-300"><span class="math">$\\forall i \\in \\{0, 1, \\dots, \\mu - 1\\}: \\quad h_i = h_{i-1} + P(m_i \\mid\\mid 0^c),</span>$</p>
+
+    <p class="text-gray-300">where  <span class="math">0^c := 0 \\mid \\mid \\cdots \\mid \\mid 0 \\in \\mathbb{F}_p^c</span>  and  <span class="math">h_{-1} := 0^r \\mid \\mid IV \\in \\mathbb{F}_p^t</span> .</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>After processing the last message block, the output is of the form  <span class="math">\\operatorname{Tr}_r(h_{\\mu}) \\mid | \\operatorname{Tr}_r(h_{\\mu+1}) \\mid | \\cdots</span> , where the truncation function  <span class="math">\\operatorname{Tr}_r</span>  yields the first r elements of the input.</li>
+    </ol>
+
+    <p class="text-gray-300">In this paper, we adapt the SAFE padding rule proposed in [9], consisting of adding the smallest number &lt; r of zeroes such that the size of  <span class="math">m \\mid\\mid 0^*</span>  is a multiple of r, where IV = H(IO, D) with H being a 128-bit hash function, IO being the pattern of absorbing to and squeezing elements to the sponge (for plain  <span class="math">\\ell</span> -input hashing one sets  <span class="math">IO = 2^{63} + \\ell 2^{32} + 1</span> ), and D being a domain separator.</p>
+
+    <p class="text-gray-300">Security. As proven in [15], if the inner permutation resembles a random one, the sponge construction is indifferentiable from a random oracle up to around  <span class="math">p^{c/2}</span>  queries. Equivalently, in order to provide  <span class="math">\\kappa</span>  bits of security,  <span class="math">p^{c/2} \\geq 2^{\\kappa}</span> .</p>
+
+    <p class="text-gray-300">Cryptographic Compression Functions. Let  <span class="math">\\mathcal{P}</span>  be a permutation over  <span class="math">\\mathbb{F}_p^t</span> . Several strategies can be used to construct a compression function. Here we focus on compression functions defined by combining the truncation function with the feed-forward operation, i.e.,</p>
+
+    <p class="text-gray-300"><span class="math">$x \\in \\mathbb{F}_p^t \\mapsto \\mathcal{C}(x) := \\operatorname{Tr}_n(\\mathcal{P}(x) + x) \\in \\mathbb{F}_p^n,</span>$</p>
+
+    <p class="text-gray-300">where  <span class="math">\\operatorname{Tr}_n</span>  yields the first n elements of the inputs. Several schemes proposed in the literature reduce to this model, including Haraka [43] and the Jive mode of operation proposed in [19]. In such cases, the state x is multiplied via an invertible  <span class="math">t \\times t</span>  matrix  <span class="math">M_C</span>  before being added to  <span class="math">\\mathcal{P}</span> , that is,  <span class="math">\\mathcal{C}&#x27;(x) := \\operatorname{Tr}_n(\\mathcal{P}(x) + M_C \\times x)</span> . However, as discussed in [27], this multiplication does not have any effect on the security of the compression function in the case in which no constraint is imposed on the input x. For this reason, we simply consider the case  <span class="math">M_C = I</span>  (i.e., identity matrix).</p>
+
+    <p class="text-gray-300"> <span class="math">&lt;sup&gt;^5&lt;/sup&gt;</span>  We assume that the output consists of at least  <span class="math">2\\kappa/\\log_2(p)</span>  elements in order to prevent birthday bound attacks.</p>
+
+    <p class="text-gray-300">Security of  <span class="math">\\mathcal{C}</span> . As discussed e.g. in [27], this approach can be seen as a permutation-based variant of the Davies-Meyer mode [50,18] which, like the latter, crucially relies on a feed-forward operation for one-wayness. For a security level of  <span class="math">\\kappa</span>  bits and assuming  <span class="math">\\mathcal{P}</span>  behaves like a pseudo-random (known) permutation,  <span class="math">\\mathcal{C}</span>  is a secure compression function with respect to collisions and (second-)preimages if</p>
+
+    <p class="text-gray-300">(1)  <span class="math">p^n \\geq 2^{2\\kappa}</span>  due to the birthday bound attack whose cost is in  <span class="math">\\mathcal{O}(2^{-n/2} = 2^{-\\kappa})</span> , (2)  <span class="math">p^{t-n} \\geq 2^{\\kappa}</span>  in order to avoid a guessing attack on the truncated part.</p>
+
+      <h3 id="sec-3.2" class="text-xl font-semibold mt-8">3.2 The Poseidon<sup> <span class="math">\\pi</span> </sup> Permutation</h3>
+
+    <p class="text-gray-300">Since our optimization is strongly based on the Poseidon<sup> <span class="math">\\pi</span> </sup> permutation, we recall its definition here. We refer to the original paper [30,32] for more details.</p>
+
+    <p class="text-gray-300">Remark 2. We emphasize that the round numbers given in the following are based on the updated security analysis proposed in [32], where the designers make corrections to the original bounds. This also includes the recent results from [6]. However, to the best of our knowledge, such results should not impact the round number of any instance of Poseidon<sup> <span class="math">\\pi</span> </sup> (due to the restriction on the value of p, t and  <span class="math">\\kappa</span> ). For this reason, we do not consider it in this work.</p>
+
+    <p class="text-gray-300">Let  <span class="math">p&gt;2^{30}</span>  be a prime number and let  <span class="math">t\\geq 2</span>  (in the following, let  <span class="math">n\\approx\\log_2(p)</span> ). The Poseidon<sup> <span class="math">\\pi</span> </sup> permutation  <span class="math">\\mathcal P</span>  over  <span class="math">\\mathbb F_p^t</span>  is defined by</p>
+
+    <p class="text-gray-300"><span class="math">$\\mathcal{P}(x) = \\mathcal{E}_{R_F-1} \\circ \\cdots \\circ \\mathcal{E}_{R_F/2} \\circ \\mathcal{I}_{R_P-1} \\circ \\cdots \\circ \\mathcal{I}_0 \\circ \\mathcal{E}_{R_F/2-1} \\circ \\cdots \\circ \\mathcal{E}_0(x),</span>$</p>
+
+    <p class="text-gray-300">where  <span class="math">\\mathcal{E}</span>  is an external (full) round,  <span class="math">\\mathcal{I}</span>  is an internal (partial) round,  <span class="math">R_F</span>  is the number of external rounds, and  <span class="math">R_P</span>  is the number of internal rounds. For a security level of  <span class="math">\\kappa</span>  bits with  <span class="math">2^{80} \\leq 2^{\\kappa} \\leq \\min\\{2^{256}, p^{t/3}\\}</span>  (due to the security of the sponge hash function and compression function given before),</p>
+
+    <p class="text-gray-300">
+<span class="math">$R_F = 2 \\cdot R_f = 8,</span>$</p>
+
+    <p class="text-gray-300"><span class="math">$R_P \\ge \\left\\lceil 1.075 \\cdot \\left\\lceil \\max \\left\\{ \\frac{\\min\\{\\kappa, \\log_2(p)\\}}{\\log_2(d)} + \\log_d(t) - 5, R_{\\text{GB}} \\right\\} \\right\\rceil \\right\\rceil, \\tag{1}</span>$</p>
+
+    <p class="text-gray-300">where  <span class="math">R_{\\rm GB}</span>  is related to the Gr&ouml;bner basis attack and given by</p>
+
+    <p class="text-gray-300"><span class="math">$\\begin{split} R_{\\mathrm{GB}} \\geq \\max &amp; \\left\\{ R_{\\mathrm{GB}}&#x27;, \\log_d(2) \\cdot \\min\\left\\{\\kappa, \\log_2(p)\\right\\} - 6, \\right. \\\\ &amp; \\left. t - 7 + \\log_d(2) \\cdot \\min\\left\\{\\frac{\\kappa}{t+1}, \\frac{\\log_2(p)}{2}\\right\\}, \\frac{\\kappa}{2 \\cdot \\log_2(d)} - 5 \\cdot t + 4 \\right\\}. \\end{split}</span>$</p>
+
+    <p class="text-gray-300">where  <span class="math">R&#x27;_{GB} \\geq 1</span>  is the smallest integer that satisfies</p>
+
+    <p class="text-gray-300"><span class="math">$\\binom{4 \\cdot t + 5 \\cdot r + 2 \\cdot R&#x27;_{GB} + d}{3r + R&#x27;_{GB} + d} \\ge 2^{\\kappa/2},</span>$</p>
+
+    <p class="text-gray-300">where d is the degree of the S-boxes and r is the rate.</p>
+
+    <p class="text-gray-300">The security level consists of 2 external/full rounds and 7.5% more internal/partial rounds. The external round  <span class="math">\\mathcal E</span>  is defined by</p>
+
+    <p class="text-gray-300"><span class="math">$\\mathcal{E}_i(x) = M \\cdot \\left( (x_0 + c_0^{(i)})^d, (x_1 + c_1^{(i)})^d, \\dots, (x_{t-1} + c_{t-1}^{(i)})^d \\right)</span>$</p>
+
+    <p class="text-gray-300">for  <span class="math">i \\in \\{0, 1, ..., R_F - 1\\}</span> , where  <span class="math">d \\geq 3</span>  is the smallest positive integer that satisfies  <span class="math">\\gcd(d, p - 1) = 1</span>  and where  <span class="math">c_j^{(i)}</span>  is the <em>j</em>-th round constant in the <em>i</em>-th external round. The internal round is defined by</p>
+
+    <p class="text-gray-300"><span class="math">$\\mathcal{I}_i(x) = M \\cdot \\left( (x_0 + c_0^{(i)})^d, x_1 + c_1^{(i)}, \\dots, x_{t-1} + c_{t-1}^{(i)} \\right)</span>$</p>
+
+    <p class="text-gray-300">for  <span class="math">i \\in \\{0, 1, \\dots, R_P - 1\\}</span> , where d is defined as before and where  <span class="math">c_j^{(i)}</span>  is the j-th round constant in the i-th internal round.</p>
+
+    <p class="text-gray-300">In both cases, M is a  <span class="math">t \\times t</span>  MDS matrix fulfilling particular properties in order to prevent arbitrarily long subspace trails. We refer to [36] and to Section 5.3 for more details regarding the condition for preventing arbitrarily long subspace trails. Here we limit ourselves to recall that such a condition is satisfied if the minimal polynomials of  <span class="math">M, M^2, \\ldots, M^\\ell</span>  are irreducible and of maximum degree. One way to set up an MDS matrix is by using a Cauchy matrix, whose element in the j-th column of the i-th row is defined by  <span class="math">M_{i,j} = 1/(x_i + y_j)</span>  for pairwise distinct  <span class="math">\\{x_i\\}_{i=1}^t</span>  and  <span class="math">\\{y_i\\}_{i=1}^t</span> , where  <span class="math">x_i + y_j \\neq 0</span> .</p>
+
+    <p class="text-gray-300">Before going on, we recall the definition of an MDS matrix.</p>
+
+    <p class="text-gray-300"><strong>Definition 1.</strong> The branch number of a matrix over  <span class="math">\\mathbb{F}_p^t</span>  is defined as  <span class="math">B(M) = \\min_{x \\in \\mathbb{F}_p^t \\setminus \\{0\\}} \\{ \\text{hw}(x) + \\text{hw}(M(x)) \\}</span> , where  <span class="math">\\text{hw}(\\cdot)</span>  is the bundle weight in wide trail terminology [20]. A matrix  <span class="math">M \\in \\mathbb{F}_p^{t \\times t}</span>  is a maximum distance separable (MDS) matrix if and only if B(M) = t + 1. Equally, a matrix M is MDS if and only if every submatrix of M is invertible.</p>
+
+    <p class="text-gray-300"><strong>Efficient Implementation.</strong> The Poseidon<sup> <span class="math">\\pi</span> </sup> permutation allows for an optimized implementation, where the round constant additions and the matrix multiplications in the partial rounds can be replaced by more efficient equivalent operations. The approach is described in detail in [32, Appendix B]. We use this method in our benchmarks for Poseidon<sup> <span class="math">\\pi</span> </sup>.</p>
+
+    <p class="text-gray-300"><strong>Security Argument.</strong> The security argument of  <span class="math">POSEIDON^{\\pi}</span>  is based on the HADES design strategy [33]. In particular, the external rounds together with the wide trail strategy are used to obtain simple and convincing arguments against statistical attacks. On the other hand, the internal rounds are mainly responsible for the security against algebraic attacks. The motivation is that the degree grows equally in the external and the internal round, but internal rounds are more efficient in the target use cases.</p>
+
+    </section>
+
+    <section id="sec-4" class="mb-10">
+      <h2 class="text-2xl font-bold">4 Security: Initial and Final Matrix Multiplications</h2>
+
+    <p class="text-gray-300">In the case of a block cipher, it is well known that the initial and the final affine layer do not (usually) affect the security. Indeed, it is sufficient to swap the initial/final affine layer with the initial/final key addition. Having done that, one can simply consider an equivalent version of the cipher without the initial/final affine layer, which is applied directly to the plaintext/ciphertext.<sup>6</sup></p>
+
+    <p class="text-gray-300">The situation is different for the case of a sponge function. In the following, we discuss the impact of the initial and final linear layers in the case of a permutation that instantiates a sponge hash function and/or a compression one.</p>
+
+    <p class="text-gray-300">Remark 3. The following considerations only hold for SPN schemes. They do not hold in general for schemes in which a nonlinear diffusion takes place.</p>
+
+    <p class="text-gray-300">Case: Sponge Hash Function. In the case of a sponge hash function, the inner part is initialized with an initial value IV. Since the S-boxes of the nonlinear layer work independently from each other over  <span class="math">\\mathbb{F}_p</span> , it is sufficient to replace IV with the corresponding value IV' computed via the nonlinear layer in order to remove the first nonlinear layer. In this case, the collision/preimage found for the sponge hash function instantiated with the modified permutation without the initial nonlinear layer can be easily extended to a collision/preimage for the sponge hash function instantiated with the original permutation. This attack has been discussed in [10] for the case of Poseidon<sup> <span class="math">\\pi</span> </sup> and Rescue. Interestingly, the recent sponge hash function Tip5 [55] exhibits a similar problem, since its internal SPN permutation starts with a nonlinear layer instead of a linear one.</p>
+
+    <p class="text-gray-300">A similar conclusion holds for the final linear layer as well. We recall that in the sponge hash function, a truncation takes place in the final step. The final linear layer guarantees that the truncated part depends on all the outputs of the final nonlinear layer. If the linear layer is omitted, then no diffusion takes place. Working in the same way just described for the initial layer, it is simple to observe that the final nonlinear layer does not have any impact on the security, and it can simply be removed.</p>
+
+    <p class="text-gray-300">Case: Compression Function. The situation for the compression function is slightly different. As discussed in [27], given invertible linear layers M',  <span class="math">\\hat{M}&#x27;</span> , the security of the two constructions</p>
+
+    <p class="text-gray-300"><span class="math">$x \\mapsto M&#x27; \\times \\mathcal{P}(M^{&quot;} \\times x) + \\hat{M} \\times x</span>$
+and  <span class="math">x&#x27; \\mapsto \\mathcal{P}&#x27;(x&#x27;) + x&#x27;</span></p>
+
+    <p class="text-gray-300">is identical for  <span class="math">\\mathcal{P}&#x27;(\\cdot) := M&#x27; \\times \\mathcal{P}(M^{&quot;} \\times \\hat{M}^{-1} \\times \\cdot)</span>  and  <span class="math">x&#x27; := \\hat{M} \\times x</span> . For this reason, we are not aware of any concrete impact of the initial and/or final linear layer on the security of the compression function  <span class="math">x \\mapsto \\operatorname{Tr}_n(\\mathcal{P}(x) + x)</span> .</p>
+
+    <p class="text-gray-300"><sup>&amp;</sup>lt;sup&gt;6</sup> There are some cases in which this is not completely true, as e.g. attacks using details of the key schedule (see e.g. [22] for the AES case).</p>
+
+    <p class="text-gray-300">Conclusion. When designing an SPN permutation for a sponge hash function, it is paramount that it starts and finishes with a linear layer that provides diffusion. Since these linear layers do not decrease the security when used with a compression function, we suggest to do the same in this case.</p>
+
+    </section>
+
+    <section id="sec-5" class="mb-10">
+      <h2 class="text-2xl font-bold">5 More Efficient Linear Layers</h2>
+
+    <p class="text-gray-300">Using the wide trail strategy and matrices with large branch numbers allows the designer to use convincing arguments regarding the statistical security of a permutation. However, Poseidon<sup>&pi;</sup> is mostly used together with large prime numbers, which in combination with low-degree nonlinear functions provide strong statistical properties. Therefore, large branch numbers are not strictly needed in order to achieve the advertised level of security, and we can instead focus on more efficient matrices.</p>
+
+    <p class="text-gray-300">In this section, we propose several new linear layers to be used together with the Poseidon<sup>&pi;</sup> permutation. All of these are built in order to provide the same security level as the original specification. However, we take into account the plain performance and the number of constraints in a Plonkish arithmetization (for the latter, recall that linear constraints are not free and are indeed part of the final cost). In particular,</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>(1) for the plain performance, we want to minimize the number of constant multiplications, and</li>
+      <li>(2) we aim for small matrix entries, such that multiplications can be replaced by addition chains in many cases.</li>
+    </ul>
+
+    <p class="text-gray-300">Both of these optimizations also result in fewer reductions being necessary, further speeding up the computation. To summarize, our main goals are to provide the same security level of Poseidon<sup>&pi;</sup> , while at the same time having linear layers which require significantly fewer operations to compute.</p>
+
+    <p class="text-gray-300">In the following, we show how to use non-MDS matrices for the external and internal rounds, denoted respectively by M<sup>E</sup> and MI. Since Poseidon<sup>&pi;</sup> is defined to use MDS matrices and hence this goes against the original specification of Poseidon, we will later show that this modification has no impact regarding the final security. We also give the efficiency in terms of Plonk constraints, noting that even more efficient representations can be derived when supporting extended versions of Plonk (e.g., Plonkish).</p>
+
+      <h3 id="sec-5.1" class="text-xl font-semibold mt-8">5.1 Matrix for the External Round</h3>
+
+    <p class="text-gray-300">Let us focus on the case t = 4 &middot; t &prime; for t &prime; &isin; N (the cases t &isin; {2, 3} are discussed separately later). For the external rounds, we propose to instantiate M<sup>E</sup> via the efficient matrices proposed for Griffin-&pi; in <a href="#page-26-5">[27]</a> as</p>
+
+    <p class="text-gray-300"><span class="math">$M_{\\mathcal{E}} = \\begin{cases} M_4 &amp; \\text{if } t = 4, \\\\ \\operatorname{circ}(2 \\cdot M_4, M_4, \\dots, M_4) \\in \\mathbb{F}_p^{t \\times t} &amp; \\text{if } t \\ge 8, \\end{cases}</span>$</p>
+
+    <p class="text-gray-300">where  <span class="math">M_4</span>  is a  <span class="math">4 \\times 4</span>  MDS matrix defined as</p>
+
+    <p class="text-gray-300"><span class="math">$M_4 = \\begin{pmatrix} 5 &amp; 7 &amp; 1 &amp; 3 \\\\ 4 &amp; 6 &amp; 1 &amp; 1 \\\\ 1 &amp; 3 &amp; 5 &amp; 7 \\\\ 1 &amp; 1 &amp; 4 &amp; 6 \\end{pmatrix},</span>$</p>
+
+    <p class="text-gray-300">which corresponds to the matrix  <span class="math">M_{4,4}^{8,4}</span>  from [23], setting  <span class="math">\\alpha = 2</span> . This matrix is MDS for all primes we consider (that is,  <span class="math">p &gt; 2^{31}</span> ).</p>
+
+    <p class="text-gray-300">As shown in [23] (see also App. B), we can compute the multiplication of 4 input elements with  <span class="math">M_4</span>  by using only 8 additions and 4 constant multiplications.</p>
+
+    <p class="text-gray-300"><strong>Plonk Arithmetization.</strong> We assume the use of 2-fan-in gates. The arithmetization in Plonk is then similar to the plain computation, with various small differences. First, only 8 constraints are needed for each  <span class="math">M_4</span>  computation. Secondly, only t constraints are needed for the finalization of  <span class="math">M_{\\mathcal{E}}</span> . In total, we need  <span class="math">8 \\cdot (t/4) + t = 3t</span>  constraints.</p>
+
+      <h3 id="sec-5.2" class="text-xl font-semibold mt-8">5.2 Matrix for the Internal Round</h3>
+
+    <p class="text-gray-300">In the original Poseidon<sup> <span class="math">\\pi</span> </sup> specification, the security argument against statistical attacks purely takes into account the external rounds and the number of active S-boxes in these rounds. The main reason for this is that the wide trail design strategy [20] is only applicable if the number of S-boxes in each round is at least  <span class="math">\\lceil t/2 \\rceil</span>  for a state size t. This is not the case for the partial rounds of Poseidon<sup> <span class="math">\\pi</span> </sup>, where only a single S-box is used.</p>
+
+    <p class="text-gray-300">Hence, for the partial rounds, the MDS property is not required anymore, and we can set up the matrix  <span class="math">M_{\\mathcal{I}}</span>  focusing only on providing full diffusion, breaking arbitrarily long subspace trails, and ensuring that the polynomial representation of the scheme is dense. This is exactly the approach introduced in the Neptune scheme [34]. For this reason, we suggest to instantiate  <span class="math">M_{\\mathcal{I}}</span>  with the matrix proposed for Neptune, that is,</p>
+
+    <p class="text-gray-300"><span class="math">$M_{\\mathcal{I}} = \\begin{pmatrix} \\mu_0 &amp; 1 &amp; \\cdots &amp; 1 \\\\ 1 &amp; \\mu_1 &amp; \\cdots &amp; 1 \\\\ \\vdots &amp; \\vdots &amp; \\ddots &amp; \\vdots \\\\ 1 &amp; 1 &amp; \\cdots &amp; \\mu_{t-1} \\end{pmatrix},</span>$</p>
+
+    <p class="text-gray-300">where  <span class="math">\\mu_0, \\mu_1, \\dots, \\mu_{t-1}</span>  are random elements from  <span class="math">\\mathbb{F}_p \\setminus \\{0, 1\\}</span>  such that the matrix is invertible and no arbitrarily long subspace trails exist (see Section 5.3). We suggest to choose these elements in order to make the multiplications efficient (e.g., small values or powers of 2, which make multiplications fast).</p>
+
+    <p class="text-gray-300"><strong>Plain Efficiency.</strong> Note that we can store the sum of the input vector in a single variable, which needs t-1 additions. Then, storing  <span class="math">\\mu_i-1</span>  for  <span class="math">i \\in \\{1, 2, ..., t-1\\}</span> ,</p>
+
+    <p class="text-gray-300">we can compute each vector element with one multiplication and one addition. In total, we need t-1+t=2t-1 additions and t multiplications. The performance benefit is significant especially for larger t, which is a popular choice in STARK-based proof systems (e.g., Plonky2 [49]).</p>
+
+    <p class="text-gray-300"><strong>Plonk Arithmetization.</strong> Again, we assume the use of 2-fan-in gates. The matrix multiplication with a vector  <span class="math">(x_0, x_1, \\ldots, x_{t-1})</span>  can be written down as</p>
+
+    <p class="text-gray-300"><span class="math">$s = x_0 + x_1 + \\dots + x_{t-1},</span>$</p>
+
+    <p class="text-gray-300"><span class="math">$y_i = (\\mu_i - 1)x_i + s \\quad \\text{for} \\quad i \\in \\{0, 1, \\dots, t - 1\\},</span>$</p>
+
+    <p class="text-gray-300">where s represents the precomputed sum and  <span class="math">(y_0, y_1, \\ldots, y_{t-1})</span>  is the output vector. This method needs t-1+t=2t-1 constraints. Note that instead of storing  <span class="math">\\mu_0, \\mu_1, \\ldots, \\mu_{t-1}</span> , it is better to directly store  <span class="math">\\mu_0-1, \\mu_1-1, \\ldots, \\mu_{t-1}-1</span>  as public constants.</p>
+
+      <h3 id="sec-5.3" class="text-xl font-semibold mt-8">5.3 Preventing Arbitrarily Long Subspace Trails</h3>
+
+    <p class="text-gray-300">Before going on, we discuss which conditions the matrix  <span class="math">M_{\\mathcal{I}}</span>  must satisfy to prevent arbitrarily long subspace trails. We refer to [35] for a formal definition of (invariant) subspace trails and limit ourselves to recall the following definition here.<sup>7</sup></p>
+
+    <p class="text-gray-300"><strong>Definition 2 ([35]).</strong> Let  <span class="math">t \\geq 2</span>  be an integer and let  <span class="math">p \\geq 2</span>  be a prime integer. Let  <span class="math">\\mathfrak{U}_0, \\ldots, \\mathfrak{U}_r \\subseteq \\mathbb{F}_p^t</span>  be r+1 subspaces such that  <span class="math">\\dim(\\mathfrak{U}_i) \\leq \\dim(\\mathfrak{U}_{i+1}) &lt; t</span>  for each  <span class="math">i \\in \\{0, 1, \\ldots, r-1\\}</span> .  <span class="math">(\\mathfrak{U}_0, \\ldots, \\mathfrak{U}_r)</span>  is a subspace trail of length  <span class="math">r \\geq 1</span>  for a function  <span class="math">\\mathcal{F}</span>  over  <span class="math">\\mathbb{F}_p^t</span>  if for each  <span class="math">i \\in \\{0, \\ldots, r-1\\}</span>  and for each  <span class="math">\\varphi_i \\in \\mathbb{F}_p^t</span>  there exists  <span class="math">\\varphi_{i+1} \\in \\mathbb{F}_p^t</span>  such that  <span class="math">F(\\mathfrak{U}_i + \\varphi_i) \\coloneqq \\{\\mathcal{F}(x) \\mid \\forall x \\in \\mathfrak{U}_i + \\varphi_i\\} \\subseteq \\mathfrak{U}_i + \\varphi_{i+1}</span> . We say that it is an invariant subspace trail if  <span class="math">\\mathfrak{U}_i = \\mathfrak{U}_j</span>  for each  <span class="math">i, j \\in \\{0, 1, \\ldots, r\\}</span> .</p>
+
+    <p class="text-gray-300">Since the nonlinear layer in a partial round of Poseidon<sup> <span class="math">\\pi</span> </sup> contains only a single nonlinear S-box, there exists a subspace that is invariant through it. More generally, independent of the details of the linear layer  <span class="math">M_{\\mathcal{I}}</span> , there exists a subspace that is invariant for up to t-1 rounds. Depending on the details of the linear layer  <span class="math">M_{\\mathcal{I}}</span> , such a subspace can be used as a starting point for a subspace trail over an arbitrary number of rounds. In this case, an attack can be set up, as concretely shown by Beyne et al. [16] at Crypto 2020, and by Keller et al. [41] at Eurocrypt 2021.</p>
+
+    <p class="text-gray-300">Hence, it is crucial to choose the linear layer correctly. For a complete analysis regarding this problem we refer to [36]. In there, the authors show that if the</p>
+
+    <p class="text-gray-300"><sup>&amp;</sup>lt;sup&gt;7</sup> The following definition is different from the one proposed in [44,45]. In there, the function  <span class="math">\\mathcal{F}</span>  depends on a secret key k, and the equality  <span class="math">\\mathcal{F}_k(\\mathfrak{U}+\\varphi)=\\mathfrak{U}+\\varphi&#x27;</span>  must hold for some  <span class="math">\\varphi,\\varphi&#x27;\\in\\mathbb{F}_p^t</span> . Since here we only deal with key-independent hash functions, the definition proposed in [35] is more suitable for our purposes.</p>
+
+    <p class="text-gray-300">minimal polynomials of the matrices  <span class="math">M_{\\mathcal{I}}, M_{\\mathcal{I}}^2, M_{\\mathcal{I}}^3, \\dots</span>  are irreducible and of maximum degree, no arbitrarily long subspace trail exists.<sup>8</sup></p>
+
+    <p class="text-gray-300">We emphasize that this is a sufficient condition, but not a necessary one. That is, there exist matrices that do not satisfy this condition, but for which no arbitrarily long subspace trail exists. In the following, we always assume that  <span class="math">M_{\\mathcal{I}}</span>  satisfies the given condition. In particular, we suggest to use the tools provided in [36] for a given  <span class="math">M_{\\mathcal{I}}</span> . We note that a suitable matrix can be found within seconds.</p>
+
+    <p class="text-gray-300">Poseidon <span class="math">2^{\\pi}</span>  is a permutation over  <span class="math">\\mathbb{F}_p^t</span> , where p as in Poseidon <span class="math">^{\\pi}</span>  (that is,  <span class="math">p &gt; 2^{30}</span> ) and  <span class="math">t \\in \\{2, 3, 4, \\dots, 4 \\cdot t&#x27;, \\dots, 24\\}</span>  for  <span class="math">t&#x27; \\in \\mathbb{N}</span> . These values are sufficient for our use case. The Poseidon <span class="math">2^{\\pi}</span>  permutation  <span class="math">\\mathcal{P}_2</span>  over  <span class="math">\\mathbb{F}_p^t</span>  is defined as</p>
+
+    <p class="text-gray-300"><span class="math">$\\mathcal{P}_2(x) = \\mathcal{E}_{R_F-1} \\circ \\cdots \\circ \\mathcal{E}_{R_F/2} \\circ \\mathcal{I}_{R_P-1} \\circ \\cdots \\circ \\mathcal{I}_0 \\circ \\mathcal{E}_{R_F/2-1} \\circ \\cdots \\circ \\mathcal{E}_0(M_{\\mathcal{E}} \\cdot x),</span>$</p>
+
+    <p class="text-gray-300">where the number of rounds is the same as in  <span class="math">POSEIDON^{\\pi}</span>  (see Eq. (1)). We refer to Section 3.2 and the instance generation script provided by the authors. Similar to  <span class="math">POSEIDON^{\\pi}</span> , the external round is defined by</p>
+
+    <p class="text-gray-300"><span class="math">$\\mathcal{E}_i(x) = M_{\\mathcal{E}} \\cdot \\left( (x_0 + c_0^{(i)})^d, (x_1 + c_1^{(i)})^d, \\dots, (x_{t-1} + c_{t-1}^{(i)})^d \\right),\\,</span>$</p>
+
+    <p class="text-gray-300">where  <span class="math">d \\geq 3</span>  is the smallest positive integer that satisfies  <span class="math">\\gcd(d, p-1) = 1</span>  and  <span class="math">c_j^{(i)}</span>  is the j-th round constant in the i-th external round. The internal round is defined by</p>
+
+    <p class="text-gray-300"><span class="math">$\\mathcal{I}_i(x) = M_{\\mathcal{I}} \\cdot \\left( (x_0 + \\hat{c}_0^{(i)})^d, x_1, \\dots, x_{t-1} \\right),</span>$</p>
+
+    <p class="text-gray-300">where  <span class="math">d \\geq 3</span>  as before and  <span class="math">\\hat{c}_0^{(i)}</span>  is the round constant in the <em>i</em>-th internal round. All round constants are generated as in Poseidon<sup> <span class="math">\\pi</span> </sup>.</p>
+
+    <p class="text-gray-300">Remark 4. In contrast to Poseidon<sup> <span class="math">\\pi</span> </sup>, we are only applying a single round constant in the internal rounds. The motivation for this change comes from the fact that an optimized (equivalent) implementation of Poseidon<sup> <span class="math">\\pi</span> </sup> also uses only one round constant during the internal rounds, and hence the security is not affected.</p>
+
+    <p class="text-gray-300"><strong>Linear Layers.</strong> The linear layers of Poseidon <span class="math">2^{\\pi}</span>  are defined as follows.</p>
+
+    <p class="text-gray-300"><sup>&amp;</sup>lt;sup&gt;8</sup> Let  <span class="math">M \\in \\mathbb{F}_p^{t \\times t}</span>  be an invertible matrix. The characteristic polynomial  <span class="math">\\Psi \\in \\mathbb{F}_p[x]</span>  is defined as  <span class="math">\\Psi(x) = \\det(x \\cdot I - M)</span> . The minimal polynomial  <span class="math">\\Phi \\in \\mathbb{F}_p[x]</span>  is the monic polynomial of minimal degree such that (i)  <span class="math">\\Phi(M) \\times v = 0^t = (0, 0, \\dots, 0)^T \\in \\mathbb{F}_p^t</span>  for each  <span class="math">v \\in \\mathbb{F}_p^t</span> , and (ii), for each polynomial  <span class="math">P \\in \\mathbb{F}_p[x]</span>  that is annihilating (in the sense that  <span class="math">P(M) \\times v = 0^t</span>  as before for each  <span class="math">v \\in \\mathbb{F}_p^t</span> ),  <span class="math">\\Phi</span>  divides P.</p>
+
+    <p class="text-gray-300">https://extgit.iaik.tugraz.at/krypto/hadeshash/-/blob/master/code/generate_params_poseidon.sage</p>
+
+    <p class="text-gray-300">    <img src="_page_14_Figure_0.jpeg" alt="" class="my-4 max-w-full" />
+</p>
+
+    <p class="text-gray-300">Fig. 1: Poseidon<sup> <span class="math">\\pi</span> </sup> (left) and Poseidon2<sup> <span class="math">\\pi</span> </sup> (right) with changes in red.</p>
+
+    <p class="text-gray-300">Case:  <span class="math">t = 4 \\cdot t&#x27; \\geq 4</span> . For t = 4k, the matrices  <span class="math">M_{\\mathcal{E}}</span>  and  <span class="math">M_{\\mathcal{I}}</span>  are set up using the approach described in Section 5. We emphasize that  <span class="math">M_{\\mathcal{I}}</span>  must be chosen in order to prevent arbitrarily long subspace trails, as described before.</p>
+
+    <p class="text-gray-300">Case:  <span class="math">t \\in \\{2,3\\}</span> . For  <span class="math">t \\in \\{2,3\\}</span>  we first compute  <span class="math">M_{\\mathcal{I}}</span>  as before. By imposing the additional condition that  <span class="math">M_{\\mathcal{I}}</span>  is MDS, we can simply set  <span class="math">M_{\\mathcal{E}} = M_{\\mathcal{I}}</span> , which reduces code complexity. For  <span class="math">M_{\\mathcal{I}}</span>  to be MDS, we require all of its submatrices to be invertible. For t=2 this is achieved if  <span class="math">\\mu_0\\mu_1 - 1 \\neq 0</span>  and  <span class="math">\\mu_0, \\mu_1 \\neq 0</span> . For t=3, this is achieved if  <span class="math">\\mu_0\\mu_1\\mu_2 - \\mu_0 - \\mu_1 - \\mu_2 + 2 \\neq 0</span>  and</p>
+
+    <p class="text-gray-300"><span class="math">$\\mu_0, \\mu_1, \\mu_2 \\neq 0, \\quad \\mu_0 \\mu_1 - 1 \\neq 0, \\quad \\mu_0 \\mu_2 - 1 \\neq 0, \\quad \\mu_1 \\mu_2 - 1 \\neq 0.</span>$</p>
+
+    <p class="text-gray-300">By choosing  <span class="math">\\mu_i \\in \\{2, 3, \\dots, p/4\\}</span> , the MDS condition is always fulfilled (indeed,  <span class="math">xy \\neq 1</span>  for  <span class="math">x, y \\in \\{2, 3, \\dots, p/4\\}</span> ).</p>
+
+    <p class="text-gray-300"><strong>Poseidon</strong><sup> <span class="math">\\pi</span> </sup> versus <strong>Poseidon</strong>2 <span class="math">^{\\pi}</span> . Compared to the original Poseidon<sup> <span class="math">\\pi</span> </sup> specification recalled in Section 3.2, three differences arise.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>A linear layer  <span class="math">M_{\\mathcal{E}}</span>  is applied at the input of Poseidon2<sup> <span class="math">\\pi</span> </sup> (see Section 4).</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Two different linear layers are used in Poseidon2<sup> <span class="math">\\pi</span> </sup> for  <span class="math">t \\geq 4</span> .</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Only one round constant is applied in each internal round.</li>
+    </ol></li>
+    </ul>
+
+    <p class="text-gray-300">A graphical overview of the differences between Poseidon and Poseidon  <span class="math">2^\\pi</span>  is given in Fig. 1.</p>
+
+    <p class="text-gray-300">From an implementation point of view, we emphasize that the optimized representation of the internal rounds, as used in  <span class="math">POSEIDON^{\\pi}</span> , is not needed for  <span class="math">POSEIDON2^{\\pi}</span> . Indeed, it would make the computation slightly more expensive. This makes  <span class="math">POSEIDON2^{\\pi}</span>  simpler and more memory-efficient than  <span class="math">POSEIDON^{\\pi}</span> .</p>
+
+    <p class="text-gray-300">Table 1: Some instantiations for Poseidon2<sup> <span class="math">\\pi</span> </sup>, where  <span class="math">n = \\lceil \\log_2(p) \\rceil</span> .</p>
+
+    <div class="overflow-x-auto my-4">
+      <table class="min-w-full text-sm text-gray-300">
+        <thead>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">(n,t,d)</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left"><span class="math">R_F</span></th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left"><span class="math">R_P</span></th>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(31, 16, 5)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">8</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">14</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(31, 24, 5)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">8</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">22</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(64, 8, 7)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">8</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">22</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(64, 12, 7)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">8</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">22</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(256, 2, 5)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">8</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">56</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">(256, 3, 5)</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">8</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">56</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p class="text-gray-300"><strong>Instances.</strong> The round numbers of Poseidon<sup> <span class="math">\\pi</span> </sup> and Poseidon2<sup> <span class="math">\\pi</span> </sup> are the same for most instantiations. In Table 1 we give some example parameters, focusing on 2-to1 compressions.</p>
+
+    <p class="text-gray-300">Changing the matrix, and especially removing the MDS requirement, may have an impact on the final security of the permutation. In this section, we assess the security level of the newly obtained  <span class="math">Poseidon 2^{\\pi}</span>  permutation.</p>
+
+    <p class="text-gray-300">Remark 5. Due to the similarities between  <span class="math">POSEIDON^{\\pi}</span>  and  <span class="math">POSEIDON2^{\\pi}</span> , we emphasize that (almost) all the attacks work in the same way for the two schemes. This means that we are going to adapt the security analysis of  <span class="math">POSEIDON^{\\pi}</span>  and  <span class="math">POSEIDON^{\\pi}</span> , focusing only on the possible differences that can arise between the two cases.</p>
+
+    <p class="text-gray-300">Remark 6. For the cases  <span class="math">t \\in \\{2,3\\}</span> , Poseidon2<sup> <span class="math">\\pi</span> </sup> is just a special case of Poseidon8<sup> <span class="math">\\pi</span> </sup> in which the MDS matrix has been fixed for achieving optimal performances. For this reason, we only focus on the case  <span class="math">t \\geq 4</span>  in the following.</p>
+
+      <h3 id="sec-7.1" class="text-xl font-semibold mt-8">7.1 Statistical Attacks</h3>
+
+    <p class="text-gray-300"><strong>Differential Attacks.</strong> Given pairs of inputs with some fixed input differences, differential cryptanalysis [17] considers the probability distribution of the corresponding output differences produced by the cryptographic primitive. Let  <span class="math">\\Delta_I, \\Delta_O \\in \\mathbb{F}_p^t</span>  be respectively the input and the output differences through a permutation  <span class="math">\\mathcal{P}</span>  over  <span class="math">\\mathbb{F}_p^t</span> . The differential probability (DP) of having a certain output difference  <span class="math">\\Delta_O</span>  given a particular input difference  <span class="math">\\Delta_I</span>  is equal to</p>
+
+    <p class="text-gray-300"><span class="math">$\\operatorname{Prob}(\\Delta_I \\to \\Delta_O) = \\max_{\\Delta_I, \\Delta_O \\neq 0} \\frac{|\\{x \\in \\mathbb{F}_p^t \\mid \\mathcal{P}(x + \\Delta_I) - \\mathcal{P}(x) = \\Delta_O\\}|}{p^t}.</span>$</p>
+
+    <p class="text-gray-300">In the case of iterated schemes, a cryptanalyst searches for ordered sequences of differences over any number of rounds that are called differential characteristics/trails. Assuming the independence of the rounds, the DP of a differential trail is the product of the DPs of its one-round differences.</p>
+
+    <p class="text-gray-300">As in Poseidon<sup> <span class="math">\\pi</span> </sup>, we make used of the wide trail design strategy on the external rounds of Poseidon2<sup> <span class="math">\\pi</span> </sup> for ensuring security against this attack. As it is well known,  <span class="math">\\mathrm{DP_{max}}(x\\mapsto x^d)=(d-1)/p</span> . Based on the result proposed in [27, Prop. 1], the branch number of  <span class="math">M_{\\mathcal{E}}</span>  assuming an MDS matrix for  <span class="math">M_4</span>  is  <span class="math">b=t/4+4\\equiv t&#x27;+4\\geq 5</span> . Hence, following the wide trail strategy at least b S-boxes are active in 2 consecutive external (full) rounds of the permutation. When considering two consecutive rounds three times,</p>
+
+    <p class="text-gray-300"><span class="math">$\\left(\\frac{d-1}{p}\\right)^{3(t&#x27;+4)} \\le \\frac{(d-1)^{3(t&#x27;+4)}}{p^{12}} \\cdot 2^{-9/4\\kappa} \\ll 2^{-2\\kappa},</span>$</p>
+
+    <p class="text-gray-300">where  <span class="math">p^{-t/3} = p^{-4t&#x27;/3} \\le 2^{-\\kappa}</span>  and where  <span class="math">d \\ll p</span>  (usually,  <span class="math">\\log_2(d) \\le 4</span>  compared to  <span class="math">\\log_2(p) &gt; 30</span> ). The factor 2 is crucial for avoiding clustering effects.</p>
+
+    <p class="text-gray-300">As a result, 6 external rounds of Poseidon2<sup> <span class="math">\\pi</span> </sup> are sufficient for guaranteeing security against differential attacks, exactly as in Poseidon<sup> <span class="math">\\pi</span> </sup>, where 2 external rounds are used as a security margin. Note that this is a pessimistic estimate. Indeed, as has been shown in previous works (e.g., [41]), the internal rounds can also be taken into account, which is ignored in this discussion.</p>
+
+    <p class="text-gray-300">Other Statistical Attacks. Due to the facts that no entry of  <span class="math">M_{\\mathcal{E}}</span>  is equal to zero and  <span class="math">M_{\\mathcal{E}}</span>  provides full diffusion after one round, a similar conclusion holds for other statistical attacks, such as linear attacks [46], truncated differential attacks [42], rebound attacks [47], among others.</p>
+
+      <h3 id="sec-7.2" class="text-xl font-semibold mt-8">7.2 Algebraic Attacks</h3>
+
+    <p class="text-gray-300">Changing the matrices in the linear layers may have an impact on the density of the resulting polynomials. This may weaken the resistance against certain attacks like interpolation attacks and Gr&ouml;bner basis attacks, which also depend on the number of monomials found in the final representations. For this purpose, we first investigate the density and the degrees of the equations generated. Then, we focus on the security with respect to Gr&ouml;bner basis attacks.</p>
+
+    <p class="text-gray-300">Interpolation Attack: Degrees and Density. The interpolation attack [40] aims to construct an interpolation polynomial that describes the function. Such polynomial can be used in order to set up a distinguisher and/or an attack on the symmetric scheme. The attack does not work if the number of unknown monomials is sufficiently large (e.g., larger than the data available for the attack). In the MitM scenario, the attacker constructs two polynomials, one that involves the input(s) and one that involve the output(s), that must match in the middle.</p>
+
+    <p class="text-gray-300">The maximum possible degrees are reached for both Poseidon<sup> <span class="math">\\pi</span> </sup> and Poseidon<sup> <span class="math">2\\pi</span> </sup>. It remains to determine the density. For this purpose, we implemented both permutations (including the four different round functions) in Sage and tested the density after increasing numbers of rounds. The results of this experiment for Poseidon<sup> <span class="math">2\\pi</span> </sup> are given in Fig. 2. We note that the reached number of</p>
+
+    <p class="text-gray-300">    <img src="_page_17_Figure_0.jpeg" alt="" class="my-4 max-w-full" />
+</p>
+
+    <p class="text-gray-300">Fig. 2: The number of monomials reached in Poseidon2<sup> <span class="math">\\pi</span> </sup> after R rounds, where d=3. We observed no significant difference between  <span class="math">\\mathcal{E}</span>  and  <span class="math">\\mathcal{I}</span> . Moreover, the numbers reached match the maximum theoretical number of monomials.</p>
+
+    <p class="text-gray-300">monomials corresponds to the maximum number of possible monomials  <span class="math">\\#_{n_v,d}</span>  for  <span class="math">n_v</span>  variables of total degree d, which is given by</p>
+
+    <p class="text-gray-300"><span class="math">$\\#_{n_v,d} = \\sum_{i=1}^d \\binom{n_v + i - 1}{i}.</span>$</p>
+
+    <p class="text-gray-300">As a result, the security of Poseidon<sup> <span class="math">\\pi</span> </sup> and Poseidon2<sup> <span class="math">\\pi</span> </sup> with respect to the interpolation attack is comparable.</p>
+
+    <p class="text-gray-300"><strong>Gr&ouml;bner Basis Attacks.</strong> In a Gr&ouml;bner basis attack, the adversary first writes down the function in consideration as an equation system and tries to solve this system for the unknowns. Like in the original Poseidon paper, here we focus on the CICO problem, and quickly recall it here.</p>
+
+    <p class="text-gray-300"><strong>Definition 3.</strong> A permutation  <span class="math">\\mathcal{P}</span>  is  <span class="math">(\\lambda, x_2, y_1)</span> -secure with respect to the CICO problem if there is no algorithm with expected complexity less than  <span class="math">\\lambda</span>  that for given  <span class="math">x_2, y_1</span>  finds  <span class="math">x_1, y_2</span>  such that  <span class="math">\\mathcal{P}(x_1 \\mid\\mid x_2) = y_1 \\mid\\mid y_2</span> .</p>
+
+    <p class="text-gray-300">Usually, we set the number of elements in the  <span class="math">x_1</span>  part to be the same as the number of elements in the  <span class="math">y_1</span>  part. In other words, we leave a certain size of the input variable and require the same size in the output to fulfill some property. Then, the expected complexity for a random permutation is proportional to the size of  <span class="math">x_1</span> . For the sponge mode using only a single permutation call, solving the CICO problem directly translates to a preimage attack on the sponge, and conversely a preimage attack on the sponge mode is a solution to the CICO problem. Solving CICO is also sufficient to break the compression mode, but an attack on the compression mode does not necessarily result in a solution to the CICO problem. Still, the CICO problem gives a good estimate of the strength of a cryptographic permutation, and of how much it deviates from a strong one.</p>
+
+    <p class="text-gray-300">The equations for the CICO problem can be written down in a straightforward way. First, we fix part of the input and use unknowns for the remainder.</p>
+
+    <p class="text-gray-300">Then, we apply the permutation to this input state, using an algebraic description of our choice. At the end, we enforce part of the output to fulfill a certain property, for example to be equal to a known value. Then the attacker has to follow three steps, which as a first step include computing the Gr&ouml;bner basis (we refer to [1,52] for a more detailed description of these steps). As is customary in the literature [4,19] and has also been done in Poseidon, here we focus on this first step. For this purpose, we compare the degrees reached during Gr&ouml;bner basis computations between Poseidon<sup> <span class="math">\\pi</span> </sup> and Poseidon<sup> <span class="math">\\pi</span> </sup>. Similar degrees imply a similar cost of the attacks for Poseidon<sup> <span class="math">\\pi</span> </sup> and Poseidon<sup> <span class="math">\\pi</span> </sup>.</p>
+
+    <p class="text-gray-300">In our experiments, we set  <span class="math">p \\approx 2^{16}</span> , t = 12, and we use two input variables. We then apply two strategies. In the first one we represent the permutation with full-round equations, hence reaching a maximum equation degree of  <span class="math">d^{R_F+R_P}</span> . In the second one, we introduce intermediate variables for each S-box, hence reaching a maximum equation degree of only d. Further, we tested the external (full) and internal (partial) rounds separately, in order to get a better understanding of the impact of our new linear layers.</p>
+
+    <p class="text-gray-300">In none of the tested cases we could observe a significant difference between  <span class="math">POSEIDON^{\\pi}</span>  and  <span class="math">POSEIDON2^{\\pi}</span> . In particular, the maximum degrees reached during the Gr&ouml;bner basis computation were the same, the degrees of the final univariate polynomials (after conversion) were the same, and the FGLM [24] time differences were negligible. We also tried solving the system in Sage, and again the solving time differences we observed were negligible. This is particularly true when testing only the internal (partial) rounds and introducing intermediate variables in each step.</p>
+
+    <p class="text-gray-300">Following our experimental results from both the density and Gr&ouml;bner basis tests, we conclude that  <span class="math">POSEIDON2^{\\pi}</span>  is no less secure against algebraic attacks than  <span class="math">POSEIDON^{\\pi}</span> . This means that the strongest attack vector remains the interpolation one, and that security against this one implies security against Gr&ouml;bner basis attacks also in the case of  <span class="math">POSEIDON2^{\\pi}</span> .</p>
+
+      <h3 id="sec-7.3" class="text-xl font-semibold mt-8">7.3 Attack from Bariant et al. [10]</h3>
+
+    <p class="text-gray-300">Finally, we point out a recent attack proposed by Bariant et al. [10] at ToSC 2022. In there, the authors propose a strategy for skipping the first round of Po-SEIDON<sup> <span class="math">\\pi</span> </sup> when attempting to solve the CICO problem. The idea is the following. Given a permutation  <span class="math">\\mathcal{P}</span> , we split it into two parts s.t.  <span class="math">\\mathcal{P}(\\cdot) = \\mathcal{P}_2 \\circ \\mathcal{P}_1(\\cdot)</span> . The idea is to find an affine subspace  <span class="math">\\mathfrak{Z} \\subseteq \\mathbb{F}_p^t</span>  s.t. for each entry  <span class="math">z \\in \\mathfrak{Z}</span> ,  <span class="math">\\mathcal{P}_1^{-1}(z)</span>  satisfies the input condition of the CICO problem with probability 1. Given such a subspace  <span class="math">\\mathfrak{Z}</span> , it is possible to reduce the CICO problem from  <span class="math">\\mathcal{P}</span>  to  <span class="math">\\mathcal{P}_2</span> . In an analogous way, this approach can be exploited to reduce the interpolation attack from  <span class="math">\\mathcal{P}</span>  to  <span class="math">\\mathcal{P}_2</span> .</p>
+
+    <p class="text-gray-300">In the case of  <span class="math">\\mathsf{POSEIDON}^\\pi</span> , the authors present an attack if  <span class="math">\\mathcal{P}_1</span>  is equal to the first two rounds without the final linear operation (equivalently, the first full round plus the next nonlinear layer). To be precise, the first nonlinear layer is skipped by using the strategy recalled in Section 4. Hence, the attack reduces to the case of one round defined as one linear layer followed by one nonlinear layer.</p>
+
+    <p class="text-gray-300">One crucial condition for the attack to work is that the S-box S over  <span class="math">\\mathbb{F}_p</span>  satisfies</p>
+
+    <p class="text-gray-300"><span class="math">$\\forall x, y \\in \\mathbb{F}_p : S(x \\cdot y) = S(x) \\cdot S(y).</span>$</p>
+
+    <p class="text-gray-300">This is always the case if S is a power map, as for Poseidon and Rescue (but not e.g. for Neptune, whose S-box is constructed via the Lai-Massey scheme).</p>
+
+    <p class="text-gray-300">In order to prevent the attack, one possibility is to consider an S-box that is not a monomial. This includes S-boxes based on the Legendre functions and/or the powers  <span class="math">(-1)^x</span>  described in [31], or a Dickson polynomial defined as</p>
+
+    <p class="text-gray-300"><span class="math">$x \\mapsto D_d(x,\\alpha) = \\sum_{i=0}^{\\left\\lfloor \\frac{d}{2} \\right\\rfloor} \\frac{d}{d-i} {d-i \\choose i} (-\\alpha)^i x^{d-2i},</span>$</p>
+
+    <p class="text-gray-300">where  <span class="math">\\alpha \\in \\mathbb{F}_p</span> . Both options are not suitable for our goals. First of all, the S-boxes based on the Legendre functions and/or the powers  <span class="math">(-1)^x</span>  are more expensive than simple power maps in ZK applications/protocols (see [54] for details). Moreover, a Dickson polynomial is invertible if  <span class="math">\\gcd(p^2-1,d)=1</span> . Then, if  <span class="math">\\gcd(d,p-1)=\\gcd(d,p+1)=1</span> , the power map can be replaced by a Dickson polynomial of the same degree. However, its computation requires several additions which impact the cost in Plonk applications. If  <span class="math">\\gcd(d,p-1)=1</span>  and  <span class="math">\\gcd(d,p+1)\\neq 1</span> , the degree of the Dickson polynomial is higher than the corresponding degree of the power map, and then more constraints are needed.</p>
+
+    <p class="text-gray-300">The attack from [10] affects the security of both  <span class="math">POSEIDON^{\\pi}</span>  and  <span class="math">POSEIDON2^{\\pi}</span> . However, since we apply an initial linear layer in  <span class="math">POSEIDON2^{\\pi}</span> , its advantage decreases to only 1 round. Moreover, the security margin of  <span class="math">POSEIDON2^{\\pi}</span>  consists of two external rounds and 12.5% more internal rounds. Hence, even without increasing the number of rounds of  <span class="math">POSEIDON^{\\pi}</span>  or changing the nonlinear layer, the scheme remains secure. Therefore, we decided that modifications of the nonlinear layer are not needed in our case.</p>
+
+    </section>
+
+    <section id="sec-8" class="mb-10">
+      <h2 class="text-2xl font-bold">8 Performance Evaluation</h2>
+
+    <p class="text-gray-300">Here we first give a theoretical comparison with the original  <span class="math">POSEIDON^{\\pi}</span>  permutation in terms of the number of additions, multiplications, and Plonk constraints. Since we only change the linear layers, we focus only on the linear layers, i.e., we ignore the impact of the nonlinear layer. Then, we present an implementation of both the original  <span class="math">POSEIDON^{\\pi}</span>  and our new  <span class="math">POSEIDON^{\\pi}</span> , and we assess the impact of our optimizations. In all our comparisons we use the efficient representation of  <span class="math">POSEIDON^{\\pi}</span>  described in detail in [32, Appendix B].</p>
+
+    <p class="text-gray-300">We note that our main goal was to increase the performance in a plain implementation and with classical Plonk constraints. Indeed, Poseidon <span class="math">2^{\\pi}</span>  is similar to Poseidon<sup> <span class="math">\\pi</span> </sup> when considering the cost in R1CS or AIR. We therefore omit these metrics and instead refer to recent comparisons given e.g. in [27].</p>
+
+    <p class="text-gray-300">    <img src="_page_20_Figure_0.jpeg" alt="" class="my-4 max-w-full" />
+</p>
+
+    <p class="text-gray-300">Fig. 3: Number of operations and Plonk constraints needed for the linear layers of Poseidon<sup> <span class="math">\\pi</span> </sup> and Poseidon2<sup> <span class="math">\\pi</span> </sup>, where  <span class="math">p \\approx 2^{64}</span> .</p>
+
+      <h3 id="sec-8.1" class="text-xl font-semibold mt-8">8.1 Theoretical Comparison</h3>
+
+    <p class="text-gray-300">We first focus on the number of arithmetic operations and on the number of Plonk constraints needed to evaluate all linear layers of  <span class="math">Poseidon2^{\\pi}</span>  and its predecessor  <span class="math">Poseidon2^{\\pi}</span> . The results are shown in Fig. 3. Taking these numbers, and considering for example an instance where  <span class="math">\\log_2(p) \\approx 64</span> , we observe that the number of operations in the linear layers can be reduced significantly. This is especially due to the larger number of operations needed for the external linear layers in the original  <span class="math">Poseidon2^{\\pi}</span> .</p>
+
+      <h3 id="sec-8.2" class="text-xl font-semibold mt-8">8.2 Implementation and Benchmarks</h3>
+
+    <p class="text-gray-300">We implemented the new Poseidon2<sup> <span class="math">\\pi</span> </sup> in Rust and compared it with other similar permutations using efficient implementations from [39]. The code and an instance generation script are available online. For the larger instances of GMiMC we apply an optimization further explained in App. C. All benchmarks were run on an Intel i7-6700K CPU. Moreover, we focus only on primitives without any high-degree components. For example, <em>Rescue</em> needs the computation of  <span class="math">x \\mapsto x^{1/d}</span>  in its nonlinear layer, which is of high degree in large fields if d is small. Hence, these computations become the bottleneck in the plain performance, which makes <em>Rescue</em> significantly slower than Poseidon2<sup> <span class="math">\\pi</span> </sup>. The same is also true for Anemoi and Griffin- <span class="math">\\pi</span> .</p>
+
+    <p class="text-gray-300">In our benchmarks we focus on three different primes, namely the 255-bit BLS12 one  <span class="math">p_{\\text{BLS12}}</span> , the 64-bit Goldilocks one  <span class="math">p_{\\text{Goldilocks}}</span>  (used in e.g. Plonky2 [49]), and the 31-bit Babybear one  <span class="math">p_{\\text{Babybear}}</span>  used in Risc0 [51].<sup>11</sup> The results for some instances are shown in Table 2, where we emphasize that we use the optimized representation of Poseidon<sup> <span class="math">\\pi</span> </sup> described in detail in [32, Appendix B]. We chose often used compression ratios such as 2-to-1, 4-to1, and 8-to-1 for</p>
+
+    <p class="text-gray-300"><sup>10</sup> https://github.com/HorizenLabs/poseidon2</p>
+
+    <p class="text-gray-300"> <span class="math">&lt;sup&gt;^{11}&lt;/sup&gt;</span>   <span class="math">p_{\\rm BLS12} = 0</span> x73eda753299d7d483339d80809a1d80553bda402fffe5bfefffffff00000001,  <span class="math">p_{\\rm Goldilocks} = 0</span> xffffffff00000001,  <span class="math">p_{\\rm Babybear} = 0</span> x78000001</p>
+
+    <p class="text-gray-300">Table 2: Plain performance of various permutations in  <span class="math">\\mu s</span>  using Rust, where  <span class="math">n = \\lceil \\log_2(p) \\rceil</span> .</p>
+
+    <div class="overflow-x-auto my-4">
+      <table class="min-w-full text-sm text-gray-300">
+        <thead>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">D + 1</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left"></th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">, ,</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left"></th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left"></th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">, 10</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">, 10</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">4 00</th>
+            <th class="px-3 py-2 border-b border-gray-600 font-semibold text-left">. 0.</th>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Permutation</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">t = 2</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">t = 3</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">t = 4</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">t = 8</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">t = 12</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">t = 16</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">t = 20</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">t = 24</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"><span class="math">p_{\\rm BLS12},</span></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"><span class="math">\\lceil \\log_2(p) \\rceil =</span></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">255</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"><span class="math">\\operatorname{Poseidon}^{\\pi}</span></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">11.78</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">16.99</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">22.26</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">53.46</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">_</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">_</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">_</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">_</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Neptune</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">_</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">-</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">17.45</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">30.05</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">_</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">_</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">_</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">-</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">GMiMC</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">20.63</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">21.86</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">22.96</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">26.97</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">_</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">_</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">_</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">-</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Poseidon <span class="math">2^{\\pi}</span></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">6.49</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">7.30</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">13.30</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">22.12</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">_</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">_</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">_</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">-</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"><span class="math">p_{\\rm Goldilock}</span></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"><span class="math">_{\\rm s}, \\lceil \\log_2(p) \\rceil</span></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">= 64</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"><span class="math">Poseidon^{\\pi}</span></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">_</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">_</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">_</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">4.25</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">7.00</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">12.03</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">15.33</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Neptune</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">_</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">_</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">_</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">3.65</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">6.22</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">9.94</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">12.31</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">GMiMC</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">_</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">_</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">_</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">3.26</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">7.01</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">13.57</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">26.72</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Poseidon <span class="math">2^{\\pi}</span></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">_</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">_</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">_</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">2.06</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">2.81</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">3.57</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">4.42</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"><span class="math">p_{\\rm Babybea}</span></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"><span class="math">_{\\mathrm{r}},\\lceil\\log_{2}(p)\\rceil</span> =</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">= 31</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"></td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"><span class="math">Poseidon^{\\pi}</span></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">_</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">_</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">_</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">_</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">_</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">7.06</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">_</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">15.0</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">Neptune</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">_</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">_</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">_</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">_</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">_</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">5.62</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">_</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">10.1</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">GMiMC</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">_</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">_</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">_</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">_</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">_</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">10.33</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">_</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">23.5</td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2 border-b border-gray-700 text-left"><span class="math">Poseidon2^{\\pi}</span></td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">_</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">_</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">_</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">_</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">_</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">2.09</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">_</td>
+            <td class="px-3 py-2 border-b border-gray-700 text-left">3.5</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p class="text-gray-300">the various field sizes. From this comparison, we can see that we can improve the performance of the original version by a factor of up to 4 for the 24-word instance. We emphasize that the advantage increases for larger state sizes, which is mainly due to the expensive matrix multiplication in the external rounds of  <span class="math">Poseidon^{\\pi}</span> . However, even in the 3-word case we can observe an improvement by a factor of more than 2.</p>
+
+      <h3 id="sec-8.3" class="text-xl font-semibold mt-8">8.3 Efficient Plonkish Version</h3>
+
+    <p class="text-gray-300">There are many possible Plonk arithmetizations and many tradeoffs a circuit builder can choose, especially when extending the classical Plonk framework with custom gates. One such approach [5] has recently been applied to  <span class="math">Poseidon^{\\pi}</span> , and potentially it can also be used for  <span class="math">Poseidon2^{\\pi}</span> .</p>
+
+    <p class="text-gray-300">In this section, however, we revisit the Plonkish representation of Poseidon<sup> <span class="math">\\pi</span> </sup> in [32, Appendix E]. We demonstrate a more optimal version which requires (t-1) polynomial equations to express the state variables that do not undergo S-boxes, in contrast to t equations in [32, Appendix E]. The resulting representation is suitable for both Poseidon<sup> <span class="math">\\pi</span> </sup> and Poseidon2<sup> <span class="math">\\pi</span> </sup> and makes the prover's work more efficient due to fewer polynomials being used.</p>
+
+    <p class="text-gray-300">Let us introduce auxiliary notation. For round r we denote</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>(1) the input to AddRoundConstants by  <span class="math">A_1^r, A_2^r, \\ldots, A_t^r</span></li>
+      <li>(2) the output of AddRoundConstants by  <span class="math">B_1^r, B_2^r, \\dots, B_t^r</span> , and</li>
+      <li>(3) the input to M by  <span class="math">C_1^r, C_2^r, \\ldots, C_t^r</span> .</li>
+    </ul>
+
+    <p class="text-gray-300">Therefore we have that in full rounds  <span class="math">C_i^r = S(B_i^r)</span>  and in partial rounds</p>
+
+    <p class="text-gray-300"><span class="math">$C_i^r = \\begin{cases} B_i^r &amp; i &lt; t, \\\\ S(B_i^r) &amp; i = t. \\end{cases}</span>$</p>
+
+    <p class="text-gray-300">Now we proceed as follows.</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Note that  <span class="math">C_i^{r-1}</span>  are linear functions of  <span class="math">\\{A_i^r\\}</span> . 2. Going through the constant layer we obtain that  <span class="math">C_i^{r-1}</span>  are affine functions</li>
+    </ol></li>
+      <li><ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Using the fact that  <span class="math">B_i^r = C_i^r</span>  for i &lt; t we get that</li>
+    </ol></li>
+    </ul>
+
+    <p class="text-gray-300">
+<span class="math">$\\{C_i^{r-1}\\}_{1 \\le i \\le t}</span>$
+are affine functions of  <span class="math">\\{C_i^r\\}_{1 \\le i \\le t-1}</span>  and  <span class="math">B_t^r</span> . (2)</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Repeatedly apply the same statement to  <span class="math">\\{C_i^{r-1}\\}_{1\\leq i\\leq t}</span>  and further up for  <span class="math">k = 1, 2, \\ldots, t - 1</span> :</li>
+    </ol>
+
+    <p class="text-gray-300">
+<span class="math">$\\{C_i^{r-k}\\}_{1 \\le i \\le t}</span>$
+are affine functions of  <span class="math">\\{C_i^r\\}_{1 \\le i \\le t-1}</span>  and  <span class="math">\\{B_t^j\\}_{r-k &lt; j \\le r}</span> . (3)</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Restrict Eq. (3) to S-box outputs:</li>
+    </ol>
+
+    <p class="text-gray-300">
+<span class="math">$\\{C_t^{r-k}\\}_{1 \\le k \\le t-1}</span>$
+are affine functions of  <span class="math">\\{C_i^r\\}_{1 \\le i \\le t-1}</span>  and  <span class="math">\\{B_t^{r-k}\\}_{0 \\le k &lt; t-1}</span> .</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Now rearrange (t-1) equations Eq. (4) so that  <span class="math">\\{C_i^r\\}_{1\\leq i\\leq t-1}</span>  are now expressed through the others:</li>
+    </ol>
+
+    <p class="text-gray-300">
+<span class="math">$\\{C_i^r\\}_{1 \\le i \\le t-1}</span>$
+are affine functions of  <span class="math">\\{C_t^{r-k}\\}_{1 \\le k \\le t-1}</span>  and  <span class="math">\\{B_t^{r-k}\\}_{0 \\le k &lt; t-1}</span> . (5)</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Now go further from round r. Similarly to Eq. (2), derive:</li>
+    </ol>
+
+    <p class="text-gray-300">
+<span class="math">$\\{B_i^{r+1}\\}_{1 \\le i \\le t}</span>$
+are affine functions of  <span class="math">\\{B_i^r\\}_{1 \\le i \\le t-1}</span>  and  <span class="math">\\{C_t^r\\}</span> . (6)</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Recursively applying Eq. (6), we get that for any r' &gt; r</li>
+    </ol>
+
+    <p class="text-gray-300">
+<span class="math">$\\{B_i^{r&#x27;}\\}_{1 \\le i \\le t}</span>$
+are affine functions of  <span class="math">\\{B_i^r\\}_{1 \\le i \\le t-1}</span>  and  <span class="math">\\{C_t^j\\}_{r \\le j \\le r&#x27;}</span> . (7)</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Restraining Eq. (7) to i = t we get</li>
+    </ol>
+
+    <p class="text-gray-300">
+<span class="math">$\\{B_t^{r+k}\\}_{1 \\le k \\le t-1}</span>$
+are affine functions of  <span class="math">\\{B_i^r\\}_{1 \\le i \\le t-1}</span>  and  <span class="math">\\{C_t^{r+k}\\}_{0 \\le k &lt; t-1}</span> . (8)</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Now rearrange (t-1) equations Eq. (8) so that  <span class="math">\\{B_i^r\\}_{1 \\le i \\le t-1}</span>  are now expressed through the others:</li>
+    </ol>
+
+    <p class="text-gray-300"><span class="math">$\\{B_i^r\\}_{1 \\le i \\le t-1}</span>$
+are affine functions of  <span class="math">\\{B_t^{r+k}\\}_{1 \\le k \\le t-1}</span>  and  <span class="math">\\{C_t^{r+k}\\}_{0 \\le k &lt; t-1}</span> . (9)</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>As  <span class="math">\\{B_i^r\\}_{1 \\leq i \\leq t-1}</span>  and  <span class="math">\\{C_i^r\\}_{1 \\leq i \\leq t-1}</span>  are identical, we get</li>
+    </ol>
+
+    <p class="text-gray-300">
+<span class="math">$\\{C_i^r\\}_{1 \\le i \\le t-1}</span>$
+are affine functions of  <span class="math">\\{B_t^{r+k}\\}_{1 \\le k \\le t-1}</span>  and  <span class="math">\\{C_t^{r+k}\\}_{0 \\le k &lt; t-1}</span> .</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Combining Eq. (5) and Eq. (10) we get that</li>
+    </ol>
+
+    <p class="text-gray-300">
+<span class="math">$t-1</span>$
+affine equations of  <span class="math">\\{B_t^{r-k}, C_t^{r-k-1}, B_t^{r+k+1}, C_t^{r+k}\\}_{0 \\le k \\le t-2}</span> . (11)</p>
+
+    <ol class="list-decimal list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li>Replacing  <span class="math">C_t^i</span>  variables with degree-d power functions of  <span class="math">B_t^i</span>  we get (t-1) equations of degree d over 2t-1 variables  <span class="math">B_t^{r-t+1}, B_t^{r-t+2}, \\ldots, B_t^{r+t-1}</span> .</li>
+    </ol>
+
+    <p class="text-gray-300">    <img src="_page_23_Picture_0.jpeg" alt="" class="my-4 max-w-full" />
+</p>
+
+    <p class="text-gray-300">Fig. 4: Expressing the round state (pink) via S-box inputs and outputs as per Eq. (5) (orange) and Eq. (10) (green).</p>
+
+    <p class="text-gray-300">So we get a group of (t-1) constraints that link inputs and outputs of S-boxes over (2t-1) rounds. The process is illustrated in Fig. 4.</p>
+
+    <p class="text-gray-300">A reader should ask immediately whether we have derived Eq. (5) correctly, as it could have happened that the system does not have rank t-1 w.r.t.  <span class="math">C_i^r</span> .</p>
+
+    <p class="text-gray-300"><strong>Proposition 1.</strong> If the matrix  <span class="math">\\mathcal{M}</span>  of Poseidon2<sup> <span class="math">\\pi</span> </sup> does not have an invariant subspace trail, then the state  <span class="math">\\{C_i^r\\}_{1 \\leq i \\leq t}</span>  is uniquely determined by S-box inputs in t preceding rounds  <span class="math">\\{B_t^{r-k}\\}_{0 \\leq k &lt; t}</span> .</p>
+
+    <p class="text-gray-300"><em>Proof.</em> Obviously  <span class="math">B_t^r</span>  bijectively maps to  <span class="math">C_t^r</span>  as it is the S-box mapping. Now consider the rest of the state. Imagine the mapping is not bijective, then there exist two executions of Poseidon2<sup> <span class="math">\\pi</span> </sup> with different substates  <span class="math">\\{C_i^r\\}_{1 \\leq i \\leq t-1}</span>  and  <span class="math">\\{C_i^{r&#x27;}\\}_{1 \\leq i \\leq t-1}</span>  but identical  <span class="math">\\{B_t^{r-k}\\}_{0 \\leq k &lt; t}</span> . Then the difference  <span class="math">\\delta \\neq \\mathbf{0}</span>  between the two states is contained in the elements  <span class="math">1, 2, \\ldots, t-1</span> . Moreover, as there is no difference in  <span class="math">\\{B_t^{r-k}\\}_{0 \\leq k &lt; t}</span> , we get that all t-1 vectors</p>
+
+    <p class="text-gray-300"><span class="math">$\\mathcal{M}^{-1} \\cdot \\delta, \\mathcal{M}^{-2} \\cdot \\delta, \\dots, \\mathcal{M}^{-t+1} \\cdot \\delta</span>$</p>
+
+    <p class="text-gray-300">are 0 in the t-th component. This only happens if  <span class="math">\\delta</span>  belongs to some invariant subspace, which is forbidden, so we get a contradiction. This concludes the proof.</p>
+
+    <p class="text-gray-300">The natural question is how the constraint groups should overlap in order to uniquely determine the state in Poseidon <span class="math">2^{\\pi}</span>  and Poseidon<sup> <span class="math">\\pi</span> </sup>. For this we recall that by Eq. (10) any t consecutive S-box inputs and outputs determine all Cvariables in the round. Therefore, it is sufficient that constraint groups overlap by t variables  <span class="math">B_t^i</span> .</p>
+
+    <p class="text-gray-300">Putting everything together, in order to cover  <span class="math">R_F</span>  full and  <span class="math">R_P</span>  partial rounds we need (all constraints of degree d):</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><p class="text-gray-300"><span class="math">-tR_F/2</span>  constraints that link inputs and outputs of a single full round for the first group of full rounds. In the last round we replace  <span class="math">C_j^{R_F/2}</span>  with degree-d functions of  <span class="math">B_t^{R_F/2+1}, B_t^{R_F/2+2}, \\ldots, B_t^{R_F/2+t-1}</span>  as per Eq. (10).</p>
+
+    <ul class="list-disc list-inside space-y-1 text-gray-300 my-2 ml-4">
+      <li><span class="math">(t-1) \\lceil \\frac{R_P}{t-1} - 1 \\rceil</span>  constraints Eq. (11) that link  <span class="math">B_t^r, B_t^{r+1}, \\ldots, B_t^{r+2t-1}</span>  for</li>
+    </ul></li>
+      <li><p class="text-gray-300"><span class="math">r = R_F/2, R_F/2 + 2t 1, R_F/2 + 4t 2, \\dots</span></p></li>
+      <li><p class="text-gray-300"><span class="math">-tR_F/2</span>  constraints that link inputs and outputs of a single full round for the last group of full rounds. In the first round of those we replace  <span class="math">A_i^{R_F/2+R_P+1}</span> with degree-d functions of  <span class="math">B_t^{R_F/2+R_P}, B_t^{R_F/2+R_P-1}, \\dots, B_t^{R_F/2+R_P-t+1}</span>  as per Eq. (5).</p></li>
+    </ul>
+
+    <p class="text-gray-300">In total we need about  <span class="math">t \\cdot R_F + R_P - t + 1</span>  constraints of degree d. Note that even though it is one constraint more than in [32, Appendix E], the constraints for the partial rounds depend on fewer variables and are thus cheaper to build overall.</p>
+
+    <p class="text-gray-300"><strong>Acknowledgements.</strong> We thank Nicholas Mainardi for making improvements to the original code. We also thank the anonymous reviewers for their helpful suggestions.</p>
+
+    </section>
+
+    <section id="references" class="mb-10">
+      <h2 class="text-2xl font-bold">References</h2>
+
+    <ul class="space-y-2 text-gray-400 text-sm list-none">
+      <li><p class="text-gray-300">1. Albrecht, M.R., Cid, C., Grassi, L., Khovratovich, D., L&uuml;ftenegger, R., Rechberger, C., Schofnegger, M.: Algebraic Cryptanalysis of STARK-Friendly Designs: Application to MARVELlous and MiMC. In: ASIACRYPT 2019. LNCS, vol. 11923, pp. 371-397 (2019)</p></li>
+      <li><p class="text-gray-300">2. Albrecht, M.R., Grassi, L., Perrin, L., Ramacher, S., Rechberger, C., Rotaru, D., Roy, A., Schofnegger, M.: Feistel Structures for MPC, and More. In: ESORICS 2019. LNCS, vol. 11736, pp. 151-171 (2019)</p></li>
+      <li><p class="text-gray-300">3. Albrecht, M.R., Grassi, L., Rechberger, C., Roy, A., Tiessen, T.: MiMC: Efficient Encryption and Cryptographic Hashing with Minimal Multiplicative Complexity. In: ASIACRYPT 2016. LNCS, vol. 10031, pp. 191-219 (2016)</p></li>
+      <li><p class="text-gray-300">4. Aly, A., Ashur, T., Eli Ben-Sasson, Dhooghe, S., Szepieniec, A.: Design of Symmetric-Key Primitives for Advanced Cryptographic Protocols. IACR Trans. Symmetric Cryptol. <strong>2020</strong>(3), 1&ndash;45 (2020)</p></li>
+      <li><p class="text-gray-300">5. Ambrona, M., Schmitt, A., Toledo, R.R., Willems, D.: New optimization techniques for PlonK&circ;a&euro;&trade;s arithmetization. IACR Cryptol. ePrint Arch. p. 462 (2022)</p></li>
+      <li><p class="text-gray-300">6. Ashur, T., Buschman, T., Mahzoun, M.: Algebraic cryptanalysis of POSEIDON. IACR Cryptol. ePrint Arch. p. 537 (2023)</p></li>
+      <li><p class="text-gray-300">7. Ashur, T., Dhooghe, S.: Marvellous: a stark-friendly family of cryptographic primitives. Cryptology ePrint Archive, Paper 2018/1098 (2018), <a href="https://eprint.iacr.org/2018/1098" target="_blank" rel="noopener noreferrer">https://eprint.iacr.</a> <a href="https://eprint.iacr.org/2018/1098" target="_blank" rel="noopener noreferrer">org/2018/1098</a>, <a href="https://eprint.iacr.org/2018/1098" target="_blank" rel="noopener noreferrer">https://eprint.iacr.org/2018/1098</a></p></li>
+      <li><p class="text-gray-300">8. Ashur, T., Kindi, A., Meier, W., Szepieniec, A., Threadbare, B.: Rescue-prime optimized. IACR Cryptol. ePrint Arch. p. 1577 (2022)</p></li>
+      <li><p class="text-gray-300">9. Aumasson, J.P., Khovratovich, D., Mennink, B., Quine, P.: SAFE (sponge api for field elements) - a toolbox for zk hash applications (2022), <a href="https://hackmd.io/bHgsH6mMStCVibM_wYvb2w" target="_blank" rel="noopener noreferrer">https://hackmd.io/</a> <a href="https://hackmd.io/bHgsH6mMStCVibM_wYvb2w" target="_blank" rel="noopener noreferrer">bHgsH6mMStCVibM\\_wYvb2w</a></p></li>
+      <li><p class="text-gray-300">10. Bariant, A., Bouvier, C., Leurent, G., Perrin, L.: Algebraic Attacks against Some Arithmetization-Oriented Primitives. IACR Trans. Symmetric Cryptol. 2022(3), 73&ndash;101 (2022)</p></li>
+      <li><p class="text-gray-300">11. Ben-Sasson, E., Bentov, I., Horesh, Y., Riabzev, M.: Fast Reed-Solomon Interactive Oracle Proofs of Proximity. In: 45th International Colloquium on Automata, Languages, and Programming (ICALP 2018). Leibniz International Proceedings in Informatics (LIPIcs), vol. 107, pp. 14:1&ndash;14:17. Schloss Dagstuhl&ndash;Leibniz-Zentrum fuer Informatik (2018)</p></li>
+      <li><p class="text-gray-300">12. Ben-Sasson, E., Bentov, I., Horesh, Y., Riabzev, M.: Scalable, transparent, and post-quantum secure computational integrity. Cryptology ePrint Archive, Report 2018/46 (2018)</p></li>
+      <li><p class="text-gray-300">13. Ben-Sasson, E., Bentov, I., Horesh, Y., Riabzev, M.: Scalable Zero Knowledge with No Trusted Setup. In: CRYPTO 2019. LNCS, vol. 11694, pp. 701&ndash;732 (2019)</p></li>
+      <li><p class="text-gray-300">14. Bertoni, G., Daemen, J., Peeters, M., Van Assche, G.: Sponge functions (2007), in: Ecrypt Hash Workshop 2007, [http://www.csrc.nist.gov/pki/HashWorkshop/](http://www.csrc.nist.gov/pki/HashWorkshop/Public Comments/2007_May.html) [PublicComments/2007\\_May.html](http://www.csrc.nist.gov/pki/HashWorkshop/Public Comments/2007_May.html)</p></li>
+      <li><p class="text-gray-300">15. Bertoni, G., Daemen, J., Peeters, M., Van Assche, G.: On the Indifferentiability of the Sponge Construction. In: EUROCRYPT 2008. LNCS, vol. 4965, pp. 181&ndash;197 (2008)</p></li>
+      <li><p class="text-gray-300">16. Beyne, T., Canteaut, A., Dinur, I., Eichlseder, M., Leander, G., Leurent, G., Naya-Plasencia, M., Perrin, L., Sasaki, Y., Todo, Y., Wiemer, F.: Out of Oddity - New Cryptanalytic Techniques Against Symmetric Primitives Optimized for Integrity Proof Systems. In: CRYPTO 2020. LNCS, vol. 12172, pp. 299&ndash;328 (2020)</p></li>
+      <li><p class="text-gray-300">17. Biham, E., Shamir, A.: Differential Cryptanalysis of DES-like Cryptosystems. In: CRYPTO 1990. LNCS, vol. 537, pp. 2&ndash;21 (1990)</p></li>
+      <li><p class="text-gray-300">18. Black, J., Rogaway, P., Shrimpton, T.: Black-Box Analysis of the Block-Cipher-Based Hash-Function Constructions from PGV. In: CRYPTO 2002. LNCS, vol. 2442, pp. 320&ndash;335 (2002)</p></li>
+      <li><p class="text-gray-300">19. Bouvier, C., Briaud, P., Chaidos, P., Perrin, L., Salen, R., Velichkov, V., Willems, D.: New Design Techniques for Efficient Arithmetization-Oriented Hash Functions: Anemoi Permutations and Jive Compression Mode. IACR Cryptol. ePrint Arch. p. 840 (2022)</p></li>
+      <li><p class="text-gray-300">20. Daemen, J., Rijmen, V.: The Wide Trail Design Strategy. In: Cryptography and Coding - IMA International Conference 2001. LNCS, vol. 2260, pp. 222&ndash;238 (2001)</p></li>
+      <li><p class="text-gray-300">21. Damg&#730;ard, I.: A Design Principle for Hash Functions. In: CRYPTO 1989. LNCS, vol. 435, pp. 416&ndash;427 (1989)</p></li>
+      <li><p class="text-gray-300">22. Dunkelman, O., Keller, N.: The effects of the omission of last round's MixColumns on AES. Inf. Process. Lett. 110(8-9), 304&ndash;308 (2010)</p></li>
+      <li><p class="text-gray-300">23. Duval, S., Leurent, G.: MDS Matrices with Lightweight Circuits. IACR Trans. Symmetric Cryptol. 2018(2), 48&ndash;78 (2018)</p></li>
+      <li><p class="text-gray-300">24. Faug\`ere, J., Gianni, P.M., Lazard, D., Mora, T.: Efficient Computation of Zero-Dimensional Gr&uml;obner Bases by Change of Ordering. J. Symb. Comput. 16(4), 329&ndash;344 (1993)</p></li>
+      <li><p class="text-gray-300">25. Gabizon, A., Williamson, Z.J.: Turbo-PLONK (2022), <a href="https://docs.zkproof.org/pages/standards/accepted-workshop3/proposal-turbo_plonk.pdf" target="_blank" rel="noopener noreferrer">https://docs.zkproof.</a> <a href="https://docs.zkproof.org/pages/standards/accepted-workshop3/proposal-turbo_plonk.pdf" target="_blank" rel="noopener noreferrer">org/pages/standards/accepted-workshop3/proposal-turbo\\_plonk.pdf</a></p></li>
+      <li><p class="text-gray-300">26. Gabizon, A., Williamson, Z.J., Ciobotaru, O.: PLONK: permutations over lagrange-bases for oecumenical noninteractive arguments of knowledge. Cryptology ePrint Archive, Report 2019/953 (2019)</p></li>
+      <li><p class="text-gray-300">27. Grassi, L., Hao, Y., Rechberger, C., Schofnegger, M., Walch, R., Wang, Q.: Horst Meets Fluid-SPN: Griffin for Zero-Knowledge Applications. In: CRYPTO (3). Lecture Notes in Computer Science, vol. 14083, pp. 573&ndash;606. Springer (2023)</p></li>
+      <li><p class="text-gray-300">28. Grassi, L., Khovratovich, D., L&uml;uftenegger, R., Rechberger, C., Schofnegger, M., Walch, R.: Reinforced Concrete: A Fast Hash Function for Verifiable Computation. In: CCS. pp. 1323&ndash;1335. ACM (2022)</p></li>
+      <li><p class="text-gray-300">29. Grassi, L., Khovratovich, D., L&uml;uftenegger, R., Rechberger, C., Schofnegger, M., Walch, R.: Monolith: Circuit-Friendly Hash Functions with New Nonlinear Layers for Fast and Constant-Time Implementations. IACR Cryptol. ePrint Arch. p. 1025 (2023)</p></li>
+      <li><p class="text-gray-300">30. Grassi, L., Khovratovich, D., Rechberger, C., Roy, A., Schofnegger, M.: Poseidon: A new hash function for zero-knowledge proof systems. In: USENIX Security Symposium. pp. 519&ndash;535. USENIX Association (2021)</p></li>
+      <li><p class="text-gray-300">31. Grassi, L., Khovratovich, D., R&oslash;njom, S., Schofnegger, M.: The Legendre Symbol and the Modulo-2 Operator in Symmetric Schemes over F<sup>p</sup> <sup>n</sup> Preimage Attack on Full Grendel. IACR Trans. Symmetric Cryptol. 2022(1), 5&ndash;37 (2022)</p></li>
+      <li><p class="text-gray-300">32. Grassi, L., Khovratovich, D., Roy, A., Rechberger, C., Schofnegger, M.: Poseidon: A New Hash Function for Zero-Knowledge Proof Systems. IACR Cryptol. ePrint Arch. p. 458 (2019)</p></li>
+      <li><p class="text-gray-300">33. Grassi, L., L&uml;uftenegger, R., Rechberger, C., Rotaru, D., Schofnegger, M.: On a Generalization of Substitution-Permutation Networks: The HADES Design Strategy. In: EUROCRYPT 2020. LNCS, vol. 12106, pp. 674&ndash;704 (2020)</p></li>
+      <li><p class="text-gray-300">34. Grassi, L., Onofri, S., Pedicini, M., Sozzi, L.: Invertible Quadratic Non-Linear Layers for MPC-/FHE-/ZK-Friendly Schemes over F<sup>p</sup> <sup>n</sup> Application to Poseidon. IACR Trans. Symmetric Cryptol. 2022(3), 20&ndash;72 (2022)</p></li>
+      <li><p class="text-gray-300">35. Grassi, L., Rechberger, C., R&oslash;njom, S.: Subspace Trail Cryptanalysis and its Applications to AES. IACR Trans. Symmetric Cryptol. 2016(2), 192&ndash;225 (2016)</p></li>
+      <li><p class="text-gray-300">36. Grassi, L., Rechberger, C., Schofnegger, M.: Proving Resistance Against Infinitely Long Subspace Trails: How to Choose the Linear Layer. IACR Trans. Symmetric Cryptol. 2021(2), 314&ndash;352 (2021)</p></li>
+      <li><p class="text-gray-300">37. Groth, J.: On the Size of Pairing-Based Non-interactive Arguments. In: EURO-CRYPT 2016. LNCS, vol. 9666, pp. 305&ndash;326 (2016)</p></li>
+      <li><p class="text-gray-300">38. Horizen Labs: ginger-lib: a RUST library for recursive SNARKs using Darlin (2022), <a href="https://github.com/HorizenOfficial/ginger-lib" target="_blank" rel="noopener noreferrer">https://github.com/HorizenOfficial/ginger-lib</a></p></li>
+      <li><p class="text-gray-300">39. IAIK: Hash functions for Zero-Knowledge applications Zoo. <a href="https://extgit.iaik.tugraz.at/krypto/zkfriendlyhashzoo" target="_blank" rel="noopener noreferrer">https://extgit.</a> <a href="https://extgit.iaik.tugraz.at/krypto/zkfriendlyhashzoo" target="_blank" rel="noopener noreferrer">iaik.tugraz.at/krypto/zkfriendlyhashzoo</a> (Aug 2021), IAIK, Graz University of Technology</p></li>
+      <li><p class="text-gray-300">40. Jakobsen, T., Knudsen, L.R.: The Interpolation Attack on Block Ciphers. In: FSE 1997. LNCS, vol. 1267, pp. 28&ndash;40 (1997)</p></li>
+      <li><p class="text-gray-300">41. Keller, N., Rosemarin, A.: Mind the Middle Layer: The HADES Design Strategy Revisited. In: EUROCRYPT 2021. LNCS, vol. 12697, pp. 35&ndash;63 (2021)</p></li>
+      <li><p class="text-gray-300">42. Knudsen, L.R.: Truncated and Higher Order Differentials. In: FSE 1994. LNCS, vol. 1008, pp. 196&ndash;211 (1994)</p></li>
+      <li><p class="text-gray-300">43. K&ouml;lbl, S., Lauridsen, M.M., Mendel, F., Rechberger, C.: Haraka v2 - efficient short-input hashing for post-quantum applications. IACR Trans. Symmetric Cryptol. <strong>2016</strong>(2), 1&ndash;29 (2016)</p></li>
+      <li><p class="text-gray-300">44. Leander, G., Abdelraheem, M.A., AlKhzaimi, H., Zenner, E.: A Cryptanalysis of PRINTcipher: The Invariant Subspace Attack. In: CRYPTO 2011. LNCS, vol. 6841, pp. 206&ndash;221 (2011)</p></li>
+      <li><p class="text-gray-300">45. Leander, G., Minaud, B., R&oslash;njom, S.: A Generic Approach to Invariant Subspace Attacks: Cryptanalysis of Robin, iSCREAM and Zorro. In: EUROCRYPT 2015. LNCS, vol. 9056, pp. 254&ndash;283 (2015)</p></li>
+      <li><p class="text-gray-300">46. Matsui, M.: Linear Cryptanalysis Method for DES Cipher. In: EUROCRYPT 1993. LNCS, vol. 765, pp. 386&ndash;397 (1993)</p></li>
+      <li><p class="text-gray-300">47. Mendel, F., Rechberger, C., Schl&auml;ffer, M., Thomsen, S.S.: The Rebound Attack: Cryptanalysis of Reduced Whirlpool and Gr&oslash;stl. In: FSE 2009. LNCS, vol. 5665, pp. 260&ndash;276 (2009)</p></li>
+      <li><p class="text-gray-300">48. Merkle, R.C.: A Certified Digital Signature. In: CRYPTO 1989. LNCS, vol. 435, pp. 218&ndash;238 (1989)</p></li>
+      <li><p class="text-gray-300">49. Polygon: Introducing Plonky2 (2022), https://blog.polygon.technology/introducing-plonky2/</p></li>
+      <li><p class="text-gray-300">50. Preneel, B., Govaerts, R., Vandewalle, J.: Hash Functions Based on Block Ciphers: A Synthetic Approach. In: CRYPTO 1993. LNCS, vol. 773, pp. 368&ndash;378 (1993)</p></li>
+      <li><p class="text-gray-300">51. RISC Zero: RISC Zero: General-Purpose Verifiable Computing (2023), https://www.risczero.com/</p></li>
+      <li><p class="text-gray-300">52. Sauer, J.F., Szepieniec, A.: SoK: Gr&ouml;bner Basis Algorithms for Arithmetization Oriented Ciphers. IACR Cryptol. ePrint Arch. p. 870 (2021)</p></li>
+      <li><p class="text-gray-300">53. Schneier, B., Kelsey, J.: Unbalanced Feistel Networks and Block Cipher Design. In: FSE. LNCS, vol. 1039, pp. 121&ndash;144. Springer (1996)</p></li>
+      <li><p class="text-gray-300">54. Szepieniec, A.: On the Use of the Legendre Symbol in Symmetric Cipher Design. IACR Cryptol. ePrint Arch. p. 984 (2021)</p></li>
+      <li><p class="text-gray-300"> Szepieniec, A., Lemmens, A., Sauer, J.F., Threadbare, B.: The Tip5 Hash Function for Recursive STARKs. Cryptology ePrint Archive, Paper 2023/107 (2023), https://eprint.iacr.org/2023/107</p></li>
+      <li><p class="text-gray-300">56. Zcash: halo2 (2022), https://zcash.github.io/halo2/index.html</p></li>
+    </ul>
+
+    </section>
+
+    <section id="app-a" class="mb-10">
+      <h2 class="text-2xl font-bold">A Efficient Circulant MDS Matrices</h2>
+
+    <p class="text-gray-300">A  <span class="math">t \\times t</span>  circulant matrix is given by  <span class="math">\\operatorname{circ}(c_0, c_1, \\dots, c_{t-1})</span>  and defined by</p>
+
+    <p class="text-gray-300"><span class="math">$M = \\begin{pmatrix} c_0 &amp; c_1 \\cdots c_{t-1} \\\\ c_{t-1} &amp; c_0 \\cdots c_{t-2} \\\\ \\vdots &amp; \\vdots &amp; \\ddots &amp; \\vdots \\\\ c_1 &amp; c_2 \\cdots &amp; c_0 \\end{pmatrix}.</span>$</p>
+
+    <p class="text-gray-300">At first sight, the multiplication of a dense  <span class="math">t \\times t</span>  circulant matrix with a t-element vector may seem to need a number of operations in  <span class="math">\\mathcal{O}(t^2)</span> . However, with  <span class="math">R = \\mathbb{F}_p[X]/(X^t-1)</span>  denoting the ring of univariate polynomials modulo  <span class="math">X^t-1</span> , note that there is an isomorphism between R and  <span class="math">t \\times t</span>  circulant matrices.</p>
+
+    <p class="text-gray-300">This link is also described in [8, Section 4], where the authors propose circulant matrices to make the <em>Rescue</em> hash function more efficient. In particular, the isomorphism is given by</p>
+
+    <p class="text-gray-300"><span class="math">$a_{t-1}X^{t-1} + a_{t-2}X^{t-2} + \\dots + a_1X + a_0 \\longleftrightarrow \\begin{pmatrix} a_0 &amp; a_{t-1} \\cdots a_1 \\\\ a_1 &amp; a_0 &amp; \\cdots &amp; a_2 \\\\ \\vdots &amp; \\vdots &amp; \\ddots &amp; \\vdots \\\\ a_{t-1} &amp; a_{t-2} \\cdots &amp; a_0 \\end{pmatrix},</span>$</p>
+
+    <p class="text-gray-300">where  <span class="math">a_i \\in \\mathbb{F}_p</span> . Hence, a fast method for polynomial multiplication modulo  <span class="math">X^t-1</span>  can be used to efficiently compute matrix-vector product for a circulant matrix. For example, using FFT (or NTT for a finite field) we obtain an algorithm with a complexity in  <span class="math">\\mathcal{O}(t\\log_2(t))</span> , which in total computes two FFTs (split into an NTT and an inverse NTT). We refer to [8, Section 4.2.1] for a description of various polynomial multiplication algorithms which can be used for this purpose.</p>
+
+    <p class="text-gray-300">Consider an input vector  <span class="math">x = (x_0, x_1, x_2, x_3)</span> . Let</p>
+
+    <p class="text-gray-300"><span class="math">$t_0 = x_0 + x_1, \\quad t_1 = x_2 + x_3,</span>$</p>
+
+    <p class="text-gray-300"><span class="math">$t_2 = 2x_1 + t_1, \\quad t_3 = 2x_3 + t_0,</span>$</p>
+
+    <p class="text-gray-300"><span class="math">$t_4 = 4t_1 + t_3, \\quad t_5 = 4t_0 + t_2,</span>$</p>
+
+    <p class="text-gray-300"><span class="math">$t_6 = t_3 + t_5, \\quad t_7 = t_2 + t_4,</span>$</p>
+
+    <p class="text-gray-300">then</p>
+
+    <p class="text-gray-300"><span class="math">$x&#x27;_0 = t_6, \\quad x&#x27;_1 = t_5,</span>$</p>
+
+    <p class="text-gray-300"><span class="math">x&#x27;_2 = t_7, \\quad x&#x27;_3 = t_4</span></p>
+
+    <p class="text-gray-300">for an output vector  <span class="math">x&#x27;=(x&#x27;_0,x&#x27;_1,x&#x27;_2,x&#x27;_3)</span> . This finalizes the computation of  <span class="math">x&#x27;=M_4\\cdot x</span> .</p>
+
+    <p class="text-gray-300">Note that this only covers a 4-word input vector. For a state size t (where  <span class="math">t/4 \\in \\mathbb{N}</span> ), we need to repeat this step t/4 times. Moreover, to get the entire multiplication by  <span class="math">M_{\\mathcal{E}}</span> , we need another 2t additions.</p>
+
+    <p class="text-gray-300">For example, let  <span class="math">x&#x27; = (x&#x27;_0, x&#x27;_1, \\dots, x&#x27;_{t-1})</span>  be the output after applying the matrix  <span class="math">M_4</span>  individually to each 4-word part of the original t-word input  <span class="math">x = (x_0, x_1, \\dots, x_{t-1})</span> . In this case, the multiplication by  <span class="math">M_4</span>  is computed t/4 times. Then, the final output  <span class="math">y = (y_0, y_1, \\dots, y_{t-1})</span>  is given by</p>
+
+    <p class="text-gray-300"><span class="math">$y_{i} = \\begin{cases} 2x&#x27;_{i} + x&#x27;_{i+4} + \\dots + x&#x27;_{i+(t-4)} &amp; \\text{if } i \\in \\{0, 1, 2, 3\\}, \\\\ x&#x27;_{i-4} + 2x&#x27;_{i} + \\dots + x&#x27;_{i+(t-8)} &amp; \\text{if } i \\in \\{4, 5, 6, 7\\}, \\\\ \\vdots &amp; \\vdots &amp; \\vdots \\\\ x&#x27;_{i-(t-4)} + x&#x27;_{i-(t-8)} + \\dots + 2x&#x27;_{i} &amp; \\text{if } i \\in \\{t-4, t-3, t-2, t-1\\}. \\end{cases}</span>$</p>
+
+    <p class="text-gray-300">Note that in the method shown above, the only constant factors greater than 1 are 2 and 4. Given the circuit, the 4 multiplications can be replaced by 6 additions if this is deemed more appropriate.</p>
+
+    <p class="text-gray-300">In GMiMCerf <a href="#page-24-1">[2]</a>, an unbalanced Feistel network <a href="#page-27-14">[53]</a> of the form</p>
+
+    <p class="text-gray-300"><span class="math">$R(x_0, x_1, \\dots, x_{t-1}) = (x_1 + f(x_0), x_2 + f(x_0), \\dots, x_{t-1} + f(x_0), x_0),</span>$</p>
+
+    <p class="text-gray-300">is used. In other words, in each round the nonlinear S-box function f is applied to the first element of the state and the result of this computation is then added to all other elements. Since t &minus; 1 additions are used in each round, the number of additions can become a bottleneck if t is large.</p>
+
+    <p class="text-gray-300">Instead of adding the result of f(x0) to each other element in each round, we apply the following approach. First, we initialize an accumulator a = 0 and an accumulator queue q with t &minus; 1 zeroes defined by</p>
+
+    <p class="text-gray-300"><span class="math">$q = (q_0, q_1, \\dots, q_{t-2}) = \\underbrace{(0, 0, \\dots, 0)}_{t-1 \\text{ zeroes}}.</span>$</p>
+
+    <p class="text-gray-300">Then, denoting the right rotation of a vector by n elements as RotateRightn, in each round we compute</p>
+
+    <p class="text-gray-300"><span class="math">$\\begin{split} s &amp;\\leftarrow f(x_0), \\\\ q &amp;\\leftarrow \\mathtt{RotateRight}_1(q), \\\\ a &amp;\\leftarrow a - q_0, \\\\ q_0 &amp;\\leftarrow s, \\\\ a &amp;\\leftarrow a + s, \\end{split}</span>$</p>
+
+    <p class="text-gray-300">followed by the Feistel rotation and the addition of a to the first state element. The idea behind this approach is to build a queue containing the accumulating results of the last t &minus; 1 nonlinear operations, and to only add the most current accumulation to a state element before it enters the nonlinear operation in the next round. After the last Feistel round, all the remaining accumulations need to be added to the entire state, which takes a number of operations in O(t). This representation is equivalent to the original (unoptimized) representation of the GMiMCerf.</p>
+
+    <p class="text-gray-300">Using this approach, we can reduce the number of operations required for an unoptimized GMiMCerf round to a constant amount, independent of the state size t. For this purpose, all the operations used in the optimized description also need to be implemented efficiently. This particularly applies to the RotateRight operation, which for example can be done using a linked list.</p>
+
+    </section>
+`;
+---
+
+<BaseLayout title="Poseidon2: A Faster Version of the Poseidon Hash Function (2023/323)">
+  <article class="max-w-4xl mx-auto article-prose">
+    <nav class="mb-8">
+      <a href="/papers" class="text-blue-400 hover:text-blue-300">
+        &larr; Back to Papers
+      </a>
+    </nav>
+
+    <header class="mb-12">
+      <h1 class="text-3xl font-bold mb-4"
+        set:html={TITLE_HTML} />
+      <p class="text-gray-400 mb-2"
+        set:html={AUTHORS_HTML} />
+      <p class="text-gray-500 text-sm mb-4">
+        2023 &middot; eprint 2023/323
+      </p>
+      <div class="flex gap-4 text-sm">
+        <a
+          href={EPRINT_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          class="text-blue-400 hover:text-blue-300"
+        >
+          Paper (eprint) &rarr;
+        </a>
+      </div>
+      <PaperDisclaimer eprintUrl={EPRINT_URL} />
+      <p class="mt-1 text-xs text-gray-600">
+        Converted with: {CRAWLER} &middot; {CONVERTED_DATE}
+      </p>
+    </header>
+
+    <nav id="toc" class="mb-10 p-6 rounded-lg" style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06);">
+      <h2 class="text-lg font-bold mb-4">Table of Contents</h2>
+      <ol class="space-y-1 text-sm text-gray-300
+        list-decimal list-inside">
+        <li>
+          <a href="#sec-1" class="hover:text-white">Introduction</a>
+          <ol class="ml-6 mt-1 space-y-1 list-decimal
+            list-inside text-gray-400">
+            <li><a href="#sec-1.1" class="hover:text-white">Our Goals</a></li>
+            <li><a href="#sec-1.2" class="hover:text-white">Our Contributions and Results</a></li>
+          </ol>
+        </li>
+        <li><a href="#sec-2" class="hover:text-white">Preliminaries: Modern Arithmetization Techniques</a></li>
+        <li>
+          <a href="#sec-3" class="hover:text-white">Preliminaries: ZK-Friendly Symmetric Primitives</a>
+          <ol class="ml-6 mt-1 space-y-1 list-decimal
+            list-inside text-gray-400">
+            <li><a href="#sec-3.1" class="hover:text-white">Modes of Operation</a></li>
+            <li><a href="#sec-3.2" class="hover:text-white">The Poseidon&lt;sup&gt;\pi&lt;/sup&gt; Permutation</a></li>
+          </ol>
+        </li>
+        <li><a href="#sec-4" class="hover:text-white">Security: Initial and Final Matrix Multiplications</a></li>
+        <li>
+          <a href="#sec-5" class="hover:text-white">More Efficient Linear Layers</a>
+          <ol class="ml-6 mt-1 space-y-1 list-decimal
+            list-inside text-gray-400">
+            <li><a href="#sec-5.1" class="hover:text-white">Matrix for the External Round</a></li>
+            <li><a href="#sec-5.2" class="hover:text-white">Matrix for the Internal Round</a></li>
+            <li><a href="#sec-5.3" class="hover:text-white">Preventing Arbitrarily Long Subspace Trails</a></li>
+          </ol>
+        </li>
+        <li><a href="#sec-6" class="hover:text-white">Poseidon2^&#123;\pi&#125; Specification</a></li>
+        <li>
+          <a href="#sec-7" class="hover:text-white">Security Analysis</a>
+          <ol class="ml-6 mt-1 space-y-1 list-decimal
+            list-inside text-gray-400">
+            <li><a href="#sec-7.1" class="hover:text-white">Statistical Attacks</a></li>
+            <li><a href="#sec-7.2" class="hover:text-white">Algebraic Attacks</a></li>
+            <li><a href="#sec-7.3" class="hover:text-white">Attack from Bariant et al. [10]</a></li>
+          </ol>
+        </li>
+        <li>
+          <a href="#sec-8" class="hover:text-white">Performance Evaluation</a>
+          <ol class="ml-6 mt-1 space-y-1 list-decimal
+            list-inside text-gray-400">
+            <li><a href="#sec-8.1" class="hover:text-white">Theoretical Comparison</a></li>
+            <li><a href="#sec-8.2" class="hover:text-white">Implementation and Benchmarks</a></li>
+            <li><a href="#sec-8.3" class="hover:text-white">Efficient Plonkish Version</a></li>
+          </ol>
+        </li>
+      </ol>
+      <p class="text-xs text-gray-500 mt-4 mb-1 font-semibold">
+        Appendices
+      </p>
+      <ol class="space-y-1 text-sm text-gray-400
+        list-[upper-alpha] list-inside">
+        <li><a href="#app-a" class="hover:text-white">Efficient Circulant MDS Matrices</a></li>
+        <li><a href="#app-b" class="hover:text-white">Efficient Computation of M_&#123;\mathcal&#123;E&#125;&#125;</a></li>
+        <li><a href="#app-c" class="hover:text-white">Optimized Feistel-ERF Implementation</a></li>
+      </ol>
+      <p class="text-xs text-gray-500 mt-4 mb-1 font-semibold">
+        Additional
+      </p>
+      <ul class="space-y-1 text-sm text-gray-400
+        list-disc list-inside">
+        <li><a href="#references" class="hover:text-white">References</a></li>
+      </ul>
+    </nav>
+
+
+    <Fragment set:html={CONTENT} />
+
+    <PaperHistory slug="poseidon2-a-faster-version-of-the-poseidon-hash-function-2023" />
+  </article>
+</BaseLayout>
