@@ -2,6 +2,8 @@
 
 An educational platform for learning cryptography with formal foundations in Lean 4.
 
+Vibe-coded for now. Only files in `data` are worth checking.
+
 ## Vision
 
 A living textbook where:
